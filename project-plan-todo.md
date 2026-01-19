@@ -6,7 +6,7 @@
 - [completed] Enhance YAML loader to support package dependencies.
 - [completed] Build the `rufus` CLI tool with `validate` and `run` commands.
 - [completed] Develop a `WorkflowTestHarness` for easy, local testing of workflows.
-- [in_progress] Rewrite all documentation for the new SDK-first architecture.
+- [completed] Rewrite all documentation for the new SDK-first architecture.
 - [completed] Implement package auto-discovery for marketplace extensions.
 - [in_progress] Create and publish at least two official marketplace packages as examples.
 - [in_progress] Build a `cookiecutter` template for community package creation.
