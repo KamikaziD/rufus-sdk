@@ -1,8 +1,8 @@
-# Confucius Workflow Engine: Comprehensive Handoff Document
+# Rufus Workflow Engine: Comprehensive Handoff Document
 
 ## Project Overview
 
-Confucius is a Python-based workflow orchestration engine positioned to compete with Temporal and AWS Step Functions. The project has evolved from a "FastAPI workflow server" into a comprehensive "workflow SDK for Python" with optional server components. This document contains all architectural decisions, strategic insights, and implementation roadmaps developed through extensive analysis.
+Rufus is a Python-based workflow orchestration engine positioned to compete with Temporal and AWS Step Functions. The project has evolved from a "FastAPI workflow server" into a comprehensive "workflow SDK for Python" with optional server components. This document contains all architectural decisions, strategic insights, and implementation roadmaps developed through extensive analysis.
 
 ---
 
@@ -75,7 +75,7 @@ Monolithic FastAPI Application
 
 **Tier 1 Markets (Immediate)**:
 1. **Regulated FinTech**: Need audit trails + GDPR compliance ($60B TAM)
-   - Pain: Step Functions too expensive ($12K/mo → $300/mo with Confucius)
+   - Pain: Step Functions too expensive ($12K/mo → $300/mo with Rufus)
    - Win: Compensation patterns + regional routing + cost savings
    
 2. **Healthcare AI Platforms**: HIPAA compliance + human-in-loop ($60B TAM)
@@ -132,7 +132,7 @@ Monolithic FastAPI Application
 └─────────────────┬───────────────────────────────┘
                   │
 ┌─────────────────▼───────────────────────────────┐
-│           Confucius SDK (Core)                  │
+│           Rufus SDK (Core)                  │
 │  ┌──────────────────────────────────────────┐  │
 │  │  WorkflowEngine (Public API)             │  │
 │  │    - start_workflow()                    │  │
@@ -221,7 +221,7 @@ response = requests.post("http://localhost:8000/api/v1/workflow/start", json={
 **After (SDK)**:
 ```python
 # Pure Python, no server required
-from confucius import WorkflowEngine, InMemoryPersistence
+from rufus import WorkflowEngine, InMemoryPersistence
 
 engine = WorkflowEngine(persistence=InMemoryPersistence())
 handle = engine.start_workflow("LoanApplication", {...})
@@ -251,7 +251,7 @@ These aren't prompts - they're **multi-step transactional workflows** where:
 - Humans need to intervene at specific gates
 - Every decision must be auditable
 
-**This is Confucius's sweet spot.**
+**This is Rufus's sweet spot.**
 
 ### Market Sizing
 
@@ -314,20 +314,20 @@ These aren't prompts - they're **multi-step transactional workflows** where:
 
 ```bash
 # Core SDK
-pip install confucius
+pip install rufus
 
 # Marketplace packages (separate PyPI packages)
-pip install confucius-stripe      # Stripe integration
-pip install confucius-sendgrid    # Email workflows
-pip install confucius-aws         # AWS orchestration
-pip install confucius-openai      # LLM workflows
+pip install rufus-stripe      # Stripe integration
+pip install rufus-sendgrid    # Email workflows
+pip install rufus-aws         # AWS orchestration
+pip install rufus-openai      # LLM workflows
 ```
 
 ### Package Auto-Discovery
 
 ```python
 # System automatically discovers installed packages
-from confucius import WorkflowEngine
+from rufus import WorkflowEngine
 
 engine = WorkflowEngine(...)
 
@@ -335,7 +335,7 @@ engine = WorkflowEngine(...)
 """
 steps:
   - name: "Charge_Card"
-    type: stripe.charge_card  # ← Auto-discovered from confucius-stripe!
+    type: stripe.charge_card  # ← Auto-discovered from rufus-stripe!
     inputs:
       amount: 50.00
 """
@@ -344,8 +344,8 @@ steps:
 ### Marketplace Package Structure
 
 ```
-confucius-stripe/
-├── confucius_stripe/
+rufus-stripe/
+├── rufus_stripe/
 │   ├── __init__.py
 │   ├── steps.py              # Step implementations
 │   └── workflows/            # Pre-built workflow templates
@@ -363,12 +363,12 @@ confucius-stripe/
 - Premium ($10-50/month): Advanced features, priority support
 - Enterprise ($100-500/month): White-label, SLA, compliance
 
-**Revenue Split**: 70% package author, 30% Confucius platform
+**Revenue Split**: 70% package author, 30% Rufus platform
 
 **Economics at Scale**:
 ```
 1,000 paid packages × $25 avg price × 10 users per package = $250K/month GMV
-Confucius revenue (30%): $75K/month = $900K/year
+Rufus revenue (30%): $75K/month = $900K/year
 ```
 
 ### Network Effects
@@ -376,7 +376,7 @@ Confucius revenue (30%): $75K/month = $900K/year
 **The Flywheel**:
 1. Developer uses free SDK
 2. Needs Stripe integration
-3. Finds `confucius-stripe` (free tier)
+3. Finds `rufus-stripe` (free tier)
 4. Builds workflow, works great
 5. Needs advanced features → upgrades to premium
 6. Package author earns $35/month from this user
@@ -404,13 +404,13 @@ Confucius revenue (30%): $75K/month = $900K/year
 workflow_type: LoanApplication
 
 requires:
-  - confucius-stripe>=1.0.0
-  - confucius-plaid>=2.1.0
-  - confucius-sendgrid>=1.5.0
+  - rufus-stripe>=1.0.0
+  - rufus-plaid>=2.1.0
+  - rufus-sendgrid>=1.5.0
 
 steps:
   - name: "Verify_Bank"
-    type: plaid.verify_account  # ← From confucius-plaid
+    type: plaid.verify_account  # ← From rufus-plaid
 ```
 
 **2. Template Inheritance**:
@@ -472,16 +472,16 @@ steps:
 **CLI Commands**:
 ```bash
 # Validate YAML
-confucius validate workflows/loan.yaml
+rufus validate workflows/loan.yaml
 
 # Test locally
-confucius run workflows/loan.yaml --data '{"amount": 50000}'
+rufus run workflows/loan.yaml --data '{"amount": 50000}'
 
 # Generate Python code
-confucius generate-code workflows/loan.yaml > loan.py
+rufus generate-code workflows/loan.yaml > loan.py
 
 # Visualize
-confucius visualize workflows/loan.yaml > diagram.svg
+rufus visualize workflows/loan.yaml > diagram.svg
 ```
 
 **IDE Integration**:
@@ -493,7 +493,7 @@ confucius visualize workflows/loan.yaml > diagram.svg
 
 **Testing Framework**:
 ```python
-from confucius.testing import WorkflowTestHarness
+from rufus.testing import WorkflowTestHarness
 
 def test_loan_workflow():
     harness = WorkflowTestHarness.from_yaml("workflows/loan.yaml")
@@ -523,7 +523,7 @@ def test_loan_workflow():
 **vs. Step Functions**: Verbose JSON (Amazon States Language)
 **vs. Airflow**: Imperative Python DAGs
 
-**Confucius**: Clean, declarative YAML that's:
+**Rufus**: Clean, declarative YAML that's:
 - ✅ Human-readable
 - ✅ Git-friendly (meaningful diffs)
 - ✅ Non-developer accessible
@@ -619,7 +619,7 @@ engine = WorkflowEngine(
 engine = WorkflowEngine(
     persistence=DynamoDBProvider(...),
     executor=LambdaExecutor(
-        function_name="confucius-step-executor"
+        function_name="rufus-step-executor"
     )
 )
 ```
@@ -634,7 +634,7 @@ engine = WorkflowEngine(
     persistence=DurableObjectProvider(...),
     executor=CloudflareExecutor(
         account_id="...",
-        worker_name="confucius-worker"
+        worker_name="rufus-worker"
     )
 )
 ```
@@ -701,15 +701,15 @@ class WorkerRegistry:
 1. Create new project structure:
    ```
    src/
-   ├── confucius/              # Core SDK
+   ├── rufus/              # Core SDK
    │   ├── engine.py
    │   ├── models.py
    │   ├── builder.py
    │   ├── persistence/
    │   ├── execution/
    │   └── observability/
-   ├── confucius_server/       # FastAPI adapter
-   └── confucius_cli/          # CLI tools
+   ├── rufus_server/       # FastAPI adapter
+   └── rufus_cli/          # CLI tools
    ```
 
 2. Implement `WorkflowEngine` public API
@@ -726,8 +726,8 @@ class WorkerRegistry:
 - ✅ 5 usage examples (Flask, Django, CLI, Jupyter, Lambda)
 
 **Deliverables**:
-- SDK package: `pip install confucius`
-- Server package: `pip install confucius[server]`
+- SDK package: `pip install rufus`
+- Server package: `pip install rufus[server]`
 - Documentation: "Getting Started with SDK"
 
 ---
@@ -743,9 +743,9 @@ class WorkerRegistry:
    - Environment variables
    - Template parameterization
 3. Create CLI tools:
-   - `confucius validate`
-   - `confucius run`
-   - `confucius visualize`
+   - `rufus validate`
+   - `rufus run`
+   - `rufus visualize`
 4. Build testing harness:
    ```python
    harness = WorkflowTestHarness.from_yaml("workflow.yaml")
@@ -764,7 +764,7 @@ class WorkerRegistry:
 - ✅ Tests run in < 1 second (no I/O)
 
 **Deliverables**:
-- CLI: `pip install confucius[cli]`
+- CLI: `pip install rufus[cli]`
 - Documentation site
 - 10+ code examples
 
@@ -777,21 +777,21 @@ class WorkerRegistry:
 **Tasks**:
 1. Implement package auto-discovery:
    ```python
-   # Automatically finds confucius-* packages
+   # Automatically finds rufus-* packages
    step_registry.auto_discover()
    ```
 2. Create 5 official packages:
-   - `confucius-stripe`
-   - `confucius-sendgrid`
-   - `confucius-aws`
-   - `confucius-openai`
-   - `confucius-slack`
+   - `rufus-stripe`
+   - `rufus-sendgrid`
+   - `rufus-aws`
+   - `rufus-openai`
+   - `rufus-slack`
 3. Build package template generator:
    ```bash
-   confucius create-package my-integration
+   rufus create-package my-integration
    ```
 4. Document package creation guide
-5. Launch marketplace microsite: `marketplace.confucius.dev`
+5. Launch marketplace microsite: `marketplace.rufus.dev`
 6. Set up PyPI automation
 
 **Success Criteria**:
@@ -822,9 +822,9 @@ class WorkerRegistry:
    - Export to YAML
    - Import from YAML (round-trip)
 5. Create enterprise packages:
-   - `confucius-salesforce-enterprise`
-   - `confucius-sap`
-   - `confucius-workday`
+   - `rufus-salesforce-enterprise`
+   - `rufus-sap`
+   - `rufus-workday`
 6. Sign 3 design partners
 
 **Success Criteria**:
@@ -833,7 +833,7 @@ class WorkerRegistry:
 - ✅ Visual builder can create 80% of workflows
 
 **Deliverables**:
-- Confucius Cloud (SaaS offering)
+- Rufus Cloud (SaaS offering)
 - Visual builder (beta)
 - Enterprise packages
 - Case studies
@@ -1047,14 +1047,14 @@ class SecretsProvider:
 - [x] Basic tests (no infrastructure needed)
 
 **Nice to Have**:
-- [ ] CLI tool (`confucius validate`)
+- [ ] CLI tool (`rufus validate`)
 - [ ] Documentation site
 - [ ] Package template
 
 ### Month 1 Goals
 
 **Deliverables**:
-- SDK package on PyPI: `pip install confucius`
+- SDK package on PyPI: `pip install rufus`
 - Documentation: Quickstart + API reference
 - 10+ code examples
 - Beta users testing SDK (5-10 developers)
@@ -1173,7 +1173,7 @@ class SecretsProvider:
 
 ## Conclusion
 
-Confucius is at an inflection point. The current server-centric architecture limits adoption to ~5,000 potential customers. By pivoting to an SDK-first model with a marketplace ecosystem, the addressable market expands to 500,000+ Python developers.
+Rufus is at an inflection point. The current server-centric architecture limits adoption to ~5,000 potential customers. By pivoting to an SDK-first model with a marketplace ecosystem, the addressable market expands to 500,000+ Python developers.
 
 **The opportunity**:
 - AI workflows explosion (2024-2026)
@@ -1192,7 +1192,7 @@ Confucius is at an inflection point. The current server-centric architecture lim
 
 **Next concrete action**: Refactor core `Workflow` class to have zero I/O dependencies, then build `WorkflowEngine` wrapper. Ship first SDK example within 2 weeks.
 
-The future of Confucius is not as a "workflow server" - it's as **the workflow SDK that becomes as ubiquitous as Requests, SQLAlchemy, or Celery in the Python ecosystem.**
+The future of Rufus is not as a "workflow server" - it's as **the workflow SDK that becomes as ubiquitous as Requests, SQLAlchemy, or Celery in the Python ecosystem.**
 
 ---
 

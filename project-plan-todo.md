@@ -1,0 +1,12 @@
+- [completed] Create new project structure for the Rufus SDK
+- [completed] Migrate and refactor the core workflow engine logic to be independent of frameworks.
+- [completed] Define `PersistenceProvider`, `ExecutionProvider`, and `WorkflowObserver` interfaces.
+- [completed] Implement default providers: `InMemoryPersistence`, `SyncExecutor`, `PostgresProvider`, `CeleryExecutor`.
+- [completed] Create an optional FastAPI server (`rufus_server`) as an adapter for the SDK.
+- [completed] Enhance YAML loader to support package dependencies.
+- [completed] Build the `rufus` CLI tool with `validate` and `run` commands.
+- [completed] Develop a `WorkflowTestHarness` for easy, local testing of workflows.
+- [in_progress] Rewrite all documentation for the new SDK-first architecture.
+- [completed] Implement package auto-discovery for marketplace extensions.
+- [in_progress] Create and publish at least two official marketplace packages as examples.
+- [in_progress] Build a `cookiecutter` template for community package creation.
