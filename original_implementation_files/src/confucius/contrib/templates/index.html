@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confucius - AI Workflow Engine</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="brand">
+                <h1><i class="fas fa-project-diagram"></i> Confucius</h1>
+                <p>ADLED (Autonomous Digital Labor Event Driven) Orchestration Platform</p>
+            </div>
+            <div class="controls">
+                <button id="metrics-button-header" class="button-secondary"><i class="fas fa-chart-line"></i> Metrics</button>
+                <button id="debug-button-header" class="button-secondary"><i class="fas fa-bug"></i> Debug</button>
+                <button id="restart-button-header" class="button-secondary" style="display: none;"><i class="fas fa-redo"></i> New Workflow</button>
+                <div class="theme-switcher">
+                    <input type="checkbox" class="theme-toggle-checkbox" id="theme-toggle">
+                    <label class="theme-toggle-label" for="theme-toggle">
+                        <span class="icon sun"><i class="fas fa-sun"></i></span>
+                        <span class="icon moon"><i class="fas fa-moon"></i></span>
+                    </label>
+                </div>
+            </div>
+        </header>
+
+        <!-- Initial View: Start Workflow -->
+        <main id="initial-view">
+            <div id="workflow-start-card" class="card">
+                <div class="card-header">
+                    <h2>Start a Workflow</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="workflow-type-select">Select Workflow Type</label>
+                        <select id="workflow-type-select">
+                            <option value="" disabled selected>Loading workflows...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="initial-data">Initial Data (JSON)</label>
+                        <textarea id="initial-data" rows="10">{}</textarea>
+                    </div>
+                    <button id="start-button" class="button-primary" onclick="startWorkflow()">Start Execution</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Metrics View -->
+        <main id="metrics-view" style="display: none;">
+            <div class="metrics-header">
+                <h2>System Metrics (Last 24h)</h2>
+                <button class="button-secondary" onclick="fetchMetricsSummary()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <div id="metrics-content">
+                <!-- Metrics will be injected here -->
+                <p>Loading metrics...</p>
+            </div>
+        </main>
+
+        <!-- Debug View -->
+        <main id="debug-view" style="display: none;">
+            <div class="metrics-header">
+                <h2>Active & Failed Workflows</h2>
+                <button class="button-secondary" onclick="fetchDebugWorkflows()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <div id="debug-content">
+                <p>Loading workflows...</p>
+            </div>
+        </main>
+
+        <!-- Workflow View: Split Layout -->
+        <main id="workflow-view" style="display: none;">
+            <!-- Top Control Section -->
+            <section class="workflow-control-section">
+                <div class="control-panel-content">
+                    <div class="status-area">
+                        <h3>Workflow Status</h3>
+                        <div id="workflow-status-display">
+                            <!-- Status Badges Injected Here -->
+                        </div>
+                    </div>
+                    <div class="interaction-area">
+                        <h3>Current Step: <span id="current-step-name">...</span></h3>
+                        <div class="action-buttons">
+                            <button id="next-step-button" class="button-primary">Next Step <i class="fas fa-arrow-right"></i></button>
+                            <button id="resume-button" class="button-primary" style="display: none;">Submit Review <i class="fas fa-check"></i></button>
+                            <button id="retry-button" class="button-warn" style="display: none;">Retry Step <i class="fas fa-redo"></i></button>
+                            <button id="check-status-button" class="button-secondary" style="display: none;">Check Status <i class="fas fa-sync"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bottom Monitoring Section -->
+            <section class="monitoring-section">
+                <!-- Left Pane: Visualizer -->
+                <div class="left-pane">
+                    <div id="workflow-visualizer-card" class="card">
+                        <div class="card-header">
+                            <h2>Steps</h2>
+                        </div>
+                        <div class="card-body">
+                            <ul id="step-visualizer-list">
+                                <!-- Steps List Injected Here -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Pane: Tabbed Info -->
+                <div class="right-pane">
+                    <div class="card">
+                        <div class="card-header tab-controls">
+                            <button class="tab-button active" data-tab="log-view">Event Log</button>
+                            <button class="tab-button" data-tab="full-state-view">Full State</button>
+                            <button class="tab-button" data-tab="required-inputs-view" style="display: none;">Required Input</button>
+                        </div>
+                        <div class="card-body tab-content">
+                            <!-- Log Tab -->
+                            <div id="log-view" class="tab-pane active">
+                                <div id="log-output" class="output-box"></div>
+                            </div>
+                            <!-- State Tab -->
+                            <div id="full-state-view" class="tab-pane">
+                                <pre id="full-state-pre" class="output-box"></pre>
+                            </div>
+                            <!-- Input Form Tab -->
+                            <div id="required-inputs-view" class="tab-pane">
+                                <form id="dynamic-step-form" onsubmit="event.preventDefault();">
+                                    <div id="dynamic-form-inputs"></div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/metrics.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Inline script to handle view switching
+        const metricsBtn = document.getElementById('metrics-button-header');
+        const debugBtn = document.getElementById('debug-button-header');
+        const initialView = document.getElementById('initial-view');
+        const workflowView = document.getElementById('workflow-view');
+        const metricsView = document.getElementById('metrics-view');
+        const debugView = document.getElementById('debug-view');
+        const startBtn = document.getElementById('restart-button-header'); // reused as "Home"
+
+        function hideAllViews() {
+            initialView.style.display = 'none';
+            workflowView.style.display = 'none';
+            metricsView.style.display = 'none';
+            debugView.style.display = 'none';
+        }
+
+        function showMetrics() {
+            hideAllViews();
+            metricsView.style.display = 'block';
+            startBtn.style.display = 'inline-block';
+            fetchMetricsSummary();
+        }
+
+        function showDebug() {
+            hideAllViews();
+            debugView.style.display = 'block';
+            startBtn.style.display = 'inline-block';
+            fetchDebugWorkflows();
+        }
+
+        function showHome() {
+            hideAllViews();
+            if (currentWorkflow) {
+                workflowView.style.display = 'flex';
+            } else {
+                initialView.style.display = 'flex';
+                startBtn.style.display = 'none';
+            }
+        }
+
+        metricsBtn.addEventListener('click', showMetrics);
+        debugBtn.addEventListener('click', showDebug);
+        // Override the restart button behavior slightly to act as "Back" if in metrics
+        // const originalRestart = startBtn.onclick; // Save app.js handler if any (it's null initially)
+        
+        // We'll let app.js handle the restart logic for actually resetting state, 
+        // but here we just want navigation if we are in metrics view.
+        // Actually, app.js assigns dom.restartButtonHeader.onclick = resetUI;
+        // We should add a dedicated "Back" button or handle state.
+        
+        // Simple fix: If in metrics view, restart button goes home.
+        // But app.js resets the UI completely. That's fine.
+    </script>
+</body>
+</html>

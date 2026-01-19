@@ -1,0 +1,28 @@
+workflow_type: TestParentWorkflow
+description: "A parent workflow for testing sub-workflow functionality."
+
+steps:
+  - name: "P_Step_1_Initial"
+    type: "STANDARD"
+    function: "workflow_utils.parent_step_1"
+    automate_next: true
+
+  - name: "P_Step_2_Trigger_Child"
+    type: "STANDARD"
+    function: "workflow_utils.trigger_child_workflow"
+    # This step will be targeted by tests that do NOT want to auto-advance
+    automate_next: false
+    meta: # NEW: Add meta to store sub-workflow related config
+      sub_workflow_merge_function: "workflow_utils.parent_merge_child_result" # NEW: Reference merge function
+
+  - name: "P_Step_3_Trigger_Child_And_Automate"
+    type: "STANDARD"
+    function: "workflow_utils.trigger_child_workflow"
+    # This step will be targeted by tests that DO want to auto-advance
+    automate_next: true
+    meta: # NEW: Add meta to store sub-workflow related config
+      sub_workflow_merge_function: "workflow_utils.parent_merge_child_result" # NEW: Reference merge function
+
+  - name: "P_Step_4_Process_Child_Result"
+    type: "STANDARD"
+    function: "workflow_utils.parent_process_child_result"

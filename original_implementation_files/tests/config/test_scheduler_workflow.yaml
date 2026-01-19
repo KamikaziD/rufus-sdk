@@ -1,0 +1,9 @@
+workflow_type: "TestScheduler"
+description: "Test workflow for scheduler verification"
+initial_state_model: "tests.scheduled_report_models.ScheduledReportState"
+
+steps:
+  - name: "Generate_PDF"
+    type: "STANDARD"
+    function: "tests.scheduled_report_utils.generate_report"
+    automate_next: true

@@ -1,0 +1,10 @@
+workflows:
+  - type: "TestParentWorkflow"
+    description: "A parent workflow for testing sub-workflow functionality."
+    config_file: "testing_parent_workflow.yaml"
+    initial_state_model: "state_models.TestParentState"
+
+  - type: "TestChildWorkflow"
+    description: "A child workflow for testing sub-workflow functionality."
+    config_file: "testing_child_workflow.yaml"
+    initial_state_model: "state_models.TestChildState"

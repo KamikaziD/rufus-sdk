@@ -1,0 +1,12 @@
+workflow_type: TestChildWorkflow
+description: "A simple child workflow for testing."
+
+steps:
+  - name: "C_Step_1"
+    type: "STANDARD"
+    function: "workflow_utils.child_step_1"
+    automate_next: true
+
+  - name: "C_Step_2"
+    type: "STANDARD"
+    function: "workflow_utils.child_step_2"

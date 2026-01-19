@@ -1,0 +1,250 @@
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+import yaml
+import asyncio
+import redis.asyncio as aredis
+
+from .workflow_loader import WorkflowBuilder
+from .persistence import save_workflow_state, load_workflow_state
+from .models import (
+    WorkflowStartRequest, WorkflowStartResponse, WorkflowStepRequest, WorkflowStepResponse,
+    WorkflowStatusResponse, ResumeWorkflowRequest
+)
+from .workflow import WorkflowJumpDirective
+import importlib
+
+# This router factory allows the user's application to initialize the router
+# with its own configured WorkflowBuilder instance.
+def get_workflow_router(workflow_builder: WorkflowBuilder) -> APIRouter:
+
+    router = APIRouter(prefix="/api/v1")
+
+    async def _save_workflow(workflow_id: str, workflow):
+        """Helper to save workflow, handling async task if needed"""
+        save_task = save_workflow_state(workflow_id, workflow)
+        if asyncio.iscoroutine(save_task) or asyncio.isfuture(save_task):
+            await save_task
+
+    @router.get("/workflows")
+    async def get_available_workflows():
+        """
+        Returns a list of available workflows from the registry.
+        """
+        registry_path = workflow_builder.registry_path
+        try:
+            with open(registry_path, "r") as f:
+                registry = yaml.safe_load(f)
+        except FileNotFoundError:
+            raise HTTPException(status_code=500, detail=f"Workflow registry not found at {registry_path}")
+
+        workflow_examples = {
+            "LoanApplication": {
+                "application_id": "L12345", "requested_amount": 15000.50,
+                "applicant_profile": {"user_id": "U-789", "name": "John Doe", "email": "j.doe@workplace.com", "country": "USA", "age": 22, "id_document_url": "s3://docs/id_valid.pdf"}
+            },
+            "KYC": {
+                "user_name": "John Doe",
+                "id_document_url": "s3://docs/id_valid.pdf"
+            },
+            "CustomerOnboarding": {"name": "Jane Smith", "email": "jane.smith@gmail.com"},
+            "ComplianceReview": {"client_id": "C-5678"},
+            "ImageComplianceWorkflow": {"compliance_text": "We sell puppies to China."}
+        }
+        
+        for wf in registry.get("workflows", []):
+            wf["initial_data_example"] = workflow_examples.get(wf["type"], {})
+
+        return registry.get("workflows", [])
+
+    @router.post("/workflow/start", response_model=WorkflowStartResponse)
+    async def start_workflow(request_data: WorkflowStartRequest):
+        try:
+            new_workflow = workflow_builder.create_workflow(
+                workflow_type=request_data.workflow_type,
+                initial_data=request_data.initial_data
+            )
+            await _save_workflow(new_workflow.id, new_workflow)
+        except (ValueError, FileNotFoundError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create workflow: {e}")
+
+        return WorkflowStartResponse(
+            workflow_id=new_workflow.id,
+            current_step_name=new_workflow.current_step_name,
+            status=new_workflow.status
+        )
+
+    @router.get("/workflow/{workflow_id}/current_step_info")
+    async def get_current_step_info(workflow_id: str):
+        workflow = load_workflow_state(workflow_id)
+        # Handle async Task if running in async context with PostgreSQL
+        if asyncio.iscoroutine(workflow) or asyncio.isfuture(workflow):
+            workflow = await workflow
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        if workflow.status == "COMPLETED" or workflow.current_step >= len(workflow.workflow_steps):
+            return {"name": "Workflow Complete", "required_input": [], "input_schema": None}
+
+        step = workflow.workflow_steps[workflow.current_step]
+        response = {"name": step.name, "type": type(step).__name__}
+
+        if workflow.status == "WAITING_HUMAN":
+            # For human steps, we use the ResumeWorkflowRequest model to build the schema
+            response["input_schema"] = ResumeWorkflowRequest.model_json_schema()
+        elif hasattr(step, 'input_schema') and step.input_schema:
+            response["input_schema"] = step.input_schema.model_json_schema()
+        else:
+            response["input_schema"] = None
+
+        return response
+
+    @router.post("/workflow/{workflow_id}/next", response_model=WorkflowStepResponse)
+    async def next_workflow_step(workflow_id: str, request_data: WorkflowStepRequest):
+        workflow = load_workflow_state(workflow_id)
+        # Handle async Task if running in async context with PostgreSQL
+        if asyncio.iscoroutine(workflow) or asyncio.isfuture(workflow):
+            workflow = await workflow
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        if workflow.status in ["PENDING_ASYNC", "WAITING_HUMAN", "COMPLETED", "FAILED"]:
+            raise HTTPException(status_code=409, detail=f"Workflow is in '{workflow.status}' state. Cannot advance with /next.")
+
+        current_step_obj = workflow.workflow_steps[workflow.current_step]
+
+        try:
+            result_dict, next_step_name = workflow.next_step(request_data.input_data)
+            save_workflow_state(workflow_id, workflow)
+
+            if workflow.status == "PENDING_ASYNC":
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "workflow_id": workflow.id, "current_step_name": current_step_obj.name, "next_step_name": None,
+                        "status": workflow.status, "state": workflow.state.model_dump(), "result": result_dict
+                    }
+                )
+
+            return WorkflowStepResponse(
+                workflow_id=workflow.id, current_step_name=current_step_obj.name, next_step_name=next_step_name,
+                status=workflow.status, state=workflow.state.model_dump(), result=result_dict
+            )
+        except WorkflowJumpDirective as e:
+            save_workflow_state(workflow_id, workflow)
+            return WorkflowStepResponse(
+                workflow_id=workflow.id, current_step_name=current_step_obj.name, next_step_name=workflow.current_step_name,
+                status=workflow.status, state=workflow.state.model_dump(), result={"message": f"Workflow branched to {e.target_step_name}"}
+            )
+        except Exception as e:
+            workflow.status = "FAILED"
+            save_workflow_state(workflow_id, workflow)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/workflow/{workflow_id}/status", response_model=WorkflowStatusResponse)
+    async def get_workflow_status(workflow_id: str):
+        workflow = load_workflow_state(workflow_id)
+        # Handle async Task if running in async context with PostgreSQL
+        if asyncio.iscoroutine(workflow) or asyncio.isfuture(workflow):
+            workflow = await workflow
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        return WorkflowStatusResponse(
+            workflow_id=workflow.id, status=workflow.status,
+            current_step_name=workflow.current_step_name, state=workflow.state.model_dump(),
+            workflow_type=workflow.workflow_type,
+            parent_execution_id=workflow.parent_execution_id,
+            blocked_on_child_id=workflow.blocked_on_child_id
+        )
+
+    @router.post("/workflow/{workflow_id}/resume", response_model=WorkflowStepResponse)
+    async def resume_workflow(workflow_id: str, request_data: ResumeWorkflowRequest):
+        workflow = load_workflow_state(workflow_id)
+        # Handle async Task if running in async context with PostgreSQL
+        if asyncio.iscoroutine(workflow) or asyncio.isfuture(workflow):
+            workflow = await workflow
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        if workflow.status != "WAITING_HUMAN":
+            raise HTTPException(status_code=400, detail=f"Workflow is not awaiting human input. Current status: {workflow.status}")
+
+        current_step_obj = workflow.workflow_steps[workflow.current_step]
+        
+        try:
+            workflow.current_step += 1
+            if workflow.current_step >= len(workflow.workflow_steps):
+                 raise HTTPException(status_code=500, detail="Workflow ended unexpectedly after human review.")
+
+            next_step_obj = workflow.workflow_steps[workflow.current_step]
+            
+            result_dict = next_step_obj.func(state=workflow.state, **request_data.model_dump())
+            
+            workflow.status = "ACTIVE"
+            save_workflow_state(workflow_id, workflow)
+            
+            workflow.next_step(user_input={})
+            save_workflow_state(workflow_id, workflow)
+
+            return WorkflowStepResponse(
+                workflow_id=workflow.id, current_step_name=current_step_obj.name,
+                next_step_name=workflow.current_step_name, status=workflow.status,
+                state=workflow.state.model_dump(), result=result_dict
+            )
+        except Exception as e:
+            workflow.status = "FAILED"
+            save_workflow_state(workflow_id, workflow)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/workflow/{workflow_id}/retry", response_model=WorkflowStatusResponse)
+    async def retry_workflow(workflow_id: str):
+        workflow = load_workflow_state(workflow_id)
+        # Handle async Task if running in async context with PostgreSQL
+        if asyncio.iscoroutine(workflow) or asyncio.isfuture(workflow):
+            workflow = await workflow
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        if workflow.status != "FAILED":
+            raise HTTPException(status_code=400, detail=f"Workflow is not in a FAILED state. Current status: {workflow.status}")
+
+        workflow.status = "ACTIVE"
+        save_workflow_state(workflow_id, workflow)
+
+        return WorkflowStatusResponse(
+            workflow_id=workflow.id, status=workflow.status,
+            current_step_name=workflow.current_step_name, state=workflow.state.model_dump()
+        )
+
+    @router.websocket("/workflow/{workflow_id}/subscribe")
+    async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
+        await websocket.accept()
+        redis_client = aredis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        pubsub = redis_client.pubsub()
+        channel = f"workflow_events:{workflow_id}"
+        
+        try:
+            # Send initial state first
+            initial_state = await redis_client.get(f"workflow:{workflow_id}")
+            if initial_state:
+                await websocket.send_text(initial_state)
+
+            await pubsub.subscribe(channel)
+            
+            while True:
+                # This timeout is important to allow the server to check for disconnects
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    await websocket.send_text(message['data'])
+                # Needed to yield control and check for client messages (like disconnect)
+                await asyncio.sleep(0.01)
+
+        except WebSocketDisconnect:
+            print(f"Client disconnected from workflow {workflow_id}")
+        except Exception as e:
+            print(f"An error occurred in websocket for {workflow_id}: {e}")
+        finally:
+            if pubsub.subscribed:
+                await pubsub.unsubscribe(channel)
+            await redis_client.close()
+            print("Websocket connection closed.")
+
+    return router
