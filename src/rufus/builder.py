@@ -8,34 +8,28 @@ import pkgutil
 import importlib.metadata
 import re
 import logging
+import copy
 
-from rufus.models import (
-    WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
-    FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep, StepContext,
-    MergeStrategy, MergeConflictBehavior # Import Merge Enums
-)
-from rufus.workflow import Workflow
-from rufus.providers.persistence import PersistenceProvider
-from rufus.providers.execution import ExecutionProvider
-from rufus.providers.observer import WorkflowObserver
-from rufus.providers.expression_evaluator import ExpressionEvaluator
-from rufus.providers.template_engine import TemplateEngine
-
+# Import providers as string literals to avoid NameError during type hinting
+# if a circular dependency arises during parsing.
+# The actual types will be resolved at runtime.
+# from rufus.providers.expression_evaluator import ExpressionEvaluator
+# from rufus.providers.template_engine import TemplateEngine
 
 logger = logging.getLogger(__name__)
 
 class WorkflowBuilder:
     def __init__(self,
                  workflow_registry: Dict[str, Any],
-                 expression_evaluator_cls: Type[ExpressionEvaluator],
-                 template_engine_cls: Type[TemplateEngine]
+                 expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
+                 template_engine_cls: Type['TemplateEngine'] # Use string literal
                  ):
         self.workflow_registry = workflow_registry
         self.expression_evaluator_cls = expression_evaluator_cls
         self.template_engine_cls = template_engine_cls
         self._workflow_configs = {} # Cache for parsed workflow YAMLs if needed
         self._loaded_modules = set() # Cache for loaded step modules
-        self._marketplace_steps: Dict[str, Type[WorkflowStep]] = {} # Cache for discovered marketplace steps
+        self._marketplace_steps: Dict[str, Type['WorkflowStep']] = {} # Cache for discovered marketplace steps
         self._discover_marketplace_steps() # Auto-discover on initialization
 
     @staticmethod
@@ -78,6 +72,10 @@ class WorkflowBuilder:
             for entry_point in importlib.metadata.entry_points().get('rufus.steps', []):
                 try:
                     step_cls = entry_point.load()
+                    # Check if step_cls is a subclass of WorkflowStep,
+                    # but import WorkflowStep locally to avoid circular import if needed at top level.
+                    # For now, assuming WorkflowStep is available at top-level models.py
+                    from rufus.models import WorkflowStep
                     if issubclass(step_cls, WorkflowStep):
                         # Use the entry point name or a defined attribute in the class as the step type
                         step_type_name = entry_point.name # e.g., "stripe.charge_card"
@@ -95,7 +93,14 @@ class WorkflowBuilder:
 
 
     @classmethod
-    def _build_steps_from_config(cls, steps_config: List[Dict[str, Any]]) -> List[WorkflowStep]:
+    def _build_steps_from_config(cls, steps_config: List[Dict[str, Any]]) -> List['WorkflowStep']:
+        # Import WorkflowStep and related models locally to avoid circular dependency
+        from rufus.models import (
+            WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
+            FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
+            MergeStrategy, MergeConflictBehavior
+        )
+
         steps = []
         for config in steps_config:
             step_type_str = config.get("type", "STANDARD")
@@ -107,15 +112,19 @@ class WorkflowBuilder:
             merge_strategy = MergeStrategy(config.get("merge_strategy", MergeStrategy.SHALLOW.value))
             merge_conflict_behavior = MergeConflictBehavior(config.get("merge_conflict_behavior", MergeConflictBehavior.PREFER_NEW.value))
 
+            input_schema = cls._import_from_string(
+                input_model_path) if input_model_path else None
+
             # Check if it's a marketplace step
             if step_type_str in cls._marketplace_steps: # Access _marketplace_steps from class method context
                 step_cls = cls._marketplace_steps[step_type_str]
-                step = step_cls(name=config["name"], **config) # Instantiate with full config
+                # Pass the input_schema directly to the custom step, assuming it can handle it
+                step = step_cls(name=config["name"], input_schema=input_schema, **config)
             elif "." in step_type_str: # Assume it's a custom step class defined in a module
                 step_cls = cls._import_from_string(step_type_str)
                 if not issubclass(step_cls, WorkflowStep):
                     raise ValueError(f"Custom step type '{step_type_str}' is not a subclass of WorkflowStep.")
-                step = step_cls(name=config["name"], **config)
+                step = step_cls(name=config["name"], input_schema=input_schema, **config)
             elif step_type_str == "PARALLEL":
                 tasks = []
                 for task_config in config.get("tasks", []):
@@ -137,7 +146,7 @@ class WorkflowBuilder:
                     name=config["name"],
                     func_path=func_path,
                     required_input=config.get("required_input", []),
-                    input_schema=cls._import_from_string(input_model_path) if input_model_path else None,
+                    input_schema=input_schema,
                     automate_next=automate_next,
                     merge_strategy=merge_strategy,
                     merge_conflict_behavior=merge_conflict_behavior
@@ -157,7 +166,7 @@ class WorkflowBuilder:
                     name=config["name"],
                     http_config=http_config,
                     required_input=config.get("required_input", []),
-                    input_schema=cls._import_from_string(input_model_path) if input_model_path else None,
+                    input_schema=input_schema,
                     automate_next=automate_next,
                     merge_strategy=merge_strategy,
                     merge_conflict_behavior=merge_conflict_behavior
@@ -254,7 +263,7 @@ class WorkflowBuilder:
         return data
 
     @staticmethod
-    def _apply_parameters_to_dict(data: Any, parameters: Dict[str, Any], template_engine: TemplateEngine) -> Any:
+    def _apply_parameters_to_dict(data: Any, parameters: Dict[str, Any], template_engine: 'TemplateEngine') -> Any: # Use string literal
         """Recursively applies template parameterization to string values in a dictionary."""
         if isinstance(data, dict):
             return {k: WorkflowBuilder._apply_parameters_to_dict(v, parameters, template_engine) for k, v in data.items()}
@@ -263,7 +272,7 @@ class WorkflowBuilder:
         elif isinstance(data, str):
             # Render the string using the template engine with 'parameters' as context
             context = {"parameters": parameters}
-            return template_engine.render_string(data, context)
+            return template_engine.render_string_template(data, context) # Changed render_string to render_string_template
         return data
 
 
@@ -289,8 +298,9 @@ class WorkflowBuilder:
         
         # Process parameters using the template engine
         # Instantiate a temporary template engine with workflow-level parameters as context
+        # Provide an empty context if no parameters are found, as Jinja2TemplateEngine requires one
+        temp_engine = self.template_engine_cls({}) # Changed to pass empty dict as context
         template_params = processed_config_info.get("parameters", {})
-        temp_engine = self.template_engine_cls() # Create an instance of the class
         processed_config_info = self._apply_parameters_to_dict(processed_config_info, template_params, temp_engine)
 
         return processed_config_info
@@ -306,12 +316,12 @@ class WorkflowBuilder:
         return self._import_from_string(state_model_path)
 
     async def create_workflow(self, workflow_type: str,
-                        persistence_provider: PersistenceProvider,
-                        execution_provider: ExecutionProvider,
+                        persistence_provider: 'PersistenceProvider', # Use string literal
+                        execution_provider: 'ExecutionProvider', # Use string literal
                         workflow_builder: 'WorkflowBuilder',
-                        expression_evaluator_cls: Type[ExpressionEvaluator],
-                        template_engine_cls: Type[TemplateEngine],
-                        workflow_observer: WorkflowObserver,
+                        expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
+                        template_engine_cls: Type['TemplateEngine'], # Use string literal
+                        workflow_observer: 'WorkflowObserver', # Use string literal
                         initial_data: Dict[str, Any] = None,
                         owner_id: Optional[str] = None,
                         org_id: Optional[str] = None,
@@ -319,7 +329,7 @@ class WorkflowBuilder:
                         priority: Optional[int] = None,
                         idempotency_key: Optional[str] = None,
                         metadata: Optional[Dict[str, Any]] = None
-                        ) -> Workflow:
+                        ) -> 'Workflow': # Changed return type hint to string literal
 
         if any(p is None for p in [persistence_provider, execution_provider, workflow_builder,
                                    expression_evaluator_cls, template_engine_cls, workflow_observer]):
@@ -337,6 +347,9 @@ class WorkflowBuilder:
 
         steps_config = workflow_config.get("steps", [])
         workflow_steps = self._build_steps_from_config(steps_config)
+
+        # Import Workflow locally to avoid circular import at the top level
+        from rufus.workflow import Workflow
 
         return Workflow(
             workflow_type=workflow_type,
@@ -370,6 +383,8 @@ class WorkflowBuilder:
 
     @classmethod
     def _collect_modules_from_steps(cls, steps: List[Dict[str, Any]], modules: set):
+        from rufus.models import WorkflowStep # Import locally if not already imported
+
         for step in steps:
             step_type = step.get("type", "STANDARD")
 

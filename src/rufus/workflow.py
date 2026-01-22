@@ -14,12 +14,13 @@ from rufus.models import (
     MergeStrategy, MergeConflictBehavior # Import new Enums
 )
 
-from rufus.providers.persistence import PersistenceProvider
-from rufus.providers.execution import ExecutionProvider
-from rufus.providers.observer import WorkflowObserver
-from rufus.providers.expression_evaluator import ExpressionEvaluator
-from rufus.providers.template_engine import TemplateEngine
-from rufus.builder import WorkflowBuilder # For builder._import_from_string
+# Use string literal type hints for providers to avoid circular import issues
+# from rufus.providers.persistence import PersistenceProvider
+# from rufus.providers.execution import ExecutionProvider
+# from rufus.providers.observer import WorkflowObserver
+# from rufus.providers.expression_evaluator import ExpressionEvaluator
+# from rufus.providers.template_engine import TemplateEngine
+# Removed: from rufus.builder import WorkflowBuilder # For builder._import_from_string
 
 class Workflow:
     def __init__(self,
@@ -30,13 +31,17 @@ class Workflow:
                  steps_config: List[Dict[str, Any]] = None,
                  state_model_path: str = None,
                  owner_id: str = None,
-                 org_id: str = None,
-                 persistence_provider: PersistenceProvider = None,
-                 execution_provider: ExecutionProvider = None,
-                 workflow_builder: 'WorkflowBuilder' = None,
-                 expression_evaluator_cls: Type[ExpressionEvaluator] = None,
-                 template_engine_cls: Type[TemplateEngine] = None,
-                 workflow_observer: WorkflowObserver = None
+                 org_id: Optional[str] = None,
+                 data_region: Optional[str] = None,
+                 priority: Optional[int] = None,
+                 idempotency_key: Optional[str] = None,
+                 metadata: Optional[Dict[str, Any]] = None,
+                 persistence_provider: 'PersistenceProvider' = None, # Use string literal
+                 execution_provider: 'ExecutionProvider' = None, # Use string literal
+                 workflow_builder: 'WorkflowBuilder' = None, # Still need type hint for mypy
+                 expression_evaluator_cls: Type['ExpressionEvaluator'] = None, # Use string literal
+                 template_engine_cls: Type['TemplateEngine'] = None, # Use string literal
+                 workflow_observer: 'WorkflowObserver' = None # Use string literal
                  ):
         self.id = workflow_id or str(uuid.uuid4())
         self.workflow_steps = workflow_steps or []
@@ -51,6 +56,18 @@ class Workflow:
         self.owner_id = owner_id
         self.org_id = org_id
 
+        # Regional data sovereignty
+        self.data_region = data_region
+
+        # Priority for task queuing
+        self.priority = priority if priority is not None else 5
+
+        # Idempotency
+        self.idempotency_key = idempotency_key
+
+        # Metadata
+        self.metadata = metadata if metadata is not None else {}
+
         # Saga pattern support
         self.saga_mode = False
         self.completed_steps_stack = []  # Track completed steps for rollback
@@ -59,48 +76,36 @@ class Workflow:
         self.parent_execution_id = None
         self.blocked_on_child_id = None
 
-        # Regional data sovereignty
-        self.data_region = None
-
-        # Priority for task queuing
-        self.priority = 5
-
-        # Idempotency
-        self.idempotency_key = None
-
-        # Metadata
-        self.metadata = {}
-
         # Injected providers (Dependency Injection)
         if persistence_provider is None:
             raise ValueError(
-                "PersistenceProvider must be injected into WorkflowEngine")
-        self.persistence: PersistenceProvider = persistence_provider
+                "PersistenceProvider must be injected into Workflow")
+        self.persistence: 'PersistenceProvider' = persistence_provider # Use string literal
 
         if execution_provider is None:
             raise ValueError(
-                "ExecutionProvider must be injected into WorkflowEngine")
-        self.execution: ExecutionProvider = execution_provider
+                "ExecutionProvider must be injected into Workflow")
+        self.execution: 'ExecutionProvider' = execution_provider # Use string literal
 
         if workflow_builder is None:
             raise ValueError(
-                "WorkflowBuilder must be injected into WorkflowEngine")
+                "WorkflowBuilder must be injected into Workflow")
         self.builder: 'WorkflowBuilder' = workflow_builder
 
         if expression_evaluator_cls is None:
             raise ValueError(
-                "ExpressionEvaluator class must be injected into WorkflowEngine")
+                "ExpressionEvaluator class must be injected into Workflow")
         self.expression_evaluator_cls = expression_evaluator_cls
 
         if template_engine_cls is None:
             raise ValueError(
-                "TemplateEngine class must be injected into WorkflowEngine")
+                "TemplateEngine class must be injected into Workflow")
         self.template_engine_cls = template_engine_cls
 
         if workflow_observer is None:
             raise ValueError(
-                "WorkflowObserver must be injected into WorkflowEngine")
-        self.observer: WorkflowObserver = workflow_observer
+                "WorkflowObserver must be injected into Workflow")
+        self.observer: 'WorkflowObserver' = workflow_observer # Use string literal
 
     @property
     def current_step_name(self) -> Optional[str]:
@@ -119,24 +124,24 @@ class Workflow:
             "state_model_path": self.state_model_path,
             "owner_id": self.owner_id,
             "org_id": self.org_id,
-            "saga_mode": self.saga_mode,
-            "completed_steps_stack": self.completed_steps_stack,
-            "parent_execution_id": self.parent_execution_id,
-            "blocked_on_child_id": self.blocked_on_child_id,
             "data_region": self.data_region,
             "priority": self.priority,
             "idempotency_key": self.idempotency_key,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "saga_mode": self.saga_mode,
+            "completed_steps_stack": self.completed_steps_stack,
+            "parent_execution_id": self.parent_execution_id,
+            "blocked_on_child_id": self.blocked_on_child_id
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any],
-                  persistence_provider: PersistenceProvider,
-                  execution_provider: ExecutionProvider,
-                  workflow_builder: 'WorkflowBuilder',
-                  expression_evaluator_cls: Type[ExpressionEvaluator],
-                  template_engine_cls: Type[TemplateEngine],
-                  workflow_observer: WorkflowObserver
+                  persistence_provider: 'PersistenceProvider', # Use string literal
+                  execution_provider: 'ExecutionProvider', # Use string literal
+                  workflow_builder: 'WorkflowBuilder', # Still need type hint for mypy
+                  expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
+                  template_engine_cls: Type['TemplateEngine'], # Use string literal
+                  workflow_observer: 'WorkflowObserver' # Use string literal
                   ) -> 'Workflow':
 
         workflow_type = data.get("workflow_type")
@@ -144,6 +149,9 @@ class Workflow:
         if not workflow_type or not state_model_path:
             raise ValueError(
                 "Missing workflow_type or state_model_path in data.")
+
+        # Import WorkflowBuilder locally to avoid circular import
+        from rufus.builder import WorkflowBuilder # Local import
 
         try:
             state_model_class = WorkflowBuilder._import_from_string(state_model_path)
@@ -180,25 +188,34 @@ class Workflow:
         instance.owner_id = data.get("owner_id")
         instance.org_id = data.get("org_id")
 
+        # Regional data sovereignty
+        instance.data_region = data.get("data_region")
+
+        # Priority for task queuing
+        instance.priority = data.get("priority", 5)
+
+        # Idempotency
+        instance.idempotency_key = data.get("idempotency_key")
+
+        # Metadata
+        instance.metadata = data.get("metadata", {})
+
         # Restore saga and sub-workflow fields
         instance.saga_mode = data.get("saga_mode", False)
         instance.completed_steps_stack = data.get("completed_steps_stack", [])
         instance.parent_execution_id = data.get("parent_execution_id")
         instance.blocked_on_child_id = data.get("blocked_on_child_id")
-        instance.data_region = data.get("data_region")
-        instance.priority = data.get("priority", 5)
-        instance.idempotency_key = data.get("idempotency_key")
-        instance.metadata = data.get("metadata", {})
+        
 
         return instance
 
-    def _notify_status_change(self, old_status: str, new_status: str, current_step_name: Optional[str], final_result: Optional[Dict[str, Any]] = None):
+    async def _notify_status_change(self, old_status: str, new_status: str, current_step_name: Optional[str], final_result: Optional[Dict[str, Any]] = None):
         """Helper to centralize status change notifications."""
-        self.observer.on_workflow_status_changed(
+        await self.observer.on_workflow_status_changed(
             self.id, old_status, new_status, current_step_name)
         if self.parent_execution_id:
             # If this is a child workflow, report its status change to the parent
-            self.execution.report_child_status_to_parent(
+            await self.execution.report_child_status_to_parent(
                 child_id=self.id,
                 parent_id=self.parent_execution_id,
                 child_new_status=new_status,
@@ -206,14 +223,14 @@ class Workflow:
                 child_result=final_result
             )
 
-    def enable_saga_mode(self):
+    async def enable_saga_mode(self):
         """Activate saga mode for automatic rollback on failure"""
         self.saga_mode = True
         print(f"[SAGA] Saga mode enabled for workflow {self.id}")
 
-    def _log_execution(self, level: str, message: str, step_name: str = None, metadata: Dict[str, Any] = None):
+    async def _log_execution(self, level: str, message: str, step_name: str = None, metadata: Dict[str, Any] = None):
         """Helper to log execution details using injected persistence provider"""
-        self.persistence.log_execution(
+        await self.persistence.log_execution(
             workflow_id=self.id,
             log_level=level,
             message=message,
@@ -228,13 +245,13 @@ class Workflow:
         print(f"[LOOP] Executing loop step: {step.name}")
         return {"loop_executed": True, "step_name": step.name}
 
-    def _execute_saga_rollback(self):
+    async def _execute_saga_rollback(self):
         """Compensate all completed steps in reverse order"""
         print(
             f"[SAGA] Rolling back {len(self.completed_steps_stack)} steps for workflow {self.id}...")
 
         # Save state before starting rollback
-        self.persistence.save_workflow(self.id, self.to_dict())
+        await self.persistence.save_workflow(self.id, self.to_dict())
 
         for entry in reversed(self.completed_steps_stack):
             step_index = entry['step_index']
@@ -251,13 +268,14 @@ class Workflow:
                     try:
                         print(
                             f"[SAGA] Compensating step {step_index}: {step_name}")
-                        compensation_result = step.compensate(
+                        # Compensate is an async method
+                        compensation_result = await step.compensate(
                             self.state, context=context)
                         print(
                             f"[SAGA] Compensated {step_name}: {compensation_result}")
 
                         # Log compensation to DB
-                        self.persistence.log_compensation(
+                        await self.persistence.log_compensation(
                             execution_id=self.id,
                             step_name=step_name,
                             step_index=step_index,
@@ -272,7 +290,7 @@ class Workflow:
                             f"[SAGA] Compensation failed for {step.name}: {comp_error}")
 
                         # Log failed compensation to DB
-                        self.persistence.log_compensation(
+                        await self.persistence.log_compensation(
                             execution_id=self.id,
                             step_name=step_name,
                             step_index=step_index,
@@ -289,21 +307,24 @@ class Workflow:
         # Save final state after rollback
         old_status = self.status
         self.status = "FAILED_ROLLED_BACK"
-        self.persistence.save_workflow(self.id, self.to_dict())
-        self.observer.on_workflow_rolled_back(
+        await self.persistence.save_workflow(self.id, self.to_dict())
+        await self.observer.on_workflow_rolled_back(
             self.id, self.workflow_type, "Saga rollback completed", self.state, self.completed_steps_stack)
-        self._notify_status_change(
+        await self._notify_status_change(
             old_status, self.status, self.current_step_name)
         print(f"[SAGA] Rollback complete for workflow {self.id}")
 
-    def _handle_sub_workflow(self, directive: StartSubWorkflowDirective):
+    async def _handle_sub_workflow(self, directive: StartSubWorkflowDirective):
         """Launch child workflow and pause parent"""
         print(
             f"[SUB-WORKFLOW] Starting {directive.workflow_type} as child of {self.id}")
 
+        # Import WorkflowBuilder locally to avoid circular import
+        from rufus.builder import WorkflowBuilder # Local import
+
         try:
             # Use injected builder to create child workflow
-            child_workflow = self.builder.create_workflow(
+            child_workflow = await self.builder.create_workflow(
                 workflow_type=directive.workflow_type,
                 initial_data=directive.initial_data,
                 persistence_provider=self.persistence,
@@ -327,17 +348,17 @@ class Workflow:
             self.blocked_on_child_id = child_workflow.id
 
             # Save both workflows
-            self.persistence.save_workflow(self.id, self.to_dict())
-            self.persistence.save_workflow(
+            await self.persistence.save_workflow(self.id, self.to_dict())
+            await self.persistence.save_workflow(
                 child_workflow.id, child_workflow.to_dict())
-            self._notify_status_change(
+            await self._notify_status_change(
                 old_status, self.status, self.current_step_name)
 
             print(
                 f"[SUB-WORKFLOW] Created child workflow {child_workflow.id}, parent {self.id} is now paused")
 
             # Dispatch child execution using injected execution provider
-            self.execution.dispatch_sub_workflow(child_workflow.id, self.id)
+            await self.execution.dispatch_sub_workflow(child_workflow.id, self.id, child_workflow.workflow_type, child_workflow.initial_state_model.model_dump())
 
             return {
                 "message": f"Sub-workflow {directive.workflow_type} started",
@@ -402,6 +423,8 @@ class Workflow:
 
             if condition_met:
                 print(f"[DYNAMIC INJECTION] Rule met. Injecting steps...")
+                # Import WorkflowBuilder locally to avoid circular import
+                from rufus.builder import WorkflowBuilder
                 new_steps = WorkflowBuilder._build_steps_from_config(
                     steps_to_insert_config)
                 print(f"[DYNAMIC INJECTION] Built {len(new_steps)} new steps.")
@@ -483,13 +506,13 @@ class Workflow:
             await self.observer.on_workflow_completed(
                 self.id, self.workflow_type, self.state)
             final_completion_result = {"status": "Workflow completed"}
-            self._notify_status_change(
+            await self._notify_status_change(
                 old_status, self.status, self.current_step_name, final_result=final_completion_result)
             return final_completion_result, None
 
         step = self.workflow_steps[self.current_step]
 
-        self._log_execution(
+        await self._log_execution(
             "INFO", f"Starting step: {step.name}", step_name=step.name)
 
         validated_model = None
@@ -519,7 +542,7 @@ class Workflow:
 
             if is_sync_step:
                 if step.func:
-                    result = self.execution.execute_sync_step_function(
+                    result = await self.execution.execute_sync_step_function(
                         step.func, self.state, context)
                     # Apply merge strategy for sync step results
                     if isinstance(result, dict):
@@ -533,7 +556,7 @@ class Workflow:
 
             elif isinstance(step, AsyncWorkflowStep):
                 # AsyncWorkflowStep uses the ExecutionProvider
-                result = self.execution.dispatch_async_task(
+                result = await self.execution.dispatch_async_task(
                     func_path=step.func_path,
                     state_data=self.state.model_dump(),  # Pass state as dict for tasks
                     workflow_id=self.id,
@@ -547,7 +570,7 @@ class Workflow:
                 )
             elif isinstance(step, HttpWorkflowStep):
                 # HttpWorkflowStep uses the ExecutionProvider
-                result = self.execution.dispatch_async_task(
+                result = await self.execution.dispatch_async_task(
                     func_path=step.func_path,
                     state_data=self.state.model_dump(),
                     workflow_id=self.id,
@@ -562,7 +585,7 @@ class Workflow:
                 )
 
             elif isinstance(step, ParallelWorkflowStep):
-                result = self.execution.dispatch_parallel_tasks(
+                result = await self.execution.dispatch_parallel_tasks(
                     tasks=step.tasks,
                     state_data=self.state.model_dump(),
                     workflow_id=self.id,
@@ -685,7 +708,7 @@ class Workflow:
                 await self.observer.on_workflow_completed( # Changed to await
                     self.id, self.workflow_type, self.state)
                 final_completion_result = {"status": "Workflow completed"}
-                self._notify_status_change(
+                await self._notify_status_change(
                     old_status, self.status, self.current_step_name, final_result=final_completion_result)
                 return final_completion_result, None
 
@@ -716,7 +739,7 @@ class Workflow:
                     self.id, self.to_dict())
                 await self.observer.on_step_executed(self.id, step.name, self.current_step, "JUMPED", { # Changed to await
                                                "target": e.target_step_name}, self.state)
-                self._notify_status_change(
+                await self._notify_status_change(
                     old_status, self.status, self.current_step_name)
                 return {"message": f"Jumped to step {e.target_step_name}"}, self.current_step_name
             except StopIteration:
@@ -748,7 +771,7 @@ class Workflow:
 
         except Exception as e:
             log_message = f"Step failed: {e}"
-            self._log_execution("ERROR", log_message,
+            await self._log_execution("ERROR", log_message,
                                 step_name=step.name, metadata={"error": str(e)})
             await self.observer.on_step_failed( # Changed to await
                 self.id, step.name, self.current_step, str(e), self.state)
@@ -761,7 +784,7 @@ class Workflow:
                     self.status = "FAILED"
                 await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
-                self._notify_status_change(
+                await self._notify_status_change(
                     old_status, self.status, self.current_step_name)
                 raise SagaWorkflowException(step.name, e)
             else:
@@ -770,7 +793,7 @@ class Workflow:
                     self.id, self.to_dict())
                 await self.observer.on_workflow_failed( # Changed to await
                     self.id, self.workflow_type, str(e), self.state)
-                self._notify_status_change(
+                await self._notify_status_change(
                     old_status, self.status, self.current_step_name)
                 raise WorkflowFailedException(
                     step_name=step.name, original_exception=e, workflow_id=self.id)

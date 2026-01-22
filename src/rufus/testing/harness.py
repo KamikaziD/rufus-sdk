@@ -1,16 +1,26 @@
 from typing import Dict, Any, Optional, List, Callable, Type
 from rufus.engine import WorkflowEngine
 from rufus.models import BaseModel, WorkflowStep, StepContext, CompensatableStep, SagaWorkflowException
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+# from rufus.builder import WorkflowBuilder # Will be imported locally where needed
+# Use string literal type hints for providers to avoid NameError during type hinting
+# if a circular dependency arises during parsing.
+# The actual types will be resolved at runtime.
+# from rufus.providers.persistence import PersistenceProvider
+# from rufus.providers.execution import ExecutionProvider
+# from rufus.providers.observer import WorkflowObserver
+# from rufus.providers.expression_evaluator import ExpressionEvaluator
+# from rufus.providers.template_engine import TemplateEngine
 import copy
 import yaml
 from pathlib import Path
 import asyncio
+
+from rufus.implementations.persistence.memory import InMemoryPersistence # Added import
+from rufus.implementations.execution.sync import SyncExecutor # Added import
+from rufus.implementations.observability.logging import LoggingObserver # Added import
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator # Added import
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine # Added import
+
 
 class WorkflowTestHarness:
     """
@@ -24,57 +34,42 @@ class WorkflowTestHarness:
         self.workflow_config = workflow_config
         self.initial_data = initial_data or {}
 
-        # Providers for the test harness
+        # Providers for the test harness (synchronous initialization)
         self.persistence = InMemoryPersistence()
         self.executor = SyncExecutor()
         self.observer = LoggingObserver() # Use a logging observer for test output
         self.expression_evaluator_cls = SimpleExpressionEvaluator
         self.template_engine_cls = Jinja2TemplateEngine
 
+        self.engine: Optional[WorkflowEngine] = None # Will be set during _ainit
         self.workflow: Optional[WorkflowEngine] = None
         self._mocked_steps: Dict[str, Callable] = {}
         self._mocked_step_results: Dict[str, Any] = {}
         self._mocked_step_exceptions: Dict[str, Exception] = {}
         self._compensation_log: List[Dict[str, Any]] = []
         
-        # Initialize the workflow engine and reset the workflow instance
-        asyncio.run(self._ainit())
+        # Do NOT call asyncio.run here. The test function using the harness
+        # should call await harness._ainit() to properly initialize.
+        # asyncio.run(self._ainit())
 
     async def _ainit(self):
+        """Asynchronously initializes the harness components."""
         # Create a minimal registry for the WorkflowEngine
         workflow_registry_for_harness = {self.workflow_type: self.workflow_config}
         
-        self.engine = await self._get_configured_engine(
-            workflow_registry_for_harness,
-            self.persistence,
-            self.executor,
-            self.observer
-        )
-        await self._reset_workflow()
-
-    async def _get_configured_engine(
-        self,
-        workflow_registry_config: Dict[str, Any],
-        persistence_provider: PersistenceProvider,
-        execution_provider: ExecutionProvider,
-        observer: WorkflowObserver
-    ) -> WorkflowEngine:
-        """Helper to configure and return a WorkflowEngine instance."""
-        await persistence_provider.initialize()
-        await observer.initialize()
-        # SyncExecutor does not have an async initialize, but it can take a WorkflowEngine instance
-        # It's initialized by WorkflowEngine's __init__ if it has an initialize method
-        
-        engine = WorkflowEngine(
-            persistence=persistence_provider,
-            executor=execution_provider,
-            observer=observer,
-            workflow_registry=workflow_registry_config,
+        self.engine = WorkflowEngine(
+            workflow_registry=workflow_registry_for_harness,
+            persistence=self.persistence,
+            executor=self.executor,
+            observer=self.observer,
             expression_evaluator_cls=self.expression_evaluator_cls,
             template_engine_cls=self.template_engine_cls
         )
-        return engine
+        await self.engine.initialize() # Initialize the engine after creation
+        await self._reset_workflow()
 
+    # Removed _get_configured_engine as it's no longer needed, WorkflowEngine is built directly
+    # And initialize is called on the engine instance.
 
     async def _reset_workflow(self):
         """Creates a fresh workflow instance for testing."""
@@ -125,11 +120,15 @@ class WorkflowTestHarness:
         self._mocked_step_results[step_name] = returns
         self._mocked_step_exceptions[step_name] = raises
 
+        # Check if self.workflow is initialized, as it's now async
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before mocking steps.")
+
         for step in self.workflow.workflow_steps:
             if step.name == step_name:
                 self._original_step_funcs[step_name] = step.func # Store original
                 
-                def mock_func(state: BaseModel, context: StepContext):
+                async def mock_func(state: BaseModel, context: StepContext): # Changed to async
                     if raises:
                         raise raises
                     if returns is not None:
@@ -150,11 +149,15 @@ class WorkflowTestHarness:
         """
         Mocks the compensation function for a specific compensatable step.
         """
+        # Check if self.workflow is initialized, as it's now async
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before mocking compensation.")
+
         for step in self.workflow.workflow_steps:
             if step.name == step_name and isinstance(step, CompensatableStep):
                 self._original_compensate_funcs[step_name] = step.compensate_func # Store original
                 
-                def mock_comp_func(state: BaseModel, context: StepContext):
+                async def mock_comp_func(state: BaseModel, context: StepContext): # Changed to async
                     self._compensation_log.append({"step_name": step_name, "action": "mocked_compensate", "result": returns, "error": str(raises)})
                     if raises:
                         raise raises
@@ -168,6 +171,9 @@ class WorkflowTestHarness:
         Runs all remaining steps in the workflow until completion or failure.
         Provides input data for steps if specified.
         """
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before running steps.")
+
         input_data_per_step = input_data_per_step or {}
         
         while self.workflow.status not in ["COMPLETED", "FAILED", "FAILED_ROLLED_BACK"]:
@@ -194,6 +200,9 @@ class WorkflowTestHarness:
 
     def reset_mocks(self):
         """Resets all mocked steps to their original implementations."""
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before resetting mocks.")
+
         for step in self.workflow.workflow_steps:
             if step.name in self._original_step_funcs:
                 step.func = self._original_step_funcs[step.name]
@@ -211,14 +220,20 @@ class WorkflowTestHarness:
     @property
     def current_state(self) -> BaseModel:
         """Returns the current state of the workflow."""
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before accessing current_state.")
         return self.workflow.state
 
     @property
     def current_status(self) -> str:
         """Returns the current status of the workflow."""
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before accessing current_status.")
         return self.workflow.status
 
     @property
     def workflow_id(self) -> str:
         """Returns the ID of the workflow being tested."""
+        if not self.workflow:
+            raise RuntimeError("WorkflowTestHarness must be initialized with await harness._ainit() before accessing workflow_id.")
         return self.workflow.id
