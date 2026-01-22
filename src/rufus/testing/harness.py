@@ -173,9 +173,11 @@ class WorkflowTestHarness:
                 elif self.workflow.status == "WAITING_HUMAN":
                     # For testing, we might want to automatically resume or inspect.
                     # This simple harness will just stop here.
+                    print(f"Harness: Workflow waiting for human input at {current_step_name}. Stopping run_all_steps.")
                     return self.workflow
 
             except Exception as e:
+                print(f"Harness: Workflow failed at step {current_step_name} with error: {e}")
                 return self.workflow
         return self.workflow
 
