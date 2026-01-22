@@ -1,0 +1,111 @@
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional, Callable, Type
+from enum import Enum
+
+# --- Step Models ---
+
+class MergeStrategy(str, Enum):
+    """Defines how results from asynchronous or parallel steps should be merged into the workflow state."""
+    SHALLOW = "shallow"    # Only top-level keys are merged; existing keys are overwritten.
+    DEEP = "deep"          # Recursive merge for nested dictionaries.
+    REPLACE = "replace"    # The entire state object is replaced by the result.
+    APPEND = "append"      # If target is a list, result items are appended. Non-list types use SHALLOW.
+    OVERWRITE_EXISTING = "overwrite_existing" # Existing keys are overwritten, new keys are added.
+    PRESERVE_EXISTING = "preserve_existing"   # Only new keys are added; existing keys are kept.
+
+class MergeConflictBehavior(str, Enum):
+    """Defines how to handle conflicts during state merging."""
+    RAISE_ERROR = "raise_error"   # Raise an error if a conflict occurs.
+    PREFER_NEW = "prefer_new"     # New value overwrites existing value.
+    PREFER_EXISTING = "prefer_existing" # Existing value is preserved over new value.
+
+class StepContext(BaseModel):
+    workflow_id: str
+    step_name: str
+    validated_input: Optional[Any] = None
+    previous_step_result: Optional[Dict[str, Any]] = None
+
+class WorkflowStep(BaseModel):
+    name: str
+    func: Optional[Callable] = None
+    input_schema: Optional[Type[BaseModel]] = None
+    required_input: List[str] = Field(default_factory=list)
+    automate_next: bool = False
+    routes: Optional[List[Dict[str, str]]] = None # For decision steps
+    
+    # Placeholder for dynamic injection config
+    dynamic_injection: Optional[Dict[str, Any]] = None
+
+class CompensatableStep(WorkflowStep):
+    compensate_func: Callable
+
+class AsyncWorkflowStep(WorkflowStep):
+    func_path: str # Path to the function for async execution
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+class HttpWorkflowStep(WorkflowStep):
+    http_config: Dict[str, Any] # Configuration for HTTP request
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+class ParallelExecutionTask(BaseModel):
+    name: str
+    func_path: str # Path to the function for parallel execution
+
+class ParallelWorkflowStep(WorkflowStep):
+    tasks: List[ParallelExecutionTask]
+    merge_function_path: Optional[str] = None
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+class FireAndForgetWorkflowStep(WorkflowStep):
+    target_workflow_type: str
+    initial_data_template: Dict[str, Any]
+
+class LoopStep(WorkflowStep):
+    loop_body: List[WorkflowStep]
+    mode: str # ITERATE or WHILE
+    iterate_over: Optional[str] = None # State path to list for iteration
+    item_var_name: str = "item"
+    while_condition: Optional[str] = None # Expression for while loop
+    max_iterations: int = 1000
+
+class CronScheduleWorkflowStep(WorkflowStep):
+    target_workflow_type: str
+    cron_expression: str
+    initial_data_template: Dict[str, Any]
+    schedule_name: Optional[str] = None
+
+# --- Directives and Exceptions ---
+
+class WorkflowJumpDirective(Exception):
+    def __init__(self, target_step_name: str):
+        self.target_step_name = target_step_name
+
+class WorkflowPauseDirective(Exception):
+    def __init__(self, result: Dict[str, Any]):
+        self.result = result
+
+class StartSubWorkflowDirective(Exception):
+    def __init__(self, workflow_type: str, initial_data: Dict[str, Any], data_region: Optional[str] = None):
+        self.workflow_type = workflow_type
+        self.initial_data = initial_data
+        self.data_region = data_region
+
+class WorkflowNextStepDirective(Exception):
+    """Internal directive to indicate that the workflow should proceed to the next step."""
+    pass
+
+class SagaWorkflowException(Exception):
+    def __init__(self, step_name: str, original_exception: Exception):
+        self.step_name = step_name
+        self.original_exception = original_exception
+        super().__init__(f"Saga step '{step_name}' failed: {original_exception}")
+
+class WorkflowFailedException(Exception):
+    def __init__(self, workflow_id: str, step_name: str, original_exception: Exception):
+        self.workflow_id = workflow_id
+        self.step_name = step_name
+        self.original_exception = original_exception
+        super().__init__(f"Workflow {workflow_id} failed at step '{step_name}': {original_exception}")

@@ -15,8 +15,6 @@ from typing import Optional, Any, Dict, List, Type
 load_dotenv()
 
 # Add the project root to the Python path to allow importing rufus package.
-# This might be needed for local development setup if rufus is not installed via pip.
-# Adjust as necessary for your project structure.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # --- Import Rufus SDK Components ---
@@ -26,13 +24,16 @@ from rufus.builder import WorkflowBuilder
 from rufus.providers.persistence import PersistenceProvider
 from rufus.providers.execution import ExecutionProvider
 from rufus.providers.observer import WorkflowObserver
-from rufus.implementations.persistence.postgres import PostgresProvider
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider, get_postgres_store # Correct import
 from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.celery import CeleryExecutor, _get_celery_app_instance # For initializing Celery
+from rufus.implementations.persistence.redis import RedisPersistenceProvider
+from rufus.implementations.execution.celery import CeleryExecutor, rufus_celery_app, get_celery_executor # Correct import
 from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.execution.thread_pool import ThreadPoolExecutorProvider # New executor
 from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.observability.events import EventPublisherObserver # Event publisher for websockets
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating import Jinja2TemplateEngine
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 # --- API Models ---
 from rufus_server.api_models import (
@@ -57,44 +58,92 @@ metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
 
+# --- Global Instances (will be initialized in lifespan events) ---
+# It's better to instantiate these once the app starts, not at module load.
+persistence_provider: Optional[PersistenceProvider] = None
+execution_provider: Optional[ExecutionProvider] = None
+workflow_observer: Optional[WorkflowObserver] = None
+workflow_engine: Optional[WorkflowEngine] = None
+workflow_registry_config: Dict[str, Any] = {}
+
+
 # --- Dependency Injection Setup (Global Instances for Server) ---
-# In a larger application, these would be managed by a proper DI framework.
-# For this example server, we'll instantiate them globally.
+@app.on_event("startup")
+async def startup_event():
+    global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
 
-# Persistence Provider
-persistence_backend = os.getenv('WORKFLOW_STORAGE', 'memory').lower()
-if persistence_backend == 'postgres':
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL must be set for PostgreSQL persistence.")
-    persistence_provider: PersistenceProvider = PostgresProvider(DATABASE_URL)
-else:
-    persistence_provider: PersistenceProvider = InMemoryPersistence()
+    # Load workflow registry
+    RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
+    try:
+        with open(RUFUS_WORKFLOW_REGISTRY_PATH, "r") as f:
+            workflow_registry_config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Warning: Workflow registry not found at {RUFUS_WORKFLOW_REGISTRY_PATH}. No workflows will be registered.")
+        workflow_registry_config = {"workflows": []}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in workflow registry {RUFUS_WORKFLOW_REGISTRY_PATH}: {e}")
 
-# Execution Provider
-execution_backend = os.getenv('WORKFLOW_EXECUTION_BACKEND', 'sync').lower()
-if execution_backend == 'celery':
-    _get_celery_app_instance() # Initialize Celery app
-    execution_provider: ExecutionProvider = CeleryExecutor(
-        broker_url=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-        result_backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
-        persistence_provider=persistence_provider,
-        observer=LoggingObserver() # Temp observer, could be a real one
+    # Persistence Provider
+    persistence_backend = os.getenv('WORKFLOW_STORAGE', 'memory').lower()
+    if persistence_backend == 'postgres':
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL must be set for PostgreSQL persistence.")
+        persistence_provider = PostgresPersistenceProvider(DATABASE_URL)
+    elif persistence_backend == 'redis':
+        REDIS_URL = os.getenv('REDIS_URL', "redis://localhost:6379/0")
+        persistence_provider = RedisPersistenceProvider(REDIS_URL)
+    else: # Default to in-memory
+        persistence_provider = InMemoryPersistence()
+    
+    await persistence_provider.initialize()
+
+
+    # Workflow Observer
+    # Using EventPublisherObserver for richer event handling, which can internally use logging and Prometheus
+    REDIS_URL = os.getenv('REDIS_URL', "redis://localhost:6379/0")
+    workflow_observer = EventPublisherObserver(REDIS_URL)
+    await workflow_observer.initialize()
+
+
+    # Execution Provider
+    execution_backend = os.getenv('WORKFLOW_EXECUTION_BACKEND', 'sync').lower()
+    if execution_backend == 'celery':
+        execution_provider = get_celery_executor(rufus_celery_app, persistence_provider) # Pass celery_app and persistence
+    elif execution_backend == 'threadpool':
+        execution_provider = ThreadPoolExecutorProvider()
+    else: # Default to sync
+        execution_provider = SyncExecutor()
+    
+    # Execution provider's initialize method will be called by WorkflowEngine's __init__
+    # as per the latest WorkflowEngine code
+    
+    # WorkflowEngine (which internally initializes WorkflowBuilder)
+    workflow_engine = WorkflowEngine(
+        persistence=persistence_provider,
+        executor=execution_provider,
+        observer=workflow_observer,
+        # Flatten the registry from {"workflows": [...]} to a dict keyed by workflow_type
+        workflow_registry={wf['type']: wf for wf in workflow_registry_config.get("workflows", [])},
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine
     )
-else:
-    execution_provider: ExecutionProvider = SyncExecutor()
 
-# Workflow Observer
-workflow_observer: WorkflowObserver = LoggingObserver() # Using simple logging for now
+    print("Rufus Server started and WorkflowEngine initialized.")
 
-# Workflow Builder
-# The builder needs to know where the registry file is.
-RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
-workflow_builder_instance = WorkflowBuilder(registry_path=RUFUS_WORKFLOW_REGISTRY_PATH)
 
-# Expression Evaluator and Template Engine classes
-expression_evaluator_cls = SimpleExpressionEvaluator
-template_engine_cls = Jinja2TemplateEngine
+@app.on_event("shutdown")
+async def shutdown_event():
+    global persistence_provider, execution_provider, workflow_observer
+    if persistence_provider:
+        await persistence_provider.close()
+    if workflow_observer:
+        await workflow_observer.close()
+    if execution_provider:
+        await execution_provider.close() # Ensure executor is shut down
+
+    print("Rufus Server shut down and providers closed.")
+
 
 # --- API Endpoints ---
 
@@ -115,19 +164,22 @@ async def internal_retry_step(request_data: RetryWorkflowRequest):
     """
     Internal endpoint called by the Retry Service (BullMQ Worker) to re-trigger a step.
     """
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
     workflow_id = request_data.workflow_id
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
+    workflow_data = await persistence_provider.load_workflow(workflow_id)
         
     if not workflow_data:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    workflow = WorkflowEngine.from_dict(
+    workflow = Workflow.from_dict( # Use Workflow.from_dict
         workflow_data,
         persistence_provider=persistence_provider,
         execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
+        workflow_builder=workflow_engine.workflow_builder, # Use engine's builder
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
         workflow_observer=workflow_observer
     )
 
@@ -147,10 +199,10 @@ async def internal_retry_step(request_data: RetryWorkflowRequest):
     workflow.metadata['last_retry_count'] = request_data.retry_count
     
     try:
-        result_dict, next_step_name = workflow.next_step(user_input={})
+        result_dict, next_step_name = await workflow.next_step(user_input={}) # Await next_step
         
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await persistence_provider.save_workflow(workflow_id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
         
         # If it went ASYNC, that's good.
         if workflow.status == "PENDING_ASYNC":
@@ -165,21 +217,17 @@ async def internal_retry_step(request_data: RetryWorkflowRequest):
         )
         
     except WorkflowJumpDirective as e:
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await persistence_provider.save_workflow(workflow_id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
         return WorkflowStepResponse(
             workflow_id=workflow.id, current_step_name=current_step_obj.name, next_step_name=workflow.current_step_name,
             status=workflow.status, state=workflow.state.model_dump(), result={"message": f"Workflow branched to {e.target_step_name}"}
         )
     except Exception as e:
         workflow.status = "FAILED"
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await persistence_provider.save_workflow(workflow_id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
         
-        # Need to re-trigger the retry mechanism if the retry fails again
-        # This part assumes a separate retry service that pushes to this endpoint
-        # For a full SDK, this re-trigger would be handled by the ExecutionProvider or a dedicated RetryProvider.
-        # For now, it simply fails.
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -188,50 +236,49 @@ async def get_available_workflows():
     """
     Returns a list of available workflows from the registry.
     """
-    registry_path = workflow_builder_instance.registry_path
-    try:
-        with open(registry_path, "r") as f:
-            registry = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=500, detail=f"Workflow registry not found at {registry_path}")
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
-    # Dummy examples for UI (if needed, otherwise remove)
-    workflow_examples = {
-        "LoanApplication": {"application_id": "L12345", "requested_amount": 15000.50},
-    }
+    # Get workflow definitions from the engine's registry
+    available_workflows = []
+    for wf_type, wf_config in workflow_engine.workflow_registry.items():
+        # Get the processed config from builder to ensure parameters and env vars are resolved
+        processed_config = workflow_engine.workflow_builder.get_workflow_config(wf_type)
+        available_workflows.append({
+            "type": wf_type,
+            "description": processed_config.get("description", "No description provided."),
+            # Include processed parameters and example initial data
+            "parameters": processed_config.get("parameters", {}),
+            "initial_data_example": processed_config.get("initial_data_example", {}) # From config or default
+        })
+    return available_workflows
 
-    for wf in registry.get("workflows", []):
-        wf["initial_data_example"] = workflow_examples.get(wf["type"], {})
-
-    return registry.get("workflows", [])
 
 @app.post("/api/v1/workflow/start", response_model=WorkflowStartResponse)
 @limiter.limit("10/minute") # Apply rate limiting
 async def start_workflow(request: Request, request_data: WorkflowStartRequest, user: Optional[UserContext] = Depends(get_current_user)):
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
     try:
-        new_workflow = workflow_builder_instance.create_workflow(
+        new_workflow = await workflow_engine.start_workflow( # Use engine.start_workflow
             workflow_type=request_data.workflow_type,
             initial_data=request_data.initial_data,
-            persistence_provider=persistence_provider,
-            execution_provider=execution_provider,
-            workflow_builder=workflow_builder_instance,
-            expression_evaluator_cls=expression_evaluator_cls,
-            template_engine_cls=template_engine_cls,
-            workflow_observer=workflow_observer
+            # persistence_provider=persistence_provider, # These are handled by engine
+            # execution_provider=execution_provider,
+            # workflow_builder=workflow_engine.workflow_builder,
+            # expression_evaluator_cls=workflow_engine.expression_evaluator_cls,
+            # template_engine_cls=workflow_engine.template_engine_cls,
+            # workflow_observer=workflow_observer,
+            owner_id=user.user_id if user else None,
+            org_id=user.org_id if user else None,
+            data_region=request_data.data_region,
+            idempotency_key=request_data.idempotency_key
         )
         
-        # Apply Data Region
-        if request_data.data_region:
-            new_workflow.data_region = request_data.data_region
+        # Data Region and RBAC are already handled by engine.start_workflow via kwargs
         
-        # Apply RBAC
-        if user:
-            new_workflow.owner_id = user.user_id
-            new_workflow.org_id = user.org_id
-        
-        persistence_provider.save_workflow(new_workflow.id, new_workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_started(new_workflow.id, new_workflow.workflow_type, new_workflow.state)
+        await workflow_observer.on_workflow_started(new_workflow.id, new_workflow.workflow_type, new_workflow.state) # Await observer call
 
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -247,21 +294,11 @@ async def start_workflow(request: Request, request_data: WorkflowStartRequest, u
 
 @app.get("/api/v1/workflow/{workflow_id}/current_step_info")
 async def get_current_step_info(workflow_id: str, user: Optional[UserContext] = Depends(get_current_user)):
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-        
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
+    
     # _check_access(workflow, user) # Implement RBAC check here
 
     if workflow.status == "COMPLETED" or workflow.current_step >= len(workflow.workflow_steps):
@@ -286,19 +323,10 @@ async def get_current_step_info(workflow_id: str, user: Optional[UserContext] = 
 
 @app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse)
 async def next_workflow_step(workflow_id: str, request_data: WorkflowStepRequest, user: Optional[UserContext] = Depends(get_current_user)):
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
         
     # _check_access(workflow, user) # Implement RBAC check here
 
@@ -310,10 +338,9 @@ async def next_workflow_step(workflow_id: str, request_data: WorkflowStepRequest
 
     try:
         old_status = workflow.status
-        result_dict, next_step_name = workflow.next_step(user_input=request_data.input_data)
+        result_dict, next_step_name = await workflow.next_step(user_input=request_data.input_data) # Await next_step
         
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
 
         if workflow.status == "PENDING_ASYNC":
             return JSONResponse(
@@ -332,27 +359,17 @@ async def next_workflow_step(workflow_id: str, request_data: WorkflowStepRequest
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         workflow.status = "FAILED"
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
-        # TODO: Trigger retry if ExecutionProvider supports it
+        await workflow_engine.persistence.save_workflow(workflow_id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
+        
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/workflow/{workflow_id}/status", response_model=WorkflowStatusResponse)
 async def get_workflow_status(workflow_id: str, user: Optional[UserContext] = Depends(get_current_user)):
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-        
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
     # _check_access(workflow, user) # Implement RBAC check here
     
     return WorkflowStatusResponse(
@@ -365,19 +382,10 @@ async def get_workflow_status(workflow_id: str, user: Optional[UserContext] = De
 
 @app.post("/api/v1/workflow/{workflow_id}/resume", response_model=WorkflowStepResponse)
 async def resume_workflow(workflow_id: str, request_data: ResumeWorkflowRequest, user: Optional[UserContext] = Depends(get_current_user)):
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
     # _check_access(workflow, user) # Implement RBAC check here
     
     if workflow.status != "WAITING_HUMAN":
@@ -398,12 +406,12 @@ async def resume_workflow(workflow_id: str, request_data: ResumeWorkflowRequest,
         workflow.status = "ACTIVE"
         
         # Execute the next step using the resume data as input
-        result_dict, next_step_name = workflow.next_step(
+        result_dict, next_step_name = await workflow.next_step( # Await next_step
             user_input=request_data.model_dump()
         )
         
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await workflow_engine.persistence.save_workflow(workflow.id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
 
 
         return WorkflowStepResponse(
@@ -418,25 +426,16 @@ async def resume_workflow(workflow_id: str, request_data: ResumeWorkflowRequest,
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         workflow.status = "FAILED"
-        persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-        workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+        await workflow_engine.persistence.save_workflow(workflow.id, workflow.to_dict()) # Await save
+        await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/workflow/{workflow_id}/retry", response_model=WorkflowStatusResponse)
 async def retry_workflow(workflow_id: str, user: Optional[UserContext] = Depends(get_current_user)):
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
     # _check_access(workflow, user) # Implement RBAC check here
     
     if workflow.status not in ["FAILED", "FAILED_ROLLED_BACK"]:
@@ -445,8 +444,8 @@ async def retry_workflow(workflow_id: str, user: Optional[UserContext] = Depends
 
     old_status = workflow.status
     workflow.status = "ACTIVE"
-    persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-    workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+    await workflow_engine.persistence.save_workflow(workflow.id, workflow.to_dict()) # Await save
+    await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
 
 
     return WorkflowStatusResponse(
@@ -460,19 +459,10 @@ async def rewind_workflow(workflow_id: str, user: Optional[UserContext] = Depend
     Rewind the workflow to the previous step.
     Useful for recovering from logic errors or bad data input.
     """
-    workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-    if not workflow_data:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    workflow = WorkflowEngine.from_dict(
-        workflow_data,
-        persistence_provider=persistence_provider,
-        execution_provider=execution_provider,
-        workflow_builder=workflow_builder_instance,
-        expression_evaluator_cls=expression_evaluator_cls,
-        template_engine_cls=template_engine_cls,
-        workflow_observer=workflow_observer
-    )
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    workflow = await workflow_engine.get_workflow(workflow_id) # Use engine.get_workflow
     # _check_access(workflow, user) # Implement RBAC check here
     
     if workflow.current_step <= 0:
@@ -485,8 +475,8 @@ async def rewind_workflow(workflow_id: str, user: Optional[UserContext] = Depend
     old_status = workflow.status
     workflow.status = "ACTIVE"
     
-    persistence_provider.save_workflow(workflow_id, workflow.to_dict(), sync=True)
-    workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name)
+    await workflow_engine.persistence.save_workflow(workflow.id, workflow.to_dict()) # Await save
+    await workflow_observer.on_workflow_status_changed(workflow.id, old_status, workflow.status, workflow.current_step_name) # Await observer call
 
     current_step_obj = workflow.workflow_steps[workflow.current_step]
     
@@ -503,33 +493,39 @@ async def rewind_workflow(workflow_id: str, user: Optional[UserContext] = Depend
 @app.get("/api/v1/workflow/{workflow_id}/audit")
 async def get_workflow_audit_log(workflow_id: str, limit: int = 100):
     """Get audit trail for workflow (Postgres backend required)"""
-    if not isinstance(persistence_provider, PostgresProvider):
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
         raise HTTPException(status_code=501, detail="Audit logs require PostgreSQL backend")
 
     # Use persistence_provider.list_audit_log once implemented
     # For now, this is a placeholder
-    raise HTTPException(status_code=501, detail="Audit log listing not yet implemented via Provider.")
+    return await workflow_engine.persistence.get_audit_log(workflow_id=workflow_id, limit=limit)
+
 
 @app.get("/api/v1/workflow/{workflow_id}/logs")
 async def get_workflow_logs(workflow_id: str, level: Optional[str] = None, limit: int = 500):
     """Get execution logs for debugging (Postgres backend required)"""
-    if not isinstance(persistence_provider, PostgresProvider):
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
         raise HTTPException(status_code=501, detail="Execution logs require PostgreSQL backend")
 
-    # Use persistence_provider.list_execution_logs once implemented
-    # For now, this is a placeholder
-    raise HTTPException(status_code=501, detail="Execution log listing not yet implemented via Provider.")
+    return await workflow_engine.persistence.get_execution_logs(workflow_id=workflow_id, level=level, limit=limit)
 
 
 @app.get("/api/v1/workflow/{workflow_id}/metrics")
 async def get_workflow_metrics(workflow_id: str, limit: int = 500):
     """Get performance metrics for workflow (Postgres backend required)"""
-    if not isinstance(persistence_provider, PostgresProvider):
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
         raise HTTPException(status_code=501, detail="Metrics require PostgreSQL backend")
 
-    # Use persistence_provider.list_metrics once implemented
-    # For now, this is a placeholder
-    raise HTTPException(status_code=501, detail="Metrics listing not yet implemented via Provider.")
+    return await workflow_engine.persistence.get_workflow_metrics(workflow_id=workflow_id, limit=limit)
 
 
 @app.get("/api/v1/workflows/executions")
@@ -537,39 +533,45 @@ async def get_workflow_executions(status: Optional[str] = None, exclude_status: 
     """
     List active and recent workflow executions.
     """
-    # Use persistence_provider.list_workflows with filters
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
     filters = {}
     if status:
         filters['status'] = status
-    if exclude_status:
-        # This logic needs to be handled by the provider implementation
-        pass # Placeholder for now
-
-    workflow_list = persistence_provider.list_workflows(filters=filters)
+    
+    workflow_list = await workflow_engine.persistence.list_workflows(**filters)
+    
     # Apply exclude_status filter here if not handled by provider
     if exclude_status:
         excluded_statuses = exclude_status.split(',')
         workflow_list = [wf for wf in workflow_list if wf.get('status') not in excluded_statuses]
 
-    # Apply limit and offset for in-memory, or delegate to provider for DB
     return workflow_list[offset:offset+limit]
 
 
 @app.get("/api/v1/metrics/summary")
 async def get_metrics_summary(hours: int = 24):
     """Get aggregated metrics across workflows (Postgres backend required)"""
-    if not isinstance(persistence_provider, PostgresProvider):
-        raise HTTPException(status_code=501, detail="Metrics require PostgreSQL backend")
-    # Placeholder for summary metrics
-    raise HTTPException(status_code=501, detail="Summary metrics not yet implemented via Provider.")
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(status_code=501, detail="Summary metrics require PostgreSQL backend")
+    
+    return await workflow_engine.persistence.get_workflow_summary(hours=hours)
 
 @app.get("/api/v1/admin/workers")
 async def get_registered_workers(limit: int = 100):
     """List registered worker nodes (Postgres backend required)"""
-    if not isinstance(persistence_provider, PostgresProvider):
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
         raise HTTPException(status_code=501, detail="Worker registry requires PostgreSQL backend")
-    # Placeholder for worker listing
-    raise HTTPException(status_code=501, detail="Worker listing not yet implemented via Provider.")
+    
+    # Placeholder, assuming the persistence provider can list workers
+    raise HTTPException(status_code=501, detail="Worker listing not yet implemented via PersistenceProvider.")
 
 @app.websocket("/api/v1/workflow/{workflow_id}/subscribe")
 async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
@@ -582,16 +584,17 @@ async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
     redis_client = aredis.Redis(
         host=redis_host, port=6379, db=0, decode_responses=True)
     pubsub = redis_client.pubsub()
-    channel = f"workflow:events:{workflow_id}" # Assuming events are published to this channel
+    channel = f"rufus:events:{workflow_id}" # Using rufus specific channel defined in EventPublisherObserver
 
     try:
         # Send initial state first
-        initial_workflow_data = persistence_provider.load_workflow(workflow_id, sync=True)
-        if initial_workflow_data:
-            initial_workflow_data['status'] = initial_workflow_data['status'] # ensure status is not None
-            # Need steps_config to re-construct current_step_name properly
-            # For now, sending raw data
-            await websocket.send_text(json.dumps(initial_workflow_data))
+        if workflow_engine is None:
+            await websocket.send_text(json.dumps({"error": "Workflow Engine not initialized."}))
+            return
+
+        initial_workflow = await workflow_engine.get_workflow(workflow_id)
+        if initial_workflow:
+            await websocket.send_text(json.dumps(initial_workflow.to_dict()))
 
 
         await pubsub.subscribe(channel)

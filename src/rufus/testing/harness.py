@@ -8,6 +8,9 @@ from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 import copy
+import yaml
+from pathlib import Path
+import asyncio
 
 class WorkflowTestHarness:
     """
@@ -16,36 +19,68 @@ class WorkflowTestHarness:
     mocking of step functions and inspection of workflow state.
     """
 
-    def __init__(self, workflow_type: str, initial_data: Optional[Dict[str, Any]] = None,
-                 registry_path: str = "config/workflow_registry.yaml"):
+    def __init__(self, workflow_type: str, workflow_config: Dict[str, Any], initial_data: Optional[Dict[str, Any]] = None):
         self.workflow_type = workflow_type
+        self.workflow_config = workflow_config
         self.initial_data = initial_data or {}
-        self.registry_path = registry_path
 
+        # Providers for the test harness
         self.persistence = InMemoryPersistence()
         self.executor = SyncExecutor()
         self.observer = LoggingObserver() # Use a logging observer for test output
-        self.builder = WorkflowBuilder(registry_path=self.registry_path)
         self.expression_evaluator_cls = SimpleExpressionEvaluator
         self.template_engine_cls = Jinja2TemplateEngine
 
-        self._reset_workflow()
+        self.workflow: Optional[WorkflowEngine] = None
         self._mocked_steps: Dict[str, Callable] = {}
         self._mocked_step_results: Dict[str, Any] = {}
         self._mocked_step_exceptions: Dict[str, Exception] = {}
         self._compensation_log: List[Dict[str, Any]] = []
+        
+        # Initialize the workflow engine and reset the workflow instance
+        asyncio.run(self._ainit())
 
-    def _reset_workflow(self):
-        """Creates a fresh workflow instance for testing."""
-        self.workflow = self.builder.create_workflow(
-            workflow_type=self.workflow_type,
-            initial_data=self.initial_data,
-            persistence_provider=self.persistence,
-            execution_provider=self.executor,
-            workflow_builder=self.builder,
+    async def _ainit(self):
+        # Create a minimal registry for the WorkflowEngine
+        workflow_registry_for_harness = {self.workflow_type: self.workflow_config}
+        
+        self.engine = await self._get_configured_engine(
+            workflow_registry_for_harness,
+            self.persistence,
+            self.executor,
+            self.observer
+        )
+        await self._reset_workflow()
+
+    async def _get_configured_engine(
+        self,
+        workflow_registry_config: Dict[str, Any],
+        persistence_provider: PersistenceProvider,
+        execution_provider: ExecutionProvider,
+        observer: WorkflowObserver
+    ) -> WorkflowEngine:
+        """Helper to configure and return a WorkflowEngine instance."""
+        await persistence_provider.initialize()
+        await observer.initialize()
+        # SyncExecutor does not have an async initialize, but it can take a WorkflowEngine instance
+        # It's initialized by WorkflowEngine's __init__ if it has an initialize method
+        
+        engine = WorkflowEngine(
+            persistence=persistence_provider,
+            executor=execution_provider,
+            observer=observer,
+            workflow_registry=workflow_registry_config,
             expression_evaluator_cls=self.expression_evaluator_cls,
-            template_engine_cls=self.template_engine_cls,
-            workflow_observer=self.observer
+            template_engine_cls=self.template_engine_cls
+        )
+        return engine
+
+
+    async def _reset_workflow(self):
+        """Creates a fresh workflow instance for testing."""
+        self.workflow = await self.engine.start_workflow(
+            workflow_type=self.workflow_type,
+            initial_data=self.initial_data
         )
         self._original_step_funcs = {step.name: step.func for step in self.workflow.workflow_steps}
         self._original_compensate_funcs = {}
@@ -56,58 +91,32 @@ class WorkflowTestHarness:
     @classmethod
     def from_yaml(cls, workflow_file_path: str, initial_data: Optional[Dict[str, Any]] = None):
         """
-        Creates a TestHarness for a single workflow defined in a YAML file,
-        bypassing the need for a full registry.
+        Creates a TestHarness for a single workflow defined in a YAML file.
         """
-        # Create a temporary registry for this single file
-        import tempfile
-        import shutil
-        temp_dir = Path(tempfile.mkdtemp())
-        temp_config_dir = temp_dir / "config"
-        temp_config_dir.mkdir()
-
         workflow_file = Path(workflow_file_path)
-        shutil.copy(workflow_file, temp_config_dir / workflow_file.name)
+        if not workflow_file.is_file():
+            raise FileNotFoundError(f"Workflow file not found at {workflow_file_path}")
 
-        workflow_name = workflow_file.stem.replace('-', '_').title().replace('_', '') + "Workflow"
+        with open(workflow_file, "r") as f:
+            workflow_config = yaml.safe_load(f)
         
-        # We need to infer the state model path or use a dummy. For testing, a dummy is fine.
-        # In a real scenario, the test writer would provide the actual state model.
-        dummy_state_model_path = "pydantic.BaseModel" # Fallback if not specified
-        try:
-            with open(workflow_file, "r") as f:
-                workflow_config = yaml.safe_load(f)
-                if workflow_config and "initial_state_model" in workflow_config:
-                    dummy_state_model_path = workflow_config["initial_state_model"]
-        except Exception:
-            pass # Use default
+        if not isinstance(workflow_config, dict) or "workflow_type" not in workflow_config:
+            raise ValueError(f"Invalid workflow YAML in {workflow_file_path}. Missing 'workflow_type'.")
 
-        temp_registry_content = {
-            "workflows": [
-                {
-                    "type": workflow_name,
-                    "description": f"Temporary workflow for {workflow_file.name}",
-                    "config_file": workflow_file.name,
-                    "initial_state_model": dummy_state_model_path
-                }
-            ]
-        }
-        temp_registry_path = temp_config_dir / "temp_cli_registry.yaml"
-        with open(temp_registry_path, "w") as f:
-            yaml.dump(temp_registry_content, f)
-
-        harness = cls(workflow_name, initial_data, registry_path=str(temp_registry_path))
-        harness._temp_dir = temp_dir # Store for cleanup
-        return harness
+        workflow_type = workflow_config["workflow_type"]
+        
+        # The Harness will directly use this workflow_config for its internal registry
+        return cls(workflow_type, workflow_config, initial_data)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Clean up temporary directory if created by from_yaml
-        if hasattr(self, '_temp_dir') and self._temp_dir.exists():
-            import shutil
-            shutil.rmtree(self._temp_dir)
+        # Cleanup any temporary resources, though for InMemoryPersistence/SyncExecutor
+        # there's usually nothing to do here besides clearing state if needed.
+        asyncio.run(self.persistence.close())
+        asyncio.run(self.observer.close())
+        asyncio.run(self.executor.close()) # SyncExecutor's close is currently a no-op
 
     def mock_step(self, step_name: str, returns: Any = None, raises: Optional[Exception] = None):
         """
@@ -125,6 +134,8 @@ class WorkflowTestHarness:
                         raise raises
                     if returns is not None:
                         # Merge mock return into state if it's a dict
+                        # This should eventually use the merge strategies, but for mocking,
+                        # a simple update is often sufficient.
                         if isinstance(returns, dict):
                             for key, value in returns.items():
                                 if hasattr(state, key):
@@ -152,7 +163,7 @@ class WorkflowTestHarness:
                 return
         raise ValueError(f"Compensatable step '{step_name}' not found.")
 
-    def run_all_steps(self, input_data_per_step: Optional[Dict[str, Any]] = None) -> WorkflowEngine:
+    async def run_all_steps(self, input_data_per_step: Optional[Dict[str, Any]] = None) -> WorkflowEngine:
         """
         Runs all remaining steps in the workflow until completion or failure.
         Provides input data for steps if specified.
@@ -164,7 +175,7 @@ class WorkflowTestHarness:
             input_for_step = input_data_per_step.get(current_step_name, {})
 
             try:
-                result, next_step_name = self.workflow.next_step(user_input=input_for_step)
+                result, next_step_name = await self.workflow.next_step(user_input=input_for_step)
                 if self.workflow.status == "PENDING_ASYNC":
                     # In sync executor, next_step processes the task directly
                     # The internal logic handles resumption.

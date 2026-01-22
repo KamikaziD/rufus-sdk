@@ -10,7 +10,8 @@ from rufus.models import (
     WorkflowStep, CompensatableStep, AsyncWorkflowStep, HttpWorkflowStep,
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
-    WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException
+    WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
+    MergeStrategy, MergeConflictBehavior # Import new Enums
 )
 
 from rufus.providers.persistence import PersistenceProvider
@@ -430,11 +431,56 @@ class Workflow:
 
         return None
 
-    def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
+    def _apply_merge_strategy(self, current_state: BaseModel, result: Dict[str, Any], strategy: MergeStrategy, conflict_behavior: MergeConflictBehavior):
+        """Applies the specified merge strategy to incorporate step results into the workflow state."""
+        if strategy == MergeStrategy.REPLACE:
+            # Reconstruct the entire state with the result
+            self.state = current_state.__class__(**result)
+            return
+
+        state_dict = current_state.model_dump()
+
+        if strategy == MergeStrategy.DEEP:
+            def deep_merge(target, source):
+                for k, v in source.items():
+                    if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+                        deep_merge(target[k], v)
+                    elif k in target and isinstance(target[k], list) and isinstance(v, list) and strategy == MergeStrategy.APPEND:
+                        target[k].extend(v)
+                    elif k in target and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                        pass # Preserve existing value
+                    else:
+                        target[k] = v
+            deep_merge(state_dict, result)
+        elif strategy == MergeStrategy.SHALLOW:
+            for k, v in result.items():
+                if k in state_dict and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                    pass # Preserve existing value
+                else:
+                    state_dict[k] = v
+        elif strategy == MergeStrategy.APPEND:
+            for k, v in result.items():
+                if k in state_dict and isinstance(state_dict[k], list) and isinstance(v, list):
+                    state_dict[k].extend(v)
+                elif k in state_dict and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                    pass
+                else:
+                    state_dict[k] = v
+        elif strategy == MergeStrategy.OVERWRITE_EXISTING:
+            state_dict.update(result)
+        elif strategy == MergeStrategy.PRESERVE_EXISTING:
+            for k, v in result.items():
+                if k not in state_dict:
+                    state_dict[k] = v
+        
+        # Reconstruct the Pydantic model from the merged dictionary
+        self.state = current_state.__class__(**state_dict)
+
+    async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
         if self.current_step >= len(self.workflow_steps):
             old_status = self.status
             self.status = "COMPLETED"
-            self.observer.on_workflow_completed(
+            await self.observer.on_workflow_completed(
                 self.id, self.workflow_type, self.state)
             final_completion_result = {"status": "Workflow completed"}
             self._notify_status_change(
@@ -475,10 +521,9 @@ class Workflow:
                 if step.func:
                     result = self.execution.execute_sync_step_function(
                         step.func, self.state, context)
+                    # Apply merge strategy for sync step results
                     if isinstance(result, dict):
-                        for key, value in result.items():
-                            if hasattr(self.state, key) and not key.startswith('_'):
-                                setattr(self.state, key, value)
+                        self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW) # Default merge for sync steps
 
                 if step.routes:
                     target_step = self.evaluate_routes(step.routes)
@@ -494,6 +539,9 @@ class Workflow:
                     workflow_id=self.id,
                     current_step_index=self.current_step,
                     data_region=self.data_region,
+                    # Pass merge strategy and conflict behavior to the async task handler
+                    merge_strategy=step.merge_strategy.value,
+                    merge_conflict_behavior=step.merge_conflict_behavior.value,
                     **user_input,  # Pass user_input as additional kwargs to the task
                     _previous_step_result=_previous_step_result  # Pass previous result
                 )
@@ -506,6 +554,9 @@ class Workflow:
                     current_step_index=self.current_step,
                     data_region=self.data_region,
                     http_config=step.http_config,  # Pass http_config for the task
+                    # Pass merge strategy and conflict behavior to the async task handler
+                    merge_strategy=step.merge_strategy.value,
+                    merge_conflict_behavior=step.merge_conflict_behavior.value,
                     **user_input,
                     _previous_step_result=_previous_step_result
                 )
@@ -517,12 +568,16 @@ class Workflow:
                     workflow_id=self.id,
                     current_step_index=self.current_step,
                     merge_function_path=step.merge_function_path,
-                    data_region=self.data_region
+                    data_region=self.data_region,
+                    # Pass merge strategy and conflict behavior to the async task handler
+                    merge_strategy=step.merge_strategy.value,
+                    merge_conflict_behavior=step.merge_conflict_behavior.value
                 )
-                if isinstance(result, dict):
-                    for key, value in result.items():
-                        if hasattr(self.state, key) and not key.startswith('_'):
-                            setattr(self.state, key, value)
+                # Apply merge strategy if parallel tasks return results synchronously (e.g., in SyncExecutor)
+                if isinstance(result, dict) and "_sync_parallel_result" in result:
+                    merged_result = result["_sync_parallel_result"]
+                    self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
+
 
             elif isinstance(step, FireAndForgetWorkflowStep):
                 # FireAndForget uses the WorkflowEngine's builder and ExecutionProvider
@@ -531,7 +586,7 @@ class Workflow:
                 initial_data = template_engine.render(
                     step.initial_data_template)
 
-                spawned_workflow = self.builder.create_workflow(
+                spawned_workflow = await self.builder.create_workflow( # Changed to await
                     workflow_type=step.target_workflow_type,
                     initial_data=initial_data,
                     persistence_provider=self.persistence,
@@ -545,9 +600,9 @@ class Workflow:
                 spawned_workflow.data_region = self.data_region  # Inherit region
                 spawned_workflow.metadata["spawned_by"] = self.id
                 spawned_workflow.metadata["spawn_reason"] = step.name
-                self.persistence.save_workflow(
+                await self.persistence.save_workflow( # Changed to await
                     spawned_workflow.id, spawned_workflow.to_dict())
-                self.execution.dispatch_independent_workflow(
+                await self.execution.dispatch_independent_workflow( # Changed to await
                     spawned_workflow.id)
 
                 spawn_record = {
@@ -578,7 +633,7 @@ class Workflow:
                 schedule_name = template_engine.render(
                     step.schedule_name or f"sched_{step.target_workflow_type}_{self.id}")
 
-                self.execution.register_scheduled_workflow(
+                await self.execution.register_scheduled_workflow( # Changed to await
                     schedule_name=schedule_name,
                     workflow_type=step.target_workflow_type,
                     cron_expression=step.cron_expression,
@@ -593,9 +648,9 @@ class Workflow:
 
             if is_async_dispatch:
                 self.status = "PENDING_ASYNC"
-                self.persistence.save_workflow(
+                await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())  # Save status change
-                self._notify_status_change(
+                await self._notify_status_change( # Changed to await
                     old_status, self.status, self.current_step_name)
 
                 # In testing mode, force synchronous execution path for easy testing
@@ -613,7 +668,7 @@ class Workflow:
                     'state_snapshot': state_snapshot_before
                 })
 
-            self.observer.on_step_executed(
+            await self.observer.on_step_executed( # Changed to await
                 self.id, step.name, self.current_step, "COMPLETED", result, self.state)
 
             injection_occurred = self._process_dynamic_injection()
@@ -625,8 +680,9 @@ class Workflow:
             self.current_step += 1
 
             if self.current_step >= len(self.workflow_steps):
+                old_status = self.status
                 self.status = "COMPLETED"
-                self.observer.on_workflow_completed(
+                await self.observer.on_workflow_completed( # Changed to await
                     self.id, self.workflow_type, self.state)
                 final_completion_result = {"status": "Workflow completed"}
                 self._notify_status_change(
@@ -641,13 +697,13 @@ class Workflow:
                 should_automate = True
 
             # Save state after current step is done and before auto-advancing
-            self.persistence.save_workflow(self.id, self.to_dict())
-            self._notify_status_change(
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
+            await self._notify_status_change( # Changed to await
                 old_status, self.status, self.current_step_name)
 
             if should_automate and self.status == "ACTIVE":
                 next_input = result if isinstance(result, dict) else {}
-                return self.next_step(user_input={}, _previous_step_result=next_input)
+                return await self.next_step(user_input={}, _previous_step_result=next_input) # Changed to await
 
             return result, next_step_name
 
@@ -656,9 +712,9 @@ class Workflow:
                 target_index = next(i for i, s in enumerate(
                     self.workflow_steps) if s.name == e.target_step_name)
                 self.current_step = target_index
-                self.persistence.save_workflow(
+                await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
-                self.observer.on_step_executed(self.id, step.name, self.current_step, "JUMPED", {
+                await self.observer.on_step_executed(self.id, step.name, self.current_step, "JUMPED", { # Changed to await
                                                "target": e.target_step_name}, self.state)
                 self._notify_status_change(
                     old_status, self.status, self.current_step_name)
@@ -670,10 +726,10 @@ class Workflow:
         except WorkflowPauseDirective as e:
             old_status = self.status
             self.status = "WAITING_HUMAN"
-            self.persistence.save_workflow(self.id, self.to_dict())
-            self._notify_status_change(
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
+            await self._notify_status_change( # Changed to await
                 old_status, self.status, self.current_step_name)
-            self.observer.on_step_executed(
+            await self.observer.on_step_executed( # Changed to await
                 self.id, step.name, self.current_step, "PAUSED_HUMAN", e.result, self.state)
             raise e
 
@@ -681,12 +737,12 @@ class Workflow:
         except StartSubWorkflowDirective as sub_directive:
 
             # Save state before pausing for sub-workflow
-            self.persistence.save_workflow(self.id, self.to_dict())
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
 
-            self.observer.on_step_executed(self.id, step.name, self.current_step, "DISPATCHED_SUB_WORKFLOW", {
+            await self.observer.on_step_executed(self.id, step.name, self.current_step, "DISPATCHED_SUB_WORKFLOW", { # Changed to await
                                            "child_type": sub_directive.workflow_type}, self.state)
 
-            return self._handle_sub_workflow(sub_directive)
+            return await self._handle_sub_workflow(sub_directive) # Changed to await
         except SagaWorkflowException as e:  # This is raised by _execute_saga_rollback
             raise e  # Re-raise after status is set
 
@@ -694,25 +750,25 @@ class Workflow:
             log_message = f"Step failed: {e}"
             self._log_execution("ERROR", log_message,
                                 step_name=step.name, metadata={"error": str(e)})
-            self.observer.on_step_failed(
+            await self.observer.on_step_failed( # Changed to await
                 self.id, step.name, self.current_step, str(e), self.state)
             old_status = self.status
             if self.saga_mode:
                 if self.completed_steps_stack:
-                    self._execute_saga_rollback()
+                    await self._execute_saga_rollback() # Changed to await
                     self.status = "FAILED_ROLLED_BACK"
                 else:
                     self.status = "FAILED"
-                self.persistence.save_workflow(
+                await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
                 self._notify_status_change(
                     old_status, self.status, self.current_step_name)
                 raise SagaWorkflowException(step.name, e)
             else:
                 self.status = "FAILED"
-                self.persistence.save_workflow(
+                await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
-                self.observer.on_workflow_failed(
+                await self.observer.on_workflow_failed( # Changed to await
                     self.id, self.workflow_type, str(e), self.state)
                 self._notify_status_change(
                     old_status, self.status, self.current_step_name)

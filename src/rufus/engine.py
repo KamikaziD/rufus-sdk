@@ -21,7 +21,6 @@ class WorkflowEngine:
                  executor: ExecutionProvider,
                  observer: Optional[WorkflowObserver] = None,
                  workflow_registry: Optional[Dict[str, Any]] = None,
-                 # Will be WorkflowBuilder
                  workflow_builder: Optional[Any] = None,
                  expression_evaluator_cls: Type[ExpressionEvaluator] = None,
                  template_engine_cls: Type[TemplateEngine] = None
@@ -29,7 +28,6 @@ class WorkflowEngine:
         self.persistence = persistence
         self.executor = executor
         self.observer = observer
-        # type: Dict[str, Dict[str, Any]] # Stores raw YAML/dict definitions
         self.workflow_registry = workflow_registry or {}
         self.expression_evaluator_cls = expression_evaluator_cls
         self.template_engine_cls = template_engine_cls
@@ -47,13 +45,28 @@ class WorkflowEngine:
             self.template_engine_cls = Jinja2TemplateEngine
 
         if self.workflow_builder is None:
-            # Lazy import to avoid circular dependency, now that Workflow is in its own file
             from rufus.builder import WorkflowBuilder
             self.workflow_builder = WorkflowBuilder(
                 expression_evaluator_cls=self.expression_evaluator_cls,
                 template_engine_cls=self.template_engine_cls,
-                workflow_registry=self.workflow_registry  # Pass registry for definition lookup
+                workflow_registry=self.workflow_registry
             )
+        
+        # Initialize the executor if it has an initialize method
+        # This allows the executor to receive a reference to the persistence provider and the engine itself.
+        if hasattr(self.executor, 'initialize'):
+            # This needs to be an awaitable call, so we'll need an async init for WorkflowEngine
+            # For now, we'll assume the user will call an async init method, or handle it
+            # appropriately in their application startup.
+            # If the executor itself handles running async code in a thread (like ThreadPoolExecutorProvider)
+            # then it can run its own initialize asynchronously from a synchronous context.
+            if asyncio.iscoroutinefunction(self.executor.initialize):
+                # If WorkflowEngine becomes async init, this can be awaited.
+                # For now, we'll run it in a new loop to avoid blocking sync init.
+                # This is a temporary workaround for the sync __init__ limitation.
+                asyncio.run(self.executor.initialize(self.persistence, self))
+            else:
+                self.executor.initialize(self.persistence, self)
 
 
     def register_workflow(self, workflow_definition: Dict[str, Any]):
@@ -63,7 +76,7 @@ class WorkflowEngine:
                 "Workflow definition must have a 'workflow_type'.")
         self.workflow_registry[workflow_type] = workflow_definition
 
-    def start_workflow(self, workflow_type: str, initial_data: Dict[str, Any], **kwargs) -> Workflow:
+    async def start_workflow(self, workflow_type: str, initial_data: Dict[str, Any], **kwargs) -> Workflow:
         workflow_definition = self.workflow_registry.get(workflow_type)
         if not workflow_definition:
             raise ValueError(
@@ -81,11 +94,11 @@ class WorkflowEngine:
             workflow_observer=self.observer,
             **kwargs
         )
-        self.persistence.save_workflow(workflow.id, workflow.to_dict())
+        await self.persistence.save_workflow(workflow.id, workflow.to_dict())
         return workflow
 
-    def get_workflow(self, workflow_id: str) -> Workflow:
-        workflow_data = self.persistence.load_workflow(workflow_id)
+    async def get_workflow(self, workflow_id: str) -> Workflow:
+        workflow_data = await self.persistence.load_workflow(workflow_id)
         if not workflow_data:
             raise ValueError(f"Workflow with ID '{workflow_id}' not found.")
 
@@ -100,8 +113,8 @@ class WorkflowEngine:
             workflow_observer=self.observer
         )
 
-    def list_workflows(self, **filters) -> List[Workflow]:
-        workflow_data_list = self.persistence.list_workflows(**filters)
+    async def list_workflows(self, **filters) -> List[Workflow]:
+        workflow_data_list = await self.persistence.list_workflows(**filters)
         return [
             Workflow.from_dict(
                 data,

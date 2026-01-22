@@ -1,0 +1,37 @@
+[project]
+name = "rufus-slack"
+version = "0.1.0"
+description = "Rufus marketplace package for Slack notifications"
+authors = [
+    { name = "Rufus AI", email = "info@rufus.ai" }
+]
+license = "MIT"
+dependencies = [
+    "rufus",
+    "slack_sdk" # Required for Slack API interaction
+]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.entry-points."rufus.steps"]
+slack.send_message = "rufus_slack.steps:SlackNotificationStep"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"] # Line too long, handled by line-length
