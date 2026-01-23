@@ -334,12 +334,16 @@ steps:
 ### 4. Execute with SDK
 ```python
 from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistence
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 from rufus.implementations.execution.sync import SyncExecutor
+
+# Initialize SQLite persistence (in-memory for testing)
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()
 
 builder = WorkflowBuilder(
     registry_path="workflow_registry.yaml",
-    persistence_provider=InMemoryPersistence(),
+    persistence_provider=persistence,
     execution_provider=SyncExecutor()
 )
 
@@ -351,6 +355,20 @@ workflow = builder.create_workflow(
 # Execute steps
 while workflow.status == "ACTIVE":
     result = workflow.next_step(user_input={})
+```
+
+**Alternative persistence options:**
+```python
+# PostgreSQL (production)
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+persistence = PostgresPersistenceProvider(db_url="postgresql://...")
+
+# SQLite file-based (development)
+persistence = SQLitePersistenceProvider(db_path="workflows.db")
+
+# In-memory (testing)
+from rufus.implementations.persistence.memory import InMemoryPersistence
+persistence = InMemoryPersistence()
 ```
 
 ---
@@ -441,6 +459,13 @@ Tests automatically exclude legacy `confucius/` and `original_implementation_fil
 - Migration management tooling
 - 20 unit tests for schema compiler
 
+**✅ Phase 2 SQLitePersistenceProvider (Completed)**
+- Full SQLite persistence implementation (800+ lines)
+- All 20 PersistenceProvider methods
+- In-memory and file-based modes
+- 14 unit tests + 6 integration tests (all passing)
+- WAL mode, foreign keys, idempotency support
+
 **Recent Migration**: The project was recently refactored from "Confucius" to "Rufus" with focus on:
 - Extracting core SDK from monolithic application
 - Unified `Workflow` class architecture
@@ -448,7 +473,7 @@ Tests automatically exclude legacy `confucius/` and `original_implementation_fil
 - Better separation: Core SDK vs Server vs CLI
 - Enhanced sub-workflow status propagation
 
-**Next**: SQLitePersistenceProvider implementation (Phase 2)
+**Next**: Phase 3 production testing and documentation
 
 **Note**: Some legacy `confucius/` code still exists in the repo for reference.
 
