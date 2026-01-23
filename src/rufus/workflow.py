@@ -358,7 +358,7 @@ class Workflow:
                 f"[SUB-WORKFLOW] Created child workflow {child_workflow.id}, parent {self.id} is now paused")
 
             # Dispatch child execution using injected execution provider
-            await self.execution.dispatch_sub_workflow(child_workflow.id, self.id, child_workflow.workflow_type, child_workflow.initial_state_model.model_dump())
+            await self.execution.dispatch_sub_workflow(child_workflow.id, self.id, child_workflow.workflow_type, child_workflow.state.model_dump())
 
             return {
                 "message": f"Sub-workflow {directive.workflow_type} started",

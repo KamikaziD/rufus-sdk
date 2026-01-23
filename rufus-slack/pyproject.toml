@@ -15,8 +15,8 @@ dependencies = [
 file = "README.md"
 content-type = "text/markdown"
 
-[project.entry-points."rufus.steps"]
-slack.send_message = "rufus_slack.steps:SlackNotificationStep"
+[project.entry-points."rufus.rufus_slack.steps.send_message"]
+
 
 [build-system]
 requires = ["setuptools>=61.0"]

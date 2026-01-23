@@ -9,6 +9,14 @@ Demonstrates complex workflow features:
 - Human-in-the-loop review
 - Saga compensation patterns
 """
+from state_models import LoanApplicationState, UserProfileState
+import yaml
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.persistence.memory import InMemoryPersistence
+from rufus.engine import WorkflowEngine
 import asyncio
 import os
 import sys
@@ -17,16 +25,6 @@ from pathlib import Path
 # Add the example directory to Python path
 example_dir = Path(__file__).parent
 sys.path.insert(0, str(example_dir))
-
-from rufus.engine import WorkflowEngine
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-import yaml
-
-from state_models import LoanApplicationState, UserProfileState
 
 
 async def run_loan_workflow():
@@ -119,15 +117,53 @@ async def run_loan_workflow():
     print(f"  Total steps executed: {step_count}")
     print()
 
-    # Step 4: Test Scenario 2 - SKIPPED (requires sub-workflow feature with SDK fixes)
-    # Note: Scenario 2 demonstrates KYC sub-workflow which hits an SDK limitation
-    # where 'initial_state_model' attribute is not implemented on Workflow object.
+    # Step 4: Test Scenario 2 - Detailed Review Path (triggers KYC sub-workflow)
     print("=" * 80)
-    print("SCENARIO 2: Detailed Review Path - SKIPPED")
-    print("Note: Sub-workflow feature requires SDK fixes")
+    print("SCENARIO 2: Detailed Review Path")
+    print("Profile: Age 24, Clean Country, Moderate Risk")
     print("=" * 80)
     print()
-    workflow2 = None  # Placeholder for summary
+
+    applicant2 = UserProfileState(
+        user_id="user_002",
+        name="Bob Smith",
+        email="bob@example.com",
+        country="US",  # Will result in CLEAN fraud status
+        age=24,  # Will result in credit score 620 (moderate risk)
+        id_document_url="https://docs.example.com/valid_id_bob.pdf"
+    )
+
+    initial_data2 = LoanApplicationState(
+        requested_amount=22000.0,  # > 20000 = full underwriting
+        applicant_profile=applicant2
+    )
+
+    # Start the workflow
+    workflow2 = await engine.start_workflow(
+        workflow_type="LoanApplication",
+        initial_data=initial_data2.model_dump()
+    )
+    print(f"✓ Started workflow: {workflow2.id}")
+    print(f"  Status: {workflow2.status}")
+    print()
+
+    # Execute workflow steps
+    step_count = 0
+    while workflow2.status == "ACTIVE":
+        step_count += 1
+        current_step = workflow2.workflow_steps[workflow2.current_step]
+        print(f"\n--- Step {step_count}: {current_step.name} ---")
+        result = await workflow2.next_step(user_input={})
+        print(f"Status: {workflow2.status}")
+        if result:
+            print(f"Result: {result}")
+
+    print()
+    print(f"✓ Workflow completed with status: {workflow2.status}")
+    print(f"  Final state: {workflow2.state.final_loan_status}")
+    print(f"  Pre-approval status: {workflow2.state.pre_approval_status}")
+    print(f"  Total steps executed: {step_count}")
+    print()
 
     # Step 5: Test Scenario 3 - Automatic Rejection (high risk)
     print("=" * 80)
@@ -179,9 +215,12 @@ async def run_loan_workflow():
     print("=" * 80)
     print("EXECUTION SUMMARY")
     print("=" * 80)
-    print(f"Scenario 1 (Fast-Track):       {workflow1.state.final_loan_status}")
-    print(f"Scenario 2 (Human Review):     SKIPPED (requires SDK fixes)")
-    print(f"Scenario 3 (Auto-Reject):      {workflow3.state.final_loan_status}")
+    print(
+        f"Scenario 1 (Fast-Track):       {workflow1.state.final_loan_status}")
+    print(
+        f"Scenario 2 (Human Review):     {workflow2.state.final_loan_status}")
+    print(
+        f"Scenario 3 (Auto-Reject):      {workflow3.state.final_loan_status}")
     print()
     print("✓ Executed scenarios completed successfully!")
     print()
@@ -189,3 +228,11 @@ async def run_loan_workflow():
 
 if __name__ == "__main__":
     asyncio.run(run_loan_workflow())
+{
+    "user_id": "user_001",
+    "name": "Alice Johnson",
+    "email": "alice@example.com",
+    "country": "US",
+    "age": 30,
+    "id_document_url": "https://docs.example.com/valid_id_alice.pdf"
+}
