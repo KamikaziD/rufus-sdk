@@ -1,0 +1,55 @@
+# Order Processing Workflow
+# Demonstrates a production-ready e-commerce order flow with:
+# - Sequential processing steps
+# - Human-in-the-loop approval for high-value orders
+# - Saga compensation for rollbacks
+
+workflow_type: "OrderProcessing"
+workflow_version: "1.0"
+initial_state_model: "state_models.OrderState"
+
+steps:
+  - name: "Initialize_Order"
+    type: "STANDARD"
+    function: "steps.initialize_order"
+    dependencies: []
+    automate_next: true
+
+  - name: "Reserve_Inventory"
+    type: "STANDARD"
+    function: "steps.reserve_inventory"
+    compensate_function: "steps.compensate_reserve_inventory"
+    dependencies: ["Initialize_Order"]
+    automate_next: true
+
+  - name: "Process_Payment"
+    type: "STANDARD"
+    function: "steps.process_payment"
+    compensate_function: "steps.compensate_process_payment"
+    dependencies: ["Reserve_Inventory"]
+    automate_next: true
+
+  # Conditional approval for high-value orders
+  - name: "Request_Approval"
+    type: "STANDARD"
+    function: "steps.request_approval"
+    dependencies: ["Process_Payment"]
+    # No automate_next - workflow pauses here
+
+  - name: "Process_Approval_Decision"
+    type: "STANDARD"
+    function: "steps.process_approval_decision"
+    input_model: "state_models.ApprovalInput"
+    dependencies: ["Request_Approval"]
+    automate_next: true
+
+  - name: "Create_Shipment"
+    type: "STANDARD"
+    function: "steps.create_shipment"
+    dependencies: ["Process_Approval_Decision"]
+    automate_next: true
+
+  - name: "Send_Confirmation_Email"
+    type: "STANDARD"
+    function: "steps.send_confirmation_email"
+    dependencies: ["Create_Shipment"]

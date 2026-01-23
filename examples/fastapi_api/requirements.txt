@@ -1,0 +1,17 @@
+# FastAPI API Example - Requirements
+
+# Web framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Rufus SDK (install from parent directory)
+# pip install -e ../..
+
+# Database
+psycopg2-binary==2.9.9
+
+# YAML parsing (included in Rufus, but explicit here)
+PyYAML==6.0.1
+
+# Validation (included with FastAPI)
+pydantic==2.5.3
