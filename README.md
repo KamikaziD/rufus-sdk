@@ -26,7 +26,7 @@ The heart of the workflow engine consists of:
 
 All external integrations abstracted via Python Protocol interfaces:
 
-- **`PersistenceProvider`** - How workflow state/logs are stored (Postgres, Redis, In-Memory)
+- **`PersistenceProvider`** - How workflow state/logs are stored (PostgreSQL, SQLite, Redis, In-Memory)
 - **`ExecutionProvider`** - Task execution environment (Sync, Celery, Thread Pool, Postgres-backed)
 - **`WorkflowObserver`** - Event hooks for monitoring (Logging, NoOp)
 - **`ExpressionEvaluator`** - Condition evaluation for decision steps
@@ -50,6 +50,21 @@ implementations/
 
 - **`src/rufus_cli/`** - Command-line tool (`rufus validate`, `rufus run`)
 - **`src/rufus_server/`** - Optional FastAPI REST API wrapper for workflows
+
+### Database & Tooling
+
+```
+migrations/                 # Database schema definitions
+├── schema.yaml            # Unified schema specification
+├── 002_postgres_standardized.sql
+├── 002_sqlite_initial.sql
+└── README.md
+
+tools/                      # Development tools
+├── compile_schema.py      # Generate DB-specific SQL from YAML
+├── validate_schema.py     # Validate schema consistency
+└── migrate.py             # Migration management
+```
 
 ---
 
@@ -186,6 +201,104 @@ All optimizations are backwards compatible and can be disabled via environment v
 
 ---
 
+## 🗄️ Database Schema Management
+
+Rufus uses a **unified schema definition** system to support multiple databases (PostgreSQL and SQLite) without schema divergence.
+
+### Multi-Database Support
+
+- **PostgreSQL** - Production-ready with full feature support (LISTEN/NOTIFY, advanced indexing, triggers)
+- **SQLite** - Embedded database for development, testing, and single-server deployments
+
+### Schema Standardization Architecture
+
+All database schemas are generated from a single source of truth:
+
+```
+migrations/schema.yaml (unified definition)
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+PostgreSQL     SQLite
+ .sql files    .sql files
+```
+
+**Key Components:**
+
+1. **`migrations/schema.yaml`** - Database-agnostic schema definition
+   - Unified type system (uuid, jsonb, timestamp, etc.)
+   - Automatic type mapping for each database
+   - Tables, indexes, triggers, views, constraints
+
+2. **`tools/compile_schema.py`** - Schema compiler
+   - Generates database-specific SQL from YAML
+   - Handles type conversions (JSONB→TEXT for SQLite)
+   - Preserves database-specific optimizations
+
+3. **`tools/validate_schema.py`** - Schema validation
+   - Ensures generated SQL matches specifications
+   - Verifies type mappings are correct
+   - Validates completeness across databases
+
+4. **`tools/migrate.py`** - Migration management
+   - Tracks applied migrations via `schema_migrations` table
+   - Applies pending migrations in order
+   - Supports both PostgreSQL and SQLite
+
+### Type Mappings
+
+| Unified Type | PostgreSQL | SQLite |
+|--------------|------------|--------|
+| uuid | UUID | TEXT |
+| jsonb | JSONB | TEXT |
+| timestamp | TIMESTAMPTZ | TEXT (ISO8601) |
+| boolean | BOOLEAN | INTEGER (0/1) |
+| bigserial | BIGSERIAL | INTEGER AUTOINCREMENT |
+
+### Usage
+
+**Generate migrations from schema:**
+```bash
+python tools/compile_schema.py --all
+```
+
+**Validate schema:**
+```bash
+python tools/validate_schema.py --all
+```
+
+**Apply migrations:**
+```bash
+# PostgreSQL
+python tools/migrate.py --db postgres://user:pass@localhost/rufus --up
+
+# SQLite
+python tools/migrate.py --db sqlite:///rufus.db --up
+```
+
+**Use SQLite for development:**
+```python
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+persistence = SQLitePersistenceProvider(db_path=":memory:")  # In-memory
+# or
+persistence = SQLitePersistenceProvider(db_path="rufus.db")  # File-based
+```
+
+### Schema Validation Results
+
+```
+PostgreSQL: ✅ 6 tables, 18 indexes, 4 triggers, 2 views
+SQLite:     ✅ 6 tables, 18 indexes, 3 triggers, 2 views
+            ✅ Full type mapping validation
+```
+
+All schema changes are made in `schema.yaml` and automatically compiled to database-specific SQL, ensuring consistency across databases.
+
+See [migrations/README.md](migrations/README.md) for detailed schema management documentation.
+
+---
+
 ## 📝 How Workflows Work
 
 ### 1. Define State Model
@@ -312,12 +425,30 @@ Tests automatically exclude legacy `confucius/` and `original_implementation_fil
 
 **Current State**: Alpha (v0.1.0)
 
+### Recent Updates
+
+**✅ Phase 1 Performance Optimizations (Completed)**
+- uvloop integration (2-4x async I/O speedup)
+- orjson serialization (3-5x faster JSON)
+- Optimized PostgreSQL connection pooling
+- Import caching (162x speedup)
+- Comprehensive benchmarking suite
+
+**✅ Phase 1 Database Schema Standardization (Completed)**
+- Unified schema definition system (`schema.yaml`)
+- Multi-database support (PostgreSQL + SQLite)
+- Automated schema compilation and validation
+- Migration management tooling
+- 20 unit tests for schema compiler
+
 **Recent Migration**: The project was recently refactored from "Confucius" to "Rufus" with focus on:
 - Extracting core SDK from monolithic application
 - Unified `Workflow` class architecture
 - Improved provider interfaces and dependency injection
 - Better separation: Core SDK vs Server vs CLI
 - Enhanced sub-workflow status propagation
+
+**Next**: SQLitePersistenceProvider implementation (Phase 2)
 
 **Note**: Some legacy `confucius/` code still exists in the repo for reference.
 
@@ -345,12 +476,18 @@ Tests automatically exclude legacy `confucius/` and `original_implementation_fil
 
 ## 📖 Documentation
 
+### Core Documentation
 - **[CLAUDE.md](CLAUDE.md)** - Detailed project guidance for AI assistants
 - **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Comprehensive usage documentation
 - **[YAML_GUIDE.md](YAML_GUIDE.md)** - Complete YAML workflow syntax reference
 - **[API_REFERENCE.md](API_REFERENCE.md)** - SDK API documentation
 - **[CLI_REFERENCE.md](CLI_REFERENCE.md)** - Command-line tool documentation
 - **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep-dive
+
+### Database & Operations
+- **[migrations/README.md](migrations/README.md)** - Database schema management guide
+- **[SQLITE_IMPLEMENTATION_PLAN.md](SQLITE_IMPLEMENTATION_PLAN.md)** - SQLite integration roadmap
+- **[PERFORMANCE_OPTIMIZATION_PLAN.md](PERFORMANCE_OPTIMIZATION_PLAN.md)** - Performance optimization strategy
 
 ---
 
