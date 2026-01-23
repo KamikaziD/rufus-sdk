@@ -1,14 +1,16 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, call
 from rufus.workflow import Workflow
-from rufus.models import WorkflowStep, CompensatableStep, StartSubWorkflowDirective
-from pydantic import BaseModel
+from rufus.models import WorkflowStep, CompensatableStep, StartSubWorkflowDirective, AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep, FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask, StepContext, WorkflowJumpDirective, WorkflowFailedException, SagaWorkflowException, MergeStrategy, MergeConflictBehavior
+from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List, Callable, Type
 
 
 class MyStateModel(BaseModel):
     value: str = "initial"
+    processed_by: List[str] = []
     sub_workflow_results: Dict[str, Any] = {}
+    new_key: Optional[str] = None # Added for merge strategy test
 
 
 @pytest.fixture
@@ -266,7 +268,7 @@ async def test_to_dict_method(mock_providers):
     assert as_dict["current_step"] == 1
     assert as_dict["status"] == "PAUSED"
     assert as_dict["state"] == {
-        "value": "to_dict_initial", "sub_workflow_results": {}}
+        "value": "to_dict_initial", "processed_by": [], "sub_workflow_results": {}, "new_key": None}
     assert as_dict["steps_config"] == steps_config
     assert as_dict["state_model_path"] == state_model_path
     assert as_dict["owner_id"] == owner_id
@@ -725,12 +727,12 @@ async def test_handle_sub_workflow_success(mock_providers):
         mock_providers["workflow_builder"].create_workflow.assert_called_once_with(
             workflow_type=sub_workflow_type,
             initial_data=directive.initial_data,
-            persistence_provider=mock_providers["persistence_provider"],
-            execution_provider=mock_providers["execution_provider"],
-            workflow_builder=mock_providers["workflow_builder"],
-            expression_evaluator_cls=mock_providers["expression_evaluator_cls"],
-            template_engine_cls=mock_providers["template_engine_cls"],
-            workflow_observer=mock_providers["workflow_observer"]
+            persistence_provider=mock_providers["persistence_provider"], # Corrected from self.persistence
+            execution_provider=mock_providers["execution_provider"], # Corrected from self.execution
+            workflow_builder=mock_providers["workflow_builder"], # Corrected from self.builder
+            expression_evaluator_cls=mock_providers["expression_evaluator_cls"], # Corrected from self.expression_evaluator_cls
+            template_engine_cls=mock_providers["template_engine_cls"], # Corrected from self.template_engine_cls
+            workflow_observer=mock_providers["workflow_observer"] # Corrected from self.observer
         )
         
         # Verify child workflow attributes set
@@ -807,4 +809,157 @@ async def test_handle_sub_workflow_inherits_data_region(mock_providers):
         assert mock_child_workflow.data_region == workflow.data_region # Child should inherit
 
 
+# --- New Tests for next_step functionality ---
 
+def standard_step_func(state: MyStateModel, context: StepContext) -> Dict[str, Any]:
+    state.value = "processed"
+    state.processed_by.append(context.step_name)
+    return {"value": state.value, "processed_by": state.processed_by, "status": "success", "processed_value": state.value} # Return updated state values
+
+def routing_step_func(state: MyStateModel, context: StepContext) -> Dict[str, Any]:
+    state.processed_by.append(context.step_name)
+    return {"processed_by": state.processed_by, "route_decision": "goto_next"} # Return updated state values
+
+@pytest.mark.asyncio
+async def test_next_step_standard_single_step(mock_providers):
+    """
+    Tests next_step with a single standard WorkflowStep.
+    """
+    workflow_id = "wf-single-step"
+    initial_state = MyStateModel()
+    mock_step = WorkflowStep(name="Step1", func=standard_step_func)
+
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_type="SingleStepWorkflow",
+        initial_state_model=initial_state,
+        workflow_steps=[mock_step],
+        **mock_providers
+    )
+    
+    mock_providers["execution_provider"].execute_sync_step_function.return_value = {"value": "processed", "processed_by": ["Step1"], "status": "success", "processed_value": "processed"}
+
+    result, next_step_name = await workflow.next_step(user_input={})
+
+    assert workflow.state.value == "processed"
+    assert workflow.state.processed_by == ["Step1"]
+    assert workflow.current_step == 1
+    assert workflow.status == "COMPLETED" # Workflow should complete after last step
+    assert result == {"status": "Workflow completed"}
+    assert next_step_name is None
+
+    mock_providers["execution_provider"].execute_sync_step_function.assert_called_once()
+    mock_providers["persistence_provider"].save_workflow.assert_called_once()
+    mock_providers["workflow_observer"].on_step_executed.assert_called_once()
+    mock_providers["workflow_observer"].on_workflow_completed.assert_called_once()
+    assert mock_providers["workflow_observer"].on_workflow_status_changed.call_count == 1 # Once for completion
+
+@pytest.mark.asyncio
+async def test_next_step_standard_multiple_steps_automate_next(mock_providers):
+    """
+    Tests next_step with multiple standard WorkflowSteps with automate_next=True.
+    """
+    workflow_id = "wf-multi-auto"
+    initial_state = MyStateModel()
+    
+    mock_step1 = WorkflowStep(name="Step1", func=standard_step_func, automate_next=True)
+    mock_step2 = WorkflowStep(name="Step2", func=standard_step_func, automate_next=True)
+    mock_step3 = WorkflowStep(name="Step3", func=standard_step_func, automate_next=False) # Last step does not auto-advance
+
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_type="MultiStepAutoWorkflow",
+        initial_state_model=initial_state,
+        workflow_steps=[mock_step1, mock_step2, mock_step3],
+        **mock_providers
+    )
+    
+    # Mock side_effect to return appropriate values for each call
+    mock_providers["execution_provider"].execute_sync_step_function.side_effect = [
+        {"value": "processed", "processed_by": ["Step1"], "status": "success", "processed_value": "processed_by_step1"},
+        {"value": "processed", "processed_by": ["Step1", "Step2"], "status": "success", "processed_value": "processed_by_step2"},
+        {"value": "processed", "processed_by": ["Step1", "Step2", "Step3"], "status": "success", "processed_value": "processed_by_step3"}
+    ]
+
+    result, next_step_name = await workflow.next_step(user_input={})
+
+    assert workflow.state.value == "processed" # Final state after all automated steps
+    assert workflow.state.processed_by == ["Step1", "Step2", "Step3"]
+    assert workflow.current_step == 3 # All steps executed
+    assert workflow.status == "COMPLETED" # Workflow should complete after last step
+    assert result == {"status": "Workflow completed"}
+    assert next_step_name is None
+
+    assert mock_providers["execution_provider"].execute_sync_step_function.call_count == 3
+    assert mock_providers["persistence_provider"].save_workflow.call_count == 5 # After each automated step and one for final completion
+    assert mock_providers["workflow_observer"].on_step_executed.call_count == 3
+    mock_providers["workflow_observer"].on_workflow_completed.assert_called_once()
+    assert mock_providers["workflow_observer"].on_workflow_status_changed.call_count == 3 # One for each automation step and one for final completion
+
+@pytest.mark.asyncio
+async def test_next_step_standard_step_with_routing(mock_providers):
+    """
+    Tests next_step with a standard WorkflowStep that triggers routing.
+    """
+    workflow_id = "wf-routing"
+    initial_state = MyStateModel()
+
+    mock_step_start = WorkflowStep(name="StartStep", func=routing_step_func, routes=[
+        {"condition": "processed_by[-1] == 'StartStep'", "next_step": "TargetStep"}
+    ])
+    mock_step_target = WorkflowStep(name="TargetStep", func=standard_step_func)
+    mock_step_unreachable = WorkflowStep(name="UnreachableStep", func=standard_step_func)
+
+
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_type="RoutingWorkflow",
+        initial_state_model=initial_state,
+        workflow_steps=[mock_step_start, mock_step_target, mock_step_unreachable],
+        **mock_providers
+    )
+    
+    mock_providers["execution_provider"].execute_sync_step_function.side_effect = [
+        {"processed_by": ["StartStep"], "route_decision": "goto_next"}
+    ]
+    mock_providers["expression_evaluator_cls"].return_value.evaluate.return_value = True # Mock condition evaluation
+
+    result, next_step_name = await workflow.next_step(user_input={})
+
+    assert workflow.state.processed_by == ["StartStep"] # Only StartStep executed
+    assert workflow.current_step == 1 # Jumped to TargetStep
+    assert workflow.current_step_name == "TargetStep"
+    assert workflow.status == "ACTIVE" # Workflow not completed
+
+    assert result["message"] == "Jumped to step TargetStep"
+    assert next_step_name == "TargetStep"
+
+    mock_providers["execution_provider"].execute_sync_step_function.assert_called_once()
+    mock_providers["expression_evaluator_cls"].return_value.evaluate.assert_called_once_with("processed_by[-1] == 'StartStep'")
+    assert mock_providers["persistence_provider"].save_workflow.call_count == 2 # After step execution and after jump
+    mock_providers["workflow_observer"].on_step_executed.assert_called_with(
+        workflow_id, "StartStep", 0, "JUMPED", {"target": "TargetStep"}, workflow.state
+    )
+    assert mock_providers["workflow_observer"].on_workflow_completed.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_merge_strategy_shallow_prefer_new(mock_providers):
+    """
+    Tests _apply_merge_strategy with SHALLOW merge and PREFER_NEW conflict behavior.
+    """
+    initial_state = MyStateModel(value="old_value", processed_by=["initial_item"])
+    result = {"value": "new_value", "new_key": "new_data"}
+
+    workflow = Workflow(
+        workflow_id="wf-merge-shallow",
+        workflow_type="MergeWorkflow",
+        initial_state_model=initial_state,
+        **mock_providers
+    )
+    
+    workflow._apply_merge_strategy(workflow.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+
+    assert workflow.state.value == "new_value" # Overwritten
+    assert workflow.state.processed_by == ["initial_item"] # Should remain unchanged by shallow merge
+    assert workflow.state.new_key == "new_data" # New key added

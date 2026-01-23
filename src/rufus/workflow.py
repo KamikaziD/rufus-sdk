@@ -530,6 +530,7 @@ class Workflow:
         )
 
         try:
+            step_index_before_jump = self.current_step # Capture current step index before potential jump
             old_status = self.status
             # Save state snapshot BEFORE execution for potential rollback
             state_snapshot_before = None
@@ -547,6 +548,7 @@ class Workflow:
                     # Apply merge strategy for sync step results
                     if isinstance(result, dict):
                         self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW) # Default merge for sync steps
+                    await self.persistence.save_workflow(self.id, self.to_dict()) # Persist state after sync step and merge
 
                 if step.routes:
                     target_step = self.evaluate_routes(step.routes)
@@ -721,8 +723,9 @@ class Workflow:
 
             # Save state after current step is done and before auto-advancing
             await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
-            await self._notify_status_change( # Changed to await
-                old_status, self.status, self.current_step_name)
+            if self.status == "ACTIVE" and not (self.current_step >= len(self.workflow_steps)): # Only notify if not completing or not about to complete
+                await self._notify_status_change( # Changed to await
+                    old_status, self.status, self.current_step_name)
 
             if should_automate and self.status == "ACTIVE":
                 next_input = result if isinstance(result, dict) else {}
@@ -737,7 +740,7 @@ class Workflow:
                 self.current_step = target_index
                 await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
-                await self.observer.on_step_executed(self.id, step.name, self.current_step, "JUMPED", { # Changed to await
+                await self.observer.on_step_executed(self.id, step.name, step_index_before_jump, "JUMPED", { # Changed to await
                                                "target": e.target_step_name}, self.state)
                 await self._notify_status_change(
                     old_status, self.status, self.current_step_name)

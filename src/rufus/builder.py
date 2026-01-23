@@ -2,7 +2,7 @@ import yaml
 import importlib
 import inspect
 import os
-from typing import Dict, Any, List, Callable, Type, Optional
+from typing import Dict, Any, List, Callable, Type, Optional, ClassVar # Import ClassVar
 from pydantic import BaseModel
 import pkgutil
 import importlib.metadata
@@ -19,6 +19,8 @@ import copy
 logger = logging.getLogger(__name__)
 
 class WorkflowBuilder:
+    _marketplace_steps: ClassVar[Dict[str, Type['WorkflowStep']]] = {} # Make it a class attribute and use ClassVar
+
     def __init__(self,
                  workflow_registry: Dict[str, Any],
                  expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
@@ -29,8 +31,9 @@ class WorkflowBuilder:
         self.template_engine_cls = template_engine_cls
         self._workflow_configs = {} # Cache for parsed workflow YAMLs if needed
         self._loaded_modules = set() # Cache for loaded step modules
-        self._marketplace_steps: Dict[str, Type['WorkflowStep']] = {} # Cache for discovered marketplace steps
-        self._discover_marketplace_steps() # Auto-discover on initialization
+        # self._marketplace_steps: Dict[str, Type['WorkflowStep']] = {} # Remove this line
+        if not WorkflowBuilder._marketplace_steps: # Ensure it's only discovered once per class load
+            self._discover_marketplace_steps()
 
     @staticmethod
     def _validate_step_function(func: Callable):
@@ -58,7 +61,8 @@ class WorkflowBuilder:
         module = importlib.import_module(module_path)
         return getattr(module, class_name)
 
-    def _discover_marketplace_steps(self):
+    @classmethod # Change to classmethod
+    def _discover_marketplace_steps(cls):
         """
         Discovers workflow steps provided by installed `rufus-*` marketplace packages
         using Python's entry points.
@@ -81,7 +85,7 @@ class WorkflowBuilder:
                         step_type_name = entry_point.name # e.g., "stripe.charge_card"
                         if hasattr(step_cls, 'STEP_TYPE_NAME'):
                             step_type_name = step_cls.STEP_TYPE_NAME
-                        self._marketplace_steps[step_type_name] = step_cls
+                        cls._marketplace_steps[step_type_name] = step_cls # Populate class attribute
                         logger.info(f"Discovered marketplace step: {step_type_name} from {entry_point.value}")
                     else:
                         logger.warning(f"Entry point {entry_point.name} loaded a class "
@@ -91,6 +95,22 @@ class WorkflowBuilder:
         except Exception as e:
             logger.warning(f"Could not load entry points for rufus.steps (perhaps no packages installed?): {e}")
 
+
+    @staticmethod
+    def _get_merge_strategy_from_str(value: str) -> 'MergeStrategy':
+        from rufus.models import MergeStrategy # Import locally to ensure correct enum definition
+        for ms in MergeStrategy:
+            if ms.value == value:
+                return ms
+        return MergeStrategy.SHALLOW # Default
+
+    @staticmethod
+    def _get_merge_conflict_behavior_from_str(value: str) -> 'MergeConflictBehavior':
+        from rufus.models import MergeConflictBehavior # Import locally to ensure correct enum definition
+        for mcb in MergeConflictBehavior:
+            if mcb.value == value:
+                return mcb
+        return MergeConflictBehavior.PREFER_NEW # Default
 
     @classmethod
     def _build_steps_from_config(cls, steps_config: List[Dict[str, Any]]) -> List['WorkflowStep']:
@@ -104,13 +124,27 @@ class WorkflowBuilder:
         steps = []
         for config in steps_config:
             step_type_str = config.get("type", "STANDARD")
-            func_path = config.get("function")
+            func_path = config.get("function") # Common func_path or function key
             compensate_func_path = config.get("compensate_function")
             input_model_path = config.get("input_model")
             automate_next = config.get("automate_next", False)
             routes = config.get("routes")
-            merge_strategy = MergeStrategy(config.get("merge_strategy", MergeStrategy.SHALLOW.value))
-            merge_conflict_behavior = MergeConflictBehavior(config.get("merge_conflict_behavior", MergeConflictBehavior.PREFER_NEW.value))
+            
+            merge_strategy = MergeStrategy.SHALLOW
+            merge_strategy_value = config.get("merge_strategy")
+            if merge_strategy_value:
+                for strategy_enum in MergeStrategy:
+                    if strategy_enum.value == merge_strategy_value:
+                        merge_strategy = strategy_enum
+                        break
+
+            merge_conflict_behavior = MergeConflictBehavior.PREFER_NEW
+            merge_conflict_behavior_value = config.get("merge_conflict_behavior")
+            if merge_conflict_behavior_value:
+                for conflict_enum in MergeConflictBehavior:
+                    if conflict_enum.value == merge_conflict_behavior_value:
+                        merge_conflict_behavior = conflict_enum
+                        break
 
             input_schema = cls._import_from_string(
                 input_model_path) if input_model_path else None
@@ -118,24 +152,28 @@ class WorkflowBuilder:
             # Check if it's a marketplace step
             if step_type_str in cls._marketplace_steps: # Access _marketplace_steps from class method context
                 step_cls = cls._marketplace_steps[step_type_str]
-                # Pass the input_schema directly to the custom step, assuming it can handle it
-                step = step_cls(name=config["name"], input_schema=input_schema, **config)
+                step_kwargs = config.copy()
+                step_name = step_kwargs.pop("name") # Extract 'name'
+                step = step_cls(name=step_name, input_schema=input_schema, **step_kwargs)
             elif "." in step_type_str: # Assume it's a custom step class defined in a module
                 step_cls = cls._import_from_string(step_type_str)
                 if not issubclass(step_cls, WorkflowStep):
                     raise ValueError(f"Custom step type '{step_type_str}' is not a subclass of WorkflowStep.")
-                step = step_cls(name=config["name"], input_schema=input_schema, **config)
+                
+                step_kwargs = config.copy()
+                step_name = step_kwargs.pop("name") # Extract 'name'
+                step = step_cls(name=step_name, input_schema=input_schema, **step_kwargs)
             elif step_type_str == "PARALLEL":
                 tasks = []
                 for task_config in config.get("tasks", []):
                     tasks.append(ParallelExecutionTask(
                         name=task_config["name"], func_path=task_config["function"]))
-
+                
                 merge_function_path = config.get("merge_function_path")
                 step = ParallelWorkflowStep(
                     name=config["name"],
                     tasks=tasks,
-                    merge_function_path=merge_function_path,
+                    merge_function_path=merge_function_path, # Pass the path string directly
                     automate_next=automate_next,
                     merge_strategy=merge_strategy,
                     merge_conflict_behavior=merge_conflict_behavior
@@ -153,18 +191,13 @@ class WorkflowBuilder:
                 )
 
             elif step_type_str == "HTTP":
-                http_config = {
-                    "method": config.get("method"),
-                    "url": config.get("url"),
-                    "headers": config.get("headers"),
-                    "body": config.get("body"),
-                    "timeout": config.get("timeout"),
-                    "output_key": config.get("output_key"),
-                    "includes": config.get("includes")
-                }
+                # Get the entire http_config dictionary from the step configuration
+                http_config_param = config.get("http_config", {})
                 step = HttpWorkflowStep(
                     name=config["name"],
-                    http_config=http_config,
+                    # HttpWorkflowStep does not have func_path. Remove this line.
+                    # func_path=func_path,
+                    http_config=http_config_param, # Pass the dictionary as is
                     required_input=config.get("required_input", []),
                     input_schema=input_schema,
                     automate_next=automate_next,
@@ -208,8 +241,20 @@ class WorkflowBuilder:
                 )
 
             else: # Standard step type or implicit
-                func = cls._import_from_string(func_path)
-                cls._validate_step_function(func)
+                # If func_path is None here, it means no 'function' was provided
+                # for a STANDARD step, which is an error unless it's a specific step type
+                # that doesn't require a function (e.g., a custom step class that
+                # defines its own execute method).
+                # For an unknown step type, we should raise an error immediately.
+
+                # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
+                # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
+                   "." not in step_type_str and step_type_str not in cls._marketplace_steps:
+                    raise ValueError(f"Unknown step type: '{step_type_str}'")
+
+                func = cls._import_from_string(func_path) # func_path could still be None for STANDARD if not provided
+                cls._validate_step_function(func) # This will catch func is None for STANDARD steps
 
                 if compensate_func_path:
                     compensate_func = cls._import_from_string(
