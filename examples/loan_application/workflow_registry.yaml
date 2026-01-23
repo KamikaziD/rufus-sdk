@@ -1,0 +1,12 @@
+# Workflow Registry for Loan Application Example
+
+workflows:
+  - type: "LoanApplication"
+    description: "Complex loan application workflow with parallel execution, sub-workflows, and human review"
+    config_file: "loan_workflow.yaml"
+    initial_state_model: "state_models.LoanApplicationState"
+
+  - type: "KYC"
+    description: "Know Your Customer verification sub-workflow"
+    config_file: "kyc_workflow.yaml"
+    initial_state_model: "state_models.KYCState"

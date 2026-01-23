@@ -7,6 +7,7 @@ from rufus.models import (
 import asyncio
 import concurrent.futures
 import threading
+import traceback
 
 class SyncExecutor(ExecutionProvider):
     """
@@ -18,14 +19,14 @@ class SyncExecutor(ExecutionProvider):
     def __init__(self):
         self._engine = None # Reference to the WorkflowEngine
         self._thread_pool_executor = None
-        self._thread_local = threading.local() # To store current event loop
+        self._loop = None # To store the main event loop
 
     async def initialize(self, engine: Any):
         """Initializes the executor, providing it with a reference to the WorkflowEngine."""
         self._engine = engine
         self._thread_pool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         # Store the event loop where initialize was called
-        self._thread_local.loop = asyncio.get_running_loop()
+        self._loop = asyncio.get_running_loop()
         print("[SyncExecutor] Initialized.")
 
     async def close(self):
@@ -74,22 +75,22 @@ class SyncExecutor(ExecutionProvider):
         return {"_async_dispatch": True, "task_id": "simulated_async_task", "result": task_result}
 
 
-    def _run_task_in_thread(self, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any], workflow_id: str):
+    def _run_task_in_thread(self, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any], state_model_path: str):
         """Helper to run a step function in a separate thread."""
-        loop = self._thread_local.loop # Get the event loop from the main thread
-        
-        # Reconstruct function and state within the new thread
+        loop = self._loop # Get the event loop from the main thread
+
+        # Reconstruct function and context within the new thread
         func = self._engine.workflow_builder._import_from_string(func_path)
-        state_model_class = self._engine.workflow_builder._import_from_string(self._engine.get_workflow(workflow_id).state_model_path)
-        state_instance = state_model_class(**state_data)
         context = StepContext(**context_data)
 
         try:
+            # For parallel tasks, pass state_data as a dict (not a Pydantic model)
+            # The parallel task functions expect state: dict parameter
             if asyncio.iscoroutinefunction(func):
                 # Run async function in the main event loop
-                result = asyncio.run_coroutine_threadsafe(func(state_instance, context), loop).result()
+                result = asyncio.run_coroutine_threadsafe(func(state_data, context), loop).result()
             else:
-                result = func(state_instance, context)
+                result = func(state_data, context)
             return {"result": result if isinstance(result, dict) else {}}
         except Exception as e:
             return {"error": str(e), "traceback": traceback.format_exc()}
@@ -102,6 +103,10 @@ class SyncExecutor(ExecutionProvider):
         if not self._thread_pool_executor:
             raise RuntimeError("ThreadPoolExecutor not initialized. Call initialize() first.")
 
+        # Get the state_model_path from the workflow before spawning threads
+        workflow = await self._engine.get_workflow(workflow_id)
+        state_model_path = workflow.state_model_path
+
         futures = []
         for task in tasks:
             context_data = { # Create context data for each task
@@ -110,7 +115,7 @@ class SyncExecutor(ExecutionProvider):
                 "validated_input": None, # Parallel tasks don't usually take user_input directly
                 "previous_step_result": None
             }
-            future = self._thread_pool_executor.submit(self._run_task_in_thread, task.func_path, state_data, context_data, workflow_id)
+            future = self._thread_pool_executor.submit(self._run_task_in_thread, task.func_path, state_data, context_data, state_model_path)
             futures.append((task.name, future))
 
         results_map = {}

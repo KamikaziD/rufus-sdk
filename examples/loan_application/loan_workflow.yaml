@@ -1,0 +1,91 @@
+# Loan Application Workflow
+# Demonstrates: Parallel execution, Decision steps, Sub-workflows, Dynamic injection,
+# Human-in-the-loop, Saga compensation
+
+workflow_type: "LoanApplication"
+workflow_version: "1.1"
+initial_state_model: "state_models.LoanApplicationState"
+
+steps:
+  - name: "Initialize_Application"
+    type: "STANDARD"
+    function: "loan.initialize_application"
+    compensate_function: "loan.compensate_collect_application_data"
+    dependencies: []
+    automate_next: true
+
+  - name: "Run_Concurrent_Checks"
+    type: "PARALLEL"
+    dependencies: ["Initialize_Application"]
+    automate_next: true
+    tasks:
+      - name: "Credit_Check"
+        function: "loan.run_credit_check_agent"
+      - name: "Fraud_Detection"
+        function: "loan.run_fraud_detection_agent"
+
+  - name: "Evaluate_Pre_Approval"
+    type: "STANDARD"
+    function: "loan.evaluate_pre_approval"
+    compensate_function: "loan.compensate_evaluate_pre_approval"
+    dependencies: ["Run_Concurrent_Checks"]
+    automate_next: true
+
+  # Sub-Workflow: Launch KYC verification as a child workflow
+  - name: "Run_KYC_Workflow"
+    type: "STANDARD"
+    function: "loan.run_kyc_workflow"
+    compensate_function: "loan.compensate_run_kyc_workflow"
+    dependencies: ["Evaluate_Pre_Approval"]
+    automate_next: true
+
+  - name: "Route_Underwriting"
+    type: "STANDARD"
+    function: "loan.route_underwriting"
+    compensate_function: "loan.compensate_route_underwriting"
+    dependencies: ["Run_KYC_Workflow"]
+    automate_next: true
+
+  - name: "Inject_Underwriting_Branch"
+    type: "STANDARD"
+    function: "general.noop"
+    dependencies: ["Route_Underwriting"]
+    automate_next: true
+    dynamic_injection:
+      rules:
+        - condition_key: "underwriting_type"
+          value_match: "full"
+          action: "INSERT_AFTER_CURRENT"
+          steps_to_insert:
+            - name: "Run_Full_Underwriting"
+              type: "ASYNC"
+              function: "loan.run_full_underwriting_agent"
+              automate_next: true
+            - name: "Request_Human_Review"
+              type: "STANDARD"
+              function: "loan.request_human_review"
+              compensate_function: "loan.compensate_request_human_review"  # NEW: Saga compensation
+            - name: "Process_Human_Decision"
+              type: "STANDARD"
+              function: "loan.process_human_decision"
+              input_model: "state_models.ProcessHumanDecisionInput"
+              compensate_function: "loan.compensate_process_human_decision"  # NEW: Saga compensation
+              dependencies: ["Request_Human_Review"]
+              automate_next: true
+#              required_input: ["decision", "reviewer_id"]
+
+        - condition_key: "underwriting_type"
+          value_match: "simple"
+          action: "INSERT_AFTER_CURRENT"
+          steps_to_insert:
+            - name: "Simplified_Underwriting"
+              type: "ASYNC"
+              function: "loan.run_simplified_underwriting_agent"
+              automate_next: true
+
+  - name: "Generate_Final_Decision"
+    type: "STANDARD"
+    function: "loan.generate_final_decision"
+    compensate_function: "loan.compensate_generate_final_decision"  # NEW: Saga compensation
+    dependencies: ["Inject_Underwriting_Branch"]
+    automate_next: true
