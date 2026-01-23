@@ -1,11 +1,11 @@
 import redis
-import json
 import os
 import asyncio
 from typing import Optional, Dict, Any, List
 
 from rufus.providers.persistence import PersistenceProvider
 from rufus.workflow import Workflow # For type hinting in from_dict method
+from rufus.utils.serialization import serialize, deserialize  # High-performance JSON serialization
 
 class RedisPersistenceProvider(PersistenceProvider):
     """Redis-backed workflow persistence store."""
@@ -49,7 +49,7 @@ class RedisPersistenceProvider(PersistenceProvider):
             await self.initialize() # Attempt to initialize if not already
 
         if self._redis_client:
-            serialized_workflow = json.dumps(workflow_data)
+            serialized_workflow = serialize(workflow_data)
             await self._redis_client.set(f"workflow:{workflow_id}", serialized_workflow)
             # Publish update for WebSocket subscribers (assuming this is handled elsewhere for now)
             # channel = f"workflow_events:{workflow_id}"
@@ -68,7 +68,7 @@ class RedisPersistenceProvider(PersistenceProvider):
         data = await self._redis_client.get(f"workflow:{workflow_id}")
         if not data:
             return None
-        return json.loads(data)
+        return deserialize(data)
 
     async def list_workflows(self, **filters) -> List[Dict[str, Any]]:
         """Lists workflows based on filters (basic implementation for Redis)."""
@@ -110,7 +110,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "metadata": metadata
             }
             # Using RPUSH to append to a list, or XADD for a stream
-            await self._redis_client.rpush(f"workflow_log:{workflow_id}", json.dumps(log_entry))
+            await self._redis_client.rpush(f"workflow_log:{workflow_id}", serialize(log_entry))
         else:
             print(f"WARNING: Redis not connected, execution log for {workflow_id} not saved.")
 
@@ -132,7 +132,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "state_after": state_after,
                 "executed_by": executed_by
             }
-            await self._redis_client.rpush(f"compensation_log:{execution_id}", json.dumps(log_entry))
+            await self._redis_client.rpush(f"compensation_log:{execution_id}", serialize(log_entry))
         else:
             print(f"WARNING: Redis not connected, compensation log for {execution_id} not saved.")
 
@@ -154,7 +154,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "decision_rationale": decision_rationale,
                 "metadata": metadata
             }
-            await self._redis_client.rpush(f"audit_log:{workflow_id}", json.dumps(log_entry))
+            await self._redis_client.rpush(f"audit_log:{workflow_id}", serialize(log_entry))
         else:
             print(f"WARNING: Redis not connected, audit log for {workflow_id} not saved.")
 
@@ -176,7 +176,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "tags": tags
             }
             # Using RPUSH to append to a list, or XADD for a stream
-            await self._redis_client.rpush(f"workflow_metrics:{workflow_id}", json.dumps(metric_entry))
+            await self._redis_client.rpush(f"workflow_metrics:{workflow_id}", serialize(metric_entry))
         else:
             print(f"WARNING: Redis not connected, metric for {workflow_id} not saved.")
 
@@ -189,7 +189,7 @@ class RedisPersistenceProvider(PersistenceProvider):
             return []
         
         metrics = await self._redis_client.lrange(f"workflow_metrics:{workflow_id}", 0, limit - 1)
-        return [json.loads(m) for m in metrics]
+        return [deserialize(m) for m in metrics]
 
 
     async def get_workflow_summary(self, hours: int = 24) -> List[Dict]:
@@ -211,7 +211,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat()
             }
-            await self._redis_client.hset("scheduled_workflows", schedule_name, json.dumps(schedule_data))
+            await self._redis_client.hset("scheduled_workflows", schedule_name, serialize(schedule_data))
         else:
             print(f"WARNING: Redis not connected, scheduled workflow {schedule_name} not registered.")
 
@@ -255,7 +255,7 @@ class RedisPersistenceProvider(PersistenceProvider):
                 "updated_at": datetime.now().isoformat()
             }
             if result:
-                update_data["result"] = json.dumps(result)
+                update_data["result"] = serialize(result)
             if error_message:
                 update_data["last_error"] = error_message
             
@@ -273,11 +273,11 @@ class RedisPersistenceProvider(PersistenceProvider):
             if record:
                 # Deserialize nested JSON fields
                 if 'task_data' in record:
-                    record['task_data'] = json.loads(record['task_data'])
+                    record['task_data'] = deserialize(record['task_data'])
                 if 'metadata' in record:
-                    record['metadata'] = json.loads(record['metadata'])
+                    record['metadata'] = deserialize(record['metadata'])
                 if 'result' in record:
-                    record['result'] = json.loads(record['result'])
+                    record['result'] = deserialize(record['result'])
                 # Convert numeric fields
                 if 'retry_count' in record:
                     record['retry_count'] = int(record['retry_count'])
