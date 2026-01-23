@@ -1,456 +1,941 @@
-# Rufus - Technical Documentation
+# Rufus SDK - Technical Documentation
 
-This document delves into the architecture, design principles, and technical
-implementation details of the Rufus SDK. It's intended for developers looking to
-understand, extend, or contribute to Rufus.
+This document provides an in-depth look at the Rufus SDK architecture, design principles, and implementation details. For getting started, see [QUICKSTART.md](QUICKSTART.md). For API details, see [API_REFERENCE.md](API_REFERENCE.md).
+
+## Table of Contents
+
+- [Core Philosophy](#core-philosophy)
+- [Architecture Overview](#architecture-overview)
+- [Design Patterns](#design-patterns)
+- [Provider Architecture](#provider-architecture)
+- [Workflow Lifecycle](#workflow-lifecycle)
+- [Advanced Features](#advanced-features)
+- [Performance Considerations](#performance-considerations)
+- [Security](#security)
+- [Contributing](#contributing)
+
+---
 
 ## Core Philosophy
 
-Rufus is built upon a set of core philosophies that drive its design and functionality:
+Rufus is built on a set of principles that guide its design and implementation:
 
-SDK-First : Designed to be embedded directly into Python applications (Django,
-Flask, FastAPI, etc.) without requiring a separate server for basic operation.
-Declarative : Workflows are defined in YAML, not code, promoting separation of
-concerns and easier collaboration.
-Durable : State is persisted via pluggable `PersistenceProvider` implementations,
-supporting ACID-compliant PostgreSQL or simple in-memory storage.
-Observable : Real-time visibility and audit logging via the `WorkflowObserver`
-interface, enabling integration with monitoring tools.
-Resilient : Built-in Saga pattern for distributed transactions and rollbacks, enhanced
-by robust parallel execution with conflict detection, ensuring data consistency
-across distributed services.
-Scalable : Async execution via pluggable `ExecutionProvider` implementations
-(e.g., Celery workers) with atomic task claiming, and improved sub-workflow
-management for clearer status propagation, enabling more complex and scalable
-orchestrations.
-Pluggable : All external dependencies (DB, task queue, messaging) are abstracted
-behind interfaces, allowing developers to "bring their own" or use provided
-implementations.
+### SDK-First Design
+
+Unlike traditional workflow engines that run as separate servers, Rufus embeds directly into your Python application. This means:
+
+- **Zero Network Overhead**: Workflows execute in-process for local operations
+- **Simpler Deployment**: No separate workflow server to manage
+- **Better Integration**: Direct access to your application's context and services
+- **Flexible Scaling**: Scale workflows by scaling your application
+
+**Trade-offs:**
+- Requires your application to manage workflow state
+- Async operations still need external infrastructure (Celery, etc.)
+- Best suited for service-oriented architectures
+
+### Pluggable Architecture
+
+Every external dependency is abstracted behind a provider interface:
+
+```python
+# You choose the providers
+engine = WorkflowEngine(
+    persistence=PostgresPersistence(...),  # or InMemoryPersistence()
+    executor=CeleryExecutor(...),          # or SyncExecutor()
+    observer=MetricsObserver(...),         # or LoggingObserver()
+    ...
+)
+```
+
+This enables:
+- **Testing**: Use in-memory providers for unit tests
+- **Migration**: Swap providers without changing workflow code
+- **Flexibility**: Integrate with your existing infrastructure
+- **Extensibility**: Implement custom providers for specific needs
+
+### Declarative Workflows
+
+Workflows are defined in YAML, not code:
+
+```yaml
+workflow_type: "OrderProcessing"
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "orders.validate"
+    automate_next: true
+
+  - name: "Process_Payment"
+    type: "STANDARD"
+    function: "payments.charge"
+    dependencies: ["Validate_Order"]
+```
+
+**Benefits:**
+- **Separation of Concerns**: Business logic (Python) separate from orchestration (YAML)
+- **Versionable**: Workflows stored in version control
+- **Reviewable**: Non-developers can review workflow structure
+- **Testable**: Workflow structure can be validated independently
+
+### Durable State
+
+Workflow state persists across restarts through pluggable persistence:
+
+- **ACID Transactions**: PostgreSQL for production durability
+- **State Versioning**: Track state changes over time
+- **Audit Trail**: Complete history of workflow execution
+- **Recovery**: Resume workflows after failures
+
+### Observable Execution
+
+Every workflow event can be observed:
+
+```python
+class CustomObserver:
+    async def on_step_completed(self, workflow_id, step_name, result):
+        self.metrics.timing(f"step.{step_name}", result['duration'])
+        self.log.info(f"Step {step_name} completed in workflow {workflow_id}")
+```
+
+**Use Cases:**
+- Metrics and monitoring (Prometheus, DataDog)
+- Alerting (PagerDuty, Slack)
+- Debugging and troubleshooting
+- Business intelligence and reporting
+
+### Resilient Patterns
+
+Built-in patterns for distributed system reliability:
+
+1. **Saga Pattern**: Distributed transaction rollback via compensation functions
+2. **Parallel Execution**: With timeout and partial success handling
+3. **Human-in-the-Loop**: Pause for external input
+4. **Conditional Branching**: Dynamic workflow paths
+5. **Sub-Workflows**: Composable workflow components
+
+---
 
 ## Architecture Overview
 
-Rufus is designed as a highly modular and extensible SDK, built around a core
-`WorkflowEngine` and a set of pluggable provider interfaces. This design ensures that the
-core logic is decoupled from specific technologies for persistence, execution, and
-observability.
+### Component Diagram
 
-### Conceptual Architecture Diagram
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│ Your Application (FastAPI, Django, etc.)                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   ┌─────────────────────────────────────────────────────────────┐ │
-│   │ Rufus SDK (Core)                                            │ │
-│   │   ┌───────────────────────────────────────────────────────┐ │ │
-│   │   │ WorkflowEngine (Orchestrator)                         │ │ │
-│   │   │ (rufus/engine.py)                                     │ │ │
-│   │   │                                                       │ │ │
-│   │   │ Manages state, delegates steps, handles directives      │ │ │
-│   │   │ Saga, Sub-workflows, Dynamic Injection, Routing         │ │ │
-│   │   └───────────────▲─────────────────▲─────────────────────┘ │ │
-│   │                   │                 │                       │ │
-│   │   ┌───────────────┴───────────────┐ │ ┌───────────────────┐ │ │
-│   │   │ rufus/models.py               │ │ │ rufus/builder.py    │ │
-│   │   │ (Data Structures & Directives)│ │ │ (Workflow Assembly) │ │
-│   │   └────────────────────────────────┘ │ └───────────────────┘ │ │
-│   └───────────────────┬───────────────────────────────────────────┘
-│                       │
-│   ┌───────────────────▼───────────────────────────────────────────┐
-│   │ Pluggable Provider Interfaces                                 │
-│   │   ┌─────────────────────────────────────────────────────────┐ │
-│   │   │ PersistenceProvider (rufus/providers/persistence.py) ───┤
-│   │   ├─────────────────────────────────────────────────────────┤ │
-│   │   │ ExecutionProvider (rufus/providers/execution.py)    ───┼─┤
-│   │   ├─────────────────────────────────────────────────────────┤ │
-│   │   │ WorkflowObserver (rufus/providers/observer.py)      ───┘ │
-│   │   ├─────────────────────────────────────────────────────────┤ │
-│   │   │ ExpressionEvaluator (rufus/providers/expression_evaluator.py)│
-│   │   ├─────────────────────────────────────────────────────────┤ │
-│   │   │ TemplateEngine (rufus/providers/template_engine.py)   │ │
-│   │   └───────────────────┬─────────────────────────────────────┘ │
-│   └───────────────────────┴───────────────────────────────────────┘
-│                       │
-│   ┌───────────────────────▼─────────────────────────────────────┐
-│   │ Default Implementations                                     │
-│   │ (rufus/implementations/*/)                                  │
-│   └─────────────────────────────────────────────────────────────┘
-│
-│   ┌─────────────────────────────────────────────────────────────┐
-│   │ rufus_server/ (Optional FastAPI API Wrapper)                │
-│   ├─────────────────────────────────────────────────────────────┤
-│   │ rufus_cli/ (Optional Command Line Tool)                     │
-│   └─────────────────────────────────────────────────────────────┘
-└─────────────────────────────────────────────────────────────────┘
+```
+┌────────────────────────────────────────────────────────────┐
+│ Your Application                                           │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ Application Code (FastAPI, Django, etc.)             │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+│                         │                                  │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │ Rufus SDK (Embedded)                                 │  │
+│  │  ┌────────────────────────────────────────────────┐  │  │
+│  │  │ WorkflowEngine (Orchestrator)                  │  │  │
+│  │  │  • State Management                            │  │  │
+│  │  │  • Step Execution                              │  │  │
+│  │  │  • Directive Handling                          │  │  │
+│  │  │  • Saga Coordination                           │  │  │
+│  │  └────────────────────────────────────────────────┘  │  │
+│  │                                                       │  │
+│  │  ┌────────────────────────────────────────────────┐  │  │
+│  │  │ WorkflowBuilder (Assembly)                     │  │  │
+│  │  │  • YAML Parsing                                │  │  │
+│  │  │  • Step Creation                               │  │  │
+│  │  │  • Function Resolution                         │  │  │
+│  │  │  • Validation                                  │  │  │
+│  │  └────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                         │                                  │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │ Provider Interfaces (Abstractions)                   │  │
+│  │  • PersistenceProvider                               │  │
+│  │  • ExecutionProvider                                 │  │
+│  │  • WorkflowObserver                                  │  │
+│  │  • ExpressionEvaluator                               │  │
+│  │  • TemplateEngine                                    │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+└──────────────────────────┼───────────────────────────────────┘
+                           │
+┌──────────────────────────▼───────────────────────────────┐
+│ External Infrastructure (Your Choice)                    │
+│  • PostgreSQL / In-Memory                                │
+│  • Celery + Redis / Synchronous                          │
+│  • Metrics Services / Logging                            │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Key Components Explained with Code References
+### Data Flow
 
-**1. rufus/models.py (The Data Layer)**
+1. **Workflow Start**
+   ```
+   Application → WorkflowEngine.start_workflow()
+   → WorkflowBuilder.create_workflow()
+   → PersistenceProvider.save_workflow()
+   → WorkflowObserver.on_workflow_started()
+   ```
 
-This module defines the fundamental data structures and directives that orchestrate
-workflows using Pydantic for strong typing, validation, and serialization.
+2. **Step Execution**
+   ```
+   Application → Workflow.next_step()
+   → WorkflowEngine (validates input, checks dependencies)
+   → ExecutionProvider.execute_sync_step_function() or dispatch_async_task()
+   → Step Function (your code)
+   → State Update → PersistenceProvider.save_workflow()
+   → WorkflowObserver.on_step_completed()
+   ```
 
+3. **Directive Handling**
+   ```
+   Step Function → raise WorkflowJumpDirective()
+   → WorkflowEngine (catches exception)
+   → Updates workflow.current_step
+   → PersistenceProvider.save_workflow()
+   → Continues execution
+   ```
 
-StepContext : Provides contextual information to step functions during execution,
-including workflow ID, step name, validated input, and previous step results.
+---
+
+## Design Patterns
+
+### 1. Provider Pattern
+
+All external dependencies are abstracted behind Protocol-based interfaces:
 
 ```python
-# rufus/models.py
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Protocol
 
-class StepContext(BaseModel):
-    workflow_id: str
-    step_name: str
-    validated_input: Optional[BaseModel] = None
-    previous_step_result: Optional[Dict[str, Any]] = None
-    loop_item: Optional[Any] = None
-    loop_index: Optional[int] = None
+class PersistenceProvider(Protocol):
+    async def save_workflow(self, workflow: Workflow) -> None: ...
+    async def load_workflow(self, workflow_id: str) -> Optional[Workflow]: ...
 ```
 
-WorkflowStep and Subclasses : The base for all steps, with specialized types for
-various execution patterns.
-CompensatableStep: Extends WorkflowStep with a `compensate_func` for
-Saga pattern rollbacks.
-AsyncWorkflowStep, HttpWorkflowStep: For non-blocking, often long-
-running, operations delegated to an `ExecutionProvider`.
-ParallelWorkflowStep: Executes multiple tasks concurrently. Enhanced
-with features for reliability:
+**Benefits:**
+- **Testability**: Mock providers for unit tests
+- **Flexibility**: Swap implementations without changing core code
+- **Extensibility**: Add custom providers for specific use cases
+
+**Example Custom Provider:**
 
 ```python
-# rufus/models.py
-from typing import List
-from rufus.models import WorkflowStep, ParallelExecutionTask, MergeStrategy, MergeConflictBehavior
+class RedisPersistence:
+    def __init__(self, redis_client):
+        self.redis = redis_client
 
-class ParallelWorkflowStep(WorkflowStep):
-    def __init__(self, name: str, tasks: List[ParallelExecutionTask],
-                 merge_function_path: Optional[str] = None,
-                 timeout_seconds: Optional[int] = None,
-                 allow_partial_success: bool = False,
-                 merge_strategy: MergeStrategy = MergeStrategy.SHALLOW,
-                 merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW,
-                 **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.tasks = tasks
-        self.merge_function_path = merge_function_path
-        self.timeout_seconds = timeout_seconds # Max duration for all parallel tasks
-        self.allow_partial_success = allow_partial_success
-        self.merge_strategy = merge_strategy
-        self.merge_conflict_behavior = merge_conflict_behavior
+    async def save_workflow(self, workflow):
+        await self.redis.set(
+            f"workflow:{workflow.id}",
+            workflow.model_dump_json(),
+            ex=86400  # 24-hour TTL
+        )
+
+    async def load_workflow(self, workflow_id):
+        data = await self.redis.get(f"workflow:{workflow_id}")
+        if data:
+            return Workflow.model_validate_json(data)
+        return None
 ```
 
-FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep:
-For independent workflow spawning, iterative processing, and scheduling.
-Workflow Directives (as Exceptions) : Special exceptions that alter the
-workflow's flow control, caught by the WorkflowEngine.
-WorkflowJumpDirective, WorkflowPauseDirective,
-StartSubWorkflowDirective, SagaWorkflowException.
+### 2. Directive Pattern
 
-**2. rufus/engine.py (The Orchestrator - WorkflowEngine)**
-
-The `WorkflowEngine` is the central controller responsible for managing the workflow's
-lifecycle, state transitions, and delegating step execution. It is designed to be highly
-extensible through dependency injection.
-
-Dependency Injection (__init__) : The constructor requires all external
-capabilities (persistence, execution, building, observability, expression evaluation,
-templating) to be injected, making the engine testable and adaptable.
+Workflows use exceptions for control flow:
 
 ```python
-# rufus/engine.py (simplified __init__)
-from typing import Dict, Any, Type, Optional
-from pydantic import BaseModel
+class WorkflowJumpDirective(Exception):
+    def __init__(self, target_step_name: str, result: Dict = None):
+        self.target_step_name = target_step_name
+        self.result = result or {}
+```
+
+**Rationale:**
+- **Non-intrusive**: Step functions remain pure
+- **Explicit**: Control flow changes are visible
+- **Type-safe**: Pydantic models ensure valid directives
+
+**Alternative Considered:**
+```python
+# Rejected: Returns are for data, not control flow
+def my_step(state, context):
+    return {"action": "JUMP", "target": "Next_Step"}  # Unclear
+```
+
+### 3. Builder Pattern
+
+WorkflowBuilder assembles workflows from declarative configurations:
+
+```python
+class WorkflowBuilder:
+    def create_workflow(self, workflow_type, initial_data):
+        # 1. Load YAML configuration
+        config = self.workflow_registry[workflow_type]
+
+        # 2. Resolve state model class
+        state_model_cls = self._import_from_string(config['initial_state_model_path'])
+
+        # 3. Create state instance
+        state = state_model_cls(**initial_data)
+
+        # 4. Build steps
+        steps = self._build_steps_from_config(config['steps'])
+
+        # 5. Assemble workflow
+        return Workflow(
+            workflow_type=workflow_type,
+            state=state,
+            workflow_steps=steps,
+            ...
+        )
+```
+
+**Benefits:**
+- **Separation**: Workflow structure separate from execution logic
+- **Validation**: YAML validated at build time
+- **Flexibility**: Same code handles all workflow types
+
+### 4. Observer Pattern
+
+Workflow events broadcast to registered observers:
+
+```python
+# Engine notifies observer at key points
+await self.observer.on_workflow_started(workflow_id, workflow_type, initial_data)
+await self.observer.on_step_completed(workflow_id, step_name, result)
+await self.observer.on_workflow_failed(workflow_id, error, state)
+```
+
+**Use Cases:**
+- Metrics collection
+- Audit logging
+- Real-time notifications
+- Debugging and tracing
+
+### 5. Saga Pattern
+
+Distributed transactions with compensation:
+
+```yaml
+steps:
+  - name: "Reserve_Inventory"
+    function: "inventory.reserve"
+    compensate_function: "inventory.release"  # Rollback
+
+  - name: "Charge_Payment"
+    function: "payments.charge"
+    compensate_function: "payments.refund"  # Rollback
+```
+
+**Execution:**
+1. Execute steps forward (reserve → charge)
+2. On failure, execute compensation functions backward (refund → release)
+3. Ensures consistency across distributed services
+
+---
+
+## Provider Architecture
+
+### PersistenceProvider
+
+Abstracts data storage for workflow state and audit logs.
+
+**Design Principles:**
+- **Async-first**: All methods are async for non-blocking I/O
+- **Transactional**: State changes are atomic
+- **Auditable**: Every state change logged
+
+**Implementation Strategies:**
+
+1. **PostgreSQL (Production)**
+   ```python
+   class PostgresPersistence:
+       async def save_workflow(self, workflow):
+           async with self.pool.acquire() as conn:
+               async with conn.transaction():
+                   # Atomic update
+                   await conn.execute("""
+                       UPDATE workflows
+                       SET state = $1, status = $2, updated_at = NOW()
+                       WHERE id = $3
+                   """, workflow.state.model_dump_json(), workflow.status, workflow.id)
+
+                   # Audit log
+                   await conn.execute("""
+                       INSERT INTO audit_logs (workflow_id, event, data)
+                       VALUES ($1, 'state_update', $2)
+                   """, workflow.id, workflow.state.model_dump_json())
+   ```
+
+2. **In-Memory (Testing)**
+   ```python
+   class InMemoryPersistence:
+       def __init__(self):
+           self.workflows: Dict[str, Workflow] = {}
+           self.audit_logs: List[Dict] = []
+
+       async def save_workflow(self, workflow):
+           self.workflows[workflow.id] = workflow
+           self.audit_logs.append({
+               'workflow_id': workflow.id,
+               'event': 'state_update',
+               'timestamp': datetime.now()
+           })
+   ```
+
+**Key Methods:**
+- `save_workflow()` - Persist workflow state
+- `load_workflow()` - Retrieve workflow by ID
+- `create_audit_log()` - Log workflow events
+- `claim_pending_task()` - Atomic task claiming (for distributed executors)
+
+### ExecutionProvider
+
+Abstracts step execution (sync, async, parallel).
+
+**Design Principles:**
+- **Pluggable**: Sync for development, Celery for production
+- **Resilient**: Handle timeouts and partial failures
+- **Observable**: Report execution status
+
+**Implementation Strategies:**
+
+1. **SyncExecutor (Development)**
+   ```python
+   class SyncExecutor:
+       async def execute_sync_step_function(self, func, state, context):
+           # Direct execution in current process
+           return func(state, context)
+
+       async def dispatch_parallel_tasks(self, tasks, state_data, ...):
+           # ThreadPoolExecutor for local parallelism
+           futures = [self._thread_pool.submit(task) for task in tasks]
+           results = [await asyncio.wrap_future(f) for f in futures]
+           return self._merge_results(results)
+   ```
+
+2. **CeleryExecutor (Production)**
+   ```python
+   class CeleryExecutor:
+       async def dispatch_async_task(self, workflow_id, func_path, state_data, ...):
+           # Dispatch to Celery workers
+           task = resume_workflow_from_celery.apply_async(
+               args=[workflow_id, func_path, state_data],
+               queue=f"region-{data_region}"
+           )
+           return {"task_id": task.id}
+
+       async def dispatch_parallel_tasks(self, tasks, ...):
+           # Celery group for parallel execution
+           job = group([
+               execute_task.s(task.func_path, state_data)
+               for task in tasks
+           ])
+           result = job.apply_async()
+           return {"group_id": result.id}
+   ```
+
+**Key Methods:**
+- `execute_sync_step_function()` - Execute synchronous step
+- `dispatch_async_task()` - Queue asynchronous task
+- `dispatch_parallel_tasks()` - Execute tasks in parallel
+- `report_child_status_to_parent()` - Sub-workflow status propagation
+
+### WorkflowObserver
+
+Abstracts event notification and monitoring.
+
+**Design Principles:**
+- **Non-blocking**: Observers must not slow down workflow execution
+- **Failure-tolerant**: Observer failures don't fail workflows
+- **Composable**: Multiple observers can be registered
+
+**Implementation Example:**
+
+```python
+class MetricsObserver:
+    def __init__(self, metrics_client):
+        self.metrics = metrics_client
+
+    async def on_step_started(self, workflow_id, step_name, step_type):
+        self.metrics.increment(f"step.{step_name}.started")
+
+    async def on_step_completed(self, workflow_id, step_name, result):
+        duration = result.get('duration_ms', 0)
+        self.metrics.timing(f"step.{step_name}.duration", duration)
+        self.metrics.increment(f"step.{step_name}.completed")
+
+    async def on_workflow_failed(self, workflow_id, error, state):
+        self.metrics.increment("workflow.failed")
+        self.alerting.send_alert(f"Workflow {workflow_id} failed: {error}")
+```
+
+**Key Methods:**
+- `on_workflow_started()` - Workflow begins
+- `on_step_started()` / `on_step_completed()` - Step lifecycle
+- `on_workflow_completed()` / `on_workflow_failed()` - Workflow completion
+- `on_saga_compensation()` - Saga rollback events
+
+---
+
+## Workflow Lifecycle
+
+### 1. Initialization
+
+```python
+# Application initializes engine
+engine = WorkflowEngine(
+    persistence=persistence,
+    executor=executor,
+    observer=observer,
+    workflow_registry=registry,
+    expression_evaluator_cls=EvaluatorCls,
+    template_engine_cls=TemplateCls
+)
+await engine.initialize()
+```
+
+**What Happens:**
+1. Providers initialize (database connections, etc.)
+2. WorkflowBuilder created with registry
+3. Engine ready to start workflows
+
+### 2. Workflow Start
+
+```python
+workflow = await engine.start_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "123", "amount": 99.99}
+)
+```
+
+**What Happens:**
+1. Builder loads YAML configuration
+2. State model instantiated with initial_data
+3. Steps built from configuration
+4. Workflow saved to persistence
+5. Observer notified (`on_workflow_started`)
+6. Workflow object returned
+
+### 3. Step Execution
+
+```python
+while workflow.status == "ACTIVE":
+    result, next_step = await workflow.next_step(user_input={})
+```
+
+**What Happens:**
+
+1. **Pre-execution**
+   - Validate dependencies satisfied
+   - Validate user input (if required)
+   - Observer notified (`on_step_started`)
+
+2. **Execution**
+   - Determine step type (STANDARD, ASYNC, PARALLEL, etc.)
+   - Delegate to appropriate executor method
+   - Execute step function
+   - Catch directives (Jump, Pause, SubWorkflow, Saga)
+
+3. **Post-execution**
+   - Merge step result into state
+   - Save workflow state
+   - Observer notified (`on_step_completed`)
+   - Advance to next step (if `automate_next: true`)
+
+4. **Directive Handling**
+   - **WorkflowJumpDirective**: Update `current_step` to target
+   - **WorkflowPauseDirective**: Set status to `WAITING_HUMAN`
+   - **StartSubWorkflowDirective**: Launch child workflow, set status to `PENDING_SUB_WORKFLOW`
+   - **SagaWorkflowException**: Execute compensation functions in reverse
+
+### 4. Completion
+
+**Successful Completion:**
+```
+Final step completes
+→ Status set to COMPLETED
+→ Observer notified (on_workflow_completed)
+→ Workflow state persisted
+```
+
+**Failure:**
+```
+Step raises exception
+→ Status set to FAILED
+→ Observer notified (on_workflow_failed)
+→ Saga compensation triggered (if enabled)
+→ Workflow state persisted
+```
+
+---
+
+## Advanced Features
+
+### Dynamic Step Injection
+
+Steps can be added to the workflow at runtime based on state:
+
+```yaml
+- name: "Route_Processing"
+  type: "STANDARD"
+  function: "router.determine_path"
+  dynamic_injection:
+    rules:
+      - condition_key: "processing_type"
+        value_match: "complex"
+        action: "INSERT_AFTER_CURRENT"
+        steps_to_insert:
+          - name: "Complex_Processing"
+            type: "ASYNC"
+            function: "processor.complex"
+```
+
+**Implementation:**
+1. After `Route_Processing` executes, engine checks `dynamic_injection`
+2. Evaluates condition: `state.processing_type == "complex"`
+3. If true, inserts `Complex_Processing` step into workflow
+4. Future `next_step()` calls include new step
+
+**Use Cases:**
+- Conditional approval workflows
+- Dynamic underwriting paths
+- Feature flag-based execution
+
+### Sub-Workflow Composition
+
+Workflows can launch child workflows:
+
+```python
+def run_background_check(state, context):
+    raise StartSubWorkflowDirective(
+        workflow_type="BackgroundCheck",
+        initial_data={"applicant_id": state.applicant_id}
+    )
+```
+
+**Status Propagation:**
+- Child: `ACTIVE` → Parent: `PENDING_SUB_WORKFLOW`
+- Child: `WAITING_HUMAN` → Parent: `WAITING_CHILD_HUMAN_INPUT`
+- Child: `FAILED` → Parent: `FAILED_CHILD_WORKFLOW`
+- Child: `COMPLETED` → Parent: Resumes execution
+
+**Implementation:**
+1. Parent raises `StartSubWorkflowDirective`
+2. Engine creates child workflow
+3. Parent workflow paused
+4. Child executes independently
+5. Child status changes reported to parent
+6. Parent resumes when child completes
+
+### Parallel Execution with Merge Strategies
+
+Execute multiple tasks concurrently and merge results:
+
+```yaml
+- name: "Run_Checks"
+  type: "PARALLEL"
+  timeout_seconds: 30
+  allow_partial_success: true
+  merge_strategy: "SHALLOW"
+  merge_conflict_behavior: "PREFER_NEW"
+  tasks:
+    - name: "Credit_Check"
+      function: "checks.credit"
+    - name: "Fraud_Check"
+      function: "checks.fraud"
+    - name: "Identity_Check"
+      function: "checks.identity"
+```
+
+**Merge Strategies:**
+- `SHALLOW`: Top-level key merge (overwrites nested objects)
+- `DEEP`: Recursive merge (preserves nested structure)
+
+**Conflict Behavior:**
+- `PREFER_NEW`: New value overwrites old (default)
+- `PREFER_OLD`: Keep existing value, log warning
+- `FAIL`: Raise exception on conflict
+
+**Partial Success:**
+```python
+# With allow_partial_success=true
+{
+    "Credit_Check": {"score": 750},  # Success
+    "Fraud_Check": {"status": "CLEAN"},  # Success
+    "Identity_Check": {"error": "Timeout"}  # Failed, but workflow continues
+}
+```
+
+### Loop Steps
+
+Iterate over collections:
+
+```yaml
+- name: "Process_Items"
+  type: "LOOP"
+  loop_over: "state.items"
+  loop_step:
+    name: "Process_Item"
+    type: "STANDARD"
+    function: "processor.process_item"
+```
+
+**Implementation:**
+```python
+# context.loop_item = current item
+# context.loop_index = current index
+
+def process_item(state, context):
+    item = context.loop_item
+    index = context.loop_index
+    print(f"Processing item {index}: {item}")
+    return {"processed": True}
+```
+
+---
+
+## Performance Considerations
+
+### Latency
+
+**Local Execution (SyncExecutor):**
+- Step execution: ~1-5ms (Python function call overhead)
+- State persistence: ~10-50ms (PostgreSQL) or ~1ms (in-memory)
+- Total per step: ~15-60ms
+
+**Distributed Execution (CeleryExecutor):**
+- Task dispatch: ~5-15ms (Redis queue)
+- Worker pickup: ~10-100ms (depends on worker availability)
+- Network overhead: ~5-20ms
+- Total per step: ~50-200ms
+
+**Optimization Strategies:**
+1. **Batch Operations**: Use parallel steps for independent operations
+2. **Async I/O**: Use async step functions for I/O-bound work
+3. **Caching**: Cache workflow registry and state models
+4. **Connection Pooling**: Reuse database connections
+
+### Throughput
+
+**Single Engine Instance:**
+- Sync executor: ~100-500 workflows/second
+- Celery executor: ~1000-5000 workflows/second (limited by workers)
+
+**Horizontal Scaling:**
+- Scale application instances (each runs WorkflowEngine)
+- Scale Celery workers independently
+- Partition workflows by data region
+
+**Database Considerations:**
+- PostgreSQL: Use connection pooling (asyncpg pool)
+- Indexes: Create indexes on workflow_id, status, owner_id
+- Archival: Move completed workflows to cold storage
+
+### Memory
+
+**Per Workflow:**
+- Workflow object: ~5-20KB (depends on state size)
+- Step objects: ~1KB each
+- Total: ~10-50KB per active workflow
+
+**Engine Overhead:**
+- Workflow registry: ~100KB-1MB (cached in memory)
+- Provider instances: ~10-50KB
+- Total: ~1-2MB per engine instance
+
+---
+
+## Security
+
+### Input Validation
+
+All user inputs validated with Pydantic:
+
+```python
+class ApprovalInput(BaseModel):
+    decision: Literal["APPROVED", "REJECTED"]
+    reviewer_id: str = Field(pattern=r'^[a-z0-9_]+$')
+    comments: Optional[str] = Field(max_length=500)
+
+# In workflow YAML
+input_model: "models.ApprovalInput"
+```
+
+**Protections:**
+- Type checking
+- Pattern validation
+- Length limits
+- Required fields
+
+### Expression Evaluation
+
+SimpleExpressionEvaluator uses restricted `eval()`:
+
+```python
+def evaluate(self, expression, context):
+    # Restricted globals (no __import__, etc.)
+    safe_globals = {
+        "__builtins__": {
+            "True": True,
+            "False": False,
+            "None": None
+        }
+    }
+    return eval(expression, safe_globals, context)
+```
+
+**Recommendations:**
+- Validate expressions before deployment
+- Use allowlist of permitted functions
+- Consider implementing custom DSL for production
+
+### Data Isolation
+
+Workflows support data region tagging:
+
+```python
+workflow = await engine.start_workflow(
+    workflow_type="UserData",
+    initial_data={...},
+    data_region="eu-west-1"  # GDPR compliance
+)
+```
+
+**Use Cases:**
+- Geographic data residency
+- Multi-tenancy
+- Compliance (GDPR, HIPAA, etc.)
+
+---
+
+## Contributing
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/rufus.git
+cd rufus
+
+# Install dependencies
+pip install -e ".[all]"
+
+# Run tests
+pytest tests/
+```
+
+### Code Standards
+
+1. **Type Hints**: All functions must have type hints
+2. **Docstrings**: Public APIs require docstrings
+3. **Tests**: New features require tests (>80% coverage)
+4. **Formatting**: Use `black` for code formatting
+5. **Linting**: Pass `ruff` checks
+
+### Architecture Principles
+
+When contributing to Rufus:
+
+1. **Keep core simple**: Complex features belong in providers
+2. **Maintain API stability**: Breaking changes require major version bump
+3. **Document thoroughly**: Update all relevant docs
+4. **Test extensively**: Unit tests + integration tests
+5. **Consider performance**: Profile before optimizing
+
+### Adding a New Provider
+
+Example: Adding a Redis persistence provider
+
+```python
+# 1. Implement protocol
 from rufus.providers.persistence import PersistenceProvider
-from rufus.providers.execution import ExecutionProvider
-from rufus.providers.observer import WorkflowObserver
-from rufus.providers.expression_evaluator import ExpressionEvaluator
-from rufus.providers.template_engine import TemplateEngine
-from rufus.builder import WorkflowBuilder
 
-class WorkflowEngine:
-    def __init__(self,
-                 persistence: PersistenceProvider,
-                 executor: ExecutionProvider,
-                 observer: WorkflowObserver,
-                 workflow_registry: Dict[str, Any], # Full registry dictionary
-                 expression_evaluator_cls: Type[ExpressionEvaluator],
-                 template_engine_cls: Type[TemplateEngine],
-                 ):
-        self.persistence: PersistenceProvider = persistence
-        self.executor: ExecutionProvider = executor
-        self.observer: WorkflowObserver = observer
-        self.workflow_registry = workflow_registry # The dictionary of all known workflows
-        self.expression_evaluator_cls = expression_evaluator_cls
-        self.template_engine_cls = template_engine_cls
-        self.workflow_builder = WorkflowBuilder( # Initialized here
-            workflow_registry=self.workflow_registry,
-            expression_evaluator_cls=self.expression_evaluator_cls,
-            template_engine_cls=self.template_engine_cls
-        )
-        # ... other initializations ...
+class RedisPersistence:
+    async def initialize(self):
+        self.redis = await aioredis.create_redis_pool(...)
+
+    async def save_workflow(self, workflow):
+        await self.redis.set(...)
+
+    async def load_workflow(self, workflow_id):
+        data = await self.redis.get(...)
+        return Workflow.model_validate_json(data)
+
+# 2. Add tests
+def test_redis_persistence():
+    persistence = RedisPersistence(...)
+    # Test all protocol methods
+
+# 3. Document in TECHNICAL_DOCUMENTATION.md and API_REFERENCE.md
+
+# 4. Create example in examples/redis_persistence/
 ```
 
-Flow of Control (`next_step` method) : This is the heart of the engine, responsible
-for advancing the workflow one step at a time. It now captures the step index
-(`step_index_before_jump`) at the start of execution to ensure accurate observer logging,
-especially when handling `WorkflowJumpDirective`. Status change notifications after a step are also conditional to prevent redundant calls if the workflow is completing.
-Input Validation : Uses `step.input_schema` (a Pydantic model) to validate
-`user_input`.
-Step Type Delegation : Determines the step type and delegates execution:
-Synchronous steps (`STANDARD`, `DECISION`) are executed directly via
-`self.executor.execute_sync_step_function`.
-Asynchronous steps (`ASYNC`, `HTTP`) are dispatched via
-`self.executor.dispatch_async_task`.
-`ParallelWorkflowStep` tasks are dispatched via
-`self.executor.dispatch_parallel_tasks`.
-Other special steps (`FireAndForget`, `Loop`, `CronSchedule`) have
-their logic handled, often involving the builder or execution provider.
-Directive Handling : Catches Workflow Directives (exceptions) to
-implement complex control flow (jumps, pauses, sub-workflow initiation).
+---
 
-Sub-workflow Status Bubbling (`_notify_status_change`) : This helper
-centralizes status updates and ensures child workflows report their status to parents
-via the ExecutionProvider. `_notify_status_change` is called at critical points,
-including after each step execution and on workflow completion. Intermediate notifications
-(e.g., after a step but before automation) are now conditional to prevent duplicate
-notifications with the final completion notification.
+## Additional Resources
 
-```python
-# rufus/engine.py (simplified)
-from rufus.models import WorkflowStatus
+- **[README.md](README.md)** - Project overview
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migrating from Confucius
+- **[API_REFERENCE.md](API_REFERENCE.md)** - Complete API documentation
+- **[examples/](examples/)** - Working code examples
 
-# ... (inside WorkflowEngine class) ...
-async def _notify_status_change(self, old_status: WorkflowStatus, new_status: WorkflowStatus,
-                                  current_step_name: Optional[str] = None,
-                                  final_result: Optional[Dict[str, Any]] = None):
-    """Helper to centralize status change notifications."""
-    await self.observer.on_workflow_status_changed(self.id, old_status.value, new_status.value,
-                                                    current_step_name, final_result)
-    if self.parent_execution_id:
-        # If this is a child workflow, report its status change
-        await self.executor.report_child_status_to_parent(
-            child_id=self.id,
-            parent_id=self.parent_execution_id,
-            child_new_status=new_status,
-            child_current_step_name=current_step_name,
-            child_result=final_result # Only relevant if status
-        )
-```
+---
 
-Saga Pattern : The `enable_saga_mode` method and `_execute_saga_rollback`
-handle transactional integrity by executing compensation functions.
-Dynamic Execution : `_process_dynamic_injection` allows runtime modification
-of the workflow step sequence based on conditions evaluated by the
-`ExpressionEvaluator`.
+## Appendix: Design Decisions
 
-**3. rufus/providers/ (The Extension Points)**
+### Why SDK-First?
 
-These modules define Python Protocols that establish clear contracts for integrating
-external services, making Rufus highly pluggable.
+**Alternative:** Separate workflow server (like Temporal, Cadence)
 
+**Decision:** SDK-first for better integration and simpler deployment
 
-PersistenceProvider (rufus/providers/persistence.py) : Defines how
-workflow states are saved and loaded, and how audit logs and task records are
-managed.
-ExecutionProvider (rufus/providers/execution.py) : Abstracts the
-underlying execution environment for all non-synchronous operations.
+**Trade-offs:**
+- ✅ Lower latency (no network calls)
+- ✅ Simpler deployment (fewer components)
+- ✅ Better integration (direct access to app context)
+- ❌ Requires application to manage state
+- ❌ Less isolation (workflow failures can affect app)
 
-```python
-# rufus/providers/execution.py (simplified)
-from typing import Protocol, List, Dict, Any, Callable
-from rufus.models import ParallelExecutionTask, WorkflowStatus
+### Why YAML for Workflows?
 
-class ExecutionProvider(Protocol):
-    async def initialize(self, workflow_engine: Any): # Added workflow_engine for context
-        ...
-    async def close(self):
-        ...
-    async def dispatch_async_task(self, workflow_id: str, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any]):
-        ...
-    async def dispatch_parallel_tasks(self, workflow_id: str, tasks: List[ParallelExecutionTask], state_data: Dict[str, Any], context_data: Dict[str, Any],
-                                        merge_function_path: Optional[str] = None, timeout_seconds: Optional[int] = None, allow_partial_success: bool = False):
-        ...
-    async def dispatch_sub_workflow(self, child_workflow_id: str, parent_workflow_id: str, sub_workflow_type: str, initial_data: Dict[str, Any],
-                                      owner_id: Optional[str] = None, org_id: Optional[str] = None, data_region: Optional[str] = None):
-        ...
-    async def report_child_status_to_parent(self, child_id: str, parent_id: str, child_new_status: WorkflowStatus,
-                                            child_current_step_name: Optional[str] = None, child_result: Optional[Dict[str, Any]] = None):
-        ...
-    async def execute_sync_step_function(self, func: Callable, state: BaseModel, context: StepContext) -> Dict[str, Any]:
-        ...
-```
+**Alternatives:** Python DSL, JSON, custom language
 
-Note the methods for parallel task dispatch with new `timeout_seconds` and
-`allow_partial_success` parameters, and `report_child_status_to_parent`
-for sub-workflow status bubbling.
-WorkflowObserver (rufus/providers/observer.py) : Provides hooks for
-external systems to observe workflow events (start, step execution, completion,
-failure, rollback, status changes).
-ExpressionEvaluator (rufus/providers/expression_evaluator.py) :
-Defines an interface for evaluating conditions, allowing for pluggable expression
-languages.
-TemplateEngine (rufus/providers/template_engine.py) : Provides an
-interface for rendering dynamic content from workflow state, used in HTTP steps or
-FireAndForget initial data.
+**Decision:** YAML for readability and familiarity
 
-**4. rufus/builder.py (The Workflow Assembler)**
+**Trade-offs:**
+- ✅ Human-readable
+- ✅ Version control friendly
+- ✅ Non-developers can understand
+- ❌ No IDE autocomplete
+- ❌ Runtime validation only
 
-The `WorkflowBuilder` is responsible for loading workflow configurations (from YAML)
-and assembling them into executable `WorkflowEngine` instances. It handles dynamic
-module imports for step functions and state models, and auto-discovery of steps from
-installed `rufus-*` packages.
+### Why Protocol-Based Providers?
 
-**5. rufus/implementations/ (Default Concrete Implementations)**
+**Alternatives:** Abstract base classes, duck typing
 
-This directory contains default, production-ready implementations of the provider
-interfaces.
+**Decision:** Protocols for structural subtyping
 
+**Trade-offs:**
+- ✅ No inheritance required
+- ✅ Compatible with existing classes
+- ✅ Static type checking
+- ❌ Less runtime validation
+- ❌ Requires type checker (mypy)
 
-rufus/implementations/persistence/postgres.py : A robust PostgreSQL-
-based persistence provider leveraging JSONB and FOR UPDATE SKIP LOCKED.
-rufus/implementations/execution/sync.py : A synchronous executor for
-simple scenarios and testing, executing steps directly in the current process. It
-implements `dispatch_parallel_tasks` using `ThreadPoolExecutor` for local
-concurrency and handling timeouts/partial success.
-rufus/implementations/execution/celery.py : A `CeleryExecutor` that
-dispatches tasks to a Celery cluster for distributed asynchronous and parallel
-execution. It uses Celery's group and chain primitives, and dispatches the
-`merge_and_resume_parallel_tasks` and `report_child_workflow_status`
-Celery tasks for robust handling of parallel step results and sub-workflow status
-propagation.
-rufus/implementations/execution/celery_tasks.py : Contains the actual
-Celery tasks (`resume_workflow_from_celery`,
-`merge_and_resume_parallel_tasks`, `report_child_workflow_status`,
-`execute_sub_workflow`, etc.) that execute on Celery workers.
-`merge_and_resume_parallel_tasks`: Collects results from parallel Celery
-tasks, performs merging (with conflict logging), respects
-`allow_partial_success`, and then resumes the main workflow.
+### Why Exceptions for Directives?
 
+**Alternatives:** Return values, callback objects
 
-`report_child_workflow_status`: Receives status updates from child
-workflows and updates the parent workflow's status accordingly
-(`FAILED_CHILD_WORKFLOW`, `WAITING_CHILD_HUMAN_INPUT`, etc.), and
-triggers parent resumption if the child completes.
-rufus/implementations/observability/logging.py : A basic
-`WorkflowObserver` that logs workflow events to the console.
+**Decision:** Exceptions for explicit control flow
 
-## Key Features (Technical Deep Dive)
+**Trade-offs:**
+- ✅ Non-intrusive to step functions
+- ✅ Explicit and visible
+- ✅ Type-safe with Pydantic
+- ❌ Can be confusing for newcomers
+- ❌ Stack traces in normal flow
 
-### Workflow Primitives
+---
 
-Rufus supports a rich set of step types, each handled uniquely by the `WorkflowEngine`
-and its `ExecutionProvider`:
-
-Standard/Decision Steps : Executed synchronously via
-`ExecutionProvider.execute_sync_step_function`. Decision steps leverage
-the `ExpressionEvaluator` for routing.
-Async/HTTP Steps : Dispatched to the `ExecutionProvider` via
-`dispatch_async_task`, which typically queues them for background processing
-(e.g., Celery).
-Parallel Steps : Tasks are dispatched as a group via
-`ExecutionProvider.dispatch_parallel_tasks`. Results are collected and
-merged by a dedicated callback mechanism (e.g.,
-`merge_and_resume_parallel_tasks` in Celery), incorporating configurable
-`timeout_seconds` and `allow_partial_success`.
-Sub-Workflows : Initiated by `StartSubWorkflowDirective`. The parent workflow
-pauses, and a child workflow is executed (via
-`ExecutionProvider.dispatch_sub_workflow`). Status changes of the child are
-actively reported back to the parent.
-
-### Saga Pattern
-
-The `WorkflowEngine` facilitates distributed transactions using the Saga pattern.
-`CompensatableSteps` define `compensate_funcs`. If a `SagaWorkflowException` is
-raised, `_execute_saga_rollback` systematically executes these compensation
-functions in reverse order of completion.
-
-### Dynamic Execution
-
-The `_process_dynamic_injection` method within `WorkflowEngine` allows for highly
-flexible workflows. Based on rules defined in YAML and evaluated against the current state
-using `ExpressionEvaluator`, new steps can be inserted into the workflow's execution
-path at runtime.
-
-### Sub-Workflow Management
-
-Rufus implements robust status bubbling for sub-workflows. When a child workflow
-changes its status, its `WorkflowEngine` (via `_notify_status_change`) calls
-`ExecutionProvider.report_child_status_to_parent`. This, in turn, dispatches a
-Celery task (`report_child_workflow_status`) that updates the parent workflow's
-status to reflect the child's state (e.g., `PENDING_SUB_WORKFLOW`,
-`WAITING_CHILD_HUMAN_INPUT`, `FAILED_CHILD_WORKFLOW`). This provides real-time
-visibility and enables the parent to react appropriately.
-
-### Parallel Execution Enhancements
-
-The `ParallelWorkflowStep` and its handling in `ExecutionProvider` implementations
-(`SyncExecutor`, `CeleryExecutor`) are significantly enhanced:
-
-
-Conflict Detection : During default merges of parallel task results, Rufus logs
-warnings when key collisions occur, ensuring developers are aware of potential data
-overwrites.
-Timeouts : Individual parallel tasks can have `timeout_seconds` defined, preventing
-indefinite blocking.
-Partial Success : The `allow_partial_success` flag enables workflows to proceed
-even if some parallel tasks fail or timeout, providing greater flexibility for non-critical
-operations.
-Improved Custom Merge : Custom merge functions now receive a dictionary
-mapping task names to their results, along with the current workflow state, allowing
-for more informed and robust aggregation logic.
-
-## Key Technologies
-
-Rufus leverages a modern Python ecosystem for robustness, performance, and developer
-experience.
-
-
-Pydantic : Robust data validation and serialization for workflow state and step
-inputs.
-YAML : Domain Specific Language (DSL) for declarative workflow definitions.
-FastAPI (for `rufus-server`) : High-performance, asynchronous REST APIs and
-WebSocket handling.
-Celery (for `CeleryExecutor`) : Distributed task queuing and asynchronous/parallel
-execution.
-PostgreSQL (for `PostgresPersistenceProvider`) : Primary persistence layer with JSONB state
-storage and FOR UPDATE SKIP LOCKED.
-Redis : Message broker for Celery and Pub/Sub functionality.
-Typer (for `rufus-cli`) : Intuitive and robust CLI tools.
-
-## Configuration & Extensibility
-
-Workflows are defined in YAML files and registered in a central
-`workflow_registry.yaml`. Rufus's architecture, built around provider interfaces, makes
-it highly extensible. Developers can swap out default implementations with custom ones to
-integrate with their specific technology stack.
-
-## Developer Guide
-
-### Extending Rufus (Adding New Features & Logic)
-
-1. **Define State Models** : Update or create Pydantic `BaseModel` classes for your
-    workflow's state (rufus.models or your application's models).
-2. **Implement Step Functions** : Write Python functions for your workflow steps. These
-    should accept (`state: BaseModel`, `context: StepContext`). Place them in
-    well-organized Python modules within your application.
-3. **Configure Workflows** : Create or update YAML files in your `config/` directory,
-    referencing your new state models and step functions.
-4. **Register Workflows** : Update `workflow_registry.yaml` to include your new
-    workflow types and their configuration files.
-5. **Implement Custom Providers** : If default `PersistenceProvider` or
-    `ExecutionProvider` implementations don't meet your needs, create custom
-    classes that adhere to the `rufus.providers` interfaces.
-
-### Important Considerations for Contributors
-
-1. Break complex tasks down into smaller manageable steps.
-2. Prioritize API stability for the SDK. Changes to core interfaces should be carefully
-    considered.
-3. Ensure updates don't break existing workflows or default implementations.
-4. Research for up-to-date libraries and documentation.
-5. Update all relevant project documentation (`README.md`,
-    `TECHNICAL_DOCUMENTATION.md`, `USAGE_GUIDE.md`, `YAML_GUIDE.md`,
-    `API_REFERENCE.md`) after changes.
-6. Maintain comprehensive test coverage.
+**Version:** 1.0.0
+**Last Updated:** January 2026
+**Contributors:** Rufus SDK Team
