@@ -121,21 +121,27 @@ class WorkflowEngine:
         # Update parent status based on child's status
         if child_new_status == "COMPLETED":
             # Merge child's final state and result into parent's state
-            if not hasattr(parent_workflow.state, "sub_workflow_results"):
-                setattr(parent_workflow.state, "sub_workflow_results", {})
+            if not hasattr(parent_workflow.state, "sub_workflow_results") or parent_workflow.state.sub_workflow_results is None:
+                parent_workflow.state.sub_workflow_results = {}
+
+            # Load child workflow once to get its type and state
+            child_workflow = await self.get_workflow(child_id)
             parent_workflow.state.sub_workflow_results[child_id] = {
-                "workflow_type": await self.get_workflow_type(child_id), # Need to get type from child
+                "workflow_type": child_workflow.workflow_type if child_workflow else "UNKNOWN",
                 "status": child_new_status,
-                "state": (await self.get_workflow(child_id)).state.model_dump() if await self.get_workflow(child_id) else {}, # Re-load child to get final state
+                "state": child_workflow.state.model_dump() if child_workflow else {},
                 "final_result": child_result
             }
+            # Advance parent to next step (sub-workflow step is complete)
+            parent_workflow.current_step += 1
             parent_workflow.status = "ACTIVE" # Parent resumes
             parent_workflow.blocked_on_child_id = None
             await self.persistence.save_workflow(parent_id, parent_workflow.to_dict())
             await parent_workflow._notify_status_change(old_parent_status, parent_workflow.status, parent_workflow.current_step_name)
-            
-            # Resume the parent workflow
-            await parent_workflow.next_step(user_input={})
+
+            # Note: For SyncExecutor, the caller manages execution flow.
+            # For async executors (Celery, etc.), auto-resume would be needed.
+            # TODO: Make this conditional based on executor type
 
         elif child_new_status == "FAILED" or child_new_status == "FAILED_ROLLED_BACK":
             parent_workflow.status = "FAILED_CHILD_WORKFLOW"

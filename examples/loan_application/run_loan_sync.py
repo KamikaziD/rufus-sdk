@@ -147,22 +147,67 @@ async def run_loan_workflow():
     print(f"  Status: {workflow2.status}")
     print()
 
-    # Execute workflow steps
+    # Execute workflow steps until it pauses for sub-workflow or human review
     step_count = 0
-    while workflow2.status == "ACTIVE":
-        step_count += 1
-        current_step = workflow2.workflow_steps[workflow2.current_step]
-        print(f"\n--- Step {step_count}: {current_step.name} ---")
-        result = await workflow2.next_step(user_input={})
-        print(f"Status: {workflow2.status}")
-        if result:
-            print(f"Result: {result}")
+    child_workflow_id = None
+
+    while workflow2.status in ["ACTIVE", "PENDING_SUB_WORKFLOW", "WAITING_HUMAN"]:
+        if workflow2.status == "ACTIVE":
+            step_count += 1
+            current_step = workflow2.workflow_steps[workflow2.current_step]
+            print(f"\n--- Step {step_count}: {current_step.name} ---")
+            result = await workflow2.next_step(user_input={})
+            print(f"Status: {workflow2.status}")
+            if result:
+                print(f"Result: {result}")
+                # Capture child workflow ID when sub-workflow is created
+                if isinstance(result, tuple) and len(result) > 0 and isinstance(result[0], dict):
+                    child_workflow_id = result[0].get('child_workflow_id')
+
+        elif workflow2.status == "PENDING_SUB_WORKFLOW":
+            # Execute the child KYC workflow
+            print(f"\n[PARENT PAUSED] Executing child KYC workflow: {workflow2.blocked_on_child_id}")
+            child_workflow = await engine.get_workflow(workflow2.blocked_on_child_id)
+
+            child_step_count = 0
+            while child_workflow.status == "ACTIVE":
+                child_step_count += 1
+                current_child_step = child_workflow.workflow_steps[child_workflow.current_step]
+                print(f"  [KYC] Step {child_step_count}: {current_child_step.name}")
+                child_result = await child_workflow.next_step(user_input={})
+                print(f"  [KYC] Status: {child_workflow.status}")
+
+            print(f"  [KYC] Child workflow completed with status: {child_workflow.status}")
+            print(f"  [KYC] KYC Status: {child_workflow.state.kyc_overall_status}")
+
+            # Resume parent workflow - reload to get updated status
+            print(f"\n[PARENT RESUME] Resuming parent workflow...")
+            workflow2 = await engine.get_workflow(workflow2.id)
+            print(f"  Parent status after child completion: {workflow2.status}")
+
+        elif workflow2.status == "WAITING_HUMAN":
+            # Automatically approve for testing
+            print(f"\n[HUMAN REVIEW] Workflow waiting for human decision")
+            print(f"  Current step: {workflow2.current_step_name}")
+            print(f"  Submitting APPROVED decision...")
+
+            approval_input = {
+                "decision": "APPROVED",
+                "reviewer_id": "admin_reviewer",
+                "comments": "Test approval for Scenario 2"
+            }
+            result = await workflow2.next_step(user_input=approval_input)
+            print(f"  Status after approval: {workflow2.status}")
+            if result:
+                print(f"  Result: {result}")
 
     print()
     print(f"✓ Workflow completed with status: {workflow2.status}")
-    print(f"  Final state: {workflow2.state.final_loan_status}")
-    print(f"  Pre-approval status: {workflow2.state.pre_approval_status}")
-    print(f"  Total steps executed: {step_count}")
+    if workflow2.state and hasattr(workflow2.state, 'final_loan_status'):
+        print(f"  Final loan status: {workflow2.state.final_loan_status}")
+    if workflow2.state and hasattr(workflow2.state, 'pre_approval_status'):
+        print(f"  Pre-approval status: {workflow2.state.pre_approval_status}")
+    print(f"  Total parent steps executed: {step_count}")
     print()
 
     # Step 5: Test Scenario 3 - Automatic Rejection (high risk)

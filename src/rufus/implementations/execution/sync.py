@@ -57,15 +57,23 @@ class SyncExecutor(ExecutionProvider):
             raise ValueError(f"Function not found at path: {func_path}")
 
         # Reconstruct state for the task context
-        state_model_class = self._engine.workflow_builder._import_from_string(self._engine.get_workflow(workflow_id).state_model_path)
+        workflow = await self._engine.get_workflow(workflow_id)
+        state_model_class = self._engine.workflow_builder._import_from_string(workflow.state_model_path)
         state_instance = state_model_class(**state_data)
-        context = StepContext(workflow_id=workflow_id, step_name=func.__name__, previous_step_result=kwargs.get('_previous_step_result')) # Revisit context for async tasks
+        context = StepContext(workflow_id=workflow_id, step_name=func.__name__, previous_step_result=kwargs.get('_previous_step_result'))
+
+        # Filter out internal parameters that shouldn't be passed to user functions
+        user_kwargs = {k: v for k, v in kwargs.items() if not k.startswith('_')}
 
         # Execute the function (ensure it's awaited if async)
+        # For async task functions (ASYNC steps), pass dict like Celery would
+        # For sync step functions (STANDARD steps), pass Pydantic model
+        # We can determine this by checking if the function expects 'state: dict' or 'state: Model'
+        # For now, async steps always get dict to match Celery behavior
         if asyncio.iscoroutinefunction(func):
-            task_result = await func(state=state_instance, context=context, **kwargs)
+            task_result = await func(state=state_data, context=context, **user_kwargs)
         else:
-            task_result = func(state=state_instance, context=context, **kwargs)
+            task_result = func(state=state_data, context=context, **user_kwargs)
 
         # In a real async executor, this would involve Celery or similar.
         # Here, we simulate the 'callback' to WorkflowEngine's resume_workflow
