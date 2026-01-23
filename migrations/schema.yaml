@@ -1,0 +1,776 @@
+# Rufus SDK - Unified Database Schema Definition
+# Version: 1.0.0
+# This schema is compiled to database-specific SQL by tools/compile_schema.py
+
+version: "1.0.0"
+description: "Rufus workflow engine persistence schema"
+
+# Type mappings for different databases
+type_mappings:
+  uuid:
+    postgres: "UUID"
+    sqlite: "TEXT"
+
+  jsonb:
+    postgres: "JSONB"
+    sqlite: "TEXT"  # JSON stored as TEXT in SQLite
+
+  timestamp:
+    postgres: "TIMESTAMPTZ"
+    sqlite: "TEXT"  # ISO8601 strings ("YYYY-MM-DD HH:MM:SS.SSS")
+
+  bigserial:
+    postgres: "BIGSERIAL"
+    sqlite: "INTEGER"  # with AUTOINCREMENT
+
+  text:
+    postgres: "TEXT"
+    sqlite: "TEXT"
+
+  varchar:
+    postgres: "VARCHAR"
+    sqlite: "TEXT"
+
+  integer:
+    postgres: "INTEGER"
+    sqlite: "INTEGER"
+
+  numeric:
+    postgres: "NUMERIC"
+    sqlite: "REAL"
+
+  boolean:
+    postgres: "BOOLEAN"
+    sqlite: "INTEGER"  # 0 or 1
+
+  inet:
+    postgres: "INET"
+    sqlite: "TEXT"
+
+# Database-specific extensions
+extensions:
+  postgres:
+    - "uuid-ossp"
+    - "pgcrypto"
+  sqlite: []
+
+# Table definitions
+tables:
+  # ============================================================================
+  # CORE WORKFLOW EXECUTIONS TABLE
+  # ============================================================================
+  workflow_executions:
+    description: "Core workflow execution state and metadata"
+    columns:
+      - name: id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: workflow_type
+        type: varchar
+        size: 100
+        nullable: false
+
+      - name: current_step
+        type: integer
+        nullable: false
+        default: 0
+
+      - name: status
+        type: varchar
+        size: 50
+        nullable: false
+
+      - name: state
+        type: jsonb
+        nullable: false
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+      - name: steps_config
+        type: jsonb
+        nullable: false
+        default:
+          postgres: "'[]'::jsonb"
+          sqlite: "'[]'"
+
+      - name: state_model_path
+        type: varchar
+        size: 500
+        nullable: false
+
+      - name: saga_mode
+        type: boolean
+        default: false
+
+      - name: completed_steps_stack
+        type: jsonb
+        default:
+          postgres: "'[]'::jsonb"
+          sqlite: "'[]'"
+
+      - name: parent_execution_id
+        type: uuid
+        nullable: true
+        foreign_key:
+          table: workflow_executions
+          column: id
+          on_delete: CASCADE
+
+      - name: blocked_on_child_id
+        type: uuid
+        nullable: true
+
+      - name: data_region
+        type: varchar
+        size: 50
+        default: "'us-east-1'"
+
+      - name: priority
+        type: integer
+        default: 5
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: updated_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: completed_at
+        type: timestamp
+        nullable: true
+
+      - name: idempotency_key
+        type: varchar
+        size: 255
+        nullable: true
+        unique: true
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+    indexes:
+      - name: idx_workflow_status
+        columns: [status, updated_at]
+        order:
+          updated_at: DESC
+
+      - name: idx_workflow_type
+        columns: [workflow_type]
+
+      - name: idx_workflow_parent
+        columns: [parent_execution_id]
+        where: "parent_execution_id IS NOT NULL"
+
+      - name: idx_workflow_region
+        columns: [data_region]
+
+      - name: idx_workflow_priority
+        columns: [priority, created_at]
+        where: "status = 'PENDING'"
+
+      - name: idx_sub_workflows
+        columns: [parent_execution_id, created_at]
+        where: "parent_execution_id IS NOT NULL"
+
+      - name: idx_workflow_idempotency
+        columns: [idempotency_key]
+        where: "idempotency_key IS NOT NULL"
+
+      - name: idx_failed_workflows
+        columns: [status, updated_at]
+        order:
+          updated_at: DESC
+        where: "status IN ('FAILED', 'FAILED_ROLLED_BACK')"
+
+      - name: idx_saga_workflows
+        columns: [saga_mode, status]
+        where: "saga_mode = TRUE"
+
+  # ============================================================================
+  # TASK QUEUE TABLE (for distributed worker claiming)
+  # ============================================================================
+  tasks:
+    description: "Task queue for distributed worker claiming with idempotency"
+    columns:
+      - name: task_id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: execution_id
+        type: uuid
+        nullable: false
+        foreign_key:
+          table: workflow_executions
+          column: id
+          on_delete: CASCADE
+
+      - name: step_name
+        type: varchar
+        size: 200
+        nullable: false
+
+      - name: step_index
+        type: integer
+        nullable: false
+
+      - name: status
+        type: varchar
+        size: 50
+        nullable: false
+        default: "'PENDING'"
+
+      - name: worker_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: claimed_at
+        type: timestamp
+        nullable: true
+
+      - name: started_at
+        type: timestamp
+        nullable: true
+
+      - name: completed_at
+        type: timestamp
+        nullable: true
+
+      - name: retry_count
+        type: integer
+        default: 0
+
+      - name: max_retries
+        type: integer
+        default: 3
+
+      - name: last_error
+        type: text
+        nullable: true
+
+      - name: task_data
+        type: jsonb
+        nullable: true
+
+      - name: result
+        type: jsonb
+        nullable: true
+
+      - name: idempotency_key
+        type: varchar
+        size: 255
+        nullable: true
+        unique: true
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: updated_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+    indexes:
+      - name: idx_tasks_claim
+        columns: [status, created_at]
+        where: "status = 'PENDING'"
+
+      - name: idx_tasks_execution
+        columns: [execution_id, step_index]
+
+  # ============================================================================
+  # COMPENSATION LOG (Saga Pattern)
+  # ============================================================================
+  compensation_log:
+    description: "Saga pattern compensation actions for rollback capability"
+    columns:
+      - name: log_id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: execution_id
+        type: uuid
+        nullable: false
+        foreign_key:
+          table: workflow_executions
+          column: id
+          on_delete: CASCADE
+
+      - name: step_name
+        type: varchar
+        size: 200
+        nullable: false
+
+      - name: step_index
+        type: integer
+        nullable: false
+
+      - name: action_type
+        type: varchar
+        size: 50
+        nullable: false
+        comment: "FORWARD, COMPENSATE, COMPENSATE_FAILED"
+
+      - name: action_result
+        type: jsonb
+        nullable: true
+
+      - name: error_message
+        type: text
+        nullable: true
+
+      - name: executed_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: executed_by
+        type: varchar
+        size: 100
+        nullable: true
+        comment: "worker_id"
+
+      - name: state_before
+        type: jsonb
+        nullable: true
+
+      - name: state_after
+        type: jsonb
+        nullable: true
+
+    indexes:
+      - name: idx_compensation_execution
+        columns: [execution_id, executed_at]
+        order:
+          executed_at: DESC
+
+  # ============================================================================
+  # AUDIT LOG (Compliance & Debugging)
+  # ============================================================================
+  workflow_audit_log:
+    description: "Compliance and audit trail for all workflow events"
+    columns:
+      - name: audit_id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: workflow_id
+        type: uuid
+        nullable: false
+        comment: "Not FK to preserve history even after deletion"
+
+      - name: execution_id
+        type: uuid
+        nullable: true
+
+      - name: event_type
+        type: varchar
+        size: 50
+        nullable: false
+        comment: "CREATED, STEP_COMPLETED, FAILED, ROLLED_BACK, etc."
+
+      - name: step_name
+        type: varchar
+        size: 200
+        nullable: true
+
+      - name: user_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: worker_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: recorded_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: old_state
+        type: jsonb
+        nullable: true
+
+      - name: new_state
+        type: jsonb
+        nullable: true
+
+      - name: state_diff
+        type: jsonb
+        nullable: true
+        comment: "Computed difference"
+
+      - name: decision_rationale
+        type: text
+        nullable: true
+        comment: "For human-in-loop steps"
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+      - name: ip_address
+        type: inet
+        nullable: true
+
+      - name: user_agent
+        type: text
+        nullable: true
+
+    indexes:
+      - name: idx_audit_workflow
+        columns: [workflow_id, recorded_at]
+        order:
+          recorded_at: DESC
+
+      - name: idx_audit_event_type
+        columns: [event_type, recorded_at]
+        order:
+          recorded_at: DESC
+
+  # ============================================================================
+  # EXECUTION LOGS (Operational Debugging)
+  # ============================================================================
+  workflow_execution_logs:
+    description: "Operational logs for debugging workflow execution. Retention: 30 days. Partition by logged_at for performance."
+    columns:
+      - name: log_id
+        type: bigserial
+        primary_key: true
+
+      - name: workflow_id
+        type: uuid
+        nullable: false
+
+      - name: execution_id
+        type: uuid
+        nullable: true
+
+      - name: step_name
+        type: varchar
+        size: 200
+        nullable: true
+
+      - name: log_level
+        type: varchar
+        size: 20
+        nullable: false
+        comment: "DEBUG, INFO, WARNING, ERROR, CRITICAL"
+
+      - name: message
+        type: text
+        nullable: false
+
+      - name: logged_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: worker_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+      - name: trace_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: span_id
+        type: varchar
+        size: 100
+        nullable: true
+
+    indexes:
+      - name: idx_execution_logs_workflow
+        columns: [workflow_id, logged_at]
+        order:
+          logged_at: DESC
+
+      - name: idx_execution_logs_level
+        columns: [log_level, logged_at]
+        order:
+          logged_at: DESC
+        where: "log_level IN ('ERROR', 'CRITICAL')"
+
+  # ============================================================================
+  # METRICS (Performance Monitoring)
+  # ============================================================================
+  workflow_metrics:
+    description: "Performance metrics and monitoring data. Retention: 90 days. Consider TimescaleDB for time-series optimization."
+    columns:
+      - name: metric_id
+        type: bigserial
+        primary_key: true
+
+      - name: workflow_id
+        type: uuid
+        nullable: false
+
+      - name: workflow_type
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: execution_id
+        type: uuid
+        nullable: true
+
+      - name: step_name
+        type: varchar
+        size: 200
+        nullable: true
+
+      - name: metric_name
+        type: varchar
+        size: 100
+        nullable: false
+        comment: "step_duration_ms, retry_count, queue_time_ms, etc."
+
+      - name: metric_value
+        type: numeric
+        nullable: false
+
+      - name: unit
+        type: varchar
+        size: 20
+        nullable: true
+        comment: "ms, count, bytes, etc."
+
+      - name: recorded_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: tags
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+    indexes:
+      - name: idx_metrics_workflow_type
+        columns: [workflow_type, metric_name, recorded_at]
+        order:
+          recorded_at: DESC
+
+      - name: idx_metrics_step
+        columns: [step_name, metric_name, recorded_at]
+        order:
+          recorded_at: DESC
+
+# ============================================================================
+# TRIGGERS (PostgreSQL only)
+# ============================================================================
+triggers:
+  postgres:
+    # Auto-update updated_at timestamp
+    - name: workflow_executions_updated_at
+      table: workflow_executions
+      timing: BEFORE UPDATE
+      for_each: ROW
+      function: |
+        CREATE OR REPLACE FUNCTION update_updated_at_column()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            NEW.updated_at = NOW();
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+    - name: tasks_updated_at
+      table: tasks
+      timing: BEFORE UPDATE
+      for_each: ROW
+      function: update_updated_at_column
+
+    # Emit workflow status change notifications
+    - name: workflow_update_trigger
+      table: workflow_executions
+      timing: AFTER UPDATE
+      for_each: ROW
+      function: |
+        CREATE OR REPLACE FUNCTION notify_workflow_update()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            payload JSON;
+        BEGIN
+            IF OLD.status IS DISTINCT FROM NEW.status THEN
+                payload = json_build_object(
+                    'id', NEW.id,
+                    'workflow_type', NEW.workflow_type,
+                    'status', NEW.status,
+                    'current_step', NEW.current_step,
+                    'updated_at', NEW.updated_at,
+                    'event', 'status_changed',
+                    'old_status', OLD.status
+                );
+                PERFORM pg_notify('workflow_update', payload::text);
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+    # Auto-populate completed_at
+    - name: workflow_completed_at
+      table: workflow_executions
+      timing: BEFORE UPDATE
+      for_each: ROW
+      function: |
+        CREATE OR REPLACE FUNCTION set_completed_at()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF NEW.status IN ('COMPLETED', 'FAILED', 'FAILED_ROLLED_BACK') AND OLD.completed_at IS NULL THEN
+                NEW.completed_at = NOW();
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+  sqlite:
+    # SQLite uses triggers differently - updated_at handled via trigger
+    - name: workflow_executions_updated_at
+      table: workflow_executions
+      timing: AFTER UPDATE
+      for_each: ROW
+      when: "OLD.updated_at = NEW.updated_at"
+      action: |
+        UPDATE workflow_executions
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = NEW.id;
+
+    - name: tasks_updated_at
+      table: tasks
+      timing: AFTER UPDATE
+      for_each: ROW
+      when: "OLD.updated_at = NEW.updated_at"
+      action: |
+        UPDATE tasks
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = NEW.task_id;
+
+    # Auto-populate completed_at
+    - name: workflow_completed_at
+      table: workflow_executions
+      timing: AFTER UPDATE
+      for_each: ROW
+      when: "NEW.status IN ('COMPLETED', 'FAILED', 'FAILED_ROLLED_BACK') AND NEW.completed_at IS NULL"
+      action: |
+        UPDATE workflow_executions
+        SET completed_at = CURRENT_TIMESTAMP
+        WHERE id = NEW.id;
+
+# ============================================================================
+# VIEWS
+# ============================================================================
+views:
+  active_workflows:
+    description: "Active workflows with current step info"
+    definition:
+      postgres: |
+        SELECT
+            id,
+            workflow_type,
+            status,
+            current_step,
+            state_model_path,
+            data_region,
+            priority,
+            created_at,
+            updated_at,
+            (updated_at - created_at) AS duration,
+            parent_execution_id IS NOT NULL AS is_sub_workflow
+        FROM workflow_executions
+        WHERE status NOT IN ('COMPLETED', 'FAILED', 'FAILED_ROLLED_BACK')
+        ORDER BY priority ASC, created_at ASC
+
+      sqlite: |
+        SELECT
+            id,
+            workflow_type,
+            status,
+            current_step,
+            state_model_path,
+            data_region,
+            priority,
+            created_at,
+            updated_at,
+            (julianday(updated_at) - julianday(created_at)) * 86400 AS duration,
+            CASE WHEN parent_execution_id IS NOT NULL THEN 1 ELSE 0 END AS is_sub_workflow
+        FROM workflow_executions
+        WHERE status NOT IN ('COMPLETED', 'FAILED', 'FAILED_ROLLED_BACK')
+        ORDER BY priority ASC, created_at ASC
+
+  workflow_execution_summary:
+    description: "Workflow execution summary for last 24 hours"
+    definition:
+      postgres: |
+        SELECT
+            workflow_type,
+            status,
+            COUNT(*) AS execution_count,
+            AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) AS avg_duration_seconds,
+            MAX(updated_at) AS last_execution
+        FROM workflow_executions
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        GROUP BY workflow_type, status
+
+      sqlite: |
+        SELECT
+            workflow_type,
+            status,
+            COUNT(*) AS execution_count,
+            AVG((julianday(completed_at) - julianday(created_at)) * 86400) AS avg_duration_seconds,
+            MAX(updated_at) AS last_execution
+        FROM workflow_executions
+        WHERE created_at > datetime('now', '-24 hours')
+        GROUP BY workflow_type, status
+
+# ============================================================================
+# SCHEMA METADATA
+# ============================================================================
+metadata:
+  migration_table: schema_migrations
+  version_column: version
+  applied_at_column: applied_at

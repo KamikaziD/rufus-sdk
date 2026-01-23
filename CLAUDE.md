@@ -460,6 +460,158 @@ export RUFUS_USE_ORJSON=false  # Use stdlib json
 - **-80% serialization time** for state persistence
 - **-90% import overhead** for repeated step function calls
 
+## Database Schema Management
+
+Rufus uses a **unified schema definition** approach to support multiple databases (PostgreSQL and SQLite) without schema divergence.
+
+### Schema Standardization Architecture
+
+```
+migrations/schema.yaml (unified definition)
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+PostgreSQL     SQLite
+ .sql files    .sql files
+```
+
+**Key Components:**
+
+1. **`migrations/schema.yaml`** - Single source of truth for database schema
+   - Database-agnostic column types (uuid, jsonb, timestamp, etc.)
+   - Type mappings for each database (JSONB→TEXT for SQLite)
+   - Table definitions, indexes, triggers, views
+   - Version: 1.0.0
+
+2. **`tools/compile_schema.py`** - Schema compiler
+   - Generates database-specific SQL from YAML
+   - Handles type conversions automatically
+   - Supports PostgreSQL and SQLite
+
+3. **`tools/validate_schema.py`** - Schema validation
+   - Compares generated SQL against original
+   - Verifies type mappings are correct
+   - Ensures all tables, indexes, triggers present
+
+4. **`tools/migrate.py`** - Migration manager
+   - Tracks applied migrations via `schema_migrations` table
+   - Applies pending migrations in order
+   - Supports both PostgreSQL and SQLite
+
+### Type Mappings
+
+| Unified Type | PostgreSQL | SQLite |
+|--------------|------------|--------|
+| `uuid` | UUID | TEXT |
+| `jsonb` | JSONB | TEXT |
+| `timestamp` | TIMESTAMPTZ | TEXT |
+| `boolean` | BOOLEAN | INTEGER (0/1) |
+| `bigserial` | BIGSERIAL | INTEGER AUTOINCREMENT |
+| `numeric` | NUMERIC | REAL |
+| `inet` | INET | TEXT |
+
+### Workflow
+
+**Generate Migrations:**
+```bash
+# Generate both PostgreSQL and SQLite migrations
+python tools/compile_schema.py --all
+
+# Generate specific database
+python tools/compile_schema.py --target postgres --output migrations/002_postgres.sql
+python tools/compile_schema.py --target sqlite --output migrations/002_sqlite.sql
+```
+
+**Validate Schema:**
+```bash
+# Validate all databases
+python tools/validate_schema.py --all
+
+# Validate specific database
+python tools/validate_schema.py --target postgres
+```
+
+**Apply Migrations:**
+```bash
+# PostgreSQL
+python tools/migrate.py --db postgres://user:pass@localhost/dbname --init
+python tools/migrate.py --db postgres://user:pass@localhost/dbname --status
+python tools/migrate.py --db postgres://user:pass@localhost/dbname --up
+
+# SQLite
+python tools/migrate.py --db sqlite:///path/to/db.sqlite --init
+python tools/migrate.py --db sqlite:///path/to/db.sqlite --up
+```
+
+### Schema Modification Process
+
+When modifying the database schema:
+
+1. **Edit only `migrations/schema.yaml`** - Never edit .sql files directly
+2. **Increment schema version** in schema.yaml
+3. **Generate migrations** using compile_schema.py
+4. **Validate** using validate_schema.py
+5. **Test migrations** against test databases
+6. **Commit all files** (schema.yaml + generated .sql files)
+
+Example schema.yaml structure:
+```yaml
+version: "1.0.0"
+
+type_mappings:
+  uuid:
+    postgres: "UUID"
+    sqlite: "TEXT"
+
+tables:
+  my_table:
+    description: "Table description"
+    columns:
+      - name: id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: data
+        type: jsonb
+        nullable: false
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+    indexes:
+      - name: idx_my_table_id
+        columns: [id]
+```
+
+### Database Support
+
+**PostgreSQL (Production):**
+- Full feature support
+- LISTEN/NOTIFY for real-time updates
+- Advanced indexing (GIN, partial indexes)
+- Triggers and stored procedures
+- Connection pooling
+
+**SQLite (Development/Testing):**
+- Embedded database (no server needed)
+- Fast in-memory mode for tests
+- Single-file portability
+- Feature parity with PostgreSQL schema
+- Limitations: No LISTEN/NOTIFY, simpler triggers
+
+### Testing with SQLite
+
+```python
+# Use SQLite for fast tests
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()
+```
+
 ## Important Notes
 
 - **Path Resolution**: All YAML paths resolved via `importlib.import_module`
