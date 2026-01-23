@@ -1,0 +1,17 @@
+# Flask API Example - Requirements
+
+# Web framework
+Flask==3.0.0
+flask-cors==4.0.0
+
+# Rufus SDK (install from parent directory)
+# pip install -e ../..
+
+# Database
+psycopg2-binary==2.9.9
+
+# YAML parsing (included in Rufus, but explicit here)
+PyYAML==6.0.1
+
+# Production server (optional)
+gunicorn==21.2.0

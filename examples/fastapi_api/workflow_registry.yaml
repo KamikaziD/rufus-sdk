@@ -1,0 +1,7 @@
+# Workflow Registry for Flask API Example
+
+workflows:
+  - type: "OrderProcessing"
+    description: "E-commerce order processing workflow with approval step"
+    config_file: "order_workflow.yaml"
+    initial_state_model: "state_models.OrderState"
