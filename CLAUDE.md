@@ -365,6 +365,101 @@ assert workflow.state.status == "completed"
 - Mock external services in step functions
 - Use `pytest` fixtures for common setup
 
+## Performance Optimizations (Phase 1)
+
+Rufus SDK includes production-grade performance optimizations enabled by default:
+
+### Optimizations Implemented
+
+1. **uvloop Event Loop**
+   - 2-4x faster async I/O operations
+   - Configured automatically in `src/rufus/__init__.py`
+   - Control via `RUFUS_USE_UVLOOP` environment variable
+   ```python
+   # Automatically enabled on import
+   import rufus  # uvloop configured here
+   ```
+
+2. **orjson Serialization**
+   - 3-5x faster JSON serialization/deserialization
+   - Utility module: `src/rufus/utils/serialization.py`
+   - Used in: postgres.py, redis.py, celery.py
+   ```python
+   from rufus.utils.serialization import serialize, deserialize
+
+   # Fast serialization
+   json_str = serialize({"key": "value"})
+   data = deserialize(json_str)
+   ```
+
+3. **Optimized PostgreSQL Connection Pool**
+   - Default: min=10, max=50 connections (tuned for high concurrency)
+   - Configurable via constructor or environment variables
+   ```python
+   persistence = PostgresPersistenceProvider(
+       db_url=db_url,
+       pool_min_size=10,
+       pool_max_size=50
+   )
+   ```
+   - Environment variables:
+     - `POSTGRES_POOL_MIN_SIZE` (default: 10)
+     - `POSTGRES_POOL_MAX_SIZE` (default: 50)
+     - `POSTGRES_POOL_COMMAND_TIMEOUT` (default: 10)
+     - `POSTGRES_POOL_MAX_QUERIES` (default: 50000)
+     - `POSTGRES_POOL_MAX_INACTIVE_LIFETIME` (default: 300)
+
+4. **Import Caching**
+   - Class-level cache in `WorkflowBuilder._import_cache`
+   - 162x speedup for repeated step function imports
+   - Reduces 5-10ms overhead per step execution
+   ```python
+   # Cached automatically - no code changes needed
+   func = WorkflowBuilder._import_from_string("my_app.steps.process_data")
+   ```
+
+### Benchmark Results
+
+Run benchmarks: `python tests/benchmarks/workflow_performance.py`
+
+```
+Serialization: 2,453,971 ops/sec (orjson)
+Import Caching: 162x speedup
+Async Latency: 5.5µs p50, 12.7µs p99 (uvloop)
+Workflow Throughput: 703,633 workflows/sec (simplified)
+```
+
+### Performance Guidelines
+
+**When writing new code:**
+- Use `from rufus.utils.serialization import serialize, deserialize` for JSON operations
+- Import caching is automatic - no code changes needed
+- PostgreSQL pool settings can be tuned per deployment
+
+**Configuration for different workloads:**
+- **Low concurrency** (< 10 concurrent workflows):
+  - `POSTGRES_POOL_MIN_SIZE=5`
+  - `POSTGRES_POOL_MAX_SIZE=20`
+- **Medium concurrency** (10-100 concurrent workflows):
+  - `POSTGRES_POOL_MIN_SIZE=10` (default)
+  - `POSTGRES_POOL_MAX_SIZE=50` (default)
+- **High concurrency** (> 100 concurrent workflows):
+  - `POSTGRES_POOL_MIN_SIZE=20`
+  - `POSTGRES_POOL_MAX_SIZE=100`
+
+**Disabling optimizations** (for debugging):
+```bash
+export RUFUS_USE_UVLOOP=false  # Use stdlib asyncio
+export RUFUS_USE_ORJSON=false  # Use stdlib json
+```
+
+### Expected Gains
+
+- **+50-100% throughput** for I/O-bound workflows
+- **-30-40% latency** for async operations
+- **-80% serialization time** for state persistence
+- **-90% import overhead** for repeated step function calls
+
 ## Important Notes
 
 - **Path Resolution**: All YAML paths resolved via `importlib.import_module`

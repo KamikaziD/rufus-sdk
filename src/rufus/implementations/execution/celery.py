@@ -16,7 +16,7 @@ from rufus.models import MergeStrategy, MergeConflictBehavior, StepContext # Imp
 from celery import Celery, chain, group
 from celery.signals import worker_process_init
 import asyncio
-import json
+from rufus.utils.serialization import serialize, deserialize  # High-performance JSON serialization
 
 # --- Rufus Celery App Setup ---
 # This is the central Celery app instance for the Rufus SDK.

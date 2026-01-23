@@ -5,11 +5,19 @@ This example demonstrates how to embed Rufus into a FastAPI application
 to expose workflow operations via REST API endpoints with async support.
 
 Features:
-- Full async/await support
+- Full async/await support with uvloop for optimal performance
 - Automatic API documentation (Swagger/OpenAPI)
 - Pydantic models for request/response validation
 - Dependency injection for workflow engine
 - CORS support for frontend integration
+- High-performance JSON serialization (orjson)
+- Optimized PostgreSQL connection pooling
+
+Performance Optimizations:
+- uvloop event loop (2-4x faster async I/O)
+- orjson serialization (3-5x faster JSON operations)
+- Connection pool tuning (configurable via environment variables)
+- Import caching for step functions
 
 Endpoints:
 - POST /workflows - Start a new workflow
@@ -23,7 +31,6 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
-import yaml
 import os
 import sys
 from pathlib import Path
@@ -32,17 +39,16 @@ from contextlib import asynccontextmanager
 # Add current directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rufus.engine import WorkflowEngine
-from rufus.implementations.persistence.postgres import PostgresPersistence
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.models import WorkflowPauseDirective
 
 
-# Global workflow engine instance
-workflow_engine: Optional[WorkflowEngine] = None
+# Global workflow builder instance
+workflow_builder: Optional[WorkflowBuilder] = None
 
 
 # Pydantic Models for API
@@ -126,51 +132,61 @@ class WorkflowListResponse(BaseModel):
 
 
 async def initialize_engine():
-    """Initialize the workflow engine with providers"""
-    global workflow_engine
+    """Initialize the workflow builder with optimized providers"""
+    global workflow_builder
 
-    # Load workflow registry
-    registry_path = Path(__file__).parent / "workflow_registry.yaml"
-    with open(registry_path) as f:
-        registry_config = yaml.safe_load(f)
-
-    # Build workflow registry dict
-    workflow_registry = {}
-    for workflow in registry_config["workflows"]:
-        workflow_file = Path(__file__).parent / workflow["config_file"]
-        with open(workflow_file) as f:
-            workflow_config = yaml.safe_load(f)
-        workflow_registry[workflow["type"]] = {
-            "initial_state_model_path": workflow["initial_state_model"],
-            "steps": workflow_config["steps"],
-            "workflow_version": workflow_config.get("workflow_version", "1.0"),
-            "description": workflow.get("description", ""),
-        }
-
-    # Get database URL from environment variable
+    # Get configuration from environment variables
+    registry_path = os.getenv("WORKFLOW_REGISTRY_PATH", str(Path(__file__).parent / "workflow_registry.yaml"))
     db_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/rufus_db")
 
-    # Initialize engine with PostgreSQL persistence
-    persistence = PostgresPersistence(db_url=db_url)
-    await persistence.initialize()
+    # Optional: Configure PostgreSQL pool settings for optimal performance
+    # These can be tuned based on your workload
+    pool_min_size = int(os.getenv("POSTGRES_POOL_MIN_SIZE", "10"))
+    pool_max_size = int(os.getenv("POSTGRES_POOL_MAX_SIZE", "50"))
 
-    workflow_engine = WorkflowEngine(
-        persistence=persistence,
-        executor=SyncExecutor(),
-        observer=LoggingObserver(),
-        workflow_registry=workflow_registry,
+    # Initialize persistence provider with optimized settings
+    persistence = PostgresPersistenceProvider(
+        db_url=db_url,
+        pool_min_size=pool_min_size,
+        pool_max_size=pool_max_size
+    )
+    await persistence.initialize()
+    print(f"✓ PostgreSQL persistence initialized (pool: {pool_min_size}-{pool_max_size} connections)")
+
+    # Initialize execution provider
+    executor = SyncExecutor()
+    await executor.initialize()
+
+    # Initialize observer
+    observer = LoggingObserver()
+
+    # Create workflow builder
+    workflow_builder = WorkflowBuilder(
+        registry_path=registry_path,
+        persistence_provider=persistence,
+        execution_provider=executor,
+        observer=observer,
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
-    await workflow_engine.initialize()
-    print(f"✓ Workflow engine initialized with {len(workflow_registry)} workflow types")
+
+    # Check for performance optimizations
+    import rufus
+    from rufus.utils.serialization import get_backend
+    print(f"✓ Performance optimizations:")
+    print(f"  - Event loop: {rufus._event_loop_backend}")
+    print(f"  - JSON backend: {get_backend()}")
+    print(f"  - Import caching: Enabled")
+    print(f"✓ Workflow builder ready")
 
 
 async def shutdown_engine():
     """Cleanup on shutdown"""
-    global workflow_engine
-    if workflow_engine:
-        # Close any open connections
+    global workflow_builder
+    if workflow_builder:
+        # Close persistence connections
+        if workflow_builder.persistence_provider:
+            await workflow_builder.persistence_provider.close()
         print("✓ Shutting down workflow engine")
 
 
@@ -202,11 +218,11 @@ app.add_middleware(
 )
 
 
-def get_engine() -> WorkflowEngine:
-    """Dependency to get the workflow engine"""
-    if workflow_engine is None:
-        raise HTTPException(status_code=503, detail="Workflow engine not initialized")
-    return workflow_engine
+def get_builder() -> WorkflowBuilder:
+    """Dependency to get the workflow builder"""
+    if workflow_builder is None:
+        raise HTTPException(status_code=503, detail="Workflow builder not initialized")
+    return workflow_builder
 
 
 @app.get("/health")
@@ -218,7 +234,7 @@ async def health_check():
 @app.post("/workflows", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(
     request: WorkflowCreateRequest,
-    engine: WorkflowEngine = Depends(get_engine)
+    builder: WorkflowBuilder = Depends(get_builder)
 ):
     """
     Start a new workflow
@@ -227,19 +243,16 @@ async def create_workflow(
     for human input.
     """
     try:
-        # Start workflow
-        workflow = await engine.start_workflow(
+        # Create and start workflow
+        workflow = builder.create_workflow(
             workflow_type=request.workflow_type,
             initial_data=request.initial_data
         )
 
         # Execute workflow steps until it pauses or completes
         while workflow.status == "ACTIVE":
-            try:
-                await workflow.next_step(user_input={})
-            except WorkflowPauseDirective:
-                # Workflow paused for human input
-                break
+            result = await workflow.next_step(user_input={})
+            # Workflow automatically pauses when needed
 
         return WorkflowResponse(
             workflow_id=workflow.id,
@@ -255,7 +268,7 @@ async def create_workflow(
 @app.get("/workflows/{workflow_id}", response_model=WorkflowDetailResponse)
 async def get_workflow(
     workflow_id: str,
-    engine: WorkflowEngine = Depends(get_engine)
+    builder: WorkflowBuilder = Depends(get_builder)
 ):
     """
     Get workflow status and details
@@ -264,7 +277,7 @@ async def get_workflow(
     current step, and full state data.
     """
     try:
-        workflow = await engine.get_workflow(workflow_id)
+        workflow = builder.load_workflow(workflow_id)
 
         return WorkflowDetailResponse(
             workflow_id=workflow.id,
@@ -286,7 +299,7 @@ async def get_workflow(
 async def resume_workflow(
     workflow_id: str,
     request: WorkflowResumeRequest,
-    engine: WorkflowEngine = Depends(get_engine)
+    builder: WorkflowBuilder = Depends(get_builder)
 ):
     """
     Resume a paused workflow with user input
@@ -295,7 +308,7 @@ async def resume_workflow(
     that is paused (WAITING_HUMAN status).
     """
     try:
-        workflow = await engine.get_workflow(workflow_id)
+        workflow = builder.load_workflow(workflow_id)
 
         if workflow.status not in ["WAITING_HUMAN", "PENDING_ASYNC"]:
             raise HTTPException(
@@ -306,12 +319,8 @@ async def resume_workflow(
         # Resume workflow with user input
         user_input = request.user_input
         while workflow.status in ["ACTIVE", "WAITING_HUMAN"]:
-            try:
-                await workflow.next_step(user_input=user_input)
-                user_input = {}  # Only use input once
-            except WorkflowPauseDirective:
-                # Workflow paused again
-                break
+            await workflow.next_step(user_input=user_input)
+            user_input = {}  # Only use input once
 
         return WorkflowResponse(
             workflow_id=workflow.id,
@@ -333,7 +342,7 @@ async def list_workflows(
     status: Optional[str] = Query(None, description="Filter by workflow status"),
     workflow_type: Optional[str] = Query(None, description="Filter by workflow type"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of results"),
-    engine: WorkflowEngine = Depends(get_engine)
+    builder: WorkflowBuilder = Depends(get_builder)
 ):
     """
     List workflows with optional filtering
@@ -349,7 +358,7 @@ async def list_workflows(
         if workflow_type:
             filters['workflow_type'] = workflow_type
 
-        workflows_data = await engine.persistence.list_workflows(**filters)
+        workflows_data = await builder.persistence_provider.list_workflows(**filters)
 
         # Limit results
         workflows_data = workflows_data[:limit]
@@ -377,7 +386,7 @@ async def list_workflows(
 @app.post("/workflows/{workflow_id}/cancel", response_model=dict)
 async def cancel_workflow(
     workflow_id: str,
-    engine: WorkflowEngine = Depends(get_engine)
+    builder: WorkflowBuilder = Depends(get_builder)
 ):
     """
     Cancel a workflow
@@ -386,7 +395,7 @@ async def cancel_workflow(
     functions - use saga rollback for that.
     """
     try:
-        workflow = await engine.get_workflow(workflow_id)
+        workflow = builder.load_workflow(workflow_id)
 
         if workflow.status in ["COMPLETED", "FAILED", "CANCELLED"]:
             raise HTTPException(

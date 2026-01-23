@@ -11,7 +11,6 @@ Provides durable, ACID-compliant workflow state management with:
 
 import asyncpg
 import asyncio
-import json
 import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -24,16 +23,24 @@ logger = logging.getLogger(__name__)
 from rufus.implementations.security.crypto_utils import encrypt_string, decrypt_string
 from rufus.workflow import Workflow # Assuming Workflow class is in rufus.workflow
 from rufus.providers.persistence import PersistenceProvider # Import the interface
+from rufus.utils.serialization import serialize, deserialize  # High-performance JSON serialization
 
 
 class PostgresPersistenceProvider(PersistenceProvider):
     """PostgreSQL-backed workflow persistence with advanced features"""
 
-    def __init__(self, db_url: str):
-        self.db_url = db_url 
+    def __init__(self, db_url: str, pool_min_size: int = None, pool_max_size: int = None):
+        self.db_url = db_url
         self.pool: Optional[asyncpg.Pool] = None
         self._initialized = False
         self.encryption_enabled = os.getenv("ENABLE_ENCRYPTION_AT_REST", "false").lower() == "true"
+
+        # Optimized pool settings (configurable via env or constructor)
+        self.pool_min_size = pool_min_size or int(os.getenv("POSTGRES_POOL_MIN_SIZE", "10"))
+        self.pool_max_size = pool_max_size or int(os.getenv("POSTGRES_POOL_MAX_SIZE", "50"))
+        self.pool_command_timeout = int(os.getenv("POSTGRES_POOL_COMMAND_TIMEOUT", "10"))
+        self.pool_max_queries = int(os.getenv("POSTGRES_POOL_MAX_QUERIES", "50000"))
+        self.pool_max_inactive_lifetime = int(os.getenv("POSTGRES_POOL_MAX_INACTIVE_LIFETIME", "300"))
 
     async def initialize(self):
         """Create connection pool and verify schema"""
@@ -43,11 +50,14 @@ class PostgresPersistenceProvider(PersistenceProvider):
         try:
             self.pool = await asyncpg.create_pool(
                 self.db_url,
-                min_size=5,
-                max_size=20,
-                command_timeout=60,
+                min_size=self.pool_min_size,
+                max_size=self.pool_max_size,
+                max_queries=self.pool_max_queries,
+                max_inactive_connection_lifetime=self.pool_max_inactive_lifetime,
+                command_timeout=self.pool_command_timeout,
                 server_settings={
-                    'application_name': 'rufus_workflow_engine'
+                    'application_name': 'rufus_workflow_engine',
+                    'statement_timeout': f'{self.pool_command_timeout * 1000}',  # Convert to ms
                 }
             )
 
@@ -67,7 +77,11 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     )
 
             self._initialized = True
-            logger.info(f"PostgreSQL workflow store initialized with pool (min=5, max=20)")
+            logger.info(
+                f"PostgreSQL workflow store initialized with optimized pool "
+                f"(min={self.pool_min_size}, max={self.pool_max_size}, "
+                f"timeout={self.pool_command_timeout}s, max_queries={self.pool_max_queries})"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize PostgreSQL store: {e}")
@@ -99,7 +113,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
 
 
         # Encryption Logic
-        state_json = json.dumps(workflow_dict['state'])
+        state_json = serialize(workflow_dict['state'])
         encrypted_state_bytes = None
         encryption_key_id = None
         state_to_store = state_json # Default plaintext
@@ -144,16 +158,16 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 workflow_dict['current_step'],
                 workflow_dict['status'],
                 state_to_store,
-                json.dumps(workflow_dict['steps_config']),
+                serialize(workflow_dict['steps_config']),
                 workflow_dict['state_model_path'],
                 workflow_dict['saga_mode'],
-                json.dumps(workflow_dict['completed_steps_stack']),
+                serialize(workflow_dict['completed_steps_stack']),
                 workflow_dict['parent_execution_id'],
                 workflow_dict['blocked_on_child_id'],
                 workflow_dict['data_region'],
                 workflow_dict['priority'],
                 workflow_dict['idempotency_key'],
-                json.dumps(workflow_dict['metadata']),
+                serialize(workflow_dict['metadata']),
                 workflow_dict['owner_id'],
                 workflow_dict['org_id'],
                 encrypted_state_bytes,
@@ -193,7 +207,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 try:
                     decrypted_json = decrypt_string(row['encrypted_state'])
                     if decrypted_json:
-                        state_data = json.loads(decrypted_json)
+                        state_data = deserialize(decrypted_json)
                 except Exception as e:
                     logger.error(f"Decryption failed for workflow {workflow_id}: {e}")
                     raise
@@ -204,17 +218,17 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 'current_step': row['current_step'],
                 'status': row['status'],
                 # Ensure state is a dict if it was a JSON string
-                'state': json.loads(state_data) if isinstance(state_data, str) else state_data,
-                'steps_config': json.loads(row['steps_config']) if isinstance(row['steps_config'], str) else row['steps_config'],
+                'state': deserialize(state_data) if isinstance(state_data, str) else state_data,
+                'steps_config': deserialize(row['steps_config']) if isinstance(row['steps_config'], str) else row['steps_config'],
                 'state_model_path': row['state_model_path'],
                 'saga_mode': row['saga_mode'],
-                'completed_steps_stack': json.loads(row['completed_steps_stack']) if isinstance(row['completed_steps_stack'], str) else row['completed_steps_stack'],
+                'completed_steps_stack': deserialize(row['completed_steps_stack']) if isinstance(row['completed_steps_stack'], str) else row['completed_steps_stack'],
                 'parent_execution_id': str(row['parent_execution_id']) if row['parent_execution_id'] else None,
                 'blocked_on_child_id': str(row['blocked_on_child_id']) if row['blocked_on_child_id'] else None,
                 'data_region': row['data_region'],
                 'priority': row['priority'],
                 'idempotency_key': row['idempotency_key'],
-                'metadata': json.loads(row['metadata']) if isinstance(row['metadata'], str) else row['metadata'],
+                'metadata': deserialize(row['metadata']) if isinstance(row['metadata'], str) else row['metadata'],
                 'owner_id': row['owner_id'],
                 'org_id': row['org_id']
             }
@@ -289,7 +303,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     'execution_id': str(row['execution_id']),
                     'step_name': row['step_name'],
                     'step_index': row['step_index'],
-                    'task_data': json.loads(row['task_data']) if row['task_data'] else {},
+                    'task_data': deserialize(row['task_data']) if row['task_data'] else {},
                     'idempotency_key': row['idempotency_key']
                 }
 
@@ -336,10 +350,10 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 step_name,
                 step_index,
                 action_type,
-                json.dumps(action_result),
+                serialize(action_result),
                 error_message,
-                json.dumps(state_before) if state_before else None,
-                json.dumps(state_after) if state_after else None,
+                serialize(state_before) if state_before else None,
+                serialize(state_after) if state_after else None,
                 executed_by
             )
 
@@ -371,10 +385,10 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 step_name,
                 user_id,
                 worker_id,
-                json.dumps(old_state) if old_state else None,
-                json.dumps(new_state) if new_state else None,
+                serialize(old_state) if old_state else None,
+                serialize(new_state) if new_state else None,
                 decision_rationale,
-                json.dumps(metadata) if metadata else None
+                serialize(metadata) if metadata else None
             )
 
     async def log_execution(
@@ -399,7 +413,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 step_name,
                 log_level,
                 message,
-                json.dumps(metadata) if metadata else None
+                serialize(metadata) if metadata else None
             )
 
     async def record_metric(
@@ -429,7 +443,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 metric_name,
                 metric_value,
                 unit,
-                json.dumps(tags) if tags else None
+                serialize(tags) if tags else None
             )
 
     async def get_workflow_metrics(self, workflow_id: str, limit: int = 100) -> List[Dict]:
@@ -514,7 +528,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 schedule_name,
                 workflow_type,
                 cron_expression,
-                json.dumps(initial_data) if initial_data else '{}',
+                serialize(initial_data) if initial_data else '{}',
                 enabled
             )
             logger.info(f"Registered scheduled workflow: {schedule_name} ({cron_expression})")
@@ -538,9 +552,9 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 execution_id,
                 step_name,
                 step_index,
-                json.dumps(task_data) if task_data else '{}',
+                serialize(task_data) if task_data else '{}',
                 idempotency_key,
-                json.dumps(metadata) if metadata else '{}',
+                serialize(metadata) if metadata else '{}',
                 max_retries
             )
             return dict(row)
@@ -561,7 +575,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     completed_at = NOW(),
                     updated_at = NOW()
                 WHERE task_id = $4
-            """, status, json.dumps(result) if result else None, error_message, task_id)
+            """, status, serialize(result) if result else None, error_message, task_id)
 
     async def get_task_record(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -584,7 +598,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     'step_name': row['step_name'],
                     'step_index': row['step_index'],
                     'status': row['status'],
-                    'task_data': json.loads(row['task_data']) if row['task_data'] else {},
+                    'task_data': deserialize(row['task_data']) if row['task_data'] else {},
                     'idempotency_key': row['idempotency_key'],
                     'retry_count': row['retry_count'],
                     'max_retries': row['max_retries']

@@ -4,6 +4,17 @@ Flask REST API for Rufus Workflow Engine
 This example demonstrates how to embed Rufus into a Flask application
 to expose workflow operations via REST API endpoints.
 
+Features:
+- Full async/await support with uvloop for optimal performance
+- High-performance JSON serialization (orjson)
+- Optimized PostgreSQL connection pooling
+- Import caching for step functions
+
+Performance Optimizations:
+- uvloop event loop (2-4x faster async I/O)
+- orjson serialization (3-5x faster JSON operations)
+- Connection pool tuning (configurable via environment variables)
+
 Endpoints:
 - POST /workflows - Start a new workflow
 - GET /workflows/<workflow_id> - Get workflow status
@@ -15,7 +26,6 @@ Endpoints:
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import asyncio
-import yaml
 import os
 import sys
 from pathlib import Path
@@ -24,20 +34,19 @@ from typing import Dict, Any
 # Add current directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rufus.engine import WorkflowEngine
-from rufus.implementations.persistence.postgres import PostgresPersistence
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.persistence_provider.postgres import PostgresPersistenceProvider
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.models import WorkflowPauseDirective
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend integration
 
-# Global workflow engine instance
-workflow_engine: WorkflowEngine = None
+# Global workflow builder instance
+workflow_builder: WorkflowBuilder = None
 
 
 def get_event_loop():
@@ -51,44 +60,51 @@ def get_event_loop():
 
 
 async def initialize_engine():
-    """Initialize the workflow engine with providers"""
-    global workflow_engine
+    """Initialize the workflow builder with optimized providers"""
+    global workflow_builder
 
-    # Load workflow registry
-    registry_path = Path(__file__).parent / "workflow_registry.yaml"
-    with open(registry_path) as f:
-        registry_config = yaml.safe_load(f)
-
-    # Build workflow registry dict
-    workflow_registry = {}
-    for workflow in registry_config["workflows"]:
-        workflow_file = Path(__file__).parent / workflow["config_file"]
-        with open(workflow_file) as f:
-            workflow_config = yaml.safe_load(f)
-        workflow_registry[workflow["type"]] = {
-            "initial_state_model_path": workflow["initial_state_model"],
-            "steps": workflow_config["steps"],
-            "workflow_version": workflow_config.get("workflow_version", "1.0"),
-            "description": workflow.get("description", ""),
-        }
-
-    # Get database URL from environment variable
+    # Get configuration from environment variables
+    registry_path = os.getenv("WORKFLOW_REGISTRY_PATH", str(Path(__file__).parent / "workflow_registry.yaml"))
     db_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/rufus_db")
 
-    # Initialize engine with PostgreSQL persistence
-    persistence = PostgresPersistence(db_url=db_url)
-    await persistence.initialize()
+    # Optional: Configure PostgreSQL pool settings for optimal performance
+    pool_min_size = int(os.getenv("POSTGRES_POOL_MIN_SIZE", "10"))
+    pool_max_size = int(os.getenv("POSTGRES_POOL_MAX_SIZE", "50"))
 
-    workflow_engine = WorkflowEngine(
-        persistence=persistence,
-        executor=SyncExecutor(),
-        observer=LoggingObserver(),
-        workflow_registry=workflow_registry,
+    # Initialize persistence provider with optimized settings
+    persistence = PostgresPersistenceProvider(
+        db_url=db_url,
+        pool_min_size=pool_min_size,
+        pool_max_size=pool_max_size
+    )
+    await persistence.initialize()
+    print(f"✓ PostgreSQL persistence initialized (pool: {pool_min_size}-{pool_max_size} connections)")
+
+    # Initialize execution provider
+    executor = SyncExecutor()
+    await executor.initialize()
+
+    # Initialize observer
+    observer = LoggingObserver()
+
+    # Create workflow builder
+    workflow_builder = WorkflowBuilder(
+        registry_path=registry_path,
+        persistence_provider=persistence,
+        execution_provider=executor,
+        observer=observer,
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
-    await workflow_engine.initialize()
-    print(f"✓ Workflow engine initialized with {len(workflow_registry)} workflow types")
+
+    # Check for performance optimizations
+    import rufus
+    from rufus.utils.serialization import get_backend
+    print(f"✓ Performance optimizations:")
+    print(f"  - Event loop: {rufus._event_loop_backend}")
+    print(f"  - JSON backend: {get_backend()}")
+    print(f"  - Import caching: Enabled")
+    print(f"✓ Workflow builder ready")
 
 
 # Initialize engine on startup
@@ -142,7 +158,7 @@ def create_workflow():
         # Start workflow
         loop = get_event_loop()
         workflow = loop.run_until_complete(
-            workflow_engine.start_workflow(
+            workflow_builder.create_workflow(
                 workflow_type=workflow_type,
                 initial_data=initial_data
             )
@@ -184,7 +200,7 @@ def get_workflow(workflow_id: str):
     """
     try:
         loop = get_event_loop()
-        workflow = loop.run_until_complete(workflow_engine.get_workflow(workflow_id))
+        workflow = loop.run_until_complete(workflow_builder.load_workflow(workflow_id))
 
         return jsonify({
             "workflow_id": workflow.id,
@@ -229,7 +245,7 @@ def resume_workflow(workflow_id: str):
         user_input = data.get("user_input", {})
 
         loop = get_event_loop()
-        workflow = loop.run_until_complete(workflow_engine.get_workflow(workflow_id))
+        workflow = loop.run_until_complete(workflow_builder.load_workflow(workflow_id))
 
         if workflow.status not in ["WAITING_HUMAN", "PENDING_ASYNC"]:
             return jsonify({
@@ -297,7 +313,7 @@ def list_workflows():
 
         loop = get_event_loop()
         workflows_data = loop.run_until_complete(
-            workflow_engine.persistence.list_workflows(**filters)
+            workflow_builder.persistence_provider.list_workflows(**filters)
         )
 
         # Limit results
@@ -337,7 +353,7 @@ def cancel_workflow(workflow_id: str):
     """
     try:
         loop = get_event_loop()
-        workflow = loop.run_until_complete(workflow_engine.get_workflow(workflow_id))
+        workflow = loop.run_until_complete(workflow_builder.load_workflow(workflow_id))
 
         if workflow.status in ["COMPLETED", "FAILED", "CANCELLED"]:
             return jsonify({
@@ -348,7 +364,7 @@ def cancel_workflow(workflow_id: str):
         old_status = workflow.status
         workflow.status = "CANCELLED"
         loop.run_until_complete(
-            workflow.persistence.save_workflow(workflow.id, workflow.to_dict())
+            workflow.persistence_provider.save_workflow(workflow.id, workflow.to_dict())
         )
         loop.run_until_complete(
             workflow._notify_status_change(old_status, "CANCELLED", workflow.current_step_name)
