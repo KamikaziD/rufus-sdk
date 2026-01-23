@@ -500,6 +500,15 @@ class Workflow:
         self.state = current_state.__class__(**state_dict)
 
     async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
+        # Handle resumption from WAITING_HUMAN status
+        if self.status == "WAITING_HUMAN" and user_input:
+            old_status = self.status
+            self.status = "ACTIVE"
+            self.current_step += 1  # Advance past the pause step
+            await self.persistence.save_workflow(self.id, self.to_dict())
+            await self._notify_status_change(old_status, self.status, self.current_step_name)
+            print(f"[RESUME] Workflow resumed from human input, advancing to step: {self.current_step_name}")
+
         if self.current_step >= len(self.workflow_steps):
             old_status = self.status
             self.status = "COMPLETED"

@@ -12,9 +12,25 @@ import traceback
 class SyncExecutor(ExecutionProvider):
     """
     A synchronous implementation of the ExecutionProvider.
-    Executes steps directly in the current process/thread.
-    Useful for local development, testing, and simple synchronous workflows.
-    Parallel tasks are simulated using ThreadPoolExecutor.
+
+    Executes all steps (including async tasks) synchronously in the current process.
+    This is ideal for:
+    - Local development and debugging
+    - Unit testing workflows without external dependencies
+    - Simple synchronous workflows that don't need task queues
+
+    Key behaviors:
+    - STANDARD steps: Executed directly in the current process
+    - ASYNC steps: Executed immediately (NOT dispatched to queue)
+    - PARALLEL steps: Executed using ThreadPoolExecutor
+    - Sub-workflows: Managed synchronously
+
+    Unlike production executors (CeleryExecutor), SyncExecutor does NOT:
+    - Pause workflows for async task completion
+    - Require task queues (Redis, RabbitMQ, etc.)
+    - Distribute work across multiple workers
+
+    For production async workflows with distributed execution, use CeleryExecutor.
     """
     def __init__(self):
         self._engine = None # Reference to the WorkflowEngine
@@ -48,8 +64,13 @@ class SyncExecutor(ExecutionProvider):
 
     async def dispatch_async_task(self, func_path: str, state_data: Dict[str, Any], workflow_id: str, current_step_index: int, data_region: Optional[str] = None, merge_strategy: str = "SHALLOW", merge_conflict_behavior: str = "PREFER_NEW", **kwargs) -> Dict[str, Any]:
         """
-        Simulates dispatching an asynchronous task.
-        For SyncExecutor, this is processed immediately as if it were a deferred task.
+        Executes async tasks synchronously for testing/development.
+
+        Unlike true async executors (CeleryExecutor), SyncExecutor executes tasks
+        immediately in the current process and returns results directly without pausing
+        the workflow. This makes testing simpler and avoids the need for task queues.
+
+        For production async workflows, use CeleryExecutor or similar.
         """
         # Load the function dynamically using WorkflowBuilder
         func = self._engine.workflow_builder._import_from_string(func_path)
@@ -65,22 +86,17 @@ class SyncExecutor(ExecutionProvider):
         # Filter out internal parameters that shouldn't be passed to user functions
         user_kwargs = {k: v for k, v in kwargs.items() if not k.startswith('_')}
 
-        # Execute the function (ensure it's awaited if async)
-        # For async task functions (ASYNC steps), pass dict like Celery would
-        # For sync step functions (STANDARD steps), pass Pydantic model
-        # We can determine this by checking if the function expects 'state: dict' or 'state: Model'
-        # For now, async steps always get dict to match Celery behavior
+        # Execute the function immediately (synchronously)
+        # Async task functions expect state as dict (matches Celery serialization)
         if asyncio.iscoroutinefunction(func):
             task_result = await func(state=state_data, context=context, **user_kwargs)
         else:
             task_result = func(state=state_data, context=context, **user_kwargs)
 
-        # In a real async executor, this would involve Celery or similar.
-        # Here, we simulate the 'callback' to WorkflowEngine's resume_workflow
-        # with the result. For testing, we just return the result directly.
-        
-        # The WorkflowEngine's next_step expects a special dict if it's async dispatched
-        return {"_async_dispatch": True, "task_id": "simulated_async_task", "result": task_result}
+        # Return result directly - workflow will continue without pausing
+        # This differs from CeleryExecutor which would return {"_async_dispatch": True}
+        # and require the workflow to wait for task completion
+        return task_result if isinstance(task_result, dict) else {}
 
 
     def _run_task_in_thread(self, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any], state_model_path: str):

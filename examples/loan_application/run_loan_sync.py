@@ -17,6 +17,7 @@ from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.engine import WorkflowEngine
+from rufus.models import WorkflowPauseDirective
 import asyncio
 import os
 import sys
@@ -156,13 +157,18 @@ async def run_loan_workflow():
             step_count += 1
             current_step = workflow2.workflow_steps[workflow2.current_step]
             print(f"\n--- Step {step_count}: {current_step.name} ---")
-            result = await workflow2.next_step(user_input={})
-            print(f"Status: {workflow2.status}")
-            if result:
-                print(f"Result: {result}")
-                # Capture child workflow ID when sub-workflow is created
-                if isinstance(result, tuple) and len(result) > 0 and isinstance(result[0], dict):
-                    child_workflow_id = result[0].get('child_workflow_id')
+            try:
+                result = await workflow2.next_step(user_input={})
+                print(f"Status: {workflow2.status}")
+                if result:
+                    print(f"Result: {result}")
+                    # Capture child workflow ID when sub-workflow is created
+                    if isinstance(result, tuple) and len(result) > 0 and isinstance(result[0], dict):
+                        child_workflow_id = result[0].get('child_workflow_id')
+            except WorkflowPauseDirective as e:
+                # Workflow paused for human input - this is expected
+                print(f"Status: {workflow2.status}")
+                print(f"Pause result: {e.result}")
 
         elif workflow2.status == "PENDING_SUB_WORKFLOW":
             # Execute the child KYC workflow
