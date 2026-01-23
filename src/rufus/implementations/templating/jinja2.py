@@ -38,3 +38,21 @@ class Jinja2TemplateEngine(TemplateEngine):
             return [self.render(item) for item in template]
         else:
             return template
+
+    def render_string_template(self, template: str, context: Dict[str, Any]) -> str:
+        """
+        Renders a string template with the given context.
+
+        Args:
+            template: The template string to render
+            context: The context variables for rendering
+
+        Returns:
+            The rendered string
+        """
+        try:
+            jinja_template = self.env.from_string(template)
+            return jinja_template.render(context)
+        except Exception as e:
+            # Fallback to direct string if rendering fails
+            return template

@@ -1,0 +1,27 @@
+# Rufus Quickstart Example - Greeting Workflow
+#
+# This workflow demonstrates the basics of Rufus:
+# 1. State management with Pydantic models
+# 2. Sequential step execution
+# 3. Automatic state updates
+# 4. Step chaining with automate_next
+
+workflow_type: "GreetingWorkflow"
+workflow_version: "1.0"
+initial_state_model: "state_models.GreetingState"
+description: "A simple greeting workflow demonstrating Rufus basics"
+
+steps:
+  # Step 1: Generate the greeting message
+  - name: "Generate_Greeting"
+    type: "STANDARD"  # Synchronous execution
+    function: "steps.generate_greeting"  # Python function path
+    automate_next: true  # Automatically proceed to next step
+    dependencies: []  # No dependencies (first step)
+
+  # Step 2: Format the output
+  - name: "Format_Output"
+    type: "STANDARD"
+    function: "steps.format_output"
+    automate_next: false  # Last step, no need to continue
+    dependencies: ["Generate_Greeting"]  # Waits for step 1 to complete
