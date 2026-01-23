@@ -70,10 +70,22 @@ class WorkflowBuilder:
         logger.info("Discovering marketplace steps...")
         # Scan for entry points defined in setup.py/pyproject.toml under a custom group
         # e.g., entry_points={'rufus.steps': ['my_step = rufus_package.steps:MyStep']}
-        
+
         # Use importlib.metadata for Python 3.8+
         try:
-            for entry_point in importlib.metadata.entry_points().get('rufus.steps', []):
+            # Handle both old and new importlib.metadata APIs
+            eps = importlib.metadata.entry_points()
+            if hasattr(eps, 'select'):
+                # Python 3.10+ API
+                rufus_steps = eps.select(group='rufus.steps')
+            elif hasattr(eps, 'get'):
+                # Python 3.9 API
+                rufus_steps = eps.get('rufus.steps', [])
+            else:
+                # Fallback: try accessing as dict
+                rufus_steps = eps.get('rufus.steps', []) if isinstance(eps, dict) else []
+
+            for entry_point in rufus_steps:
                 try:
                     step_cls = entry_point.load()
                     # Check if step_cls is a subclass of WorkflowStep,

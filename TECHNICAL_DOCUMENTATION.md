@@ -193,7 +193,9 @@ class WorkflowEngine:
 ```
 
 Flow of Control (`next_step` method) : This is the heart of the engine, responsible
-for advancing the workflow one step at a time.
+for advancing the workflow one step at a time. It now captures the step index
+(`step_index_before_jump`) at the start of execution to ensure accurate observer logging,
+especially when handling `WorkflowJumpDirective`. Status change notifications after a step are also conditional to prevent redundant calls if the workflow is completing.
 Input Validation : Uses `step.input_schema` (a Pydantic model) to validate
 `user_input`.
 Step Type Delegation : Determines the step type and delegates execution:
@@ -210,7 +212,10 @@ implement complex control flow (jumps, pauses, sub-workflow initiation).
 
 Sub-workflow Status Bubbling (`_notify_status_change`) : This helper
 centralizes status updates and ensures child workflows report their status to parents
-via the ExecutionProvider.
+via the ExecutionProvider. `_notify_status_change` is called at critical points,
+including after each step execution and on workflow completion. Intermediate notifications
+(e.g., after a step but before automation) are now conditional to prevent duplicate
+notifications with the final completion notification.
 
 ```python
 # rufus/engine.py (simplified)

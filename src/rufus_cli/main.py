@@ -217,25 +217,5 @@ def run(
     asyncio.run(_run_workflow())
 
 
-@app.command()
-def visualize(workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file.")):
-    """
-    Generates a textual representation of the workflow structure.
-    """
-    if not workflow_file.is_file():
-        typer.echo(f"Error: Workflow file not found at {workflow_file}", err=True)
-        raise typer.Exit(code=1)
-
-    try:
-        with open(workflow_file, "r") as f:
-            workflow_config = yaml.safe_load(f)
-        
-        if not isinstance(workflow_config, dict):
-            typer.echo(f"Error: Invalid YAML format in {workflow_file}. Expected a dictionary.", err=True)
-            raise typer.Exit(code=1)
-
-        workflow_type = workflow_config.get("workflow_type", "UnnamedWorkflow")
-        steps_config = workflow_config.get("steps", [])
-
-        typer.echo(f"Workflow: {workflow_type}")
-        typer.echo("-
+if __name__ == "__main__":
+    app()
