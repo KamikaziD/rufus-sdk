@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rufus.dev/schema/workflow_registry.json",
+  "title": "Rufus Workflow Registry",
+  "description": "JSON Schema for Rufus workflow registry YAML files.",
+  "type": "object",
+  "required": ["workflows"],
+  "properties": {
+    "workflows": {
+      "type": "array",
+      "description": "List of all available workflows in this registry.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "config_file", "initial_state_model"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Workflow type identifier. Must match workflow_type in the config file.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "examples": ["OrderProcessing", "KYC", "LoanApplication"]
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of this workflow."
+          },
+          "config_file": {
+            "type": "string",
+            "description": "Path to the workflow YAML file, relative to registry location.",
+            "pattern": "^[^/].*\\.yaml$",
+            "examples": ["order_workflow.yaml", "workflows/kyc.yaml"]
+          },
+          "initial_state_model": {
+            "type": "string",
+            "description": "Python import path to the Pydantic state model for this workflow.",
+            "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[A-Z][A-Za-z0-9_]*$",
+            "examples": ["state_models.OrderState", "models.KYCState"]
+          },
+          "requires": {
+            "type": "array",
+            "description": "Optional list of external rufus-* packages required for this workflow.",
+            "items": {
+              "type": "string",
+              "pattern": "^rufus-[a-z][a-z0-9-]*$"
+            },
+            "examples": [["rufus-payments", "rufus-notifications"]]
+          },
+          "deprecated": {
+            "type": "boolean",
+            "description": "If true, this workflow version is deprecated and should not be used for new instances.",
+            "default": false
+          },
+          "successor": {
+            "type": "string",
+            "description": "If deprecated, the workflow type that supersedes this one.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          }
+        }
+      }
+    }
+  }
+}

@@ -740,6 +740,141 @@ def process_item(state, context):
 - Provider instances: ~10-50KB
 - Total: ~1-2MB per engine instance
 
+### Network Overhead Model
+
+Rufus uses an **embedded SDK architecture** that eliminates central orchestrator overhead:
+
+| Architecture | Orchestrator Hop | Persistence Hop | Total Network Calls/Step |
+|--------------|------------------|-----------------|--------------------------|
+| **Temporal/Cadence** | Yes (2x network) | Yes (2x) | **4 per step** |
+| **Rufus + PostgreSQL** | ❌ No | Yes (2x) | **2 per step** |
+| **Rufus + SQLite** | ❌ No | Local I/O only | **0 network calls** |
+| **Rufus + In-Memory** | ❌ No | ❌ No | **0** |
+
+**Key Advantage**: Workflows execute **in-process**, avoiding the Worker → Orchestrator → Worker round-trip. For PostgreSQL persistence, database I/O remains (load state, save state), but the central orchestrator bottleneck is eliminated.
+
+**Best Performance**: Use SQLite (`:memory:`) or In-Memory persistence for development/testing with zero network overhead.
+
+---
+
+## Critical Production Warnings
+
+### ⚠️ Executor Portability
+
+**CRITICAL ISSUE**: Step functions must be **stateless and process-isolated** to work across all ExecutionProviders.
+
+**The Problem**: Developers test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, separate processes). Code that works locally breaks in production.
+
+**Why It Breaks**:
+- **SyncExecutor**: All steps run in the same Python process. Global variables and module-level state are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process. No shared memory.
+
+**Anti-Patterns (will break in distributed execution)**:
+
+```python
+# ❌ Global state lost between steps
+global_cache = {}
+
+def step_a(state, context):
+    global_cache['data'] = expensive_computation()
+    return {}
+
+def step_b(state, context):
+    data = global_cache['data']  # KeyError in Celery!
+    return {"result": process(data)}
+
+# ❌ Module-level connection lost
+_db_connection = None
+
+def step_c(state, context):
+    global _db_connection
+    if not _db_connection:
+        _db_connection = create_connection()
+    _db_connection.query(...)  # Different worker, _db_connection is None!
+```
+
+**Correct Patterns (portable across all executors)**:
+
+```python
+# ✅ Store in workflow state
+def step_a_correct(state, context):
+    data = expensive_computation()
+    state.cached_data = data  # Persisted to database
+    return {"cached_data": data}
+
+def step_b_correct(state, context):
+    data = state.cached_data  # Loaded from database
+    return {"result": process(data)}
+
+# ✅ Create resources per step
+def step_c_correct(state, context):
+    connection = create_connection()  # Fresh connection
+    result = connection.query(...)
+    connection.close()
+    return {"query_result": result}
+```
+
+**Testing Strategy**:
+```python
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()
+])
+def test_workflow_executor_portable(executor):
+    """Ensure workflow works with both sync and distributed execution."""
+    builder = WorkflowBuilder(execution_provider=executor)
+    workflow = builder.create_workflow("TestWorkflow", initial_data={})
+    # Run test - should pass with both executors
+```
+
+### ⚠️ Dynamic Injection Caution
+
+**WARNING**: Dynamic step injection creates **non-deterministic workflows** that are difficult to debug and audit.
+
+**Problems**:
+1. **Audit Trail Mismatch**: Logs show steps not in YAML definition
+2. **Version Control**: Can't reconstruct execution from Git history
+3. **Debugging**: Developers see different workflow structure than execution trace
+4. **Compensation**: Saga rollback must track dynamically injected steps
+5. **Compliance**: Regulatory audits require deterministic processes
+
+**Recommended Alternatives**:
+
+**Use DECISION steps instead**:
+```yaml
+# Preferred: Explicit branching
+- name: "Check_Risk"
+  type: "DECISION"
+  function: "risk.check"
+  routes:
+    - condition: "state.risk_score > 80"
+      target: "Enhanced_Review"  # Visible in YAML
+    - condition: "state.risk_score <= 80"
+      target: "Standard_Review"
+```
+
+**Use conditional logic within steps**:
+```python
+def process_application(state, context):
+    if state.risk_score > 80:
+        enhanced_review_logic(state)
+    else:
+        standard_review_logic(state)
+    return {"reviewed": True}
+```
+
+**Only use dynamic injection for**:
+- Plugin systems (external package-defined steps)
+- Multi-tenant workflows (tenant-specific logic)
+- Controlled A/B testing
+- Jurisdiction-specific compliance rules
+
+**If dynamic injection is necessary**:
+- Enable full audit logging
+- Snapshot final workflow structure
+- Document reason thoroughly
+- Review regularly
+
 ---
 
 ## Security

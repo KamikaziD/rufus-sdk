@@ -663,7 +663,198 @@ steps:
         function: "my_app.services.call_service_b"
     merge_function_path: "my_app.utils.merge_service_results" # Custom function to combine results
 ```
-## 11. Troubleshooting YAML Configuration
+## 11. Best Practices & Critical Warnings
+
+### ⚠️ Executor Portability - CRITICAL
+
+**THE PROBLEM**: Step functions must be **stateless and process-isolated** to work across all execution providers.
+
+Developers often test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, fresh process per task). Code that works locally breaks in production because:
+
+- **SyncExecutor**: All steps run in the same Python process. Global variables, module-level state, and in-memory caches are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process/thread. No shared memory.
+
+**❌ BREAKS in Distributed Execution:**
+
+```python
+# Global state lost between steps
+global_cache = {}
+
+def step_a(state: MyState, context: StepContext):
+    global_cache['user_data'] = fetch_user(state.user_id)
+    return {}
+
+def step_b(state: MyState, context: StepContext):
+    user_data = global_cache['user_data']  # KeyError in Celery!
+    return {"name": user_data['name']}
+
+# Module-level state lost
+_connection = None
+
+def step_c(state: MyState, context: StepContext):
+    global _connection
+    if _connection is None:
+        _connection = create_db_connection()
+    _connection.query(...)  # Different worker, _connection is None!
+```
+
+**✅ WORKS Everywhere:**
+
+```python
+# Store in workflow state - persisted to database
+def step_a_correct(state: MyState, context: StepContext):
+    user_data = fetch_user(state.user_id)
+    state.user_data = user_data  # Persisted
+    return {"user_data": user_data}
+
+def step_b_correct(state: MyState, context: StepContext):
+    user_data = state.user_data  # Loaded from database
+    return {"name": user_data['name']}
+
+# Create resources per step
+def step_c_correct(state: MyState, context: StepContext):
+    connection = create_db_connection()  # New connection each time
+    result = connection.query(...)
+    return {"query_result": result}
+```
+
+**Golden Rules**:
+1. **Store everything in workflow state** - `state.field = value` persists
+2. **Return data from steps** - Return dict merges into state
+3. **No global variables** - Each step is isolated
+4. **No module-level state** - Don't rely on `_module_var`
+5. **Create resources per step** - DB connections, API clients created and cleaned up within each step
+
+**Test for Portability**:
+```python
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()  # Tests process isolation
+])
+def test_workflow_portable(executor):
+    builder = WorkflowBuilder(execution_provider=executor)
+    workflow = builder.create_workflow("MyWorkflow", initial_data={...})
+    # Should work with both executors
+```
+
+---
+
+### ⚠️ Dynamic Injection - USE WITH EXTREME CAUTION
+
+**THE PROBLEM**: Dynamic step injection makes workflows **non-deterministic** and extremely hard to debug.
+
+When workflows modify their own structure at runtime:
+1. **Debugging Difficulty**: Audit logs show steps not in YAML
+2. **Compensation Complexity**: Saga rollback must track injected steps
+3. **Non-Determinism**: Same workflow type + different data = different execution
+4. **Version Control**: Can't reconstruct execution from Git history
+5. **Audit Compliance**: Harder to prove regulatory compliance
+
+**When to Use** (Rare cases ONLY):
+- Plugin systems (steps defined by external packages)
+- Multi-tenant workflows (tenants provide custom logic)
+- A/B testing (controlled experiments)
+- Dynamic compliance (jurisdiction-specific rules)
+
+**Recommended Alternatives** (Use these instead):
+
+**1. DECISION Steps with Explicit Routes**:
+```yaml
+- name: "Check_Order_Value"
+  type: "DECISION"
+  function: "steps.check_order_value"
+  routes:
+    - condition: "state.amount > 10000"
+      target: "High_Value_Review"  # Visible in YAML!
+    - condition: "state.amount <= 10000"
+      target: "Standard_Processing"
+
+- name: "High_Value_Review"  # Explicit step
+  type: "STANDARD"
+  function: "steps.high_value_review"
+```
+
+**2. Conditional Logic Within Steps**:
+```python
+def process_order(state: OrderState, context: StepContext):
+    if state.amount > 10000:
+        perform_high_value_checks(state)
+    else:
+        perform_standard_checks(state)
+    return {"processed": True}
+```
+
+**3. Multiple Workflow Versions**:
+```yaml
+# order_processing_standard.yaml
+workflow_type: "OrderProcessing_Standard"
+
+# order_processing_high_value.yaml
+workflow_type: "OrderProcessing_HighValue"
+```
+
+---
+
+### General Best Practices
+
+**Idempotent Steps**:
+Design step functions to be idempotent - they can be called multiple times without changing the result beyond the initial call. Critical for retries and recovery.
+
+```python
+def charge_payment(state: OrderState, context: StepContext):
+    # Check if already charged
+    if state.payment_id:
+        return {"payment_id": state.payment_id, "already_charged": True}
+
+    payment_id = payment_api.charge(state.amount, idempotency_key=context.workflow_id)
+    state.payment_id = payment_id
+    return {"payment_id": payment_id}
+```
+
+**Small, Focused Steps**:
+Each step should do one thing well. Improves readability, testability, and reusability.
+
+**Clear State Models**:
+Define Pydantic state models clearly, ensuring they represent the evolving data accurately.
+
+```python
+class OrderState(BaseModel):
+    order_id: str
+    amount: Decimal
+    payment_id: Optional[str] = None  # Set after payment
+    shipment_id: Optional[str] = None  # Set after shipment
+    status: str = "pending"
+```
+
+**Version Control YAML**:
+Treat workflow YAML files as code. Store in Git, use pull requests for changes, and include in CI/CD.
+
+**Logging and Observability**:
+Integrate with WorkflowObserver to gain insights, debug issues, and monitor performance.
+
+**Leverage Package Auto-Discovery**:
+When creating reusable components, package them as `rufus-*` extensions. The SDK's auto-discovery will load them automatically.
+
+**Validate Workflows**:
+Use the CLI validator to catch errors early:
+
+```bash
+# Basic validation
+rufus validate workflow.yaml
+
+# Strict validation (includes import checks)
+rufus validate workflow.yaml --strict
+```
+
+**Performance Considerations**:
+- Use PostgreSQL connection pooling in production
+- Enable uvloop for async I/O performance
+- Use orjson for faster JSON serialization
+- Cache step function imports (automatic)
+
+---
+
+## 12. Troubleshooting YAML Configuration
 
 ### Common Errors
 

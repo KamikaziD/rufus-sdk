@@ -164,69 +164,68 @@ async def get_configured_engine(
 
 
 @app.command()
-def validate(workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file.")):
+def validate(
+    workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file."),
+    strict: bool = typer.Option(False, "--strict", help="Perform comprehensive validation including function imports"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON")
+):
     """
-    Validates a Rufus workflow YAML file for syntax and basic structure.
+    Validates a Rufus workflow YAML file for syntax, structure, and correctness.
+
+    Basic validation checks:
+    - YAML syntax
+    - Required fields (workflow_type, steps, initial_state_model)
+    - Step structure
+    - Dependency references
+    - Route targets
+
+    Strict validation (--strict) additionally checks:
+    - Function paths can be imported
+    - State model is a valid Pydantic class
+    - Compensation functions exist
+    - Parallel task functions exist
+
+    Examples:
+        rufus validate workflow.yaml              # Basic validation
+        rufus validate workflow.yaml --strict     # Comprehensive validation
+        rufus validate workflow.yaml --json       # JSON output
     """
-    if not workflow_file.is_file():
-        typer.echo(f"Error: Workflow file not found at {workflow_file}", err=True)
-        raise typer.Exit(code=1)
+    from rufus_cli.validation import validate_workflow_file
 
-    try:
-        with open(workflow_file, "r") as f:
-            workflow_config = yaml.safe_load(f)
-        
-        if not isinstance(workflow_config, dict):
-            typer.echo(f"Error: Invalid YAML format in {workflow_file}. Expected a dictionary.", err=True)
-            raise typer.Exit(code=1)
+    is_valid, errors, warnings = validate_workflow_file(workflow_file, strict=strict)
 
-        if "workflow_type" not in workflow_config:
-            typer.echo(f"Error: 'workflow_type' missing in {workflow_file}", err=True)
-            raise typer.Exit(code=1)
-        if "steps" not in workflow_config or not isinstance(workflow_config["steps"], list):
-            typer.echo(f"Error: 'steps' section missing or not a list in {workflow_file}", err=True)
-            raise typer.Exit(code=1)
-        
-        # Minimal registry for validation
-        temp_registry_entry = {
-            workflow_config["workflow_type"]:
-                {
-                    "initial_state_model_path": "pydantic.BaseModel", # Generic model for validation
-                    "steps": workflow_config.get("steps", []),
-                    "parameters": workflow_config.get("parameters", {}),
-                    "env": workflow_config.get("env", {})
-                }
+    if json_output:
+        result = {
+            "valid": is_valid,
+            "file": str(workflow_file),
+            "errors": errors,
+            "warnings": warnings
         }
-        # A dummy WorkflowEngine to get a builder for validation
-        # No need to await initialize as it's a dummy run
-        persistence = InMemoryPersistence()
-        executor = SyncExecutor()
-        observer = LoggingObserver()
-        expression_evaluator_cls = SimpleExpressionEvaluator
-        template_engine_cls = Jinja2TemplateEngine
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        # Pretty output
+        if is_valid:
+            typer.secho(f"✓ Successfully validated {workflow_file}", fg=typer.colors.GREEN, bold=True)
+        else:
+            typer.secho(f"✗ Validation failed for {workflow_file}", fg=typer.colors.RED, bold=True, err=True)
 
-        engine = WorkflowEngine(
-            persistence=persistence,
-            executor=executor,
-            observer=observer,
-            workflow_registry=temp_registry_entry,
-            expression_evaluator_cls=expression_evaluator_cls,
-            template_engine_cls=template_engine_cls
-        )
+        if errors:
+            typer.secho(f"\n{len(errors)} Error(s):", fg=typer.colors.RED, bold=True, err=True)
+            for i, error in enumerate(errors, 1):
+                typer.secho(f"  {i}. {error}", fg=typer.colors.RED, err=True)
 
-        # Attempt to build steps to catch more errors
-        # Note: This will not fully validate func_paths unless they are importable
-        engine.workflow_builder._build_steps_from_config(workflow_config["steps"])
+        if warnings:
+            typer.secho(f"\n{len(warnings)} Warning(s):", fg=typer.colors.YELLOW, bold=True)
+            for i, warning in enumerate(warnings, 1):
+                typer.secho(f"  {i}. {warning}", fg=typer.colors.YELLOW)
 
+        if not is_valid:
+            if not strict and not any("import" in e.lower() for e in errors):
+                typer.secho(f"\nTip: Use --strict to check function imports and state models", fg=typer.colors.CYAN)
+        elif not warnings:
+            typer.secho(f"\nNo issues found!", fg=typer.colors.GREEN)
 
-        typer.echo(f"Successfully validated {workflow_file} (syntax and basic structure passed).")
-    except yaml.YAMLError as e:
-        typer.echo(f"Error: Invalid YAML syntax in {workflow_file}: {e}", err=True)
-        raise typer.Exit(code=1)
-    except Exception as e:
-        typer.echo(f"An unexpected error occurred during validation: {e}", err=True)
-        import traceback
-        traceback.print_exc()
+    if not is_valid:
         raise typer.Exit(code=1)
 
 

@@ -180,6 +180,21 @@ Rufus SDK includes **Phase 1 performance optimizations** for production workload
    - Automatic caching of imported step functions
    - Reduces overhead by 5-10ms per step execution
 
+### Performance Model
+
+Rufus uses an **embedded SDK architecture** that eliminates orchestrator overhead:
+
+| Architecture | Orchestrator Hop | Persistence Hop | Total Network Calls/Step |
+|--------------|------------------|-----------------|--------------------------|
+| **Temporal/Cadence** | Yes (2x network) | Yes (2x) | **4 per step** |
+| **Rufus + PostgreSQL** | ❌ No | Yes (2x) | **2 per step** |
+| **Rufus + SQLite** | ❌ No | Local I/O only | **0 network calls** |
+| **Rufus + In-Memory** | ❌ No | ❌ No | **0** |
+
+**Key Advantage**: Rufus workflows execute **in-process**, avoiding the Worker → Orchestrator → Worker round-trip that systems like Temporal require. For PostgreSQL persistence, you still have database I/O (load state, save state), but you eliminate the central orchestrator bottleneck.
+
+**Best Performance**: Use SQLite (`:memory:`) or In-Memory persistence for development/testing with zero network overhead.
+
 ### Benchmark Results
 
 Run benchmarks: `python tests/benchmarks/workflow_performance.py`
@@ -188,6 +203,7 @@ Run benchmarks: `python tests/benchmarks/workflow_performance.py`
 JSON Serialization: 2,453,971 ops/sec (orjson)
 Import Caching: 162x speedup for cached imports
 Async Latency: 5.5µs p50, 12.7µs p99 (uvloop)
+SQLite Workflows: ~9,000 ops/sec (in-memory)
 ```
 
 ### Expected Production Gains
@@ -195,6 +211,7 @@ Async Latency: 5.5µs p50, 12.7µs p99 (uvloop)
 - **+50-100% throughput** for I/O-bound workflows
 - **-30-40% latency** for async operations
 - **-80% serialization time** for state persistence
+- **-50% network overhead** vs. centralized orchestrators
 - **Minimal memory overhead** (<5% increase)
 
 All optimizations are backwards compatible and can be disabled via environment variables.
