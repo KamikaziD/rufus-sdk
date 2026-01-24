@@ -906,9 +906,200 @@ python tests/benchmarks/persistence_benchmark.py
 - **Provider Injection**: All providers injected via `Workflow.__init__` or `WorkflowBuilder`
 - **Async Execution**: Async steps dispatched to `ExecutionProvider`, not executed inline
 - **Error Handling**: Uncaught exceptions set workflow status to `FAILED`
-- **Dynamic Injection**: Evaluated after each step, can insert new steps at runtime
 - **Parallel Merge Conflicts**: Logged as warnings when tasks return overlapping keys
 - **Sub-Workflow Nesting**: Supports hierarchical composition with status propagation
+
+### ⚠️ Executor Portability Warning
+
+**CRITICAL**: Step functions must be **stateless and process-isolated** to work across all executors.
+
+**The Problem**: Developers often test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, fresh process per task). Code that works locally breaks in production because:
+
+- **SyncExecutor**: All steps run in the same Python process. Global variables, module-level state, and in-memory caches are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process/thread. No shared memory.
+
+**Common Pitfalls**:
+
+```python
+# ❌ BREAKS in CeleryExecutor - global state lost between steps
+global_cache = {}
+
+def step_a(state: MyState, context: StepContext):
+    global_cache['user_data'] = fetch_user(state.user_id)
+    return {}
+
+def step_b(state: MyState, context: StepContext):
+    user_data = global_cache['user_data']  # KeyError in Celery!
+    return {"name": user_data['name']}
+
+# ❌ BREAKS in CeleryExecutor - module-level state lost
+_connection = None
+
+def step_c(state: MyState, context: StepContext):
+    global _connection
+    if _connection is None:
+        _connection = create_db_connection()  # Created in worker process
+    _connection.query(...)  # Different worker, _connection is None!
+
+# ✅ WORKS everywhere - state persisted in workflow state
+def step_a_correct(state: MyState, context: StepContext):
+    user_data = fetch_user(state.user_id)
+    state.user_data = user_data  # Persisted to database
+    return {"user_data": user_data}
+
+def step_b_correct(state: MyState, context: StepContext):
+    user_data = state.user_data  # Loaded from database
+    return {"name": user_data['name']}
+
+# ✅ WORKS everywhere - return data to workflow state
+def step_c_correct(state: MyState, context: StepContext):
+    # Create connection per step (Celery worker will clean up)
+    connection = create_db_connection()
+    result = connection.query(...)
+    return {"query_result": result}  # Result saved to state
+```
+
+**Best Practices**:
+1. **Store everything in workflow state** - `state.field = value` persists to database
+2. **Return data from steps** - Return dict merges into state automatically
+3. **No global variables** - Treat each step as isolated function
+4. **No module-level state** - Don't rely on `_module_var` between steps
+5. **Create resources per step** - Database connections, API clients, etc. should be created and cleaned up within each step
+
+**Testing for Portability**:
+```python
+import pytest
+from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()  # Closer to Celery behavior
+])
+def test_workflow_executor_portable(executor):
+    """Test that workflow works with both sync and threaded execution."""
+    builder = WorkflowBuilder(
+        config_dir="config/",
+        execution_provider=executor
+    )
+    workflow = builder.create_workflow("MyWorkflow", initial_data={...})
+    # Run workflow - should work with both executors
+    ...
+```
+
+**Quick Check**: If your step function uses `global`, module-level variables, or relies on state from previous steps not in the workflow state object, it will likely break in distributed execution.
+
+---
+
+### ⚠️ Dynamic Injection Caution
+
+**WARNING**: Dynamic step injection makes workflows **non-deterministic** and significantly harder to debug.
+
+**The Problem**: When a workflow modifies its own structure at runtime based on data, the execution trace no longer matches the YAML definition. This creates serious operational challenges:
+
+1. **Debugging Difficulty**: Audit logs show steps that don't exist in the workflow YAML file
+2. **Compensation Complexity**: Saga rollback must track dynamically injected steps
+3. **Non-Determinism**: Same workflow type with different data produces different execution paths
+4. **Version Control**: Cannot reconstruct execution from Git history (definition changed at runtime)
+5. **Audit Compliance**: Harder to prove regulatory compliance when workflow structure is dynamic
+
+**Example of the Problem**:
+
+```yaml
+# my_workflow.yaml
+steps:
+  - name: "Process_Order"
+    type: "STANDARD"
+    function: "steps.process_order"
+    dynamic_injection:
+      condition: "state.amount > 10000"
+      steps:
+        - name: "High_Value_Review"  # This step NOT in YAML!
+          function: "steps.high_value_review"
+      insert_after: "Process_Order"
+```
+
+**What happens**:
+- Low-value order ($100): Executes `Process_Order` → `Ship_Order` (matches YAML)
+- High-value order ($20,000): Executes `Process_Order` → `High_Value_Review` → `Ship_Order` (YAML + injected step)
+
+**When developer looks at audit log**: "Why did this workflow execute `High_Value_Review`? It's not in the YAML file!"
+
+**When to Use Dynamic Injection** (Rare cases only):
+1. **Plugin Systems**: Steps defined by external packages (e.g., `rufus-plugins`)
+2. **Multi-Tenant Workflows**: Tenants provide custom validation logic
+3. **A/B Testing**: Controlled experiments with workflow variations
+4. **Dynamic Compliance**: Regulatory requirements vary by jurisdiction
+
+**Recommended Alternatives** (Use these instead):
+
+**1. DECISION Steps with Explicit Routes**:
+```yaml
+steps:
+  - name: "Check_Order_Value"
+    type: "DECISION"
+    function: "steps.check_order_value"
+    routes:
+      - condition: "state.amount > 10000"
+        target: "High_Value_Review"  # Visible in YAML!
+      - condition: "state.amount <= 10000"
+        target: "Standard_Processing"
+
+  - name: "High_Value_Review"  # Explicit step
+    type: "STANDARD"
+    function: "steps.high_value_review"
+    dependencies: ["Check_Order_Value"]
+```
+
+**2. Conditional Logic Within Steps**:
+```python
+def process_order(state: OrderState, context: StepContext):
+    if state.amount > 10000:
+        # High-value logic inline
+        perform_high_value_checks(state)
+    else:
+        # Standard logic
+        perform_standard_checks(state)
+    return {"processed": True}
+```
+
+**3. Multiple Workflow Versions**:
+```yaml
+# order_processing_standard.yaml
+workflow_type: "OrderProcessing_Standard"
+
+# order_processing_high_value.yaml
+workflow_type: "OrderProcessing_HighValue"
+steps:
+  - name: "High_Value_Review"  # Explicit in this version
+```
+
+**If You Must Use Dynamic Injection**:
+1. **Enable Full Audit Logging**: Record when steps were injected and why
+2. **Snapshot Workflow Definition**: Save final workflow structure to database
+3. **Add Comments**: Document why dynamic injection is necessary
+4. **Limit Scope**: Only inject in specific, well-documented scenarios
+5. **Review Regularly**: Periodic audits of dynamic injection usage
+
+**Configuration Example** (if necessary):
+```yaml
+steps:
+  - name: "Process_Data"
+    type: "STANDARD"
+    function: "steps.process_data"
+    dynamic_injection:
+      # DOCUMENT WHY THIS IS NEEDED
+      # Reason: Multi-tenant workflow, tenants define custom validation
+      condition: "state.tenant_config.has_custom_validation"
+      steps:
+        - name: "Custom_Validation"
+          function: "state.tenant_config.validation_function"
+      insert_after: "Process_Data"
+      # Log injection for audit
+      audit_injection: true
+```
+
+**Remember**: Dynamic injection is a **power tool** that trades debuggability for flexibility. Use sparingly and document thoroughly.
 
 ## Recent Migration (SDK Extraction)
 

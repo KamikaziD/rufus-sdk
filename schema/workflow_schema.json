@@ -1,0 +1,344 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rufus.dev/schema/workflow.json",
+  "title": "Rufus Workflow Definition",
+  "description": "JSON Schema for Rufus workflow YAML files. Provides IDE autocomplete and validation for workflow definitions.",
+  "type": "object",
+  "required": ["workflow_type", "initial_state_model", "steps"],
+  "properties": {
+    "workflow_type": {
+      "type": "string",
+      "description": "Unique identifier for this workflow type. Used when starting workflows.",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "examples": ["OrderProcessing", "KYC", "LoanApplication"]
+    },
+    "workflow_version": {
+      "type": "string",
+      "description": "Semantic version for this workflow definition (e.g., '1.0.0'). Recommended for production workflows.",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "examples": ["1.0", "1.0.0", "2.3.1"]
+    },
+    "initial_state_model": {
+      "type": "string",
+      "description": "Python import path to the Pydantic model defining this workflow's state structure.",
+      "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[A-Z][A-Za-z0-9_]*$",
+      "examples": ["state_models.OrderState", "my_app.models.WorkflowState"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this workflow does."
+    },
+    "steps": {
+      "type": "array",
+      "description": "Ordered list of steps that make up this workflow.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/step"
+      }
+    }
+  },
+  "definitions": {
+    "step": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for this step within the workflow. Use descriptive PascalCase names.",
+          "pattern": "^[A-Z][A-Za-z0-9_]*$",
+          "examples": ["Initialize_Order", "Process_Payment", "Send_Email"]
+        },
+        "type": {
+          "type": "string",
+          "description": "Step execution type. Determines how the step is executed.",
+          "enum": [
+            "STANDARD",
+            "COMPENSATABLE",
+            "ASYNC",
+            "HTTP",
+            "PARALLEL",
+            "FIRE_AND_FORGET",
+            "LOOP",
+            "CRON_SCHEDULER",
+            "DECISION"
+          ],
+          "default": "STANDARD"
+        },
+        "function": {
+          "type": "string",
+          "description": "Python import path to the step function. Required for STANDARD, COMPENSATABLE, ASYNC, DECISION step types.",
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[a-z_][a-z0-9_]*$",
+          "examples": ["steps.process_payment", "my_app.workflow.initialize"]
+        },
+        "compensate_function": {
+          "type": "string",
+          "description": "Python import path to the compensation function. Used for Saga pattern rollback. Only valid for COMPENSATABLE type or when using Saga mode.",
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[a-z_][a-z0-9_]*$",
+          "examples": ["steps.refund_payment", "steps.release_inventory"]
+        },
+        "input_model": {
+          "type": "string",
+          "description": "Python import path to Pydantic model for validating user input to this step.",
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[A-Z][A-Za-z0-9_]*$",
+          "examples": ["state_models.ApprovalInput", "models.PaymentInput"]
+        },
+        "automate_next": {
+          "type": "boolean",
+          "description": "If true, automatically execute the next step after this one completes. If false, workflow pauses until next_step() is called.",
+          "default": false
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "List of step names that must complete before this step can execute. Step names must reference existing steps in this workflow.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9_]*$"
+          },
+          "default": []
+        },
+        "routes": {
+          "type": "array",
+          "description": "For DECISION steps only. Defines conditional routing based on state values.",
+          "items": {
+            "type": "object",
+            "required": ["condition", "target"],
+            "properties": {
+              "condition": {
+                "type": "string",
+                "description": "Python expression evaluated against workflow state. First matching condition is taken."
+              },
+              "target": {
+                "type": "string",
+                "description": "Name of step to jump to if condition is true.",
+                "pattern": "^[A-Z][A-Za-z0-9_]*$"
+              }
+            }
+          }
+        },
+        "dynamic_injection": {
+          "type": "object",
+          "description": "Rules for injecting new steps at runtime based on workflow state. USE WITH EXTREME CAUTION - makes workflows non-deterministic.",
+          "properties": {
+            "condition": {
+              "type": "string",
+              "description": "Python expression evaluated after this step. If true, injects steps."
+            },
+            "steps": {
+              "type": "array",
+              "description": "Steps to inject if condition is true.",
+              "items": {
+                "$ref": "#/definitions/step"
+              }
+            },
+            "insert_after": {
+              "type": "string",
+              "description": "Step name after which to insert the new steps.",
+              "pattern": "^[A-Z][A-Za-z0-9_]*$"
+            }
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "description": "For PARALLEL steps only. List of tasks to execute concurrently.",
+          "items": {
+            "type": "object",
+            "required": ["name", "function"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Unique name for this parallel task.",
+                "pattern": "^[A-Z][A-Za-z0-9_]*$"
+              },
+              "function": {
+                "type": "string",
+                "description": "Python import path to the task function.",
+                "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*\\.[a-z_][a-z0-9_]*$"
+              }
+            }
+          }
+        },
+        "merge_strategy": {
+          "type": "string",
+          "description": "How to merge async/parallel step results into workflow state. SHALLOW = top-level keys only, DEEP = recursive merge.",
+          "enum": ["SHALLOW", "DEEP", "REPLACE", "APPEND", "OVERWRITE_EXISTING", "PRESERVE_EXISTING"],
+          "default": "SHALLOW"
+        },
+        "merge_conflict_behavior": {
+          "type": "string",
+          "description": "How to handle conflicts when parallel tasks return overlapping keys. PREFER_NEW = use task result, PREFER_EXISTING = keep current state, RAISE_ERROR = fail.",
+          "enum": ["PREFER_NEW", "PREFER_EXISTING", "RAISE_ERROR"],
+          "default": "PREFER_NEW"
+        },
+        "allow_partial_success": {
+          "type": "boolean",
+          "description": "For PARALLEL steps. If true, workflow continues even if some tasks fail. If false, any task failure fails the step.",
+          "default": false
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Maximum execution time for this step in seconds. Step fails if timeout is exceeded.",
+          "minimum": 1,
+          "examples": [300, 60, 3600]
+        },
+        "http_config": {
+          "type": "object",
+          "description": "For HTTP steps only. Configuration for HTTP request.",
+          "required": ["url", "method"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "HTTP endpoint URL. Can include Jinja2 templates using workflow state.",
+              "format": "uri"
+            },
+            "method": {
+              "type": "string",
+              "description": "HTTP method",
+              "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+            },
+            "headers": {
+              "type": "object",
+              "description": "HTTP headers. Values can be Jinja2 templates.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "type": "object",
+              "description": "Request body for POST/PUT/PATCH. Can include Jinja2 templates."
+            },
+            "timeout": {
+              "type": "integer",
+              "description": "Request timeout in seconds",
+              "minimum": 1
+            }
+          }
+        },
+        "target_workflow_type": {
+          "type": "string",
+          "description": "For FIRE_AND_FORGET and CRON_SCHEDULER steps. Workflow type to launch.",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "initial_data_template": {
+          "type": "object",
+          "description": "For FIRE_AND_FORGET and CRON_SCHEDULER steps. Template for initial data passed to launched workflow. Can include Jinja2 templates."
+        },
+        "cron_expression": {
+          "type": "string",
+          "description": "For CRON_SCHEDULER steps only. Cron expression defining schedule.",
+          "pattern": "^(\\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\\*/[0-9]+)\\s+(\\*|([0-9]|1[0-9]|2[0-3])|\\*/[0-9]+)\\s+(\\*|([1-9]|[12][0-9]|3[01])|\\*/[0-9]+)\\s+(\\*|([1-9]|1[012])|[A-Z]{3}|\\*/[0-9]+)\\s+(\\*|[0-6]|[A-Z]{3}|\\*/[0-9]+)$",
+          "examples": ["0 0 * * *", "*/15 * * * *", "0 9 * * MON"]
+        },
+        "schedule_name": {
+          "type": "string",
+          "description": "For CRON_SCHEDULER steps only. Optional name for this schedule."
+        },
+        "loop_body": {
+          "type": "array",
+          "description": "For LOOP steps only. Steps to execute on each iteration.",
+          "items": {
+            "$ref": "#/definitions/step"
+          }
+        },
+        "mode": {
+          "type": "string",
+          "description": "For LOOP steps only. ITERATE = loop over list items, WHILE = loop while condition is true.",
+          "enum": ["ITERATE", "WHILE"]
+        },
+        "iterate_over": {
+          "type": "string",
+          "description": "For LOOP steps with ITERATE mode. State path to list to iterate over (e.g., 'items', 'data.users')."
+        },
+        "item_var_name": {
+          "type": "string",
+          "description": "For LOOP steps with ITERATE mode. Variable name for current item in loop body.",
+          "default": "item",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "while_condition": {
+          "type": "string",
+          "description": "For LOOP steps with WHILE mode. Python expression evaluated before each iteration."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "description": "For LOOP steps. Maximum number of iterations to prevent infinite loops.",
+          "minimum": 1,
+          "default": 1000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": ["STANDARD", "COMPENSATABLE", "ASYNC", "DECISION"]
+              }
+            }
+          },
+          "then": {
+            "required": ["function"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "PARALLEL"
+              }
+            }
+          },
+          "then": {
+            "required": ["tasks"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "HTTP"
+              }
+            }
+          },
+          "then": {
+            "required": ["http_config"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": ["FIRE_AND_FORGET", "CRON_SCHEDULER"]
+              }
+            }
+          },
+          "then": {
+            "required": ["target_workflow_type", "initial_data_template"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "CRON_SCHEDULER"
+              }
+            }
+          },
+          "then": {
+            "required": ["cron_expression"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "LOOP"
+              }
+            }
+          },
+          "then": {
+            "required": ["loop_body", "mode"]
+          }
+        }
+      ]
+    }
+  }
+}
