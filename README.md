@@ -38,7 +38,7 @@ Ready-to-use implementations:
 
 ```
 implementations/
-├── persistence/       # postgres.py, redis.py, memory.py
+├── persistence/       # postgres.py, sqlite.py, redis.py, memory.py
 ├── execution/         # sync.py, celery.py, thread_pool.py, postgres_executor.py
 ├── observability/     # logging.py, noop.py
 ├── templating/        # jinja2.py
@@ -377,8 +377,27 @@ persistence = InMemoryPersistence()
 
 ### Installation
 ```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# SQLite is included by default - no database server required!
+# For PostgreSQL support (production):
+pip install asyncpg
 ```
+
+### Quick Start with SQLite (Zero Setup)
+
+Try the SQLite Task Manager example - no database server needed:
+```bash
+# Run the simple demo
+python examples/sqlite_task_manager/simple_demo.py
+```
+
+This demonstrates:
+- In-memory SQLite database (`:memory:`)
+- Complete workflow lifecycle
+- Execution logging and metrics
+- Zero external dependencies
 
 ### Run Tests
 ```bash
@@ -403,6 +422,15 @@ uvicorn rufus_server.main:app --reload
 ---
 
 ## 📚 Examples
+
+### **SQLite Task Manager** (`examples/sqlite_task_manager/`) 🆕
+Zero-setup workflow example using embedded SQLite:
+- In-memory database (no PostgreSQL required)
+- Human-in-the-loop approval workflow
+- Task creation, assignment, and completion
+- Workflow pause/resume with user input
+- Complete with step functions and YAML config
+- **Run**: `python examples/sqlite_task_manager/simple_demo.py`
 
 ### **Quickstart** (`examples/quickstart/`)
 Simple greeting workflow demonstrating:
@@ -452,12 +480,27 @@ Tests automatically exclude legacy `confucius/` and `original_implementation_fil
 - Import caching (162x speedup)
 - Comprehensive benchmarking suite
 
-**✅ Phase 1 Database Schema Standardization (Completed)**
+**✅ SQLite Persistence Implementation (Completed)**
+
+**Phase 1: Schema Standardization**
 - Unified schema definition system (`schema.yaml`)
 - Multi-database support (PostgreSQL + SQLite)
 - Automated schema compilation and validation
 - Migration management tooling
 - 20 unit tests for schema compiler
+
+**Phase 2: SQLitePersistenceProvider**
+- Full PersistenceProvider interface implementation (20 methods)
+- Type conversion helpers (JSON, UUID, datetime, boolean)
+- WAL mode for improved concurrency
+- Foreign key enforcement
+- 14 unit tests + 6 integration tests
+
+**Phase 3: Production Testing & Documentation**
+- Performance benchmarks (~9K ops/sec for workflows)
+- SQLite Task Manager example application
+- Comprehensive usage guide and troubleshooting
+- Ready for development, testing, and low-concurrency production use
 
 **✅ Phase 2 SQLitePersistenceProvider (Completed)**
 - Full SQLite persistence implementation (800+ lines)

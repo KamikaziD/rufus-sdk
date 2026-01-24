@@ -19,10 +19,11 @@ The architecture separates workflow definition (YAML) from implementation (Pytho
 # Install in development mode with all dependencies
 pip install -r requirements.txt
 
-# For PostgreSQL support
+# SQLite support is included by default (no server required)
+# For PostgreSQL support (production)
 pip install asyncpg
 
-# Start Redis (required for Celery executor)
+# For Redis/Celery executor (optional, for distributed execution)
 docker run -d --name redis-server -p 6379:6379 redis
 ```
 
@@ -117,7 +118,8 @@ All external integrations are abstracted via Python Protocol interfaces:
 ### Default Implementations (`src/rufus/implementations/`)
 
 **Persistence**
-- `postgres.py`: PostgreSQL with JSONB, FOR UPDATE SKIP LOCKED, audit logging
+- `postgres.py`: PostgreSQL with JSONB, FOR UPDATE SKIP LOCKED, audit logging (production)
+- `sqlite.py`: SQLite with WAL mode, foreign keys, type conversions (development/testing)
 - `memory.py`: In-memory storage for testing
 - `redis.py`: Redis-based persistence
 
@@ -610,6 +612,291 @@ from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
+```
+
+## SQLite Persistence Provider
+
+Rufus SDK includes full SQLite support for development, testing, and low-concurrency deployments. SQLite provides a lightweight, embedded database option that requires no external server.
+
+### When to Use SQLite
+
+**✅ Recommended for:**
+- **Development**: No PostgreSQL server required - zero setup friction
+- **Testing**: Fast in-memory databases (`db_path=":memory:"`)
+- **CI/CD**: Simplified pipelines without database containers
+- **Demos**: Portable, self-contained examples
+- **Single-server deployments**: Low-to-medium concurrency workloads
+- **Edge computing**: Embedded workflows on IoT/edge devices
+- **Prototyping**: Quick experimentation without infrastructure
+
+**❌ Not recommended for:**
+- **High concurrency**: SQLite has write serialization (single writer at a time)
+- **Distributed systems**: No built-in replication or clustering
+- **Real-time updates**: No LISTEN/NOTIFY support (use PostgreSQL)
+- **Large-scale production**: PostgreSQL recommended for >100 concurrent workflows
+
+### Installation and Setup
+
+**Install dependencies:**
+```bash
+# SQLite support included in base requirements
+pip install -r requirements.txt
+
+# aiosqlite is automatically installed
+```
+
+**No server setup required** - SQLite is embedded in the Python process.
+
+### Usage Examples
+
+**1. In-Memory Database (Testing)**
+```python
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+# Fast, ephemeral database - perfect for tests
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()
+
+# Run tests...
+await persistence.close()
+```
+
+**2. File-Based Database (Development)**
+```python
+# Persistent database stored on disk
+persistence = SQLitePersistenceProvider(db_path="workflows.db")
+await persistence.initialize()
+
+# Apply migrations
+from tools.migrate import migrate_database
+await migrate_database("sqlite:///workflows.db")
+```
+
+**3. Full Workflow Integration**
+```python
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.observability.logging import LoggingObserver
+
+# Create SQLite persistence
+persistence = SQLitePersistenceProvider(db_path="workflows.db")
+await persistence.initialize()
+
+# Build workflow with SQLite backend
+builder = WorkflowBuilder(
+    config_dir="config/",
+    persistence_provider=persistence,
+    execution_provider=SyncExecutionProvider(),
+    observer=LoggingObserver()
+)
+
+# Use normally - no PostgreSQL required!
+workflow = await builder.create_workflow(
+    workflow_type="MyWorkflow",
+    initial_data={"user_id": "123"}
+)
+```
+
+**4. Example Application**
+See `examples/sqlite_task_manager/` for a complete example:
+```bash
+# Run the simple demo
+python examples/sqlite_task_manager/simple_demo.py
+
+# Or run the full workflow example
+python examples/sqlite_task_manager/main.py
+```
+
+### Configuration Options
+
+```python
+SQLitePersistenceProvider(
+    db_path: str = ":memory:",        # Database file path or ":memory:"
+    timeout: float = 5.0,              # Lock timeout in seconds
+    check_same_thread: bool = False    # Allow multi-threaded access
+)
+```
+
+**Key parameters:**
+- **`db_path`**:
+  - `":memory:"` - In-memory database (fast, ephemeral)
+  - `"path/to/db.sqlite"` - File-based database (persistent)
+  - Use absolute paths for production
+
+- **`timeout`**:
+  - How long to wait for database locks (default: 5 seconds)
+  - Increase for high-contention scenarios
+
+- **`check_same_thread`**:
+  - Set to `False` for async/multi-threaded applications (default)
+  - SQLite default is `True` but Rufus handles thread safety
+
+### Performance Characteristics
+
+**Benchmark Results** (single-threaded, in-memory):
+```
+save_workflow:  ~9,000 ops/sec
+load_workflow:  ~6,500 ops/sec
+create_task:    ~7,800 ops/sec
+log_execution:  ~9,000 ops/sec
+record_metric:  ~8,500 ops/sec
+```
+
+**vs PostgreSQL:**
+- **Reads**: Similar performance for single-threaded workloads
+- **Writes**: PostgreSQL faster for concurrent writes (10+ workers)
+- **Latency**: SQLite slightly lower latency for local operations
+- **Throughput**: PostgreSQL significantly better for concurrent workloads
+
+### SQLite-Specific Features
+
+**WAL Mode** (Write-Ahead Logging):
+- Automatically enabled for file-based databases
+- Improves concurrency (readers don't block writers)
+- Better crash recovery
+
+**Foreign Key Enforcement**:
+- Enabled by default (SQLite disables by default)
+- Ensures referential integrity (parent/child workflows)
+
+**Type Conversions**:
+- **UUID**: Stored as TEXT (hex format)
+- **JSONB**: Stored as TEXT (JSON strings)
+- **Timestamps**: Stored as TEXT (ISO8601 format)
+- **Booleans**: Stored as INTEGER (0/1)
+- Automatic conversion handled by persistence provider
+
+### Migration Between Databases
+
+**SQLite to PostgreSQL:**
+```python
+# 1. Export from SQLite
+sqlite_persistence = SQLitePersistenceProvider(db_path="workflows.db")
+workflows = await sqlite_persistence.list_workflows(limit=10000)
+
+# 2. Import to PostgreSQL
+postgres_persistence = PostgresPersistenceProvider(db_url="postgresql://...")
+for workflow in workflows:
+    await postgres_persistence.save_workflow(workflow['id'], workflow)
+```
+
+**PostgreSQL to SQLite:**
+```python
+# Similar process, reverse direction
+# Note: LISTEN/NOTIFY features will be lost
+```
+
+### Best Practices
+
+**Development:**
+```python
+# Use file-based database for development
+persistence = SQLitePersistenceProvider(db_path="dev_workflows.db")
+
+# Keep database in .gitignore
+# Commit schema migrations, not database files
+```
+
+**Testing:**
+```python
+# Use in-memory database for tests
+@pytest.fixture
+async def persistence():
+    provider = SQLitePersistenceProvider(db_path=":memory:")
+    await provider.initialize()
+    # Apply schema...
+    yield provider
+    await provider.close()
+```
+
+**Production (Low Concurrency):**
+```python
+# Use absolute path and WAL mode (automatic)
+persistence = SQLitePersistenceProvider(
+    db_path="/var/lib/rufus/workflows.db",
+    timeout=10.0  # Increase timeout for production
+)
+
+# Regular backups with SQLite backup API
+import shutil
+shutil.copy("/var/lib/rufus/workflows.db", "/backups/workflows_backup.db")
+```
+
+### Limitations and Workarounds
+
+**1. No LISTEN/NOTIFY**
+- **Impact**: No real-time workflow status updates
+- **Workaround**: Use polling or external pub/sub (Redis)
+```python
+# Polling approach
+import asyncio
+async def poll_workflow_status(workflow_id):
+    while True:
+        workflow = await persistence.load_workflow(workflow_id)
+        if workflow['status'] in ['COMPLETED', 'FAILED']:
+            break
+        await asyncio.sleep(1)  # Poll every second
+```
+
+**2. Write Serialization**
+- **Impact**: Only one writer at a time (concurrent reads OK)
+- **Workaround**: Use connection pooling with retry logic
+- **Recommendation**: Switch to PostgreSQL for >50 concurrent writers
+
+**3. Simpler Triggers**
+- **Impact**: Some PostgreSQL triggers simplified for SQLite
+- **Effect**: Minimal - core functionality preserved
+- **Details**: `updated_at` triggers use AFTER UPDATE instead of BEFORE UPDATE
+
+### Troubleshooting
+
+**Error: "database is locked"**
+```python
+# Increase timeout
+persistence = SQLitePersistenceProvider(
+    db_path="workflows.db",
+    timeout=30.0  # Wait up to 30 seconds
+)
+
+# Or reduce concurrent writes
+# Or switch to PostgreSQL for high concurrency
+```
+
+**Error: "no such table"**
+```bash
+# Apply migrations
+python tools/migrate.py --db sqlite:///workflows.db --up
+
+# Or use initialize_schema.py
+python tools/initialize_schema.py --database sqlite --output workflows.db
+```
+
+**Error: "UNIQUE constraint failed"**
+```python
+# Check for duplicate idempotency keys
+# SQLite uses INSERT OR REPLACE for idempotent operations
+# This is expected behavior, not an error in most cases
+```
+
+**Performance Issues:**
+```python
+# 1. Use WAL mode (automatic for file-based databases)
+# 2. Use in-memory database for tests
+# 3. Reduce concurrent writes
+# 4. Consider PostgreSQL for production workloads
+
+# Check if WAL mode is enabled
+async with persistence.conn.execute("PRAGMA journal_mode") as cursor:
+    mode = await cursor.fetchone()
+    print(f"Journal mode: {mode[0]}")  # Should be 'wal'
+```
+
+### Running Benchmarks
+
+Compare SQLite vs PostgreSQL performance:
+```bash
+python tests/benchmarks/persistence_benchmark.py
 ```
 
 ## Important Notes

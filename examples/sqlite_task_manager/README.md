@@ -99,3 +99,38 @@ SQLite performance (based on benchmarks):
 - **Log execution**: ~9,000 ops/sec
 
 Perfect for development, testing, and moderate production workloads.
+
+## Simple Demo
+
+For a minimal example without workflow builder dependencies:
+
+```bash
+python examples/sqlite_task_manager/simple_demo.py
+```
+
+This demonstrates raw SQLite persistence operations:
+- In-memory database (`:memory:`)
+- Schema creation
+- Workflow CRUD operations
+- Logging and metrics
+- Database statistics
+
+## Troubleshooting
+
+Having issues with SQLite? See the comprehensive troubleshooting guide:
+
+**[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
+
+Common issues covered:
+- "database is locked" errors
+- "no such table" errors
+- Performance optimization
+- Data integrity
+- Migration problems
+- When to switch to PostgreSQL
+
+## Additional Resources
+
+- [CLAUDE.md - SQLite Section](../../CLAUDE.md#sqlite-persistence-provider)
+- [SQLITE_IMPLEMENTATION_PLAN.md](../../SQLITE_IMPLEMENTATION_PLAN.md)
+- [Performance Benchmarks](../../tests/benchmarks/persistence_benchmark.py)
