@@ -1,0 +1,41 @@
+workflow_type: "TaskApprovalWorkflow"
+workflow_version: "1.0.0"
+initial_state_model: "examples.sqlite_task_manager.models.TaskState"
+description: "Task approval workflow with SQLite persistence"
+
+steps:
+  - name: "Create_Task"
+    type: "STANDARD"
+    function: "examples.sqlite_task_manager.steps.create_task"
+    description: "Initialize task with details"
+    automate_next: true
+
+  - name: "Assign_Task"
+    type: "STANDARD"
+    function: "examples.sqlite_task_manager.steps.assign_task"
+    description: "Auto-assign task to team member"
+    automate_next: true
+    dependencies:
+      - "Create_Task"
+
+  - name: "Request_Approval"
+    type: "STANDARD"
+    function: "examples.sqlite_task_manager.steps.request_approval"
+    description: "Pause for manager approval"
+    dependencies:
+      - "Assign_Task"
+
+  - name: "Complete_Task"
+    type: "STANDARD"
+    function: "examples.sqlite_task_manager.steps.complete_task"
+    description: "Mark task as completed after approval"
+    automate_next: true
+    dependencies:
+      - "Request_Approval"
+
+  - name: "Send_Notification"
+    type: "STANDARD"
+    function: "examples.sqlite_task_manager.steps.send_notification"
+    description: "Send completion notification"
+    dependencies:
+      - "Complete_Task"

@@ -110,7 +110,8 @@ behavior.
 
 *   `PersistenceProvider` : Handles saving and loading workflow states.
     *   `InMemoryPersistence` (for testing/dev)
-    *   `PostgresPersistenceProvider` (for production durability)
+    *   `SQLitePersistenceProvider` (for development/testing/low-concurrency production)
+    *   `PostgresPersistenceProvider` (for high-concurrency production)
     *   `RedisPersistenceProvider` (for caching/specific use-cases)
 *   `ExecutionProvider` : Manages how workflow steps are executed (synchronously,
     asynchronously, in parallel).
@@ -279,7 +280,8 @@ async def main():
     # --- 2. Initialize SDK Providers ---
     # Choose your desired implementations for persistence, execution, and observability
     persistence_provider = InMemoryPersistence() # For development and testing
-    # persistence_provider = PostgresPersistenceProvider(db_url="postgresql://user:password@host:port/db")
+    # persistence_provider = SQLitePersistenceProvider(db_path="workflows.db") # For development (embedded DB)
+    # persistence_provider = PostgresPersistenceProvider(db_url="postgresql://user:password@host:port/db") # For production
     execution_provider = SyncExecutor() # For synchronous execution
     # execution_provider = CeleryExecutor(celery_app=my_celery_app_instance)
     workflow_observer = LoggingObserver() # Logs events to console
