@@ -31,39 +31,65 @@ def show(
 
 @app.command("set-persistence")
 def set_persistence(
-    provider: str = typer.Option(..., "--provider", "-p", help="Provider type (sqlite, postgres, memory)"),
     db_path: Optional[str] = typer.Option(None, "--db-path", help="Database path (for SQLite)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (for PostgreSQL)"),
     pool_min: Optional[int] = typer.Option(None, "--pool-min", help="Min pool size (for PostgreSQL)"),
     pool_max: Optional[int] = typer.Option(None, "--pool-max", help="Max pool size (for PostgreSQL)"),
 ):
     """
-    Set persistence provider configuration
+    Set persistence provider configuration (interactive)
 
     Examples:\n
-        rufus config set-persistence --provider sqlite --db-path workflows.db\n
-        rufus config set-persistence --provider postgres --db-url postgresql://localhost/rufus
+        rufus config set-persistence --db-path workflows.db\n
+        rufus config set-persistence --db-url postgresql://localhost/rufus
     """
     config_manager = get_config_manager()
     formatter = Formatter()
 
     try:
+        # Interactive provider selection
+        formatter.print("\n[bold]Available persistence providers:[/bold]")
+        formatter.print("  1. memory - In-memory (testing only)")
+        formatter.print("  2. sqlite - SQLite database (development/production)")
+        formatter.print("  3. postgres - PostgreSQL database (production)")
+
+        provider_choice = typer.prompt("\nSelect provider (1-3)", type=int)
+
+        provider_map = {
+            1: "memory",
+            2: "sqlite",
+            3: "postgres"
+        }
+
+        if provider_choice not in provider_map:
+            formatter.print_error("Invalid choice")
+            raise typer.Exit(code=1)
+
+        provider = provider_map[provider_choice]
         kwargs = {}
-        if db_path:
+
+        # Provider-specific configuration
+        if provider == "sqlite":
+            if not db_path:
+                db_path = typer.prompt("Database path", default="~/.rufus/workflows.db")
             kwargs["db_path"] = db_path
-        if db_url:
+        elif provider == "postgres":
+            if not db_url:
+                db_url = typer.prompt("Database URL", default="postgresql://localhost/rufus")
             kwargs["db_url"] = db_url
-        if pool_min:
+            if not pool_min:
+                pool_min = typer.prompt("Min pool size", default=10, type=int)
+            if not pool_max:
+                pool_max = typer.prompt("Max pool size", default=50, type=int)
             kwargs["pool_min_size"] = pool_min
-        if pool_max:
             kwargs["pool_max_size"] = pool_max
 
         config_manager.set_persistence(provider, **kwargs)
-        formatter.print_success(f"Persistence provider set to: {provider}")
+        formatter.print_success(f"\nPersistence provider set to: {provider}")
 
-        if provider == "sqlite" and db_path:
+        if provider == "sqlite":
             formatter.print_info(f"Database path: {db_path}")
-        elif provider == "postgres" and db_url:
+        elif provider == "postgres":
             formatter.print_info(f"Database URL: {db_url}")
 
     except Exception as e:
@@ -72,33 +98,67 @@ def set_persistence(
 
 
 @app.command("set-execution")
-def set_execution(
-    provider: str = typer.Option(..., "--provider", "-p", help="Provider type (sync, thread_pool)")
-):
-    """Set execution provider"""
+def set_execution():
+    """Set execution provider (interactive)"""
     config_manager = get_config_manager()
     formatter = Formatter()
 
     try:
+        # Interactive provider selection
+        formatter.print("\n[bold]Available execution providers:[/bold]")
+        formatter.print("  1. sync - Synchronous execution (simple, testing)")
+        formatter.print("  2. thread_pool - Thread pool execution (parallel tasks)")
+
+        provider_choice = typer.prompt("\nSelect provider (1-2)", type=int)
+
+        provider_map = {
+            1: "sync",
+            2: "thread_pool"
+        }
+
+        if provider_choice not in provider_map:
+            formatter.print_error("Invalid choice")
+            raise typer.Exit(code=1)
+
+        provider = provider_map[provider_choice]
+
         config_manager.set_execution(provider)
-        formatter.print_success(f"Execution provider set to: {provider}")
+        formatter.print_success(f"\nExecution provider set to: {provider}")
     except Exception as e:
         formatter.print_error(f"Failed to set execution: {e}")
         raise typer.Exit(code=1)
 
 
 @app.command("set-default")
-def set_default(
-    key: str = typer.Option(..., "--key", "-k", help="Default key (auto_execute, interactive, json_output)"),
-    value: bool = typer.Option(..., "--value", "-v", help="Value (true/false)"),
-):
-    """Set default behavior"""
+def set_default():
+    """Set default behavior (interactive)"""
     config_manager = get_config_manager()
     formatter = Formatter()
 
     try:
+        # Interactive key selection
+        formatter.print("\n[bold]Available defaults:[/bold]")
+        formatter.print("  1. auto_execute - Automatically execute next step")
+        formatter.print("  2. interactive - Use interactive mode")
+        formatter.print("  3. json_output - Output as JSON by default")
+
+        key_choice = typer.prompt("\nSelect default to configure (1-3)", type=int)
+
+        key_map = {
+            1: "auto_execute",
+            2: "interactive",
+            3: "json_output"
+        }
+
+        if key_choice not in key_map:
+            formatter.print_error("Invalid choice")
+            raise typer.Exit(code=1)
+
+        key = key_map[key_choice]
+        value = typer.confirm(f"Enable {key}?", default=True)
+
         config_manager.set_default(key, value)
-        formatter.print_success(f"Default '{key}' set to: {value}")
+        formatter.print_success(f"\nDefault '{key}' set to: {value}")
     except Exception as e:
         formatter.print_error(f"Failed to set default: {e}")
         raise typer.Exit(code=1)

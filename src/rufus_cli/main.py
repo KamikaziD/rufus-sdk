@@ -23,7 +23,7 @@ from rufus.providers.observer import WorkflowObserver
 from rufus.models import WorkflowStep # Import WorkflowStep to analyze its structure
 
 # Import new command modules
-from rufus_cli.commands import config_cmd, workflow_cmd
+from rufus_cli.commands import config_cmd, workflow_cmd, db_cmd
 
 app = typer.Typer(
     help="Rufus - Python-native workflow orchestration engine",
@@ -33,6 +33,7 @@ app = typer.Typer(
 # Add command groups
 app.add_typer(config_cmd.app, name="config")
 app.add_typer(workflow_cmd.app, name="workflow")
+app.add_typer(db_cmd.app, name="db")
 
 # Convenience aliases for workflow commands at top level
 @app.command("list")
