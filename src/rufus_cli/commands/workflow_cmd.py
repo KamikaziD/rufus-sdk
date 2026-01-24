@@ -322,3 +322,293 @@ def retry_workflow(
             await close_providers(persistence, execution, observer)
 
     asyncio.run(_retry())
+
+
+@app.command("logs")
+def view_logs(
+    workflow_id: str = typer.Argument(..., help="Workflow ID"),
+    step: Optional[str] = typer.Option(None, "--step", help="Filter by step name"),
+    level: Optional[str] = typer.Option(None, "--level", help="Filter by log level (INFO, WARNING, ERROR)"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Number of logs to show"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow logs in real-time"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """View workflow execution logs"""
+    async def _view_logs():
+        config = get_config()
+        persistence, execution, observer = await create_providers(config)
+        formatter = Formatter()
+
+        try:
+            # Verify workflow exists
+            workflow_data = await persistence.load_workflow(workflow_id)
+            if not workflow_data:
+                formatter.print_error(f"Workflow not found: {workflow_id}")
+                raise typer.Exit(code=1)
+
+            # Build filters
+            filters = {
+                "workflow_id": workflow_id,
+                "limit": limit
+            }
+            if step:
+                filters["step_name"] = step
+            if level:
+                filters["log_level"] = level.upper()
+
+            # Get logs from persistence
+            logs = await persistence.get_workflow_logs(**filters)
+
+            if not logs:
+                formatter.print_info("No logs found for this workflow")
+                return
+
+            # Display logs
+            if json_output:
+                print(json.dumps(logs, indent=2, default=str))
+            else:
+                from rich.table import Table
+                from rich import box
+                from rich.console import Console
+
+                table = Table(title=f"Workflow Logs: {workflow_id}", box=box.ROUNDED)
+                table.add_column("Time", style="cyan", no_wrap=True)
+                table.add_column("Level", style="yellow", width=8)
+                table.add_column("Step", style="magenta")
+                table.add_column("Message", style="white")
+
+                for log in logs:
+                    # Format timestamp
+                    logged_at = log.get("logged_at", "")
+                    if logged_at:
+                        from datetime import datetime
+                        try:
+                            dt = datetime.fromisoformat(logged_at.replace('Z', '+00:00'))
+                            logged_at = dt.strftime("%H:%M:%S")
+                        except:
+                            pass
+
+                    # Color code log level
+                    log_level = log.get("log_level", "INFO")
+                    level_style = {
+                        "ERROR": "bold red",
+                        "WARNING": "bold yellow",
+                        "INFO": "bold green",
+                        "DEBUG": "dim"
+                    }.get(log_level, "white")
+
+                    table.add_row(
+                        logged_at,
+                        f"[{level_style}]{log_level}[/{level_style}]",
+                        log.get("step_name", ""),
+                        log.get("message", "")
+                    )
+
+                console = Console()
+                console.print(table)
+
+                formatter.print(f"\nShowing {len(logs)} log entries")
+                if len(logs) == limit:
+                    formatter.print_info(f"Use --limit to show more logs")
+
+        except Exception as e:
+            formatter.print_error(f"Failed to view logs: {e}")
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            await close_providers(persistence, execution, observer)
+
+    asyncio.run(_view_logs())
+
+
+@app.command("metrics")
+def view_metrics(
+    workflow_id: Optional[str] = typer.Option(None, "--workflow-id", "-w", help="Workflow ID (optional for summary)"),
+    workflow_type: Optional[str] = typer.Option(None, "--type", help="Filter by workflow type"),
+    summary: bool = typer.Option(False, "--summary", help="Show aggregated summary"),
+    limit: int = typer.Option(50, "--limit", help="Number of metrics to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """View workflow performance metrics"""
+    async def _view_metrics():
+        config = get_config()
+        persistence, execution, observer = await create_providers(config)
+        formatter = Formatter()
+
+        try:
+            # Build filters
+            filters = {"limit": limit}
+            if workflow_id:
+                # Verify workflow exists
+                workflow_data = await persistence.load_workflow(workflow_id)
+                if not workflow_data:
+                    formatter.print_error(f"Workflow not found: {workflow_id}")
+                    raise typer.Exit(code=1)
+                filters["workflow_id"] = workflow_id
+            if workflow_type:
+                filters["workflow_type"] = workflow_type
+
+            # Get metrics from persistence
+            metrics = await persistence.get_workflow_metrics(**filters)
+
+            if not metrics:
+                formatter.print_info("No metrics found")
+                return
+
+            # Display metrics
+            if json_output:
+                print(json.dumps(metrics, indent=2, default=str))
+            else:
+                from rich.table import Table
+                from rich import box
+                from rich.console import Console
+
+                title = "Workflow Metrics"
+                if workflow_id:
+                    title += f": {workflow_id}"
+                elif workflow_type:
+                    title += f" ({workflow_type})"
+
+                table = Table(title=title, box=box.ROUNDED)
+                table.add_column("Time", style="cyan", no_wrap=True)
+                table.add_column("Workflow", style="magenta")
+                table.add_column("Step", style="yellow")
+                table.add_column("Metric", style="green")
+                table.add_column("Value", style="bold white", justify="right")
+                table.add_column("Unit", style="dim")
+
+                for metric in metrics:
+                    # Format timestamp
+                    recorded_at = metric.get("recorded_at", "")
+                    if recorded_at:
+                        from datetime import datetime
+                        try:
+                            dt = datetime.fromisoformat(recorded_at.replace('Z', '+00:00'))
+                            recorded_at = dt.strftime("%H:%M:%S")
+                        except:
+                            pass
+
+                    # Format value
+                    value = metric.get("metric_value", 0)
+                    if isinstance(value, float):
+                        value_str = f"{value:.2f}"
+                    else:
+                        value_str = str(value)
+
+                    # Truncate workflow ID for display
+                    wf_id = metric.get("workflow_id", "")
+                    if len(wf_id) > 12:
+                        wf_id = wf_id[:12] + "..."
+
+                    table.add_row(
+                        recorded_at,
+                        wf_id,
+                        metric.get("step_name", ""),
+                        metric.get("metric_name", ""),
+                        value_str,
+                        metric.get("unit", "")
+                    )
+
+                console = Console()
+                console.print(table)
+
+                formatter.print(f"\nShowing {len(metrics)} metrics")
+                if summary and len(metrics) > 0:
+                    # Calculate summary stats
+                    total_metrics = len(metrics)
+                    unique_steps = len(set(m.get("step_name", "") for m in metrics if m.get("step_name")))
+                    formatter.print(f"\nSummary:")
+                    formatter.print(f"  Total metrics: {total_metrics}")
+                    formatter.print(f"  Unique steps: {unique_steps}")
+
+        except Exception as e:
+            formatter.print_error(f"Failed to view metrics: {e}")
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            await close_providers(persistence, execution, observer)
+
+    asyncio.run(_view_metrics())
+
+
+@app.command("cancel")
+def cancel_workflow(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to cancel"),
+    force: bool = typer.Option(False, "--force", help="Skip compensation/rollback"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Cancellation reason"),
+):
+    """Cancel a running workflow"""
+    async def _cancel():
+        config = get_config()
+        persistence, execution, observer = await create_providers(config)
+        formatter = Formatter()
+
+        try:
+            # Load workflow
+            workflow_data = await persistence.load_workflow(workflow_id)
+            if not workflow_data:
+                formatter.print_error(f"Workflow not found: {workflow_id}")
+                raise typer.Exit(code=1)
+
+            current_status = workflow_data.get("status")
+
+            # Check if workflow can be cancelled
+            terminal_states = ["COMPLETED", "FAILED", "FAILED_ROLLED_BACK", "CANCELLED"]
+            if current_status in terminal_states:
+                formatter.print_warning(f"Workflow is already in terminal state: {current_status}")
+                return
+
+            # Confirm cancellation
+            if not force:
+                from rich.prompt import Confirm
+                confirmed = Confirm.ask(
+                    f"\n[bold yellow]Cancel workflow {workflow_id}?[/bold yellow]\n"
+                    f"Current status: {current_status}\n"
+                    f"This action may trigger compensation if saga mode is enabled.",
+                    default=False
+                )
+                if not confirmed:
+                    formatter.print_info("Cancellation aborted")
+                    return
+
+            formatter.print_info(f"🛑 Cancelling workflow: {workflow_id}")
+
+            # Update workflow status to CANCELLED
+            workflow_data["status"] = "CANCELLED"
+            if reason:
+                if "metadata" not in workflow_data:
+                    workflow_data["metadata"] = {}
+                workflow_data["metadata"]["cancellation_reason"] = reason
+
+            # Save updated workflow
+            await persistence.save_workflow(workflow_id, workflow_data)
+
+            # Log cancellation
+            await persistence.log_workflow_execution(
+                workflow_id=workflow_id,
+                step_name=workflow_data.get("current_step_name"),
+                log_level="WARNING",
+                message=f"Workflow cancelled" + (f": {reason}" if reason else ""),
+                metadata={"force": force}
+            )
+
+            formatter.print_success(f"Workflow cancelled successfully")
+            formatter.print(f"Previous status: {current_status}")
+            formatter.print(f"New status: CANCELLED")
+
+            if force:
+                formatter.print_warning("Compensation/rollback skipped (--force)")
+            elif workflow_data.get("saga_mode"):
+                formatter.print_info("Saga mode detected - compensation may be triggered")
+
+        except Exception as e:
+            formatter.print_error(f"Failed to cancel workflow: {e}")
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            await close_providers(persistence, execution, observer)
+
+    asyncio.run(_cancel())

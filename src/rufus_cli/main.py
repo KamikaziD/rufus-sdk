@@ -95,6 +95,42 @@ def retry_alias(
     """Retry a failed workflow (alias for 'workflow retry')"""
     workflow_cmd.retry_workflow(workflow_id, from_step, auto_execute)
 
+
+@app.command("logs")
+def logs_alias(
+    workflow_id: str = typer.Argument(..., help="Workflow ID"),
+    step: Optional[str] = typer.Option(None, "--step", help="Filter by step name"),
+    level: Optional[str] = typer.Option(None, "--level", help="Filter by log level"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Number of logs to show"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow logs"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """View workflow logs (alias for 'workflow logs')"""
+    workflow_cmd.view_logs(workflow_id, step, level, limit, follow, json_output)
+
+
+@app.command("metrics")
+def metrics_alias(
+    workflow_id: Optional[str] = typer.Option(None, "--workflow-id", "-w", help="Workflow ID"),
+    workflow_type: Optional[str] = typer.Option(None, "--type", help="Filter by workflow type"),
+    summary: bool = typer.Option(False, "--summary", help="Show summary"),
+    limit: int = typer.Option(50, "--limit", help="Number of metrics"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """View workflow metrics (alias for 'workflow metrics')"""
+    workflow_cmd.view_metrics(workflow_id, workflow_type, summary, limit, json_output)
+
+
+@app.command("cancel")
+def cancel_alias(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to cancel"),
+    force: bool = typer.Option(False, "--force", help="Skip compensation"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Cancellation reason"),
+):
+    """Cancel a running workflow (alias for 'workflow cancel')"""
+    workflow_cmd.cancel_workflow(workflow_id, force, reason)
+
+
 async def get_configured_engine(
     workflow_registry_config: Dict[str, Any],
     persistence_provider: Optional[PersistenceProvider] = None,
