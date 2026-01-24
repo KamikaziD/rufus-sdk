@@ -48,7 +48,11 @@ implementations/
 
 ### Additional Packages
 
-- **`src/rufus_cli/`** - Command-line tool (`rufus validate`, `rufus run`)
+- **`src/rufus_cli/`** - Comprehensive CLI with 21 commands for workflow management, database operations, and monitoring
+  - Configuration: `config show/set-persistence/set-execution/reset`
+  - Workflows: `list/start/show/resume/retry/logs/metrics/cancel`
+  - Database: `db init/migrate/status/stats/validate`
+  - Legacy: `validate/run`
 - **`src/rufus_server/`** - Optional FastAPI REST API wrapper for workflows
 
 ### Database & Tooling
@@ -404,14 +408,62 @@ This demonstrates:
 pytest
 ```
 
-### Validate a Workflow
+### Use the CLI
+
+The Rufus CLI provides comprehensive workflow management. See [docs/CLI_USAGE_GUIDE.md](docs/CLI_USAGE_GUIDE.md) for complete documentation.
+
+#### Configure and Initialize
 ```bash
-rufus validate config/my_workflow.yaml
+# Configure persistence (interactive)
+rufus config set-persistence  # Choose SQLite for development
+
+# Initialize database
+rufus db init
+
+# Verify setup
+rufus db stats
 ```
 
-### Run a Workflow Locally
+#### Manage Workflows
 ```bash
+# List workflows
+rufus list --status ACTIVE
+
+# Start a workflow
+rufus start MyWorkflow --data '{"user_id": "123"}'
+
+# View workflow details
+rufus show <workflow-id> --state
+
+# View logs
+rufus logs <workflow-id> --level ERROR
+
+# View metrics
+rufus metrics --workflow-id <id> --summary
+
+# Cancel workflow
+rufus cancel <workflow-id> --reason "Debugging"
+```
+
+#### Legacy Commands (Still Supported)
+```bash
+# Validate workflow YAML
+rufus validate config/my_workflow.yaml
+
+# Run workflow locally (in-memory)
 rufus run config/my_workflow.yaml -d '{"field": "value"}'
+```
+
+#### Database Management
+```bash
+# Initialize database
+rufus db init
+
+# Apply migrations
+rufus db migrate
+
+# Check status
+rufus db status
 ```
 
 ### Start FastAPI Server (Optional)
