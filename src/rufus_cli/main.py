@@ -22,7 +22,77 @@ from rufus.providers.execution import ExecutionProvider
 from rufus.providers.observer import WorkflowObserver
 from rufus.models import WorkflowStep # Import WorkflowStep to analyze its structure
 
-app = typer.Typer()
+# Import new command modules
+from rufus_cli.commands import config_cmd, workflow_cmd
+
+app = typer.Typer(
+    help="Rufus - Python-native workflow orchestration engine",
+    no_args_is_help=True
+)
+
+# Add command groups
+app.add_typer(config_cmd.app, name="config")
+app.add_typer(workflow_cmd.app, name="workflow")
+
+# Convenience aliases for workflow commands at top level
+@app.command("list")
+def list_alias(
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by status"),
+    workflow_type: Optional[str] = typer.Option(None, "--type", help="Filter by workflow type"),
+    limit: int = typer.Option(20, "--limit", help="Maximum number of workflows"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List workflows (alias for 'workflow list')"""
+    workflow_cmd.list_workflows(status, workflow_type, limit, verbose, json_output)
+
+
+@app.command("start")
+def start_alias(
+    workflow_type: str = typer.Argument(..., help="Workflow type to start"),
+    data: Optional[str] = typer.Option(None, "--data", "-d", help="Initial data as JSON"),
+    data_file: Optional[Path] = typer.Option(None, "--data-file", help="Initial data from file"),
+    config_file: Optional[Path] = typer.Option(None, "--config", help="Workflow config file"),
+    auto_execute: Optional[bool] = typer.Option(None, "--auto", help="Auto-execute all steps"),
+    interactive: Optional[bool] = typer.Option(None, "--interactive", "-i", help="Interactive mode"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate without executing"),
+):
+    """Start a new workflow (alias for 'workflow start')"""
+    workflow_cmd.start_workflow(workflow_type, data, data_file, config_file, auto_execute, interactive, dry_run)
+
+
+@app.command("show")
+def show_alias(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to display"),
+    state: bool = typer.Option(False, "--state", help="Show full state"),
+    logs: bool = typer.Option(False, "--logs", help="Show execution logs"),
+    metrics: bool = typer.Option(False, "--metrics", help="Show performance metrics"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all details"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show workflow details (alias for 'workflow show')"""
+    workflow_cmd.show_workflow(workflow_id, state, logs, metrics, verbose, json_output)
+
+
+@app.command("resume")
+def resume_alias(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to resume"),
+    user_input: Optional[str] = typer.Option(None, "--input", "-i", help="User input as JSON"),
+    input_file: Optional[Path] = typer.Option(None, "--input-file", help="User input from file"),
+    auto_execute: bool = typer.Option(False, "--auto", help="Auto-execute remaining steps"),
+):
+    """Resume a paused workflow (alias for 'workflow resume')"""
+    workflow_cmd.resume_workflow(workflow_id, user_input, input_file, auto_execute)
+
+
+@app.command("retry")
+def retry_alias(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to retry"),
+    from_step: Optional[str] = typer.Option(None, "--from-step", help="Step to retry from"),
+    auto_execute: bool = typer.Option(False, "--auto", help="Auto-execute remaining steps"),
+):
+    """Retry a failed workflow (alias for 'workflow retry')"""
+    workflow_cmd.retry_workflow(workflow_id, from_step, auto_execute)
 
 async def get_configured_engine(
     workflow_registry_config: Dict[str, Any],
