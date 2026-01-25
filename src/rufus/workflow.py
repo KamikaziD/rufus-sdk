@@ -28,6 +28,8 @@ class Workflow:
                  workflow_steps: List[WorkflowStep] = None,
                  initial_state_model: BaseModel = None,
                  workflow_type: str = None,
+                 workflow_version: Optional[str] = None,
+                 definition_snapshot: Optional[Dict[str, Any]] = None,
                  steps_config: List[Dict[str, Any]] = None,
                  state_model_path: str = None,
                  owner_id: str = None,
@@ -49,6 +51,8 @@ class Workflow:
         self.state = initial_state_model
         self.status = "ACTIVE"
         self.workflow_type = workflow_type
+        self.workflow_version = workflow_version
+        self.definition_snapshot = definition_snapshot
         self.steps_config = steps_config or []
         self.state_model_path = state_model_path
 
@@ -117,6 +121,8 @@ class Workflow:
         return {
             "id": self.id,
             "workflow_type": self.workflow_type,
+            "workflow_version": self.workflow_version,
+            "definition_snapshot": self.definition_snapshot,
             "current_step": self.current_step,
             "status": self.status,
             "state": self.state.model_dump() if self.state else {},

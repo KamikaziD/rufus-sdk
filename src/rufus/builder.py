@@ -420,7 +420,7 @@ class WorkflowBuilder:
 
         # Use get_workflow_config to ensure env vars and parameters are processed
         workflow_config = self.get_workflow_config(workflow_type)
-        
+
         state_model_class = self._import_from_string(
             workflow_config["initial_state_model_path"])
 
@@ -430,11 +430,20 @@ class WorkflowBuilder:
         steps_config = workflow_config.get("steps", [])
         workflow_steps = self._build_steps_from_config(steps_config)
 
+        # Extract workflow version (if present in YAML)
+        workflow_version = workflow_config.get("workflow_version")
+
+        # Create definition snapshot to protect running workflows from YAML changes
+        # This is part of the Tier 2 workflow versioning enhancement
+        definition_snapshot = copy.deepcopy(workflow_config)
+
         # Import Workflow locally to avoid circular import at the top level
         from rufus.workflow import Workflow
 
         return Workflow(
             workflow_type=workflow_type,
+            workflow_version=workflow_version,
+            definition_snapshot=definition_snapshot,
             workflow_steps=workflow_steps,
             initial_state_model=initial_state,
             steps_config=steps_config,

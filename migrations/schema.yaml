@@ -1,8 +1,8 @@
 # Rufus SDK - Unified Database Schema Definition
-# Version: 1.0.0
+# Version: 1.1.0
 # This schema is compiled to database-specific SQL by tools/compile_schema.py
 
-version: "1.0.0"
+version: "1.1.0"
 description: "Rufus workflow engine persistence schema"
 
 # Type mappings for different databases
@@ -73,6 +73,17 @@ tables:
         type: varchar
         size: 100
         nullable: false
+
+      - name: workflow_version
+        type: varchar
+        size: 50
+        nullable: true
+        comment: "Optional explicit version from YAML (e.g., '1.0.0')"
+
+      - name: definition_snapshot
+        type: jsonb
+        nullable: true
+        comment: "Snapshot of workflow definition at creation time to protect running workflows from YAML changes"
 
       - name: current_step
         type: integer
@@ -199,6 +210,63 @@ tables:
       - name: idx_saga_workflows
         columns: [saga_mode, status]
         where: "saga_mode = TRUE"
+
+  # ============================================================================
+  # WORKFLOW HEARTBEATS (Zombie Detection & Recovery)
+  # ============================================================================
+  workflow_heartbeats:
+    description: "Worker heartbeat tracking for detecting crashed/zombie workflows"
+    columns:
+      - name: workflow_id
+        type: uuid
+        primary_key: true
+        foreign_key:
+          table: workflow_executions
+          column: id
+          on_delete: CASCADE
+
+      - name: worker_id
+        type: varchar
+        size: 100
+        nullable: false
+        comment: "Identifier of the worker processing this workflow"
+
+      - name: last_heartbeat
+        type: timestamp
+        nullable: false
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+        comment: "Last time worker confirmed it's still processing"
+
+      - name: current_step
+        type: varchar
+        size: 200
+        nullable: true
+        comment: "Current step being executed"
+
+      - name: step_started_at
+        type: timestamp
+        nullable: true
+        comment: "When current step execution started"
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+        comment: "Additional context (PID, hostname, etc.)"
+
+    indexes:
+      - name: idx_heartbeat_time
+        columns: [last_heartbeat]
+        order:
+          last_heartbeat: ASC
+        comment: "For scanning stale heartbeats"
+
+      - name: idx_heartbeat_worker
+        columns: [worker_id, last_heartbeat]
+        comment: "For worker-specific queries"
 
   # ============================================================================
   # TASK QUEUE TABLE (for distributed worker claiming)

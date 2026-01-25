@@ -1,5 +1,5 @@
 -- Rufus SDK - SQLITE Schema
--- Generated from migrations/schema.yaml v1.0.0
+-- Generated from migrations/schema.yaml v1.1.0
 -- DO NOT EDIT MANUALLY - Use tools/compile_schema.py
 
 -- ============================================================================
@@ -10,6 +10,8 @@
 CREATE TABLE IF NOT EXISTS workflow_executions (
     id TEXT PRIMARY KEY DEFAULT lower(hex(randomblob(16))),
     workflow_type VARCHAR(100) NOT NULL,
+    workflow_version VARCHAR(50),
+    definition_snapshot TEXT,
     current_step INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(50) NOT NULL,
     state TEXT NOT NULL DEFAULT '{}',
@@ -27,6 +29,17 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     idempotency_key VARCHAR(255) UNIQUE,
     metadata TEXT DEFAULT '{}',
     FOREIGN KEY (parent_execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
+-- Worker heartbeat tracking for detecting crashed/zombie workflows
+CREATE TABLE IF NOT EXISTS workflow_heartbeats (
+    workflow_id TEXT PRIMARY KEY,
+    worker_id VARCHAR(100) NOT NULL,
+    last_heartbeat TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    current_step VARCHAR(200),
+    step_started_at TEXT,
+    metadata TEXT DEFAULT '{}',
+    FOREIGN KEY (workflow_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
 );
 
 -- Task queue for distributed worker claiming with idempotency
@@ -129,6 +142,10 @@ CREATE INDEX IF NOT EXISTS idx_sub_workflows ON workflow_executions (parent_exec
 CREATE INDEX IF NOT EXISTS idx_workflow_idempotency ON workflow_executions (idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_failed_workflows ON workflow_executions (status, updated_at DESC) WHERE status IN ('FAILED', 'FAILED_ROLLED_BACK');
 CREATE INDEX IF NOT EXISTS idx_saga_workflows ON workflow_executions (saga_mode, status) WHERE saga_mode = 1;
+
+-- Indexes for workflow_heartbeats
+CREATE INDEX IF NOT EXISTS idx_heartbeat_time ON workflow_heartbeats (last_heartbeat ASC);
+CREATE INDEX IF NOT EXISTS idx_heartbeat_worker ON workflow_heartbeats (worker_id, last_heartbeat);
 
 -- Indexes for tasks
 CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks (status, created_at) WHERE status = 'PENDING';
