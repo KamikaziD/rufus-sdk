@@ -899,6 +899,450 @@ Compare SQLite vs PostgreSQL performance:
 python tests/benchmarks/persistence_benchmark.py
 ```
 
+## Production Reliability Features (Tier 2)
+
+Rufus includes production-grade reliability features to handle worker crashes and workflow definition changes.
+
+### Zombie Workflow Recovery
+
+**Problem**: When a worker crashes while processing a workflow step, the workflow stays in `RUNNING` state forever with no way to detect or recover.
+
+**Solution**: Heartbeat-based zombie detection and automatic recovery.
+
+#### How It Works
+
+1. **HeartbeatManager** (worker-side) sends periodic heartbeats while processing steps
+2. **ZombieScanner** (monitoring process) detects stale heartbeats
+3. Zombie workflows automatically marked as `FAILED_WORKER_CRASH`
+4. Cleanup removes stale heartbeat records
+
+#### Using HeartbeatManager
+
+**In Step Functions** (automatic via execution provider):
+```python
+from rufus.heartbeat import HeartbeatManager
+
+async def long_running_step(state: MyState, context: StepContext):
+    # Heartbeat automatically managed by execution provider
+    # Just write your step logic
+    result = await process_payment(state.amount)
+    return {"payment_id": result.id}
+```
+
+**Manual Heartbeat Control** (advanced):
+```python
+from rufus.heartbeat import HeartbeatManager
+
+async def custom_step(state: MyState, context: StepContext):
+    # Manual heartbeat control for custom execution logic
+    heartbeat = HeartbeatManager(
+        persistence=context.persistence,
+        workflow_id=context.workflow_id,
+        heartbeat_interval_seconds=30
+    )
+
+    async with heartbeat:  # Auto-start and stop
+        # Long-running operation
+        result = await complex_computation(state)
+        return {"result": result}
+```
+
+**Configuration**:
+```python
+heartbeat = HeartbeatManager(
+    persistence=persistence_provider,
+    workflow_id=uuid.UUID(...),
+    worker_id="custom-worker-123",  # Optional, auto-generated if not provided
+    heartbeat_interval_seconds=30   # Default: 30s
+)
+
+# Start heartbeat
+await heartbeat.start(
+    current_step="Process_Payment",
+    metadata={"custom": "data"}
+)
+
+# ... execute step ...
+
+# Stop and cleanup
+await heartbeat.stop()
+```
+
+#### Using ZombieScanner
+
+**CLI - One-Shot Scan**:
+```bash
+# Scan for zombies (dry-run)
+rufus scan-zombies --db postgresql://localhost/rufus
+
+# Scan and fix
+rufus scan-zombies --db postgresql://localhost/rufus --fix
+
+# Custom threshold (default: 120s)
+rufus scan-zombies --db postgresql://localhost/rufus --fix --threshold 180
+
+# JSON output for monitoring
+rufus scan-zombies --db postgresql://localhost/rufus --json
+```
+
+**CLI - Continuous Daemon**:
+```bash
+# Run as background daemon
+rufus zombie-daemon --db postgresql://localhost/rufus
+
+# Custom scan interval and threshold
+rufus zombie-daemon --db postgresql://localhost/rufus --interval 60 --threshold 120
+```
+
+**Programmatic Usage**:
+```python
+from rufus.zombie_scanner import ZombieScanner
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+# Create scanner
+persistence = PostgresPersistenceProvider(db_url)
+await persistence.initialize()
+
+scanner = ZombieScanner(
+    persistence=persistence,
+    stale_threshold_seconds=120  # Heartbeats older than this are "stale"
+)
+
+# One-shot scan and recover
+summary = await scanner.scan_and_recover(dry_run=False)
+print(f"Found {summary['zombies_found']}, recovered {summary['zombies_recovered']}")
+
+# Or scan and recover separately
+zombies = await scanner.scan()
+recovered_count = await scanner.recover(zombies, dry_run=False)
+
+# Run as continuous daemon
+await scanner.run_daemon(
+    scan_interval_seconds=60,
+    stale_threshold_seconds=120
+)
+```
+
+#### Database Schema
+
+The `workflow_heartbeats` table tracks worker health:
+
+```sql
+CREATE TABLE workflow_heartbeats (
+    workflow_id UUID PRIMARY KEY REFERENCES workflow_executions(id) ON DELETE CASCADE,
+    worker_id VARCHAR(100) NOT NULL,
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    current_step VARCHAR(200),
+    step_started_at TIMESTAMPTZ,
+    metadata JSONB DEFAULT '{}'
+);
+
+CREATE INDEX idx_heartbeat_time ON workflow_heartbeats(last_heartbeat ASC);
+```
+
+#### Production Deployment
+
+**Option 1: Cron Job**
+```bash
+# Run every minute via cron
+* * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/rufus/zombie-scanner.log 2>&1
+```
+
+**Option 2: Systemd Service**
+```ini
+[Unit]
+Description=Rufus Zombie Workflow Scanner
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Option 3: Kubernetes CronJob**
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rufus-zombie-scanner
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: scanner
+            image: myapp/rufus:latest
+            command:
+            - rufus
+            - scan-zombies
+            - --db
+            - postgresql://postgres/rufus
+            - --fix
+          restartPolicy: OnFailure
+```
+
+#### Configuration Recommendations
+
+| Workload | Heartbeat Interval | Stale Threshold | Scan Interval |
+|----------|-------------------|-----------------|---------------|
+| **Fast steps** (< 1 min) | 15s | 60s | 30s |
+| **Medium steps** (1-10 min) | 30s | 120s | 60s |
+| **Long steps** (10+ min) | 60s | 300s | 120s |
+| **Very long steps** (hours) | 300s | 900s | 300s |
+
+**Key Rule**: `Stale Threshold > 2 × Heartbeat Interval` to avoid false positives.
+
+#### Monitoring
+
+**Metrics to Track**:
+- Zombie workflows detected per hour
+- Recovery success rate
+- Average time to detection
+- False positive rate
+
+**Alerts**:
+```python
+# Alert if many zombies detected
+if summary['zombies_found'] > 10:
+    send_alert("High zombie workflow count detected")
+
+# Alert if recovery fails
+if summary['zombies_recovered'] < summary['zombies_found']:
+    send_alert("Zombie recovery failures detected")
+```
+
+---
+
+### Workflow Versioning (Definition Snapshots)
+
+**Problem**: Deploying new YAML workflow definitions breaks running workflows. If 10,000 workflows are running and you deploy a YAML file that removes a step, those workflows fail when they try to resume.
+
+**Solution**: Snapshot workflow definitions at creation time. Running workflows use their snapshot, new workflows use the latest YAML.
+
+#### How It Works
+
+1. **WorkflowBuilder** snapshots complete workflow config on `create_workflow()`
+2. **Workflow** stores snapshot in `definition_snapshot` field
+3. **Persistence** saves snapshot to database (JSONB column)
+4. **On Resume**: Workflow uses snapshot, immune to YAML changes
+
+#### Automatic Snapshotting
+
+Snapshotting is **automatic** - no code changes required:
+
+```python
+# WorkflowBuilder automatically snapshots on create
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "12345"}
+)
+
+# Snapshot stored in workflow.definition_snapshot
+assert workflow.definition_snapshot is not None
+assert workflow.definition_snapshot['workflow_type'] == "OrderProcessing"
+```
+
+**What's Snapshotted**:
+- Complete workflow YAML config
+- All step definitions
+- State model path
+- Dependencies, routes, parallel tasks
+- Everything needed to reconstruct workflow execution
+
+#### Explicit Versioning
+
+**Optional**: Add `workflow_version` to YAML for explicit version tracking:
+
+```yaml
+workflow_type: "OrderProcessing"
+workflow_version: "1.5.0"  # Explicit version
+initial_state_model: "my_app.models.OrderState"
+description: "Order processing workflow"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "my_app.steps.validate_order"
+```
+
+Access version in code:
+```python
+workflow = await builder.create_workflow("OrderProcessing", initial_data)
+
+# Check version
+print(f"Workflow version: {workflow.workflow_version}")  # "1.5.0"
+```
+
+#### Breaking Changes Strategy
+
+**Option A: Keep Old YAML, Deploy New Version**
+
+```yaml
+# config/order_processing_v1.yaml (keep for running workflows)
+workflow_type: "OrderProcessing_v1"
+workflow_version: "1.0.0"
+steps:
+  - name: "Human_Approval"  # Legacy step
+
+# config/order_processing_v2.yaml (new deployments)
+workflow_type: "OrderProcessing_v2"
+workflow_version: "2.0.0"
+steps:
+  # Human_Approval removed
+```
+
+Register both:
+```yaml
+# config/workflow_registry.yaml
+workflows:
+  - type: "OrderProcessing_v1"
+    config_file: "order_processing_v1.yaml"
+    deprecated: true
+
+  - type: "OrderProcessing_v2"
+    config_file: "order_processing_v2.yaml"
+```
+
+**Option B: Rely on Snapshots (Recommended)**
+
+Just update the YAML - running workflows use their snapshot:
+
+```yaml
+# config/order_processing.yaml (updated)
+workflow_type: "OrderProcessing"
+workflow_version: "2.0.0"  # Bumped version
+steps:
+  # Human_Approval removed - running workflows unaffected!
+```
+
+Running workflows (created with v1.0.0):
+- Use their snapshot (still has Human_Approval)
+- Complete successfully
+
+New workflows (created after deploy):
+- Use new YAML (no Human_Approval)
+- Follow new process
+
+#### Version Compatibility Checking
+
+**Check compatibility when resuming workflows** (optional):
+
+```python
+from rufus.builder import WorkflowBuilder
+
+def check_version_compatibility(snapshot_version: str, current_version: str) -> bool:
+    """Check if workflow snapshot is compatible with current YAML."""
+    if not snapshot_version or not current_version:
+        return True  # No version specified - allow
+
+    snap_major = int(snapshot_version.split('.')[0])
+    curr_major = int(current_version.split('.')[0])
+
+    # Compatible if same major version
+    return snap_major == curr_major
+
+# In WorkflowBuilder.load_workflow:
+workflow_dict = await persistence.load_workflow(workflow_id)
+
+snapshot_version = workflow_dict.get('workflow_version')
+current_config = self.get_workflow_config(workflow_dict['workflow_type'])
+current_version = current_config.get('workflow_version')
+
+if not check_version_compatibility(snapshot_version, current_version):
+    raise ValueError(
+        f"Workflow version {snapshot_version} incompatible with "
+        f"current version {current_version}"
+    )
+```
+
+#### Database Schema
+
+The `workflow_executions` table includes version fields:
+
+```sql
+ALTER TABLE workflow_executions ADD COLUMN workflow_version VARCHAR(50);
+ALTER TABLE workflow_executions ADD COLUMN definition_snapshot JSONB;
+```
+
+**Storage Overhead**:
+- ~5-10 KB per workflow (typical)
+- PostgreSQL: Stored as compressed JSONB
+- SQLite: Stored as TEXT
+
+#### Migration Strategy
+
+**For Existing Workflows**:
+
+```sql
+-- Existing workflows without snapshots will have NULL
+-- This is backward compatible - they'll continue using current YAML
+SELECT COUNT(*) FROM workflow_executions WHERE definition_snapshot IS NULL;
+
+-- Optionally backfill snapshots for running workflows
+-- (requires custom migration script to reconstruct from current YAML)
+```
+
+#### Best Practices
+
+**✅ Do:**
+- Use automatic snapshotting (it's automatic!)
+- Bump `workflow_version` for breaking changes
+- Keep snapshots for audit/debugging
+- Test migrations on staging first
+
+**❌ Don't:**
+- Delete old YAML files immediately (wait for running workflows to complete)
+- Make breaking changes without version bump
+- Disable snapshotting (wastes the protection)
+
+#### Troubleshooting
+
+**Check Snapshot Contents**:
+```python
+workflow = await persistence.load_workflow(workflow_id)
+snapshot = workflow['definition_snapshot']
+
+print(f"Snapshot workflow_type: {snapshot['workflow_type']}")
+print(f"Snapshot version: {snapshot.get('workflow_version')}")
+print(f"Steps in snapshot: {[s['name'] for s in snapshot['steps']]}")
+```
+
+**Verify Snapshot Protection**:
+```python
+# Create workflow with v1 YAML
+workflow = await builder.create_workflow("MyWorkflow", initial_data)
+workflow_id = workflow.id
+
+# Deploy v2 YAML (breaking changes)
+# ... update YAML file ...
+
+# Resume workflow - should use v1 snapshot
+loaded_workflow = await persistence.load_workflow(workflow_id)
+snapshot = loaded_workflow['definition_snapshot']
+
+# Snapshot should have v1 steps, not v2
+assert snapshot['workflow_version'] == "1.0.0"
+```
+
+**Storage Analysis**:
+```sql
+-- Check snapshot storage usage
+SELECT
+    AVG(LENGTH(definition_snapshot::text)) AS avg_snapshot_size_bytes,
+    MAX(LENGTH(definition_snapshot::text)) AS max_snapshot_size_bytes
+FROM workflow_executions
+WHERE definition_snapshot IS NOT NULL;
+```
+
+---
+
 ## Important Notes
 
 - **Path Resolution**: All YAML paths resolved via `importlib.import_module`

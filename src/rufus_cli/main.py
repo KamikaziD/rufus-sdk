@@ -323,5 +323,160 @@ def run(
     asyncio.run(_run_workflow())
 
 
+@app.command(name="scan-zombies")
+def scan_zombies(
+    database_url: str = typer.Option(..., "--db", help="Database connection URL (postgresql:// or sqlite://)"),
+    fix: bool = typer.Option(False, "--fix", help="Automatically mark zombie workflows as FAILED_WORKER_CRASH"),
+    stale_threshold: int = typer.Option(120, "--threshold", help="Heartbeat stale threshold in seconds (default: 120)"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON")
+):
+    """
+    Scan for zombie workflows with stale heartbeats.
+
+    A zombie workflow is one where the worker crashed while processing a step,
+    leaving the workflow in RUNNING state with a stale heartbeat.
+
+    Example:
+        rufus scan-zombies --db postgresql://localhost/rufus --fix
+        rufus scan-zombies --db sqlite:///workflows.db --threshold 180 --json
+    """
+    async def _scan():
+        # Import persistence provider based on database URL
+        if database_url.startswith("postgresql://"):
+            from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+            persistence = PostgresPersistenceProvider(database_url)
+        elif database_url.startswith("sqlite://"):
+            from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+            db_path = database_url.replace("sqlite:///", "")
+            persistence = SQLitePersistenceProvider(db_path)
+        else:
+            typer.echo(f"Unsupported database URL: {database_url}", err=True)
+            raise typer.Exit(code=1)
+
+        try:
+            await persistence.initialize()
+
+            # Import and create zombie scanner
+            from rufus.zombie_scanner import ZombieScanner
+            scanner = ZombieScanner(persistence, stale_threshold_seconds=stale_threshold)
+
+            # Scan and optionally recover
+            summary = await scanner.scan_and_recover(
+                stale_threshold_seconds=stale_threshold,
+                dry_run=not fix
+            )
+
+            if json_output:
+                import json
+                typer.echo(json.dumps(summary, indent=2))
+            else:
+                typer.echo(f"\n{'='*60}")
+                typer.echo(f"Zombie Workflow Scan Results")
+                typer.echo(f"{'='*60}")
+                typer.echo(f"Scan time:          {summary['scan_time']}")
+                typer.echo(f"Duration:           {summary['duration_seconds']:.2f}s")
+                typer.echo(f"Stale threshold:    {summary['stale_threshold_seconds']}s")
+                typer.echo(f"Zombies found:      {summary['zombies_found']}")
+                typer.echo(f"Zombies recovered:  {summary['zombies_recovered']}")
+                typer.echo(f"Dry run:            {summary['dry_run']}")
+                typer.echo(f"{'='*60}\n")
+
+                if summary['zombies_found'] > 0:
+                    if fix:
+                        typer.echo(
+                            f"✓ Marked {summary['zombies_recovered']} zombie workflows as FAILED_WORKER_CRASH",
+                            fg=typer.colors.GREEN,
+                            bold=True
+                        )
+                    else:
+                        typer.echo(
+                            f"⚠ Found {summary['zombies_found']} zombie workflows. Run with --fix to recover them.",
+                            fg=typer.colors.YELLOW,
+                            bold=True
+                        )
+                else:
+                    typer.echo(
+                        "✓ No zombie workflows found",
+                        fg=typer.colors.GREEN,
+                        bold=True
+                    )
+
+        except Exception as e:
+            typer.echo(f"Error scanning for zombies: {e}", err=True)
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            if hasattr(persistence, 'close'):
+                await persistence.close()
+
+    asyncio.run(_scan())
+
+
+@app.command(name="zombie-daemon")
+def zombie_daemon(
+    database_url: str = typer.Option(..., "--db", help="Database connection URL"),
+    scan_interval: int = typer.Option(60, "--interval", help="Scan interval in seconds (default: 60)"),
+    stale_threshold: int = typer.Option(120, "--threshold", help="Heartbeat stale threshold in seconds (default: 120)")
+):
+    """
+    Run zombie scanner as a continuous background daemon.
+
+    The daemon will periodically scan for zombie workflows and automatically
+    mark them as FAILED_WORKER_CRASH.
+
+    Example:
+        rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+    """
+    async def _run_daemon():
+        # Import persistence provider based on database URL
+        if database_url.startswith("postgresql://"):
+            from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+            persistence = PostgresPersistenceProvider(database_url)
+        elif database_url.startswith("sqlite://"):
+            from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+            db_path = database_url.replace("sqlite:///", "")
+            persistence = SQLitePersistenceProvider(db_path)
+        else:
+            typer.echo(f"Unsupported database URL: {database_url}", err=True)
+            raise typer.Exit(code=1)
+
+        try:
+            await persistence.initialize()
+
+            # Import and create zombie scanner
+            from rufus.zombie_scanner import ZombieScanner
+            scanner = ZombieScanner(persistence, stale_threshold_seconds=stale_threshold)
+
+            typer.echo(f"\n{'='*60}")
+            typer.echo(f"Starting Zombie Scanner Daemon")
+            typer.echo(f"{'='*60}")
+            typer.echo(f"Database:          {database_url}")
+            typer.echo(f"Scan interval:     {scan_interval}s")
+            typer.echo(f"Stale threshold:   {stale_threshold}s")
+            typer.echo(f"{'='*60}\n")
+            typer.echo("Press Ctrl+C to stop\n")
+
+            # Run daemon
+            await scanner.run_daemon(
+                scan_interval_seconds=scan_interval,
+                stale_threshold_seconds=stale_threshold
+            )
+
+        except KeyboardInterrupt:
+            typer.echo("\n\nStopping zombie scanner daemon...", fg=typer.colors.YELLOW)
+            scanner.stop_daemon()
+        except Exception as e:
+            typer.echo(f"Error in zombie daemon: {e}", err=True)
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            if hasattr(persistence, 'close'):
+                await persistence.close()
+
+    asyncio.run(_run_daemon())
+
+
 if __name__ == "__main__":
     app()
