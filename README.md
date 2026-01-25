@@ -436,6 +436,121 @@ On failure, compensation functions execute in reverse order automatically.
 
 ---
 
+## 🌐 Polyglot Support (Multi-Language Workflows)
+
+Rufus supports **polyglot architectures** through HTTP Steps, enabling Python-orchestrated workflows to integrate with services written in any language.
+
+### The Polyglot Approach
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│         Orchestration Layer             │
+└───────────┬─────────────────────────────┘
+            │ HTTP/REST
+            ▼
+┌─────────────────────────────────────────┐
+│     External Services (Any Language)    │
+│  ├─ Go microservices                    │
+│  ├─ Rust ML inference                   │
+│  ├─ Node.js notification services       │
+│  ├─ Java enterprise APIs                │
+│  └─ Any HTTP-speaking service           │
+└─────────────────────────────────────────┘
+```
+
+### HTTP Steps for Cross-Language Integration
+
+Call any HTTP service directly from your workflow:
+
+```yaml
+- name: "Call_Go_Service"
+  type: "HTTP"
+  http_config:
+    method: "POST"
+    url: "http://go-service:8080/api/process"
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{state.auth_token}}"
+    body:
+      user_id: "{{state.user_id}}"
+      payload: "{{state.data}}"
+    timeout: 30
+  automate_next: true
+```
+
+### Multi-Language Pipeline Example
+
+```yaml
+workflow_type: "PolyglotDataPipeline"
+steps:
+  # Python: Data validation
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "steps.validate_input"
+    automate_next: true
+
+  # Go Service: High-performance data processing
+  - name: "Process_Data_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/process"
+      body: "{{state.validated_data}}"
+    automate_next: true
+
+  # Rust Service: ML inference
+  - name: "ML_Inference_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_data.features}}"
+    automate_next: true
+
+  # Node.js: Send notification
+  - name: "Notify_User_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification-service:3000/send"
+      body:
+        recipient: "{{state.user_email}}"
+        message: "Processing complete: {{state.ml_prediction}}"
+```
+
+### HTTP Step Features
+
+| Feature | Description |
+|---------|-------------|
+| **Jinja2 Templating** | Dynamic URL, headers, and body with `{{variable}}` syntax |
+| **All HTTP Methods** | GET, POST, PUT, DELETE, PATCH supported |
+| **Response Handling** | Automatic JSON parsing, status code capture |
+| **Merge Strategies** | SHALLOW or DEEP merge of response into workflow state |
+| **Timeout Config** | Per-step timeout settings |
+| **Error Handling** | Configurable retry policies |
+
+### When to Use Polyglot Workflows
+
+**Ideal For:**
+- Integrating existing microservices in different languages
+- Leveraging language-specific performance (Go for concurrency, Rust for ML)
+- Third-party API integrations
+- Legacy system integration
+- Multi-team architectures with different tech stacks
+
+**Best Practices:**
+- Use HTTP steps for external service calls
+- Keep orchestration logic in Python
+- Implement idempotency in external services
+- Use service discovery for dynamic endpoints
+- Configure appropriate timeouts per service
+
+See [USAGE_GUIDE.md](USAGE_GUIDE.md#polyglot-workflows-http-steps) for detailed polyglot documentation.
+
+---
+
 ## 💾 Database Support
 
 ### Multi-Database Architecture

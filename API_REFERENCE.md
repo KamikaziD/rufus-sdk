@@ -763,15 +763,106 @@ class ParallelWorkflowStep(WorkflowStep):
 
 ##### HttpWorkflowStep
 
-Step that makes HTTP requests.
+Step that makes HTTP requests to external services, enabling polyglot workflows.
 
 ```python
 class HttpWorkflowStep(WorkflowStep):
-    url_template: str
-    method: str = "GET"
-    headers_template: Optional[Dict[str, str]] = None
-    body_template: Optional[str] = None
+    http_config: Dict[str, Any]  # Full HTTP configuration
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
 ```
+
+**http_config Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | `str` | Yes | Target URL (supports Jinja2 templating) |
+| `method` | `str` | No | HTTP method: GET, POST, PUT, DELETE, PATCH (default: GET) |
+| `headers` | `Dict[str, str]` | No | Request headers (supports templating) |
+| `body` | `Dict[str, Any]` | No | Request body for POST/PUT/PATCH (supports templating) |
+| `query_params` | `Dict[str, str]` | No | URL query parameters |
+| `timeout` | `int` | No | Request timeout in seconds (default: 30) |
+| `output_key` | `str` | No | Key to store response in state |
+| `includes` | `List[str]` | No | Filter response fields to save |
+| `retry_policy` | `Dict` | No | Retry configuration |
+
+**YAML Example:**
+
+```yaml
+- name: "Call_External_API"
+  type: "HTTP"
+  http_config:
+    method: "POST"
+    url: "https://api.example.com/process/{{state.item_id}}"
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{secrets.API_KEY}}"
+    body:
+      data: "{{state.payload}}"
+      options:
+        format: "json"
+    timeout: 30
+    retry_policy:
+      max_attempts: 3
+      delay_seconds: 2
+  output_key: "api_response"
+  automate_next: true
+```
+
+**Polyglot Workflow Example:**
+
+```yaml
+# Call services written in different languages
+steps:
+  # Go service for high-performance processing
+  - name: "Process_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-service:8080/process"
+      body: "{{state.data}}"
+
+  # Rust service for ML inference
+  - name: "Predict_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_data}}"
+
+  # Node.js service for notifications
+  - name: "Notify_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification:3000/send"
+      body:
+        user: "{{state.user_id}}"
+        message: "{{state.result}}"
+```
+
+**Response Structure:**
+
+The HTTP step returns a dictionary with the following fields:
+
+```python
+{
+    "status_code": 200,           # HTTP status code
+    "body": {...},                # Parsed JSON body (or text if not JSON)
+    "headers": {...},             # Response headers
+    "error": False,               # True if request failed
+    "error_message": None         # Error description if failed
+}
+```
+
+**Templating:**
+
+HTTP steps support Jinja2 templating for dynamic content:
+
+- `{{state.field}}` - Access workflow state
+- `{{secrets.API_KEY}}` - Access secrets
+- `{{state.items | tojson}}` - JSON serialize complex objects
 
 ---
 

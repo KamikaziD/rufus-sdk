@@ -531,6 +531,275 @@ steps:
 *   Uses Jinja2-like syntax (`{{variable}}`) for dynamic values in `url`, `headers`, `body`, and `query_params`.
 *   Context for templating is the entire workflow state and available secrets.
 
+### 8.1 Polyglot Workflows (HTTP Steps)
+
+HTTP steps enable **polyglot workflows** - Python-orchestrated workflows that integrate with services written in any programming language. This is the primary mechanism for multi-language support in Rufus.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│         Orchestration Layer             │
+└───────────┬─────────────────────────────┘
+            │ HTTP/REST
+            ▼
+┌─────────────────────────────────────────┐
+│     External Services (Any Language)    │
+│  ├─ Go microservices                    │
+│  ├─ Rust ML inference                   │
+│  ├─ Node.js notification services       │
+│  ├─ Java enterprise APIs                │
+│  └─ Any HTTP-speaking service           │
+└─────────────────────────────────────────┘
+```
+
+#### Multi-Language Pipeline Example
+
+```yaml
+workflow_type: "PolyglotDataPipeline"
+description: "Process data using services in multiple languages"
+initial_state_model: "my_app.models.PipelineState"
+
+steps:
+  # Python: Data validation and business logic
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "my_app.steps.validate_input"
+    automate_next: true
+
+  # Go Service: High-performance concurrent processing
+  - name: "Process_Data_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/api/process"
+      headers:
+        Content-Type: "application/json"
+        X-Request-ID: "{{state.request_id}}"
+      body:
+        data: "{{state.validated_data}}"
+        options:
+          concurrency: 100
+          batch_size: 1000
+      timeout: 60
+    output_key: "go_processing_result"
+    automate_next: true
+
+  # Rust Service: Machine learning inference
+  - name: "ML_Inference_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml-service:8080/predict"
+      headers:
+        Content-Type: "application/json"
+      body:
+        features: "{{state.go_processing_result.features}}"
+        model_version: "v2.1"
+      timeout: 30
+    output_key: "ml_prediction"
+    automate_next: true
+
+  # Node.js: Send real-time notifications
+  - name: "Notify_User_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification-service:3000/api/notify"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{secrets.NOTIFICATION_API_KEY}}"
+      body:
+        user_id: "{{state.user_id}}"
+        channel: "email"
+        template: "processing_complete"
+        data:
+          result: "{{state.ml_prediction.result}}"
+          confidence: "{{state.ml_prediction.confidence}}"
+    automate_next: true
+
+  # Python: Final business logic and state update
+  - name: "Finalize_Processing"
+    type: "STANDARD"
+    function: "my_app.steps.finalize_processing"
+```
+
+#### Third-Party API Integration
+
+```yaml
+steps:
+  # Stripe: Payment processing
+  - name: "Create_Payment_Intent"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.stripe.com/v1/payment_intents"
+      headers:
+        Authorization: "Bearer {{secrets.STRIPE_SECRET_KEY}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        amount: "{{state.amount_cents}}"
+        currency: "usd"
+        customer: "{{state.stripe_customer_id}}"
+    output_key: "stripe_payment"
+    automate_next: true
+
+  # Twilio: SMS notification
+  - name: "Send_SMS"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{secrets.TWILIO_SID}}/Messages.json"
+      headers:
+        Authorization: "Basic {{secrets.TWILIO_AUTH_BASE64}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        To: "{{state.customer_phone}}"
+        From: "{{secrets.TWILIO_PHONE}}"
+        Body: "Payment of ${{state.amount}} received. Thank you!"
+    automate_next: true
+
+  # SendGrid: Email notification
+  - name: "Send_Email"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.sendgrid.com/v3/mail/send"
+      headers:
+        Authorization: "Bearer {{secrets.SENDGRID_API_KEY}}"
+        Content-Type: "application/json"
+      body:
+        personalizations:
+          - to:
+              - email: "{{state.customer_email}}"
+        from:
+          email: "noreply@example.com"
+        subject: "Payment Confirmation"
+        content:
+          - type: "text/plain"
+            value: "Your payment of ${{state.amount}} has been processed."
+```
+
+#### Microservices Orchestration Pattern
+
+```yaml
+workflow_type: "OrderFulfillment"
+steps:
+  # Inventory Service (Go)
+  - name: "Reserve_Inventory"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://inventory-service:8080/api/reserve"
+      body:
+        items: "{{state.order_items}}"
+        reservation_id: "{{state.order_id}}"
+      timeout: 10
+    output_key: "inventory_reservation"
+    automate_next: true
+
+  # Pricing Service (Rust)
+  - name: "Calculate_Final_Price"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://pricing-service:8080/api/calculate"
+      body:
+        items: "{{state.order_items}}"
+        customer_id: "{{state.customer_id}}"
+        promotions: "{{state.applied_promotions}}"
+      timeout: 5
+    output_key: "pricing_result"
+    automate_next: true
+
+  # Payment Service (Java)
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://payment-service:8080/api/charge"
+      body:
+        customer_id: "{{state.customer_id}}"
+        amount: "{{state.pricing_result.total}}"
+        payment_method: "{{state.payment_method_id}}"
+        idempotency_key: "{{state.order_id}}"
+      timeout: 30
+    output_key: "payment_result"
+    automate_next: true
+
+  # Shipping Service (Node.js)
+  - name: "Create_Shipment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://shipping-service:3000/api/shipments"
+      body:
+        order_id: "{{state.order_id}}"
+        items: "{{state.order_items}}"
+        address: "{{state.shipping_address}}"
+        carrier_preference: "{{state.carrier_preference}}"
+    output_key: "shipment"
+```
+
+#### Error Handling in Polyglot Workflows
+
+```yaml
+steps:
+  - name: "Call_External_Service"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://external-service/api/process"
+      body: "{{state.data}}"
+      timeout: 30
+      retry_policy:
+        max_attempts: 3
+        delay_seconds: 2
+        backoff_multiplier: 2
+    output_key: "service_response"
+    automate_next: true
+
+  - name: "Check_Response"
+    type: "DECISION"
+    function: "steps.check_service_response"
+    routes:
+      - condition: "state.service_response.status_code >= 400"
+        target: "Handle_Error"
+      - condition: "state.service_response.body.status == 'failed'"
+        target: "Handle_Error"
+      - default: "Continue_Processing"
+
+  - name: "Handle_Error"
+    type: "STANDARD"
+    function: "steps.handle_service_error"
+    automate_next: false  # Manual intervention may be needed
+```
+
+#### When to Use Polyglot Workflows
+
+**Ideal Use Cases:**
+- Integrating existing microservices in different languages
+- Leveraging language-specific strengths (Go for concurrency, Rust for ML)
+- Third-party API integrations (Stripe, Twilio, SendGrid, etc.)
+- Legacy system integration via REST APIs
+- Multi-team architectures with different tech stacks
+
+**Best Practices:**
+1. **Keep orchestration in Python** - Business logic and control flow in the workflow engine
+2. **Use HTTP steps for external calls** - Any language that speaks HTTP can be integrated
+3. **Implement idempotency** - External services should handle duplicate requests gracefully
+4. **Use service discovery** - Don't hardcode URLs in production
+5. **Configure appropriate timeouts** - Different services have different latency profiles
+6. **Handle errors gracefully** - Check response status codes and body for errors
+7. **Use retry policies** - Transient failures are common in distributed systems
+
+**Performance Considerations:**
+- HTTP steps add network latency compared to Python steps
+- Use connection pooling in high-throughput scenarios
+- Consider gRPC for performance-critical polyglot calls (planned feature)
+- Batch multiple operations where possible
+
 ## 9. Advanced Node Types (The "Gears")
 
 These nodes provide high-level control flow and orchestration capabilities.
