@@ -62,18 +62,21 @@ def step_2_function(state: SimpleState, context):
 
 def test_workflow_has_version_and_snapshot_fields():
     """Test that Workflow class has version and snapshot fields."""
+    # Create mock providers
+    from unittest.mock import Mock
+
     workflow = Workflow(
         workflow_type="TestWorkflow",
         workflow_version="1.0.0",
         definition_snapshot={"test": "snapshot"},
         workflow_steps=[],
         initial_state_model=SimpleState(),
-        persistence_provider=None,
-        execution_provider=None,
-        workflow_builder=None,
-        expression_evaluator_cls=None,
-        template_engine_cls=None,
-        workflow_observer=None
+        persistence_provider=Mock(),
+        execution_provider=Mock(),
+        workflow_builder=Mock(),
+        expression_evaluator_cls=Mock,
+        template_engine_cls=Mock,
+        workflow_observer=Mock()
     )
 
     assert workflow.workflow_version == "1.0.0"
@@ -82,6 +85,8 @@ def test_workflow_has_version_and_snapshot_fields():
 
 def test_workflow_to_dict_includes_version_and_snapshot():
     """Test that to_dict includes version and snapshot."""
+    from unittest.mock import Mock
+
     snapshot = {
         "workflow_type": "TestWorkflow",
         "steps": [{"name": "Step_1"}]
@@ -93,12 +98,12 @@ def test_workflow_to_dict_includes_version_and_snapshot():
         definition_snapshot=snapshot,
         workflow_steps=[],
         initial_state_model=SimpleState(),
-        persistence_provider=None,
-        execution_provider=None,
-        workflow_builder=None,
-        expression_evaluator_cls=None,
-        template_engine_cls=None,
-        workflow_observer=None
+        persistence_provider=Mock(),
+        execution_provider=Mock(),
+        workflow_builder=Mock(),
+        expression_evaluator_cls=Mock,
+        template_engine_cls=Mock,
+        workflow_observer=Mock()
     )
 
     workflow_dict = workflow.to_dict()
@@ -109,16 +114,18 @@ def test_workflow_to_dict_includes_version_and_snapshot():
 
 def test_workflow_backward_compatibility_no_version():
     """Test backward compatibility when version/snapshot not provided."""
+    from unittest.mock import Mock
+
     workflow = Workflow(
         workflow_type="TestWorkflow",
         workflow_steps=[],
         initial_state_model=SimpleState(),
-        persistence_provider=None,
-        execution_provider=None,
-        workflow_builder=None,
-        expression_evaluator_cls=None,
-        template_engine_cls=None,
-        workflow_observer=None
+        persistence_provider=Mock(),
+        execution_provider=Mock(),
+        workflow_builder=Mock(),
+        expression_evaluator_cls=Mock,
+        template_engine_cls=Mock,
+        workflow_observer=Mock()
     )
 
     assert workflow.workflow_version is None

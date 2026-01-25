@@ -36,7 +36,12 @@ class MockZombiePersistence:
     ) -> List[Dict[str, Any]]:
         """Mock get stale heartbeats."""
         self.scan_count += 1
-        return self.stale_heartbeats.copy()
+        # Filter by threshold
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_threshold_seconds)
+        return [
+            hb for hb in self.stale_heartbeats
+            if datetime.fromisoformat(hb['last_heartbeat']) < stale_cutoff
+        ]
 
     async def mark_workflow_as_crashed(
         self,
