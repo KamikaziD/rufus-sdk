@@ -854,7 +854,205 @@ rufus validate workflow.yaml --strict
 
 ---
 
-## 12. Troubleshooting YAML Configuration
+## 12. Production Reliability Features
+
+Rufus includes production-grade features to handle worker crashes and workflow definition changes.
+
+### 12.1 Zombie Workflow Recovery
+
+Automatically detect and recover workflows where the worker crashed during execution.
+
+**Quick Start - CLI**:
+```bash
+# Scan for zombie workflows (dry-run)
+rufus scan-zombies --db postgresql://localhost/rufus
+
+# Fix zombies automatically
+rufus scan-zombies --db postgresql://localhost/rufus --fix
+
+# Run continuous monitoring daemon
+rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+```
+
+**Programmatic Usage**:
+```python
+from rufus.zombie_scanner import ZombieScanner
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+# Setup
+persistence = PostgresPersistenceProvider("postgresql://localhost/rufus")
+await persistence.initialize()
+
+scanner = ZombieScanner(persistence, stale_threshold_seconds=120)
+
+# One-shot scan and recover
+summary = await scanner.scan_and_recover(dry_run=False)
+print(f"Recovered {summary['zombies_recovered']} zombie workflows")
+```
+
+**Heartbeat Configuration**:
+```python
+from rufus.heartbeat import HeartbeatManager
+
+# Heartbeats are automatic via execution provider
+# For custom execution logic:
+async def my_step(state: MyState, context: StepContext):
+    heartbeat = HeartbeatManager(
+        persistence=context.persistence,
+        workflow_id=context.workflow_id,
+        heartbeat_interval_seconds=30
+    )
+
+    async with heartbeat:  # Auto-start and cleanup
+        result = await long_running_operation()
+        return {"result": result}
+```
+
+**Production Deployment**:
+
+Option 1: Cron job (simple):
+```bash
+*/5 * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/zombie-scanner.log 2>&1
+```
+
+Option 2: Systemd daemon (recommended):
+```ini
+[Unit]
+Description=Rufus Zombie Scanner Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rufus zombie-daemon --db postgresql://localhost/rufus
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Option 3: Kubernetes CronJob:
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rufus-zombie-scanner
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: scanner
+            image: myapp/rufus:latest
+            command: ["rufus", "scan-zombies", "--db", "$(DATABASE_URL)", "--fix"]
+```
+
+**Configuration Guidelines**:
+
+| Step Duration | Heartbeat Interval | Stale Threshold | Scan Interval |
+|---------------|-------------------|-----------------|---------------|
+| < 1 minute    | 15s               | 60s             | 30s           |
+| 1-10 minutes  | 30s               | 120s            | 60s           |
+| 10+ minutes   | 60s               | 300s            | 120s          |
+
+**Key Rule**: Stale Threshold > 2 × Heartbeat Interval
+
+### 12.2 Workflow Versioning
+
+Protect running workflows from breaking YAML changes using automatic definition snapshots.
+
+**How It Works**:
+1. WorkflowBuilder snapshots complete YAML on workflow creation
+2. Snapshot stored in database with workflow
+3. Running workflows use their snapshot (immune to YAML changes)
+4. New workflows use latest YAML
+
+**Automatic (No Code Changes)**:
+```python
+# Snapshotting is automatic
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "123"}
+)
+
+# Snapshot automatically stored
+assert workflow.definition_snapshot is not None
+```
+
+**Explicit Versioning (Recommended)**:
+```yaml
+# config/order_processing.yaml
+workflow_type: "OrderProcessing"
+workflow_version: "2.0.0"  # Bump for breaking changes
+initial_state_model: "my_app.models.OrderState"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "my_app.steps.validate"
+```
+
+**Breaking Changes Strategy**:
+
+Option A: Update YAML in place (snapshot protects running workflows):
+```yaml
+# Before (v1.0.0)
+steps:
+  - name: "Human_Approval"  # Step exists
+  - name: "Process_Payment"
+
+# After (v2.0.0)
+steps:
+  # Human_Approval removed - running workflows still have it via snapshot!
+  - name: "Process_Payment"
+```
+
+Running workflows created with v1.0.0:
+- ✅ Still have "Human_Approval" (from snapshot)
+- ✅ Complete successfully
+
+New workflows created after deploy:
+- ✅ Use v2.0.0 (no "Human_Approval")
+- ✅ Follow new process
+
+Option B: Explicit versioning with separate YAMLs:
+```yaml
+# config/order_processing_v1.yaml (keep for compatibility)
+workflow_type: "OrderProcessing_v1"
+workflow_version: "1.0.0"
+
+# config/order_processing_v2.yaml (new deployments)
+workflow_type: "OrderProcessing_v2"
+workflow_version: "2.0.0"
+```
+
+**Checking Snapshots**:
+```python
+# Load workflow and inspect snapshot
+workflow = await persistence.load_workflow(workflow_id)
+snapshot = workflow['definition_snapshot']
+
+print(f"Workflow version: {snapshot.get('workflow_version')}")
+print(f"Steps: {[s['name'] for s in snapshot['steps']]}")
+```
+
+**Storage Overhead**:
+- ~5-10 KB per workflow (typical)
+- PostgreSQL: Compressed JSONB
+- SQLite: TEXT
+
+**Best Practices**:
+- ✅ Always bump `workflow_version` for breaking changes
+- ✅ Use semantic versioning (MAJOR.MINOR.PATCH)
+- ✅ Test YAML changes on staging first
+- ✅ Keep old YAMLs until running workflows complete (or rely on snapshots)
+- ❌ Don't make breaking changes without version bump
+- ❌ Don't delete workflow definitions immediately after deploy
+
+---
+
+## 13. Troubleshooting YAML Configuration
 
 ### Common Errors
 
