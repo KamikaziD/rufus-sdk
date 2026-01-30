@@ -531,6 +531,618 @@ steps:
 *   Uses Jinja2-like syntax (`{{variable}}`) for dynamic values in `url`, `headers`, `body`, and `query_params`.
 *   Context for templating is the entire workflow state and available secrets.
 
+### 8.1 Polyglot Workflows (HTTP Steps)
+
+HTTP steps enable **polyglot workflows** - Python-orchestrated workflows that integrate with services written in any programming language. This is the primary mechanism for multi-language support in Rufus.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│         Orchestration Layer             │
+└───────────┬─────────────────────────────┘
+            │ HTTP/REST
+            ▼
+┌─────────────────────────────────────────┐
+│     External Services (Any Language)    │
+│  ├─ Go microservices                    │
+│  ├─ Rust ML inference                   │
+│  ├─ Node.js notification services       │
+│  ├─ Java enterprise APIs                │
+│  └─ Any HTTP-speaking service           │
+└─────────────────────────────────────────┘
+```
+
+#### Multi-Language Pipeline Example
+
+```yaml
+workflow_type: "PolyglotDataPipeline"
+description: "Process data using services in multiple languages"
+initial_state_model: "my_app.models.PipelineState"
+
+steps:
+  # Python: Data validation and business logic
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "my_app.steps.validate_input"
+    automate_next: true
+
+  # Go Service: High-performance concurrent processing
+  - name: "Process_Data_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/api/process"
+      headers:
+        Content-Type: "application/json"
+        X-Request-ID: "{{state.request_id}}"
+      body:
+        data: "{{state.validated_data}}"
+        options:
+          concurrency: 100
+          batch_size: 1000
+      timeout: 60
+    output_key: "go_processing_result"
+    automate_next: true
+
+  # Rust Service: Machine learning inference
+  - name: "ML_Inference_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml-service:8080/predict"
+      headers:
+        Content-Type: "application/json"
+      body:
+        features: "{{state.go_processing_result.features}}"
+        model_version: "v2.1"
+      timeout: 30
+    output_key: "ml_prediction"
+    automate_next: true
+
+  # Node.js: Send real-time notifications
+  - name: "Notify_User_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification-service:3000/api/notify"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{secrets.NOTIFICATION_API_KEY}}"
+      body:
+        user_id: "{{state.user_id}}"
+        channel: "email"
+        template: "processing_complete"
+        data:
+          result: "{{state.ml_prediction.result}}"
+          confidence: "{{state.ml_prediction.confidence}}"
+    automate_next: true
+
+  # Python: Final business logic and state update
+  - name: "Finalize_Processing"
+    type: "STANDARD"
+    function: "my_app.steps.finalize_processing"
+```
+
+#### Third-Party API Integration
+
+```yaml
+steps:
+  # Stripe: Payment processing
+  - name: "Create_Payment_Intent"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.stripe.com/v1/payment_intents"
+      headers:
+        Authorization: "Bearer {{secrets.STRIPE_SECRET_KEY}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        amount: "{{state.amount_cents}}"
+        currency: "usd"
+        customer: "{{state.stripe_customer_id}}"
+    output_key: "stripe_payment"
+    automate_next: true
+
+  # Twilio: SMS notification
+  - name: "Send_SMS"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{secrets.TWILIO_SID}}/Messages.json"
+      headers:
+        Authorization: "Basic {{secrets.TWILIO_AUTH_BASE64}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        To: "{{state.customer_phone}}"
+        From: "{{secrets.TWILIO_PHONE}}"
+        Body: "Payment of ${{state.amount}} received. Thank you!"
+    automate_next: true
+
+  # SendGrid: Email notification
+  - name: "Send_Email"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.sendgrid.com/v3/mail/send"
+      headers:
+        Authorization: "Bearer {{secrets.SENDGRID_API_KEY}}"
+        Content-Type: "application/json"
+      body:
+        personalizations:
+          - to:
+              - email: "{{state.customer_email}}"
+        from:
+          email: "noreply@example.com"
+        subject: "Payment Confirmation"
+        content:
+          - type: "text/plain"
+            value: "Your payment of ${{state.amount}} has been processed."
+```
+
+#### Microservices Orchestration Pattern
+
+```yaml
+workflow_type: "OrderFulfillment"
+steps:
+  # Inventory Service (Go)
+  - name: "Reserve_Inventory"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://inventory-service:8080/api/reserve"
+      body:
+        items: "{{state.order_items}}"
+        reservation_id: "{{state.order_id}}"
+      timeout: 10
+    output_key: "inventory_reservation"
+    automate_next: true
+
+  # Pricing Service (Rust)
+  - name: "Calculate_Final_Price"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://pricing-service:8080/api/calculate"
+      body:
+        items: "{{state.order_items}}"
+        customer_id: "{{state.customer_id}}"
+        promotions: "{{state.applied_promotions}}"
+      timeout: 5
+    output_key: "pricing_result"
+    automate_next: true
+
+  # Payment Service (Java)
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://payment-service:8080/api/charge"
+      body:
+        customer_id: "{{state.customer_id}}"
+        amount: "{{state.pricing_result.total}}"
+        payment_method: "{{state.payment_method_id}}"
+        idempotency_key: "{{state.order_id}}"
+      timeout: 30
+    output_key: "payment_result"
+    automate_next: true
+
+  # Shipping Service (Node.js)
+  - name: "Create_Shipment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://shipping-service:3000/api/shipments"
+      body:
+        order_id: "{{state.order_id}}"
+        items: "{{state.order_items}}"
+        address: "{{state.shipping_address}}"
+        carrier_preference: "{{state.carrier_preference}}"
+    output_key: "shipment"
+```
+
+#### Error Handling in Polyglot Workflows
+
+```yaml
+steps:
+  - name: "Call_External_Service"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://external-service/api/process"
+      body: "{{state.data}}"
+      timeout: 30
+      retry_policy:
+        max_attempts: 3
+        delay_seconds: 2
+        backoff_multiplier: 2
+    output_key: "service_response"
+    automate_next: true
+
+  - name: "Check_Response"
+    type: "DECISION"
+    function: "steps.check_service_response"
+    routes:
+      - condition: "state.service_response.status_code >= 400"
+        target: "Handle_Error"
+      - condition: "state.service_response.body.status == 'failed'"
+        target: "Handle_Error"
+      - default: "Continue_Processing"
+
+  - name: "Handle_Error"
+    type: "STANDARD"
+    function: "steps.handle_service_error"
+    automate_next: false  # Manual intervention may be needed
+```
+
+#### When to Use Polyglot Workflows
+
+**Ideal Use Cases:**
+- Integrating existing microservices in different languages
+- Leveraging language-specific strengths (Go for concurrency, Rust for ML)
+- Third-party API integrations (Stripe, Twilio, SendGrid, etc.)
+- Legacy system integration via REST APIs
+- Multi-team architectures with different tech stacks
+
+**Best Practices:**
+1. **Keep orchestration in Python** - Business logic and control flow in the workflow engine
+2. **Use HTTP steps for external calls** - Any language that speaks HTTP can be integrated
+3. **Implement idempotency** - External services should handle duplicate requests gracefully
+4. **Use service discovery** - Don't hardcode URLs in production
+5. **Configure appropriate timeouts** - Different services have different latency profiles
+6. **Handle errors gracefully** - Check response status codes and body for errors
+7. **Use retry policies** - Transient failures are common in distributed systems
+
+**Performance Considerations:**
+- HTTP steps add network latency compared to Python steps
+- Use connection pooling in high-throughput scenarios
+- Consider gRPC for performance-critical polyglot calls (planned feature)
+- Batch multiple operations where possible
+
+### 8.2 JavaScript Steps (Embedded V8)
+
+JavaScript steps provide **in-process polyglot execution** - data transformation and business logic written in JavaScript/TypeScript that runs directly within the workflow engine using an embedded V8 runtime (PyMiniRacer).
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│                                         │
+│  ┌─────────────────────────────────┐    │
+│  │   Embedded V8 Runtime (PyMiniRacer)  │
+│  │   ├─ JavaScript execution       │    │
+│  │   ├─ TypeScript transpilation   │    │
+│  │   └─ Sandboxed environment      │    │
+│  └─────────────────────────────────┘    │
+└─────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- Zero network latency (in-process execution)
+- Strong sandboxing (V8 isolates)
+- TypeScript support with esbuild transpilation
+- Access to workflow state and context
+- Built-in utility functions (rufus.*)
+
+#### Installation
+
+```bash
+# Install py-mini-racer for V8 JavaScript execution
+pip install py-mini-racer
+
+# Optional: Install esbuild for TypeScript support
+npm install -g esbuild
+# or
+pip install esbuild
+```
+
+#### Basic Usage - Inline Code
+
+```yaml
+steps:
+  - name: "Calculate_Discount"
+    type: "JAVASCRIPT"
+    js_config:
+      code: |
+        const items = state.items;
+        const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discount = subtotal > 100 ? 0.1 : 0;
+        const total = subtotal * (1 - discount);
+        return {
+          subtotal: rufus.round(subtotal, 2),
+          discount_percent: discount * 100,
+          total: rufus.round(total, 2)
+        };
+      timeout_ms: 5000
+    output_key: "pricing"
+    automate_next: true
+```
+
+#### File-Based Scripts (Recommended)
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Transform_Data"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/transform.js"
+      timeout_ms: 10000
+      memory_limit_mb: 128
+    automate_next: true
+```
+
+**scripts/transform.js:**
+```javascript
+// Workflow state is available as `state`
+// Step context is available as `context`
+
+const users = state.raw_users;
+
+// Transform user data
+const transformed = users.map(user => ({
+  id: user.id,
+  fullName: `${user.first_name} ${user.last_name}`.trim(),
+  email: user.email.toLowerCase(),
+  createdAt: rufus.formatDate(user.created_at, 'iso'),
+  isActive: user.status === 'active'
+}));
+
+// Group by active status
+const grouped = rufus.groupBy(transformed, 'isActive');
+
+// Log for debugging (captured in workflow logs)
+rufus.log(`Processed ${transformed.length} users`);
+
+return {
+  users: transformed,
+  active_count: grouped.true?.length || 0,
+  inactive_count: grouped.false?.length || 0
+};
+```
+
+#### TypeScript Support
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Process_Order"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/process-order.ts"
+      typescript: true  # Auto-detected from .ts extension
+      tsconfig_path: "./tsconfig.json"  # Optional
+    automate_next: true
+```
+
+**scripts/process-order.ts:**
+```typescript
+interface OrderItem {
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+interface OrderState {
+  items: OrderItem[];
+  customer_id: string;
+  discount_code?: string;
+}
+
+// Type-safe access to workflow state
+const order = state as unknown as OrderState;
+
+// Calculate totals with type safety
+const calculateTotal = (items: OrderItem[]): number => {
+  return items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+};
+
+const subtotal = calculateTotal(order.items);
+const discount = order.discount_code ? 0.1 : 0;
+const total = subtotal * (1 - discount);
+
+return {
+  subtotal,
+  discount,
+  total,
+  item_count: order.items.length
+};
+```
+
+#### Available Context
+
+JavaScript steps have access to:
+
+```javascript
+// Workflow state (read-only, frozen)
+state.user_id       // Access state fields
+state.items[0].price // Nested access
+
+// Step context (read-only, frozen)
+context.workflow_id    // Current workflow ID
+context.step_name      // Current step name
+context.workflow_type  // Workflow type
+```
+
+#### Built-in Utilities (rufus.*)
+
+The `rufus` object provides common utility functions:
+
+```javascript
+// Logging (captured for audit)
+rufus.log("Info message");
+rufus.warn("Warning message");
+rufus.error("Error message");
+
+// Date/Time
+rufus.now();          // ISO timestamp
+rufus.timestamp();    // Unix timestamp
+rufus.formatDate(date, 'iso|date|time');
+rufus.addDays(date, 5);
+rufus.diffDays(date1, date2);
+
+// Identifiers
+rufus.uuid();         // Generate UUID v4
+
+// Math
+rufus.round(3.14159, 2);   // 3.14
+rufus.clamp(15, 0, 10);    // 10
+rufus.sum([1, 2, 3]);      // 6
+rufus.avg([1, 2, 3]);      // 2
+rufus.min([1, 2, 3]);      // 1
+rufus.max([1, 2, 3]);      // 3
+
+// Strings
+rufus.slugify("Hello World");   // "hello-world"
+rufus.truncate("Long text", 5); // "Lo..."
+rufus.capitalize("hello");      // "Hello"
+rufus.camelCase("user_name");   // "userName"
+rufus.snakeCase("userName");    // "user_name"
+
+// Objects
+rufus.pick(obj, ['a', 'b']);    // Pick specific keys
+rufus.omit(obj, ['c']);         // Omit specific keys
+rufus.get(obj, 'a.b.c', default); // Deep get with default
+rufus.set(obj, 'a.b.c', value); // Deep set (returns new object)
+rufus.merge(obj1, obj2);        // Shallow merge
+
+// Arrays
+rufus.unique([1, 1, 2]);        // [1, 2]
+rufus.flatten([[1], [2]]);      // [1, 2]
+rufus.chunk([1, 2, 3, 4], 2);   // [[1, 2], [3, 4]]
+rufus.groupBy(arr, 'key');      // Group by key
+rufus.sortBy(arr, 'key');       // Sort by key
+rufus.first(arr, n);            // First n elements
+rufus.last(arr, n);             // Last n elements
+rufus.compact([0, 1, null, 2]); // [1, 2]
+
+// Validation
+rufus.isEmail("test@example.com");  // true
+rufus.isURL("https://...");         // true
+rufus.isUUID("...");                // true
+rufus.isEmpty(value);               // true/false
+rufus.isNumber(value);
+rufus.isString(value);
+rufus.isArray(value);
+rufus.isObject(value);
+
+// Type conversion
+rufus.toNumber("42", 0);       // 42
+rufus.toString(value);         // String
+rufus.toBoolean(value);        // Boolean
+rufus.toArray(value);          // Array
+
+// JSON
+rufus.parseJSON(str);          // Parse or null
+rufus.stringify(obj, pretty);  // JSON string
+```
+
+#### Configuration Options
+
+```yaml
+js_config:
+  # Script source (one required)
+  script_path: "scripts/process.js"  # Path to .js or .ts file
+  # OR
+  code: "return { value: state.x * 2 };"  # Inline code
+
+  # Execution limits
+  timeout_ms: 5000          # Max execution time (100-300000ms)
+  memory_limit_mb: 128      # Max V8 heap size (16-1024MB)
+
+  # TypeScript options
+  typescript: false         # Force TypeScript (auto-detected from .ts)
+  tsconfig_path: null       # Path to tsconfig.json
+
+  # Output
+  output_key: null          # Key to store result (default: merge at root)
+
+  # Advanced
+  strict_mode: true         # JavaScript strict mode
+```
+
+#### Security
+
+JavaScript steps run in a sandboxed V8 environment with:
+
+1. **Blocked Globals**: `eval`, `Function`, `setTimeout`, `require`, `process`, etc.
+2. **Frozen Prototypes**: Prevents prototype pollution attacks
+3. **Read-Only State**: Workflow state cannot be modified directly
+4. **Resource Limits**: Timeout and memory limits enforced
+5. **No I/O**: No file system, network, or process access
+
+#### Use Cases
+
+**1. Data Transformation:**
+```yaml
+- name: "Transform_API_Response"
+  type: "JAVASCRIPT"
+  js_config:
+    code: |
+      const response = state.api_response;
+      return {
+        users: response.data.users.map(u => ({
+          id: u.id,
+          name: u.full_name,
+          active: u.status === 'active'
+        })),
+        total: response.pagination.total_count
+      };
+```
+
+**2. Validation Logic:**
+```yaml
+- name: "Validate_Order"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/validate-order.js"
+  automate_next: true
+
+- name: "Handle_Validation"
+  type: "DECISION"
+  routes:
+    - condition: "state.validation.is_valid"
+      target: "Process_Order"
+    - default: "Reject_Order"
+```
+
+**3. Complex Calculations:**
+```yaml
+- name: "Calculate_Pricing"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/pricing-engine.ts"
+    typescript: true
+    timeout_ms: 10000
+```
+
+#### JavaScript vs HTTP Steps
+
+| Feature | JavaScript Steps | HTTP Steps |
+|---------|------------------|------------|
+| Latency | ~5-50ms (in-process) | 50-500ms+ (network) |
+| Language | JavaScript/TypeScript | Any HTTP service |
+| Use Case | Data transformation, business logic | External services, APIs |
+| Security | V8 sandbox | Network isolation |
+| Dependencies | py-mini-racer | None |
+
+**When to Use JavaScript Steps:**
+- Data transformation and mapping
+- Complex calculations
+- Validation logic
+- Business rules
+- JSON manipulation
+- When Python performance is sufficient but JS is preferred
+
+**When to Use HTTP Steps:**
+- External API calls
+- Services in other languages (Go, Rust, Java)
+- Third-party integrations (Stripe, Twilio)
+- Long-running operations
+- When you need language-specific libraries
+
 ## 9. Advanced Node Types (The "Gears")
 
 These nodes provide high-level control flow and orchestration capabilities.

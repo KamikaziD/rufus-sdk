@@ -339,6 +339,89 @@ Child workflows report status changes to parents:
 - Parent resumes when child completes
 - Child results available in `state.sub_workflow_results[workflow_type]`
 
+### Polyglot Support (HTTP Steps)
+
+Rufus supports **polyglot workflows** through HTTP Steps, enabling Python-orchestrated workflows to call services written in any programming language.
+
+**Architecture**:
+```
+Rufus Engine (Python) → HTTP/REST → External Services (Go/Rust/Node.js/Java/etc.)
+```
+
+**HTTP Step Configuration**:
+```yaml
+- name: "Call_Go_Service"
+  type: "HTTP"
+  http_config:
+    method: "POST"
+    url: "http://go-service:8080/api/process"
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{state.auth_token}}"
+    body:
+      user_id: "{{state.user_id}}"
+      data: "{{state.payload}}"
+    timeout: 30
+  output_key: "go_response"
+  automate_next: true
+```
+
+**Multi-Language Pipeline Example**:
+```yaml
+workflow_type: "PolyglotPipeline"
+steps:
+  # Python: Validation
+  - name: "Validate"
+    type: "STANDARD"
+    function: "steps.validate"
+    automate_next: true
+
+  # Go: High-performance processing
+  - name: "Process_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/process"
+      body: "{{state.validated_data}}"
+    automate_next: true
+
+  # Rust: ML inference
+  - name: "Predict_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_data}}"
+    automate_next: true
+
+  # Node.js: Notifications
+  - name: "Notify_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification:3000/send"
+      body:
+        user: "{{state.user_id}}"
+        result: "{{state.prediction}}"
+```
+
+**Key Features**:
+- Jinja2 templating for dynamic URLs, headers, and body
+- All HTTP methods supported (GET, POST, PUT, DELETE, PATCH)
+- Automatic JSON parsing of responses
+- Configurable timeouts and retry policies
+- Response merged into workflow state
+
+**Best Practices**:
+- Keep orchestration logic in Python
+- Implement idempotency in external services
+- Use service discovery for production URLs
+- Configure appropriate timeouts per service
+- Handle HTTP errors with DECISION steps
+
+**Documentation**: See [USAGE_GUIDE.md](USAGE_GUIDE.md#81-polyglot-workflows-http-steps) for complete polyglot documentation.
+
 ## Testing
 
 ### Using TestHarness

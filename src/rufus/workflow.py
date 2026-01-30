@@ -11,7 +11,7 @@ from rufus.models import (
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
     WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
-    MergeStrategy, MergeConflictBehavior # Import new Enums
+    MergeStrategy, MergeConflictBehavior, JavaScriptWorkflowStep
 )
 
 # Use string literal type hints for providers to avoid circular import issues
@@ -554,7 +554,8 @@ class Workflow:
 
             result = {}
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
-                                                 FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep))
+                                                 FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
+                                                 JavaScriptWorkflowStep))
 
             if is_sync_step:
                 if step.func:
@@ -618,6 +619,58 @@ class Workflow:
                     merged_result = result["_sync_parallel_result"]
                     self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
 
+            elif isinstance(step, JavaScriptWorkflowStep):
+                # JavaScript steps execute synchronously in a sandboxed V8 environment
+                from rufus.javascript import JavaScriptExecutor, is_mini_racer_available
+
+                if not is_mini_racer_available():
+                    raise RuntimeError(
+                        f"JavaScript step '{step.name}' requires py_mini_racer. "
+                        "Install with: pip install py_mini_racer"
+                    )
+
+                # Get or create executor (could be cached on workflow instance)
+                if not hasattr(self, '_js_executor'):
+                    self._js_executor = JavaScriptExecutor()
+
+                # Execute JavaScript with workflow state
+                js_result = self._js_executor.execute_config(
+                    config=step.js_config,
+                    state=self.state.model_dump(),
+                    context={
+                        "workflow_id": self.id,
+                        "step_name": step.name,
+                        "workflow_type": self.workflow_type
+                    }
+                )
+
+                if not js_result.success:
+                    raise RuntimeError(
+                        f"JavaScript step '{step.name}' failed: {js_result.error}"
+                    )
+
+                # Log any console output from the script
+                if js_result.logs:
+                    for log_entry in js_result.logs:
+                        await self._log_execution(
+                            log_entry.get("level", "INFO").upper(),
+                            f"[JS] {log_entry.get('message', '')}",
+                            step_name=step.name
+                        )
+
+                # Handle result based on output_key configuration
+                if step.js_config.output_key:
+                    result = {step.js_config.output_key: js_result.result}
+                else:
+                    result = js_result.result if isinstance(js_result.result, dict) else {"result": js_result.result}
+
+                # Apply merge strategy
+                if isinstance(result, dict):
+                    self._apply_merge_strategy(
+                        self.state, result,
+                        step.merge_strategy, step.merge_conflict_behavior
+                    )
+                await self.persistence.save_workflow(self.id, self.to_dict())
 
             elif isinstance(step, FireAndForgetWorkflowStep):
                 # FireAndForget uses the WorkflowEngine's builder and ExecutionProvider
