@@ -24,14 +24,16 @@ async def sqlite_with_schema():
     await provider.initialize()
 
     # Apply actual schema migration
-    schema_path = Path(__file__).parent.parent.parent / "migrations" / "002_sqlite_initial.sql"
+    schema_path = Path(__file__).parent.parent.parent / \
+        "migrations" / "002_sqlite_initial.sql"
 
     if schema_path.exists():
         with open(schema_path, 'r') as f:
             schema_sql = f.read()
 
         # Fix CREATE OR REPLACE VIEW syntax for SQLite
-        schema_sql = schema_sql.replace('CREATE OR REPLACE VIEW', 'CREATE VIEW IF NOT EXISTS')
+        schema_sql = schema_sql.replace(
+            'CREATE OR REPLACE VIEW', 'CREATE VIEW IF NOT EXISTS')
 
         # Execute schema using executescript which handles multiple statements
         try:
@@ -58,7 +60,9 @@ async def sqlite_with_schema():
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     completed_at TEXT,
                     idempotency_key TEXT UNIQUE,
-                    metadata TEXT DEFAULT '{}'
+                    metadata TEXT DEFAULT '{}',
+                    workflow_version TEXT,
+                    definition_snapshot TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -280,7 +284,8 @@ class TestSQLiteIntegration:
         # 8. Verify metrics
         metrics = await provider.get_workflow_metrics(workflow_id)
         assert len(metrics) >= 1
-        payment_metric = next(m for m in metrics if m['metric_name'] == 'payment_processing_time_ms')
+        payment_metric = next(
+            m for m in metrics if m['metric_name'] == 'payment_processing_time_ms')
         assert payment_metric['metric_value'] == 1250.5
 
     @pytest.mark.asyncio
@@ -514,6 +519,8 @@ class TestSQLiteIntegration:
                 workflow_type TEXT NOT NULL,
                 current_step INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
+                workflow_version TEXT DEFAULT 'v1',
+                definition_snapshot TEXT,
                 state TEXT NOT NULL DEFAULT '{}',
                 steps_config TEXT NOT NULL DEFAULT '[]',
                 state_model_path TEXT NOT NULL,

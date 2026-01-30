@@ -373,7 +373,8 @@ async def test_create_workflow():
     from rufus.workflow import Workflow
     assert isinstance(workflow, Workflow)
     assert workflow.workflow_type == "test_workflow"
-    assert isinstance(workflow.state, MyStateModel)
+    # Check state type by class name instead of isinstance to avoid module reload issues
+    assert type(workflow.state).__name__ == "MyStateModel"
 
     # Clean up the dummy module
     import os

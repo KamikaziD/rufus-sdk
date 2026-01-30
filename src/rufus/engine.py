@@ -139,9 +139,15 @@ class WorkflowEngine:
             await self.persistence.save_workflow(parent_id, parent_workflow.to_dict())
             await parent_workflow._notify_status_change(old_parent_status, parent_workflow.status, parent_workflow.current_step_name)
 
-            # Note: For SyncExecutor, the caller manages execution flow.
-            # For async executors (Celery, etc.), auto-resume would be needed.
-            # TODO: Make this conditional based on executor type
+            # Auto-resume parent workflow for async executors
+            # For SyncExecutor, the caller manages execution flow
+            # For async executors (Celery, ThreadPool, etc.), dispatch the parent to resume
+            from rufus.implementations.execution.sync import SyncExecutor
+            if not isinstance(self.executor, SyncExecutor):
+                # Async executor: dispatch parent workflow to resume execution
+                # Note: dispatch_independent_workflow is sync for Celery (uses .delay()),
+                # async for ThreadPool, so we don't await here
+                self.executor.dispatch_independent_workflow(parent_id)
 
         elif child_new_status == "FAILED" or child_new_status == "FAILED_ROLLED_BACK":
             parent_workflow.status = "FAILED_CHILD_WORKFLOW"

@@ -697,7 +697,9 @@ async def test_handle_sub_workflow_success(mock_providers):
     mock_child_workflow.parent_execution_id = None # Should be set by parent
     mock_child_workflow.data_region = None # Should be set by parent
     mock_child_workflow.to_dict.return_value = {"id": child_workflow_id, "status": "ACTIVE", "state": child_initial_state.model_dump()}
-    
+
+    mock_child_workflow.state = MagicMock(spec=MyStateModel)
+    mock_child_workflow.state.model_dump.return_value = child_initial_state.model_dump()
     mock_child_workflow.initial_state_model = MagicMock(spec=MyStateModel) # Mock the model itself
     mock_child_workflow.initial_state_model.model_dump.return_value = child_initial_state.model_dump() # Mock its method
 
@@ -783,7 +785,9 @@ async def test_handle_sub_workflow_inherits_data_region(mock_providers):
     mock_child_workflow.parent_execution_id = None
     mock_child_workflow.data_region = None
     mock_child_workflow.to_dict.return_value = {"id": child_workflow_id, "status": "ACTIVE", "state": child_initial_state.model_dump()}
-    
+
+    mock_child_workflow.state = MagicMock(spec=MyStateModel)
+    mock_child_workflow.state.model_dump.return_value = child_initial_state.model_dump()
     mock_child_workflow.initial_state_model = MagicMock(spec=MyStateModel) # Mock the model itself
     mock_child_workflow.initial_state_model.model_dump.return_value = child_initial_state.model_dump() # Mock its method
 
