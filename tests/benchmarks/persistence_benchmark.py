@@ -79,6 +79,7 @@ class PersistenceBenchmark:
             CREATE TABLE IF NOT EXISTS workflow_executions (
                 id TEXT PRIMARY KEY,
                 workflow_type TEXT NOT NULL,
+                workflow_version TEXT NOT NULL DEFAULT 'v1',                             
                 current_step INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT '{}',
@@ -295,8 +296,10 @@ class PersistenceBenchmark:
             print(f"\n{operation.upper().replace('_', ' ')}")
             print("-" * 70)
 
-            headers = ["Provider", "Mean (ms)", "Median (ms)", "P95 (ms)", "P99 (ms)", "Ops/sec"]
-            print(f"{'Provider':<12} {'Mean':<12} {'Median':<12} {'P95':<12} {'P99':<12} {'Ops/sec':<10}")
+            headers = [
+                "Provider", "Mean (ms)", "Median (ms)", "P95 (ms)", "P99 (ms)", "Ops/sec"]
+            print(
+                f"{'Provider':<12} {'Mean':<12} {'Median':<12} {'P95':<12} {'P99':<12} {'Ops/sec':<10}")
             print("-" * 70)
 
             for provider_name in ['sqlite', 'postgres']:
@@ -327,18 +330,22 @@ class PersistenceBenchmark:
                     continue
 
                 sqlite_stats = self.results['sqlite'][operation].get_stats()
-                postgres_stats = self.results['postgres'][operation].get_stats()
+                postgres_stats = self.results['postgres'][operation].get_stats(
+                )
 
                 if postgres_stats['mean'] > 0:
                     speedup = postgres_stats['mean'] / sqlite_stats['mean']
                     if speedup > 1:
-                        print(f"  {operation:<25} SQLite is {speedup:.2f}x faster")
+                        print(
+                            f"  {operation:<25} SQLite is {speedup:.2f}x faster")
                     else:
-                        print(f"  {operation:<25} PostgreSQL is {1/speedup:.2f}x faster")
+                        print(
+                            f"  {operation:<25} PostgreSQL is {1/speedup:.2f}x faster")
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='Persistence layer benchmarks')
+    parser = argparse.ArgumentParser(
+        description='Persistence layer benchmarks')
     parser.add_argument(
         '--postgres',
         help='PostgreSQL connection URL (e.g., postgresql://user:pass@localhost/test)'

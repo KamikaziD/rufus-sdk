@@ -125,6 +125,12 @@ try:
 except ImportError:
     HAS_MINI_RACER = False
 
+try:
+    from rufus.javascript.typescript import is_esbuild_available
+    HAS_ESBUILD = is_esbuild_available()
+except ImportError:
+    HAS_ESBUILD = False
+
 
 @pytest.mark.skipif(not HAS_MINI_RACER, reason="py_mini_racer not installed")
 class TestJavaScriptExecutor:
@@ -373,6 +379,7 @@ class TestScriptLoader:
             assert compiled.original_path is not None
             assert compiled.is_typescript is False
 
+    @pytest.mark.skipif(not HAS_ESBUILD, reason="esbuild not installed")
     def test_load_detects_typescript(self):
         """Test that .ts extension triggers TypeScript detection."""
         with tempfile.TemporaryDirectory() as tmpdir:

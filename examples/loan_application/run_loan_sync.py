@@ -172,24 +172,29 @@ async def run_loan_workflow():
 
         elif workflow2.status == "PENDING_SUB_WORKFLOW":
             # Execute the child KYC workflow
-            print(f"\n[PARENT PAUSED] Executing child KYC workflow: {workflow2.blocked_on_child_id}")
+            print(
+                f"\n[PARENT PAUSED] Executing child KYC workflow: {workflow2.blocked_on_child_id}")
             child_workflow = await engine.get_workflow(workflow2.blocked_on_child_id)
 
             child_step_count = 0
             while child_workflow.status == "ACTIVE":
                 child_step_count += 1
                 current_child_step = child_workflow.workflow_steps[child_workflow.current_step]
-                print(f"  [KYC] Step {child_step_count}: {current_child_step.name}")
+                print(
+                    f"  [KYC] Step {child_step_count}: {current_child_step.name}")
                 child_result = await child_workflow.next_step(user_input={})
                 print(f"  [KYC] Status: {child_workflow.status}")
 
-            print(f"  [KYC] Child workflow completed with status: {child_workflow.status}")
-            print(f"  [KYC] KYC Status: {child_workflow.state.kyc_overall_status}")
+            print(
+                f"  [KYC] Child workflow completed with status: {child_workflow.status}")
+            print(
+                f"  [KYC] KYC Status: {child_workflow.state.kyc_overall_status}")
 
             # Resume parent workflow - reload to get updated status
             print(f"\n[PARENT RESUME] Resuming parent workflow...")
             workflow2 = await engine.get_workflow(workflow2.id)
-            print(f"  Parent status after child completion: {workflow2.status}")
+            print(
+                f"  Parent status after child completion: {workflow2.status}")
 
         elif workflow2.status == "WAITING_HUMAN":
             # Automatically approve for testing
@@ -279,11 +284,12 @@ async def run_loan_workflow():
 
 if __name__ == "__main__":
     asyncio.run(run_loan_workflow())
-{
-    "user_id": "user_001",
-    "name": "Alice Johnson",
-    "email": "alice@example.com",
-    "country": "US",
-    "age": 30,
-    "id_document_url": "https://docs.example.com/valid_id_alice.pdf"
-}
+
+# {
+#     "user_id": "user_001",
+#     "name": "Alice Johnson",
+#     "email": "alice@example.com",
+#     "country": "US",
+#     "age": 30,
+#     "id_document_url": "https://docs.example.com/valid_id_alice.pdf"
+# }
