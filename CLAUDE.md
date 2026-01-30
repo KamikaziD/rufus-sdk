@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Rufus is a Python-native, SDK-first workflow engine designed for orchestrating complex business processes and AI pipelines. It emphasizes a declarative, developer-friendly approach where workflows are defined in YAML and executed via an embedded SDK. The project consists of:
 
 1. **Core SDK** (`src/rufus/`) - The reusable workflow engine library
-2. **CLI Tool** (`src/rufus_cli/`) - Command-line interface for validation and local testing
+2. **CLI Tool** (`src/rufus_cli/`) - Comprehensive command-line interface with 21 commands for workflow management, database operations, and monitoring
 3. **Server** (`src/rufus_server/`) - Optional FastAPI wrapper for REST API access
 
 The architecture separates workflow definition (YAML) from implementation (Python functions) and decouples core engine logic from external dependencies through pluggable provider interfaces.
@@ -90,10 +90,85 @@ rufus zombie-daemon [--interval 60]           # Run scanner as daemon
 
 **Legacy Commands (Preserved):**
 ```bash
-# Validate a workflow YAML file
+# Configure persistence (interactive)
+rufus config set-persistence  # Choose SQLite for development
+
+# Initialize database
+rufus db init
+
+# List workflows
+rufus list
+
+# Start a workflow
+rufus start MyWorkflow --data '{"user_id": "123"}'
+
+# View workflow details
+rufus show <workflow-id>
+
+# View logs
+rufus logs <workflow-id>
+```
+
+#### Configuration Commands
+```bash
+rufus config show               # Show current configuration
+rufus config set-persistence    # Set database (SQLite/PostgreSQL)
+rufus config set-execution      # Set executor (sync/thread_pool)
+rufus config reset             # Reset to defaults
+```
+
+#### Workflow Management
+```bash
+# List and filter workflows
+rufus list --status ACTIVE --type OrderProcessing --limit 50
+
+# Start workflow
+rufus start OrderProcessing --data '{"customer_id": "123"}'
+
+# Show details
+rufus show <workflow-id> --state --logs --metrics
+
+# Resume paused workflow
+rufus resume <workflow-id> --input '{"approved": true}'
+
+# Retry failed workflow
+rufus retry <workflow-id> --from-step Process_Payment
+
+# View execution logs
+rufus logs <workflow-id> --step Payment --level ERROR --limit 100
+
+# View performance metrics
+rufus metrics --workflow-id <id> --summary
+
+# Cancel running workflow
+rufus cancel <workflow-id> --reason "Duplicate order"
+```
+
+#### Database Management
+```bash
+# Initialize database schema
+rufus db init
+
+# Apply migrations
+rufus db migrate --dry-run  # Preview first
+rufus db migrate            # Apply
+
+# Check migration status
+rufus db status
+
+# View database statistics
+rufus db stats
+
+# Validate schema
+rufus db validate
+```
+
+#### Legacy Commands (Preserved)
+```bash
+# Validate workflow YAML
 rufus validate config/my_workflow.yaml
 
-# Run a workflow locally (in-memory, synchronous)
+# Run workflow locally (in-memory, synchronous)
 rufus run config/my_workflow.yaml -d '{"field": "value"}'
 
 # Specify custom registry
