@@ -22,6 +22,174 @@ from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 app = typer.Typer(name="workflow", help="Manage workflows")
 
 
+async def _auto_execute_workflow(
+    workflow_id: str,
+    workflow_data: dict,
+    persistence,
+    execution,
+    observer,
+    formatter: Formatter,
+    input_data: dict = None
+):
+    """
+    Auto-execute remaining workflow steps.
+
+    This function reconstructs the workflow from its definition snapshot
+    and executes all remaining steps automatically until completion or
+    until it encounters a WAITING_HUMAN state.
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.console import Console
+    from rufus.workflow import Workflow
+    from rufus.builder import WorkflowBuilder
+
+    console = Console()
+
+    try:
+        # Get definition snapshot
+        definition = workflow_data.get('definition_snapshot')
+        if not definition:
+            formatter.print_error("No definition snapshot found. Cannot auto-execute.")
+            formatter.print_info("This workflow may have been created before versioning support.")
+            return
+
+        # Create a minimal WorkflowBuilder for workflow reconstruction
+        # We don't need a full config directory since we have the snapshot
+        builder = WorkflowBuilder(
+            config_dir=None,  # Not needed - we have snapshot
+            persistence_provider=persistence,
+            execution_provider=execution,
+            observer=observer
+        )
+
+        # Reconstruct workflow from persisted data
+        workflow = Workflow.from_dict(
+            data=workflow_data,
+            persistence_provider=persistence,
+            execution_provider=execution,
+            workflow_builder=builder,
+            expression_evaluator_cls=SimpleExpressionEvaluator,
+            template_engine_cls=Jinja2TemplateEngine,
+            workflow_observer=observer
+        )
+
+        # Get current step info
+        current_step_idx = workflow.current_step
+        total_steps = len(workflow.workflow_steps)
+
+        formatter.print_info(f"\n🚀 Auto-executing workflow steps...")
+        formatter.print(f"Starting from step {current_step_idx + 1} of {total_steps}")
+
+        # Progress tracking
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+
+            initial_steps_remaining = total_steps - current_step_idx
+            task = progress.add_task(
+                f"Executing workflow steps",
+                total=initial_steps_remaining
+            )
+
+            steps_executed = 0
+            max_iterations = total_steps * 2  # Safety limit to prevent infinite loops
+            iteration = 0
+
+            while iteration < max_iterations:
+                iteration += 1
+
+                # Check workflow status
+                if workflow.status == 'COMPLETED':
+                    progress.update(task, completed=initial_steps_remaining)
+                    formatter.print_success(f"\n✅ Workflow completed successfully!")
+                    formatter.print(f"Total steps executed: {steps_executed}")
+                    break
+
+                if workflow.status == 'FAILED':
+                    formatter.print_error(f"\n❌ Workflow failed during execution")
+                    formatter.print(f"Failed at step: {workflow.current_step_name}")
+                    break
+
+                if workflow.status == 'WAITING_HUMAN':
+                    progress.update(task, completed=steps_executed)
+                    formatter.print_warning(f"\n⏸  Workflow paused - waiting for human input")
+                    formatter.print(f"Paused at step: {workflow.current_step_name}")
+                    formatter.print_info(f"\nResume with:")
+                    formatter.print(f"  rufus resume {workflow_id} --input '{{\"your\": \"data\"}}' --auto")
+                    break
+
+                if workflow.status == 'CANCELLED':
+                    formatter.print_warning(f"\n🛑 Workflow was cancelled")
+                    break
+
+                if workflow.status not in ['ACTIVE', 'RUNNING']:
+                    formatter.print_warning(f"\nWorkflow entered unexpected state: {workflow.status}")
+                    break
+
+                # Check if we've reached the end
+                if workflow.current_step >= total_steps:
+                    formatter.print_info(f"\nReached end of workflow steps")
+                    break
+
+                # Get current step info
+                step_name = workflow.current_step_name or f"step_{workflow.current_step}"
+
+                # Update progress
+                progress.update(
+                    task,
+                    description=f"Executing: {step_name}",
+                    completed=steps_executed
+                )
+
+                try:
+                    # Execute next step
+                    result, error = await workflow.next_step(
+                        user_input=input_data or {}
+                    )
+
+                    steps_executed += 1
+
+                    if error:
+                        formatter.print_error(f"\nStep failed: {step_name}")
+                        formatter.print(f"Error: {error}")
+                        break
+
+                    # Brief pause between steps for visibility
+                    await asyncio.sleep(0.1)
+
+                except Exception as step_error:
+                    formatter.print_error(f"\nException during step execution: {step_name}")
+                    formatter.print(f"Error: {str(step_error)}")
+                    break
+
+            if iteration >= max_iterations:
+                formatter.print_error(f"\n⚠️  Safety limit reached ({max_iterations} iterations)")
+                formatter.print_info("Workflow may have entered an infinite loop")
+
+        # Show final state
+        formatter.print(f"\n" + "="*60)
+        formatter.print(f"Final Status: [bold]{workflow.status}[/bold]")
+        formatter.print(f"Steps Executed: {steps_executed}")
+        formatter.print(f"Current Step: {workflow.current_step}/{total_steps}")
+
+        if workflow.status == 'COMPLETED':
+            formatter.print_success("Workflow execution complete!")
+        elif workflow.status == 'WAITING_HUMAN':
+            formatter.print_info("Workflow paused for human input")
+        elif workflow.status == 'FAILED':
+            formatter.print_error("Workflow execution failed")
+
+    except Exception as e:
+        formatter.print_error(f"\nAuto-execution failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.command("list")
 def list_workflows(
     status: Optional[str] = typer.Option(None, "--status", help="Filter by status (ACTIVE, COMPLETED, FAILED, etc.)"),
@@ -262,14 +430,49 @@ def resume_workflow(
 
             formatter.print_info(f"⏯  Resuming workflow: {workflow_id}")
 
-            # For now, print message about resumption
-            # Full implementation would reconstruct workflow and call next_step
-            formatter.print_warning("Resume functionality requires full workflow reconstruction")
-            formatter.print_info("This feature will be fully implemented in the next iteration")
+            # Check workflow status
+            status = workflow_data.get('status')
+            if status not in ['WAITING_HUMAN', 'PAUSED', 'ACTIVE']:
+                formatter.print_warning(f"Workflow is in {status} state. Can only resume WAITING_HUMAN, PAUSED, or ACTIVE workflows.")
+                return
 
-            formatter.print(f"\nWorkflow: {workflow_data.get('id')}")
-            formatter.print(f"Status: {workflow_data.get('status')}")
-            formatter.print(f"Current Step: {workflow_data.get('current_step_name', 'N/A')}")
+            # Merge user input into workflow state
+            if input_data:
+                state = workflow_data.get('state', {})
+                state.update(input_data)
+                workflow_data['state'] = state
+
+            # Update status to ACTIVE if paused
+            if status in ['WAITING_HUMAN', 'PAUSED']:
+                workflow_data['status'] = 'ACTIVE'
+                await persistence.save_workflow(workflow_id, workflow_data)
+
+                formatter.print_success(f"Workflow resumed")
+                formatter.print(f"Status: [bold yellow]ACTIVE[/bold yellow]")
+
+                if input_data:
+                    formatter.print_info(f"User input merged into state:")
+                    formatter.print(json.dumps(input_data, indent=2))
+
+            # Auto-execute if requested
+            if auto_execute:
+                await _auto_execute_workflow(
+                    workflow_id=workflow_id,
+                    workflow_data=workflow_data,
+                    persistence=persistence,
+                    execution=execution,
+                    observer=observer,
+                    formatter=formatter,
+                    input_data=input_data
+                )
+            else:
+                formatter.print(f"\nWorkflow is now ready for execution")
+                formatter.print_info(f"Note: Full step execution requires workflow reconstruction from definition snapshot")
+                formatter.print_info(f"Use the SDK or server API for complete execution control")
+
+                formatter.print(f"\nWorkflow: {workflow_data.get('id')}")
+                formatter.print(f"Type: {workflow_data.get('workflow_type')}")
+                formatter.print(f"Current Step: {workflow_data.get('current_step')}")
 
         except Exception as e:
             formatter.print_error(f"Failed to resume workflow: {e}")
@@ -303,15 +506,73 @@ def retry_workflow(
 
             formatter.print_info(f"🔄 Retrying workflow: {workflow_id}")
 
-            # For now, print message about retry
-            # Full implementation would modify workflow state and resume
-            formatter.print_warning("Retry functionality requires workflow state modification")
-            formatter.print_info("This feature will be fully implemented in the next iteration")
+            # Check if workflow is in a failed state
+            status = workflow_data.get('status')
+            if status not in ['FAILED', 'FAILED_ROLLED_BACK']:
+                formatter.print_warning(f"Workflow is in {status} state. Retry is typically used for FAILED workflows.")
+                from rich.prompt import Confirm
+                confirm = Confirm.ask("Continue anyway?", default=False)
+                if not confirm:
+                    return
 
-            formatter.print(f"\nWorkflow: {workflow_data.get('id')}")
-            formatter.print(f"Previous Status: {workflow_data.get('status')}")
+            # Get steps from definition snapshot
+            definition = workflow_data.get('definition_snapshot')
+            steps_list = definition.get('steps', []) if definition else workflow_data.get('steps_config', [])
+
+            # Reset to retry
             if from_step:
-                formatter.print(f"Retry from step: {from_step}")
+                # Find step index by name
+                step_index = None
+                for idx, step in enumerate(steps_list):
+                    if step.get('name') == from_step:
+                        step_index = idx
+                        break
+
+                if step_index is None:
+                    formatter.print_error(f"Step not found: {from_step}")
+                    available_steps = [s.get('name', f'step_{i}') for i, s in enumerate(steps_list)]
+                    formatter.print_info(f"Available steps: {', '.join(available_steps)}")
+                    return
+
+                workflow_data['current_step'] = step_index
+                formatter.print_info(f"Reset to step: {from_step} (index {step_index})")
+            else:
+                # Keep current step for retry
+                current_step_idx = workflow_data.get('current_step', 0)
+                if current_step_idx < len(steps_list):
+                    current_step_name = steps_list[current_step_idx].get('name', f'step_{current_step_idx}')
+                    formatter.print_info(f"Retrying current step: {current_step_name} (index {current_step_idx})")
+                else:
+                    formatter.print_warning(f"Current step index {current_step_idx} is beyond workflow steps")
+
+            # Update status to ACTIVE
+            workflow_data['status'] = 'ACTIVE'
+
+            # Save workflow state
+            await persistence.save_workflow(workflow_id, workflow_data)
+
+            formatter.print_success(f"Workflow reset for retry")
+            formatter.print(f"Status: [bold yellow]ACTIVE[/bold yellow]")
+            current_step_idx = workflow_data.get('current_step', 0)
+            if current_step_idx < len(steps_list):
+                current_step_name = steps_list[current_step_idx].get('name', f'step_{current_step_idx}')
+                formatter.print(f"Current step: {current_step_name}")
+
+            # Auto-execute if requested
+            if auto_execute:
+                await _auto_execute_workflow(
+                    workflow_id=workflow_id,
+                    workflow_data=workflow_data,
+                    persistence=persistence,
+                    execution=execution,
+                    observer=observer,
+                    formatter=formatter,
+                    input_data={}
+                )
+            else:
+                formatter.print(f"\nWorkflow is now ready for retry")
+                formatter.print_info(f"Note: Full step execution requires workflow reconstruction from definition snapshot")
+                formatter.print_info(f"Use the SDK or server API for complete execution control")
 
         except Exception as e:
             formatter.print_error(f"Failed to retry workflow: {e}")
@@ -360,7 +621,10 @@ def view_logs(
             logs = await persistence.get_workflow_logs(**filters)
 
             if not logs:
-                formatter.print_info("No logs found for this workflow")
+                if json_output:
+                    print(json.dumps([], indent=2))  # Output empty JSON array
+                else:
+                    formatter.print_info("No logs found for this workflow")
                 return
 
             # Display logs
@@ -453,7 +717,10 @@ def view_metrics(
             metrics = await persistence.get_workflow_metrics(**filters)
 
             if not metrics:
-                formatter.print_info("No metrics found")
+                if json_output:
+                    print(json.dumps([], indent=2))  # Output empty JSON array
+                else:
+                    formatter.print_info("No metrics found")
                 return
 
             # Display metrics
@@ -586,12 +853,11 @@ def cancel_workflow(
             await persistence.save_workflow(workflow_id, workflow_data)
 
             # Log cancellation
-            await persistence.log_workflow_execution(
+            await persistence.log_execution(
                 workflow_id=workflow_id,
                 step_name=workflow_data.get("current_step_name"),
                 log_level="WARNING",
-                message=f"Workflow cancelled" + (f": {reason}" if reason else ""),
-                metadata={"force": force}
+                message=f"Workflow cancelled" + (f": {reason}" if reason else "")
             )
 
             formatter.print_success(f"Workflow cancelled successfully")
