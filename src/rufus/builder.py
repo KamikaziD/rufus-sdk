@@ -155,7 +155,7 @@ class WorkflowBuilder:
         from rufus.models import (
             WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
-            MergeStrategy, MergeConflictBehavior
+            MergeStrategy, MergeConflictBehavior, JavaScriptWorkflowStep, JavaScriptConfig
         )
 
         steps = []
@@ -242,6 +242,20 @@ class WorkflowBuilder:
                     merge_conflict_behavior=merge_conflict_behavior
                 )
 
+            elif step_type_str == "JAVASCRIPT":
+                # Get the JavaScript configuration dictionary from the step configuration
+                js_config_dict = config.get("js_config", {})
+                js_config = JavaScriptConfig(**js_config_dict)
+                step = JavaScriptWorkflowStep(
+                    name=config["name"],
+                    js_config=js_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior
+                )
+
             elif step_type_str == "FIRE_AND_FORGET":
                 step = FireAndForgetWorkflowStep(
                     name=config["name"],
@@ -286,7 +300,7 @@ class WorkflowBuilder:
 
                 # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
                 # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
-                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "JAVASCRIPT", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
                    "." not in step_type_str and step_type_str not in cls._marketplace_steps:
                     raise ValueError(f"Unknown step type: '{step_type_str}'")
 

@@ -866,6 +866,121 @@ HTTP steps support Jinja2 templating for dynamic content:
 
 ---
 
+##### JavaScriptWorkflowStep
+
+Step that executes JavaScript/TypeScript code in a sandboxed V8 environment.
+
+```python
+class JavaScriptWorkflowStep(WorkflowStep):
+    js_config: JavaScriptConfig  # JavaScript execution configuration
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+```
+
+**JavaScriptConfig Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `script_path` | `str` | One of script_path/code | Path to .js or .ts file |
+| `code` | `str` | One of script_path/code | Inline JavaScript code |
+| `timeout_ms` | `int` | No | Max execution time in ms (default: 5000, range: 100-300000) |
+| `memory_limit_mb` | `int` | No | Max V8 heap size in MB (default: 128, range: 16-1024) |
+| `typescript` | `bool` | No | Force TypeScript transpilation (auto-detected from .ts) |
+| `tsconfig_path` | `str` | No | Path to tsconfig.json |
+| `output_key` | `str` | No | Key to store result in state (default: merge at root) |
+| `strict_mode` | `bool` | No | Execute in strict mode (default: true) |
+
+**YAML Example - Inline Code:**
+
+```yaml
+- name: "Calculate_Total"
+  type: "JAVASCRIPT"
+  js_config:
+    code: |
+      const items = state.items;
+      const total = items.reduce((sum, item) => sum + item.price, 0);
+      return { total: rufus.round(total, 2) };
+    timeout_ms: 3000
+  automate_next: true
+```
+
+**YAML Example - File-Based:**
+
+```yaml
+- name: "Transform_Data"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/transform.js"
+    timeout_ms: 10000
+    memory_limit_mb: 256
+  output_key: "transformed_data"
+  automate_next: true
+```
+
+**YAML Example - TypeScript:**
+
+```yaml
+- name: "Process_Order"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/process-order.ts"
+    typescript: true
+    tsconfig_path: "./tsconfig.json"
+  automate_next: true
+```
+
+**Script Context:**
+
+JavaScript scripts have access to:
+
+```javascript
+// Workflow state (read-only, frozen)
+state.user_id
+state.items[0].price
+
+// Step context (read-only, frozen)
+context.workflow_id
+context.step_name
+context.workflow_type
+
+// Built-in utilities
+rufus.log("message");
+rufus.round(3.14, 2);
+rufus.uuid();
+// See USAGE_GUIDE.md for full rufus.* API
+```
+
+**Return Value:**
+
+Scripts must return a JSON-serializable value:
+
+```javascript
+// Return object (merged into state)
+return { result: calculated_value, status: "complete" };
+
+// Return primitive (wrapped as { result: value })
+return 42;
+
+// Return array (wrapped as { result: [...] })
+return [1, 2, 3];
+```
+
+**Security:**
+
+- Blocked: `eval`, `Function`, `setTimeout`, `require`, `process`, etc.
+- Frozen prototypes prevent prototype pollution
+- Resource limits enforced (timeout, memory)
+- No file system or network access
+
+**Dependencies:**
+
+```bash
+pip install py-mini-racer  # Required for V8 execution
+npm install -g esbuild     # Optional, for TypeScript support
+```
+
+---
+
 ### State Models
 
 User-defined Pydantic models representing workflow state.

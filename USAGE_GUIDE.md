@@ -800,6 +800,349 @@ steps:
 - Consider gRPC for performance-critical polyglot calls (planned feature)
 - Batch multiple operations where possible
 
+### 8.2 JavaScript Steps (Embedded V8)
+
+JavaScript steps provide **in-process polyglot execution** - data transformation and business logic written in JavaScript/TypeScript that runs directly within the workflow engine using an embedded V8 runtime (PyMiniRacer).
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│                                         │
+│  ┌─────────────────────────────────┐    │
+│  │   Embedded V8 Runtime (PyMiniRacer)  │
+│  │   ├─ JavaScript execution       │    │
+│  │   ├─ TypeScript transpilation   │    │
+│  │   └─ Sandboxed environment      │    │
+│  └─────────────────────────────────┘    │
+└─────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- Zero network latency (in-process execution)
+- Strong sandboxing (V8 isolates)
+- TypeScript support with esbuild transpilation
+- Access to workflow state and context
+- Built-in utility functions (rufus.*)
+
+#### Installation
+
+```bash
+# Install py-mini-racer for V8 JavaScript execution
+pip install py-mini-racer
+
+# Optional: Install esbuild for TypeScript support
+npm install -g esbuild
+# or
+pip install esbuild
+```
+
+#### Basic Usage - Inline Code
+
+```yaml
+steps:
+  - name: "Calculate_Discount"
+    type: "JAVASCRIPT"
+    js_config:
+      code: |
+        const items = state.items;
+        const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discount = subtotal > 100 ? 0.1 : 0;
+        const total = subtotal * (1 - discount);
+        return {
+          subtotal: rufus.round(subtotal, 2),
+          discount_percent: discount * 100,
+          total: rufus.round(total, 2)
+        };
+      timeout_ms: 5000
+    output_key: "pricing"
+    automate_next: true
+```
+
+#### File-Based Scripts (Recommended)
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Transform_Data"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/transform.js"
+      timeout_ms: 10000
+      memory_limit_mb: 128
+    automate_next: true
+```
+
+**scripts/transform.js:**
+```javascript
+// Workflow state is available as `state`
+// Step context is available as `context`
+
+const users = state.raw_users;
+
+// Transform user data
+const transformed = users.map(user => ({
+  id: user.id,
+  fullName: `${user.first_name} ${user.last_name}`.trim(),
+  email: user.email.toLowerCase(),
+  createdAt: rufus.formatDate(user.created_at, 'iso'),
+  isActive: user.status === 'active'
+}));
+
+// Group by active status
+const grouped = rufus.groupBy(transformed, 'isActive');
+
+// Log for debugging (captured in workflow logs)
+rufus.log(`Processed ${transformed.length} users`);
+
+return {
+  users: transformed,
+  active_count: grouped.true?.length || 0,
+  inactive_count: grouped.false?.length || 0
+};
+```
+
+#### TypeScript Support
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Process_Order"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/process-order.ts"
+      typescript: true  # Auto-detected from .ts extension
+      tsconfig_path: "./tsconfig.json"  # Optional
+    automate_next: true
+```
+
+**scripts/process-order.ts:**
+```typescript
+interface OrderItem {
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+interface OrderState {
+  items: OrderItem[];
+  customer_id: string;
+  discount_code?: string;
+}
+
+// Type-safe access to workflow state
+const order = state as unknown as OrderState;
+
+// Calculate totals with type safety
+const calculateTotal = (items: OrderItem[]): number => {
+  return items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+};
+
+const subtotal = calculateTotal(order.items);
+const discount = order.discount_code ? 0.1 : 0;
+const total = subtotal * (1 - discount);
+
+return {
+  subtotal,
+  discount,
+  total,
+  item_count: order.items.length
+};
+```
+
+#### Available Context
+
+JavaScript steps have access to:
+
+```javascript
+// Workflow state (read-only, frozen)
+state.user_id       // Access state fields
+state.items[0].price // Nested access
+
+// Step context (read-only, frozen)
+context.workflow_id    // Current workflow ID
+context.step_name      // Current step name
+context.workflow_type  // Workflow type
+```
+
+#### Built-in Utilities (rufus.*)
+
+The `rufus` object provides common utility functions:
+
+```javascript
+// Logging (captured for audit)
+rufus.log("Info message");
+rufus.warn("Warning message");
+rufus.error("Error message");
+
+// Date/Time
+rufus.now();          // ISO timestamp
+rufus.timestamp();    // Unix timestamp
+rufus.formatDate(date, 'iso|date|time');
+rufus.addDays(date, 5);
+rufus.diffDays(date1, date2);
+
+// Identifiers
+rufus.uuid();         // Generate UUID v4
+
+// Math
+rufus.round(3.14159, 2);   // 3.14
+rufus.clamp(15, 0, 10);    // 10
+rufus.sum([1, 2, 3]);      // 6
+rufus.avg([1, 2, 3]);      // 2
+rufus.min([1, 2, 3]);      // 1
+rufus.max([1, 2, 3]);      // 3
+
+// Strings
+rufus.slugify("Hello World");   // "hello-world"
+rufus.truncate("Long text", 5); // "Lo..."
+rufus.capitalize("hello");      // "Hello"
+rufus.camelCase("user_name");   // "userName"
+rufus.snakeCase("userName");    // "user_name"
+
+// Objects
+rufus.pick(obj, ['a', 'b']);    // Pick specific keys
+rufus.omit(obj, ['c']);         // Omit specific keys
+rufus.get(obj, 'a.b.c', default); // Deep get with default
+rufus.set(obj, 'a.b.c', value); // Deep set (returns new object)
+rufus.merge(obj1, obj2);        // Shallow merge
+
+// Arrays
+rufus.unique([1, 1, 2]);        // [1, 2]
+rufus.flatten([[1], [2]]);      // [1, 2]
+rufus.chunk([1, 2, 3, 4], 2);   // [[1, 2], [3, 4]]
+rufus.groupBy(arr, 'key');      // Group by key
+rufus.sortBy(arr, 'key');       // Sort by key
+rufus.first(arr, n);            // First n elements
+rufus.last(arr, n);             // Last n elements
+rufus.compact([0, 1, null, 2]); // [1, 2]
+
+// Validation
+rufus.isEmail("test@example.com");  // true
+rufus.isURL("https://...");         // true
+rufus.isUUID("...");                // true
+rufus.isEmpty(value);               // true/false
+rufus.isNumber(value);
+rufus.isString(value);
+rufus.isArray(value);
+rufus.isObject(value);
+
+// Type conversion
+rufus.toNumber("42", 0);       // 42
+rufus.toString(value);         // String
+rufus.toBoolean(value);        // Boolean
+rufus.toArray(value);          // Array
+
+// JSON
+rufus.parseJSON(str);          // Parse or null
+rufus.stringify(obj, pretty);  // JSON string
+```
+
+#### Configuration Options
+
+```yaml
+js_config:
+  # Script source (one required)
+  script_path: "scripts/process.js"  # Path to .js or .ts file
+  # OR
+  code: "return { value: state.x * 2 };"  # Inline code
+
+  # Execution limits
+  timeout_ms: 5000          # Max execution time (100-300000ms)
+  memory_limit_mb: 128      # Max V8 heap size (16-1024MB)
+
+  # TypeScript options
+  typescript: false         # Force TypeScript (auto-detected from .ts)
+  tsconfig_path: null       # Path to tsconfig.json
+
+  # Output
+  output_key: null          # Key to store result (default: merge at root)
+
+  # Advanced
+  strict_mode: true         # JavaScript strict mode
+```
+
+#### Security
+
+JavaScript steps run in a sandboxed V8 environment with:
+
+1. **Blocked Globals**: `eval`, `Function`, `setTimeout`, `require`, `process`, etc.
+2. **Frozen Prototypes**: Prevents prototype pollution attacks
+3. **Read-Only State**: Workflow state cannot be modified directly
+4. **Resource Limits**: Timeout and memory limits enforced
+5. **No I/O**: No file system, network, or process access
+
+#### Use Cases
+
+**1. Data Transformation:**
+```yaml
+- name: "Transform_API_Response"
+  type: "JAVASCRIPT"
+  js_config:
+    code: |
+      const response = state.api_response;
+      return {
+        users: response.data.users.map(u => ({
+          id: u.id,
+          name: u.full_name,
+          active: u.status === 'active'
+        })),
+        total: response.pagination.total_count
+      };
+```
+
+**2. Validation Logic:**
+```yaml
+- name: "Validate_Order"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/validate-order.js"
+  automate_next: true
+
+- name: "Handle_Validation"
+  type: "DECISION"
+  routes:
+    - condition: "state.validation.is_valid"
+      target: "Process_Order"
+    - default: "Reject_Order"
+```
+
+**3. Complex Calculations:**
+```yaml
+- name: "Calculate_Pricing"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/pricing-engine.ts"
+    typescript: true
+    timeout_ms: 10000
+```
+
+#### JavaScript vs HTTP Steps
+
+| Feature | JavaScript Steps | HTTP Steps |
+|---------|------------------|------------|
+| Latency | ~5-50ms (in-process) | 50-500ms+ (network) |
+| Language | JavaScript/TypeScript | Any HTTP service |
+| Use Case | Data transformation, business logic | External services, APIs |
+| Security | V8 sandbox | Network isolation |
+| Dependencies | py-mini-racer | None |
+
+**When to Use JavaScript Steps:**
+- Data transformation and mapping
+- Complex calculations
+- Validation logic
+- Business rules
+- JSON manipulation
+- When Python performance is sufficient but JS is preferred
+
+**When to Use HTTP Steps:**
+- External API calls
+- Services in other languages (Go, Rust, Java)
+- Third-party integrations (Stripe, Twilio)
+- Long-running operations
+- When you need language-specific libraries
+
 ## 9. Advanced Node Types (The "Gears")
 
 These nodes provide high-level control flow and orchestration capabilities.
