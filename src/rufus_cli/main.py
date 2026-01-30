@@ -168,7 +168,9 @@ async def get_configured_engine(
 def validate(
     workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file."),
     strict: bool = typer.Option(False, "--strict", help="Perform comprehensive validation including function imports"),
-    json_output: bool = typer.Option(False, "--json", help="Output results as JSON")
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
+    graph: bool = typer.Option(False, "--graph", help="Generate dependency graph visualization"),
+    graph_format: str = typer.Option("mermaid", "--graph-format", help="Graph format: mermaid, dot, or text")
 ):
     """
     Validates a Rufus workflow YAML file for syntax, structure, and correctness.
@@ -179,6 +181,7 @@ def validate(
     - Step structure
     - Dependency references
     - Route targets
+    - Circular dependency detection
 
     Strict validation (--strict) additionally checks:
     - Function paths can be imported
@@ -186,14 +189,37 @@ def validate(
     - Compensation functions exist
     - Parallel task functions exist
 
+    Dependency graph (--graph) generates visualization:
+    - Mermaid format (default): Markdown-compatible flowchart
+    - DOT format: Graphviz compatible
+    - Text format: Simple text representation
+
     Examples:
-        rufus validate workflow.yaml              # Basic validation
-        rufus validate workflow.yaml --strict     # Comprehensive validation
-        rufus validate workflow.yaml --json       # JSON output
+        rufus validate workflow.yaml                      # Basic validation
+        rufus validate workflow.yaml --strict             # Comprehensive validation
+        rufus validate workflow.yaml --graph              # Show dependency graph
+        rufus validate workflow.yaml --graph --graph-format dot  # DOT format graph
+        rufus validate workflow.yaml --json               # JSON output
     """
-    from rufus_cli.validation import validate_workflow_file
+    from rufus_cli.validation import validate_workflow_file, WorkflowValidator
 
     is_valid, errors, warnings = validate_workflow_file(workflow_file, strict=strict)
+
+    # Generate dependency graph if requested
+    graph_output = None
+    if graph and workflow_file.exists():
+        try:
+            with open(workflow_file, "r") as f:
+                config = yaml.safe_load(f)
+
+            if isinstance(config, dict) and "steps" in config:
+                validator = WorkflowValidator(strict=strict)
+                graph_output = validator.generate_dependency_graph(
+                    config["steps"],
+                    format=graph_format
+                )
+        except Exception as e:
+            warnings.append(f"Could not generate dependency graph: {e}")
 
     if json_output:
         result = {
@@ -202,6 +228,8 @@ def validate(
             "errors": errors,
             "warnings": warnings
         }
+        if graph_output:
+            result["dependency_graph"] = graph_output
         typer.echo(json.dumps(result, indent=2))
     else:
         # Pretty output
@@ -219,6 +247,10 @@ def validate(
             typer.secho(f"\n{len(warnings)} Warning(s):", fg=typer.colors.YELLOW, bold=True)
             for i, warning in enumerate(warnings, 1):
                 typer.secho(f"  {i}. {warning}", fg=typer.colors.YELLOW)
+
+        if graph_output:
+            typer.secho(f"\nDependency Graph ({graph_format}):", fg=typer.colors.CYAN, bold=True)
+            typer.echo(f"\n{graph_output}\n")
 
         if not is_valid:
             if not strict and not any("import" in e.lower() for e in errors):

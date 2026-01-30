@@ -6,7 +6,7 @@ Provides strict validation beyond basic YAML syntax checking.
 import importlib
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Set
 import yaml
 
 try:
@@ -70,6 +70,13 @@ class WorkflowValidator:
 
             for step in steps:
                 self._validate_step(step, step_names, workflow_config)
+
+            # Check for circular dependencies
+            circular_deps = self._check_circular_dependencies(steps)
+            if circular_deps:
+                self.errors.append(
+                    f"Circular dependency detected: {' -> '.join(circular_deps)}"
+                )
 
         # State model validation (strict mode only)
         if self.strict and "initial_state_model" in workflow_config:
@@ -300,6 +307,166 @@ class WorkflowValidator:
 
         except Exception as e:
             self.warnings.append(f"Could not validate state model '{state_model_path}': {e}")
+
+    def _check_circular_dependencies(self, steps: List[Dict[str, Any]]) -> List[str]:
+        """
+        Check for circular dependencies in workflow steps.
+
+        Returns:
+            List of step names in circular dependency path, or empty list if no cycles
+        """
+        # Build dependency graph
+        graph = {}
+        for step in steps:
+            step_name = step.get("name")
+            if step_name:
+                graph[step_name] = step.get("dependencies", [])
+
+        # DFS to detect cycles
+        visited = set()
+        rec_stack = set()
+        path = []
+
+        def has_cycle(node: str) -> bool:
+            visited.add(node)
+            rec_stack.add(node)
+            path.append(node)
+
+            # Visit all dependencies
+            for dep in graph.get(node, []):
+                if dep not in visited:
+                    if has_cycle(dep):
+                        return True
+                elif dep in rec_stack:
+                    # Found cycle - add the node that completes the cycle
+                    path.append(dep)
+                    return True
+
+            path.pop()
+            rec_stack.remove(node)
+            return False
+
+        # Check each node
+        for node in graph:
+            if node not in visited:
+                if has_cycle(node):
+                    # Extract just the cycle part from path
+                    cycle_start = path[-1]
+                    cycle_start_idx = path.index(cycle_start)
+                    return path[cycle_start_idx:]
+
+        return []
+
+    def generate_dependency_graph(self, steps: List[Dict[str, Any]], format: str = "mermaid") -> str:
+        """
+        Generate a dependency graph visualization.
+
+        Args:
+            steps: List of workflow steps
+            format: Output format ("mermaid", "dot", or "text")
+
+        Returns:
+            Graph representation as string
+        """
+        if format == "mermaid":
+            return self._generate_mermaid_graph(steps)
+        elif format == "dot":
+            return self._generate_dot_graph(steps)
+        else:  # text
+            return self._generate_text_graph(steps)
+
+    def _generate_mermaid_graph(self, steps: List[Dict[str, Any]]) -> str:
+        """Generate Mermaid flowchart."""
+        lines = ["```mermaid", "graph TD"]
+
+        for step in steps:
+            step_name = step.get("name", "unnamed")
+            step_type = step.get("type", "STANDARD")
+
+            # Node shape based on type
+            if step_type == "DECISION":
+                node = f'    {step_name}{{{{{step_name}}}}}'  # Diamond
+            elif step_type == "PARALLEL":
+                node = f'    {step_name}[/{step_name}/]'  # Parallelogram
+            else:
+                node = f'    {step_name}[{step_name}]'  # Rectangle
+
+            lines.append(node)
+
+            # Add dependencies as edges
+            for dep in step.get("dependencies", []):
+                lines.append(f'    {dep} --> {step_name}')
+
+            # Add routes
+            for route in step.get("routes", []):
+                target = route.get("target")
+                condition = route.get("condition", "")
+                if target:
+                    label = f'|{condition[:20]}|' if condition else ''
+                    lines.append(f'    {step_name} {label}--> {target}')
+
+        lines.append("```")
+        return "\n".join(lines)
+
+    def _generate_dot_graph(self, steps: List[Dict[str, Any]]) -> str:
+        """Generate Graphviz DOT format."""
+        lines = ["digraph workflow {", '    rankdir=TD;', '    node [shape=box];', '']
+
+        for step in steps:
+            step_name = step.get("name", "unnamed")
+            step_type = step.get("type", "STANDARD")
+
+            # Node shape based on type
+            if step_type == "DECISION":
+                shape = "diamond"
+            elif step_type == "PARALLEL":
+                shape = "parallelogram"
+            else:
+                shape = "box"
+
+            lines.append(f'    {step_name} [shape={shape}, label="{step_name}\\n({step_type})"];')
+
+        lines.append('')
+
+        # Add edges
+        for step in steps:
+            step_name = step.get("name", "unnamed")
+
+            for dep in step.get("dependencies", []):
+                lines.append(f'    {dep} -> {step_name};')
+
+            for route in step.get("routes", []):
+                target = route.get("target")
+                condition = route.get("condition", "")
+                if target:
+                    label = condition[:30] if condition else ''
+                    lines.append(f'    {step_name} -> {target} [label="{label}"];')
+
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _generate_text_graph(self, steps: List[Dict[str, Any]]) -> str:
+        """Generate simple text representation."""
+        lines = ["Workflow Dependency Graph", "="*50, ""]
+
+        for i, step in enumerate(steps, 1):
+            step_name = step.get("name", "unnamed")
+            step_type = step.get("type", "STANDARD")
+
+            lines.append(f"{i}. {step_name} ({step_type})")
+
+            deps = step.get("dependencies", [])
+            if deps:
+                lines.append(f"   Dependencies: {', '.join(deps)}")
+
+            routes = step.get("routes", [])
+            if routes:
+                route_targets = [r.get("target", "?") for r in routes]
+                lines.append(f"   Routes to: {', '.join(route_targets)}")
+
+            lines.append("")
+
+        return "\n".join(lines)
 
 
 def validate_workflow_file(workflow_file: Path, strict: bool = False) -> Tuple[bool, List[str], List[str]]:

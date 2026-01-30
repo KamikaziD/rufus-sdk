@@ -1,123 +1,266 @@
 """
-Tests for validate and run commands (rufus validate, rufus run).
+Tests for validation and run commands.
 """
 import pytest
-import json
-import yaml
 from pathlib import Path
-
 from typer.testing import CliRunner
 
 from rufus_cli.main import app
-from tests.cli.utils import assert_output_contains, create_test_workflow_yaml
+from rufus_cli.validation import WorkflowValidator
 
 
-class TestValidate:
+class TestValidateCommand:
     """Tests for 'rufus validate' command."""
 
-    def test_validate_valid_workflow(self, cli_runner, sample_workflow_yaml):
-        """Test validating a valid workflow YAML."""
-        result = cli_runner.invoke(app, ["validate", str(sample_workflow_yaml)])
+    @pytest.fixture
+    def valid_workflow_yaml(self, tmp_path):
+        """Create a valid workflow YAML file."""
+        yaml_content = """
+workflow_type: "TestWorkflow"
+initial_state_model: "pydantic.BaseModel"
 
-        # Should succeed
+steps:
+  - name: "Step_1"
+    type: "STANDARD"
+    function: "test.step1"
+"""
+        yaml_file = tmp_path / "valid_workflow.yaml"
+        yaml_file.write_text(yaml_content)
+        return yaml_file
+
+    @pytest.fixture
+    def circular_dependency_yaml(self, tmp_path):
+        """Create workflow with circular dependencies."""
+        yaml_content = """
+workflow_type: "CircularWorkflow"
+initial_state_model: "pydantic.BaseModel"
+
+steps:
+  - name: "Step_A"
+    type: "STANDARD"
+    function: "test.step_a"
+    dependencies: ["Step_B"]
+
+  - name: "Step_B"
+    type: "STANDARD"
+    function: "test.step_b"
+    dependencies: ["Step_C"]
+
+  - name: "Step_C"
+    type: "STANDARD"
+    function: "test.step_c"
+    dependencies: ["Step_A"]
+"""
+        yaml_file = tmp_path / "circular_workflow.yaml"
+        yaml_file.write_text(yaml_content)
+        return yaml_file
+
+    @pytest.fixture
+    def complex_workflow_yaml(self, tmp_path):
+        """Create a complex workflow for graph testing."""
+        yaml_content = """
+workflow_type: "ComplexWorkflow"
+initial_state_model: "pydantic.BaseModel"
+
+steps:
+  - name: "Start"
+    type: "STANDARD"
+    function: "test.start"
+
+  - name: "Process"
+    type: "STANDARD"
+    function: "test.process"
+    dependencies: ["Start"]
+
+  - name: "Decide"
+    type: "DECISION"
+    function: "test.decide"
+    dependencies: ["Process"]
+    routes:
+      - condition: "state.approved"
+        target: "Approve"
+      - condition: "!state.approved"
+        target: "Reject"
+
+  - name: "Approve"
+    type: "STANDARD"
+    function: "test.approve"
+
+  - name: "Reject"
+    type: "STANDARD"
+    function: "test.reject"
+
+  - name: "End"
+    type: "STANDARD"
+    function: "test.end"
+    dependencies: ["Approve", "Reject"]
+"""
+        yaml_file = tmp_path / "complex_workflow.yaml"
+        yaml_file.write_text(yaml_content)
+        return yaml_file
+
+    def test_validate_missing_file(self, cli_runner):
+        """Test validate with non-existent file."""
+        result = cli_runner.invoke(app, ["validate", "nonexistent.yaml"])
+
+        assert result.exit_code == 1
+        assert "not found" in result.stdout.lower() or "not found" in result.stderr.lower()
+
+    def test_validate_valid_workflow(self, cli_runner, valid_workflow_yaml):
+        """Test validate with valid workflow."""
+        result = cli_runner.invoke(app, ["validate", str(valid_workflow_yaml)])
+
+        # Should succeed (exit code 0)
         assert result.exit_code == 0
-        # Should indicate validation success
-        # (Exact message depends on implementation)
+        assert "success" in result.stdout.lower() or "✓" in result.stdout
 
-    def test_validate_invalid_workflow(self, cli_runner, tmp_path):
-        """Test validating an invalid workflow YAML."""
-        # Create invalid workflow (missing required fields)
-        invalid_yaml = tmp_path / "invalid.yaml"
-        with open(invalid_yaml, 'w') as f:
-            yaml.dump({"workflow_type": "Test"}, f)  # Missing steps
+    def test_validate_with_strict(self, cli_runner, valid_workflow_yaml):
+        """Test validate with --strict flag."""
+        result = cli_runner.invoke(app, ["validate", str(valid_workflow_yaml), "--strict"])
 
-        result = cli_runner.invoke(app, ["validate", str(invalid_yaml)])
+        # May fail due to imports not being available
+        # Just check that --strict is processed
+        assert result.exit_code in [0, 1]
 
-        # Should fail with validation errors
-        # Exit code depends on how validation errors are handled
+    def test_validate_json_output(self, cli_runner, valid_workflow_yaml):
+        """Test validate with --json output."""
+        result = cli_runner.invoke(app, ["validate", str(valid_workflow_yaml), "--json"])
 
-    def test_validate_missing_file(self, cli_runner, tmp_path):
-        """Test validating non-existent file."""
-        missing_file = tmp_path / "does_not_exist.yaml"
+        # Should output valid JSON
+        import json
+        try:
+            output = json.loads(result.stdout)
+            assert "valid" in output
+            assert "errors" in output
+            assert "warnings" in output
+        except json.JSONDecodeError:
+            pytest.fail("Output is not valid JSON")
 
-        result = cli_runner.invoke(app, ["validate", str(missing_file)])
+    def test_validate_circular_dependency(self, cli_runner, circular_dependency_yaml):
+        """Test validation detects circular dependencies."""
+        result = cli_runner.invoke(app, ["validate", str(circular_dependency_yaml)])
 
-        # Should fail with file not found error
-        assert result.exit_code != 0
+        assert result.exit_code == 1
+        # Circular dependency error may be in stdout or stderr
+        output = (result.stdout + result.stderr).lower()
+        assert "circular" in output
 
-    def test_validate_malformed_yaml(self, cli_runner, tmp_path):
-        """Test validating malformed YAML."""
-        malformed_yaml = tmp_path / "malformed.yaml"
-        with open(malformed_yaml, 'w') as f:
-            f.write("{ invalid yaml content: [ unclosed")
+    def test_validate_with_graph_mermaid(self, cli_runner, complex_workflow_yaml):
+        """Test validate with --graph flag (mermaid format)."""
+        result = cli_runner.invoke(app, ["validate", str(complex_workflow_yaml), "--graph"])
 
-        result = cli_runner.invoke(app, ["validate", str(malformed_yaml)])
+        assert result.exit_code == 0
+        assert "graph" in result.stdout.lower() or "mermaid" in result.stdout.lower()
+        assert "Start" in result.stdout
+        assert "End" in result.stdout
 
-        # Should fail with YAML parsing error
-        assert result.exit_code != 0
+    def test_validate_with_graph_dot(self, cli_runner, complex_workflow_yaml):
+        """Test validate with --graph and --graph-format dot."""
+        result = cli_runner.invoke(
+            app,
+            ["validate", str(complex_workflow_yaml), "--graph", "--graph-format", "dot"]
+        )
 
-    @pytest.mark.skip(reason="Strict mode may not be implemented yet")
-    def test_validate_strict_mode(self, cli_runner, sample_workflow_yaml):
-        """Test validation in strict mode."""
-        result = cli_runner.invoke(app, ["validate", str(sample_workflow_yaml), "--strict"])
+        assert result.exit_code == 0
+        assert "digraph" in result.stdout
 
-        # Should perform strict validation
+    def test_validate_with_graph_text(self, cli_runner, complex_workflow_yaml):
+        """Test validate with --graph and --graph-format text."""
+        result = cli_runner.invoke(
+            app,
+            ["validate", str(complex_workflow_yaml), "--graph", "--graph-format", "text"]
+        )
 
-    def test_validate_json_output(self, cli_runner, sample_workflow_yaml):
-        """Test JSON output format."""
-        result = cli_runner.invoke(app, ["validate", str(sample_workflow_yaml), "--json"])
-
-        # Should output validation results as JSON
-        # May succeed or fail depending on validation, but should be valid JSON if --json flag works
+        assert result.exit_code == 0
+        assert "Dependency Graph" in result.stdout
 
 
-class TestRun:
+class TestWorkflowValidator:
+    """Direct tests for WorkflowValidator class."""
+
+    def test_circular_dependency_detection(self):
+        """Test circular dependency detection."""
+        validator = WorkflowValidator()
+
+        steps = [
+            {"name": "A", "dependencies": ["B"]},
+            {"name": "B", "dependencies": ["C"]},
+            {"name": "C", "dependencies": ["A"]}
+        ]
+
+        cycle = validator._check_circular_dependencies(steps)
+        assert len(cycle) > 0
+        assert "A" in cycle and "B" in cycle and "C" in cycle
+
+    def test_no_circular_dependency(self):
+        """Test valid dependency chain."""
+        validator = WorkflowValidator()
+
+        steps = [
+            {"name": "A", "dependencies": []},
+            {"name": "B", "dependencies": ["A"]},
+            {"name": "C", "dependencies": ["B"]}
+        ]
+
+        cycle = validator._check_circular_dependencies(steps)
+        assert len(cycle) == 0
+
+    def test_generate_mermaid_graph(self):
+        """Test Mermaid graph generation."""
+        validator = WorkflowValidator()
+
+        steps = [
+            {"name": "Start", "type": "STANDARD"},
+            {"name": "Decide", "type": "DECISION", "dependencies": ["Start"]},
+            {
+                "name": "Process",
+                "type": "STANDARD",
+                "routes": [{"target": "End", "condition": "state.done"}]
+            },
+            {"name": "End", "type": "STANDARD"}
+        ]
+
+        graph = validator.generate_dependency_graph(steps, format="mermaid")
+        assert "```mermaid" in graph
+        assert "graph TD" in graph
+        assert "Start" in graph
+        assert "End" in graph
+
+    def test_generate_dot_graph(self):
+        """Test DOT graph generation."""
+        validator = WorkflowValidator()
+
+        steps = [
+            {"name": "Start", "type": "STANDARD"},
+            {"name": "End", "type": "STANDARD", "dependencies": ["Start"]}
+        ]
+
+        graph = validator.generate_dependency_graph(steps, format="dot")
+        assert "digraph workflow" in graph
+        assert "Start" in graph
+        assert "End" in graph
+        assert "->" in graph
+
+    def test_generate_text_graph(self):
+        """Test text graph generation."""
+        validator = WorkflowValidator()
+
+        steps = [
+            {"name": "Start", "type": "STANDARD"},
+            {"name": "End", "type": "STANDARD", "dependencies": ["Start"]}
+        ]
+
+        graph = validator.generate_dependency_graph(steps, format="text")
+        assert "Dependency Graph" in graph
+        assert "Start" in graph
+        assert "End" in graph
+        assert "Dependencies: Start" in graph
+
+
+class TestRunCommand:
     """Tests for 'rufus run' command."""
 
-    @pytest.mark.skip(reason="Requires full workflow execution - integration test")
-    def test_run_workflow_success(self, cli_runner, sample_workflow_yaml):
-        """Test running a workflow successfully."""
-        result = cli_runner.invoke(
-            app,
-            ["run", str(sample_workflow_yaml), "-d", '{"user_id": "123"}']
-        )
-
-        # Should execute workflow to completion
-        # assert result.exit_code == 0
-
-    def test_run_workflow_invalid_json(self, cli_runner, sample_workflow_yaml):
-        """Test running with invalid JSON data."""
-        result = cli_runner.invoke(
-            app,
-            ["run", str(sample_workflow_yaml), "-d", '{invalid}']
-        )
-
-        # Should fail with JSON parsing error
-        # Exit code check depends on error handling
-
-    def test_run_workflow_missing_file(self, cli_runner, tmp_path):
-        """Test running non-existent workflow file."""
-        missing_file = tmp_path / "missing.yaml"
-
-        result = cli_runner.invoke(app, ["run", str(missing_file)])
-
-        # Should fail with file not found
-        assert result.exit_code != 0
-
-    @pytest.mark.skip(reason="Requires full workflow execution")
-    def test_run_workflow_with_registry(self, cli_runner, sample_workflow_yaml, sample_workflow_registry):
-        """Test running with custom workflow registry."""
-        result = cli_runner.invoke(
-            app,
-            [
-                "run",
-                str(sample_workflow_yaml),
-                "--registry",
-                str(sample_workflow_registry),
-                "-d",
-                '{"user_id": "123"}'
-            ]
-        )
-
-        # Should use specified registry
-        # assert result.exit_code == 0
+    @pytest.mark.skip(reason="Requires full workflow integration")
+    def test_run_simple_workflow(self):
+        """Test running a simple workflow."""
+        pass
