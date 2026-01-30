@@ -46,9 +46,49 @@ pytest tests/sdk/test_workflow.py::test_workflow_initialization
 
 ### Running the CLI
 
-The Rufus CLI provides comprehensive workflow management with 21 commands across 4 categories. See [docs/CLI_USAGE_GUIDE.md](docs/CLI_USAGE_GUIDE.md) for complete documentation.
+**Configuration Management:**
+```bash
+rufus config show               # Show current configuration
+rufus config set-persistence    # Set persistence provider (interactive)
+rufus config set-execution      # Set execution provider (interactive)
+rufus config set-default        # Set default behaviors (interactive)
+rufus config reset              # Reset to defaults
+rufus config path               # Show config file location
+```
 
-#### Quick Start
+**Workflow Management:**
+```bash
+# List and inspect workflows
+rufus list [--status ACTIVE] [--type OrderProcessing] [--limit 10]
+rufus show <workflow-id> [--state] [--logs]
+
+# Start and control workflows
+rufus start <workflow-type> [--data '{"field": "value"}']
+rufus resume <workflow-id> [--input '{"approval": true}']
+rufus retry <workflow-id> [--from-step StepName]
+rufus cancel <workflow-id> [--force] [--reason "User cancelled"]
+
+# Monitoring and debugging
+rufus logs <workflow-id> [--step StepName] [--level ERROR] [--limit 100]
+rufus metrics [--workflow-id <id>] [--type execution_time]
+```
+
+**Database Management:**
+```bash
+rufus db init [--db-url postgresql://...]  # Initialize database schema
+rufus db migrate [--dry-run]               # Apply pending migrations
+rufus db status                            # Show migration status
+rufus db stats                             # Show database statistics
+rufus db validate                          # Validate schema definition
+```
+
+**Zombie Workflow Recovery:**
+```bash
+rufus scan-zombies [--fix] [--threshold 120]  # Scan for zombie workflows
+rufus zombie-daemon [--interval 60]           # Run scanner as daemon
+```
+
+**Legacy Commands (Preserved):**
 ```bash
 # Configure persistence (interactive)
 rufus config set-persistence  # Choose SQLite for development
@@ -130,22 +170,19 @@ rufus validate config/my_workflow.yaml
 
 # Run workflow locally (in-memory, synchronous)
 rufus run config/my_workflow.yaml -d '{"field": "value"}'
+
+# Specify custom registry
+rufus run config/my_workflow.yaml --registry config/workflow_registry.yaml
 ```
 
-#### Command Structure
-- **Grouped commands:** `rufus workflow list`, `rufus config show`, `rufus db init`
-- **Top-level aliases:** `rufus list` (= `rufus workflow list`)
-- **JSON output:** Add `--json` to any command
-- **Help:** Add `--help` to any command
-
-**Configuration File:** `~/.rufus/config.yaml` (auto-created on first use)
-
-**Features:**
-- Beautiful terminal output with color-coded tables (Rich library)
-- Interactive configuration wizards
-- Multi-database support (SQLite, PostgreSQL)
-- Comprehensive filtering and search
-- Performance metrics and logging
+**Alternative Subcommand Syntax:**
+```bash
+# All workflow commands also available via subcommands
+rufus workflow list              # Same as: rufus list
+rufus workflow start <type>      # Same as: rufus start <type>
+rufus workflow show <id>         # Same as: rufus show <id>
+# ... etc for all workflow commands
+```
 
 ### Running the Server (Optional)
 ```bash
