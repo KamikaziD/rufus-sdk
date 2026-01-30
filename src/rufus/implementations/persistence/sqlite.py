@@ -165,6 +165,8 @@ class SQLitePersistenceProvider(PersistenceProvider):
         """
         # Extract fields from workflow_dict
         workflow_type = workflow_dict.get('workflow_type')
+        workflow_version = workflow_dict.get('workflow_version')
+        definition_snapshot = self._serialize_json(workflow_dict.get('definition_snapshot')) if workflow_dict.get('definition_snapshot') else None
         current_step = workflow_dict.get('current_step', 0)
         status = workflow_dict.get('status')
         state = self._serialize_json(workflow_dict.get('state', {}))
@@ -183,13 +185,13 @@ class SQLitePersistenceProvider(PersistenceProvider):
         # Insert or replace workflow execution
         await self.conn.execute("""
             INSERT OR REPLACE INTO workflow_executions (
-                id, workflow_type, current_step, status, state, steps_config,
+                id, workflow_type, workflow_version, definition_snapshot, current_step, status, state, steps_config,
                 state_model_path, saga_mode, completed_steps_stack,
                 parent_execution_id, blocked_on_child_id, data_region, priority,
                 idempotency_key, metadata, completed_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """, (
-            workflow_id, workflow_type, current_step, status, state, steps_config,
+            workflow_id, workflow_type, workflow_version, definition_snapshot, current_step, status, state, steps_config,
             state_model_path, saga_mode, completed_steps_stack,
             parent_execution_id, blocked_on_child_id, data_region, priority,
             idempotency_key, metadata, completed_at
@@ -208,7 +210,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         """
         async with self.conn.execute("""
             SELECT
-                id, workflow_type, current_step, status, state, steps_config,
+                id, workflow_type, workflow_version, definition_snapshot, current_step, status, state, steps_config,
                 state_model_path, saga_mode, completed_steps_stack,
                 parent_execution_id, blocked_on_child_id, data_region, priority,
                 created_at, updated_at, completed_at, idempotency_key, metadata
@@ -223,22 +225,24 @@ class SQLitePersistenceProvider(PersistenceProvider):
         return {
             'id': row[0],
             'workflow_type': row[1],
-            'current_step': row[2],
-            'status': row[3],
-            'state': self._deserialize_json(row[4]),
-            'steps_config': self._deserialize_json(row[5]),
-            'state_model_path': row[6],
-            'saga_mode': self._int_to_bool(row[7]),
-            'completed_steps_stack': self._deserialize_json(row[8]),
-            'parent_execution_id': row[9],
-            'blocked_on_child_id': row[10],
-            'data_region': row[11],
-            'priority': row[12],
-            'created_at': self._from_iso8601(row[13]),
-            'updated_at': self._from_iso8601(row[14]),
-            'completed_at': self._from_iso8601(row[15]),
-            'idempotency_key': row[16],
-            'metadata': self._deserialize_json(row[17]),
+            'workflow_version': row[2],
+            'definition_snapshot': self._deserialize_json(row[3]) if row[3] else None,
+            'current_step': row[4],
+            'status': row[5],
+            'state': self._deserialize_json(row[6]),
+            'steps_config': self._deserialize_json(row[7]),
+            'state_model_path': row[8],
+            'saga_mode': self._int_to_bool(row[9]),
+            'completed_steps_stack': self._deserialize_json(row[10]),
+            'parent_execution_id': row[11],
+            'blocked_on_child_id': row[12],
+            'data_region': row[13],
+            'priority': row[14],
+            'created_at': self._from_iso8601(row[15]),
+            'updated_at': self._from_iso8601(row[16]),
+            'completed_at': self._from_iso8601(row[17]),
+            'idempotency_key': row[18],
+            'metadata': self._deserialize_json(row[19]),
         }
 
     async def list_workflows(self, **filters) -> List[Dict[str, Any]]:
@@ -737,6 +741,168 @@ class SQLitePersistenceProvider(PersistenceProvider):
             f"Scheduled workflows not yet implemented in SQLite provider. "
             f"Schedule '{schedule_name}' for '{workflow_type}' not registered."
         )
+
+    # ============================================================================
+    # HEARTBEAT OPERATIONS (Zombie Detection & Recovery)
+    # ============================================================================
+
+    async def upsert_heartbeat(
+        self,
+        workflow_id: uuid.UUID,
+        worker_id: str,
+        current_step: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Upsert heartbeat record for a workflow.
+
+        This is used by HeartbeatManager to track worker health. If a worker
+        crashes, the heartbeat becomes stale and can be detected by ZombieScanner.
+
+        Args:
+            workflow_id: ID of the workflow being processed
+            worker_id: Identifier of the worker
+            current_step: Name of the current step (optional)
+            metadata: Additional context (PID, hostname, etc.)
+        """
+        async with self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workflow_heartbeats (
+                workflow_id, worker_id, last_heartbeat, current_step,
+                step_started_at, metadata
+            )
+            VALUES (?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)
+            """,
+            (
+                str(workflow_id),
+                worker_id,
+                current_step,
+                serialize(metadata or {})
+            )
+        ):
+            await self.conn.commit()
+
+    async def delete_heartbeat(self, workflow_id: uuid.UUID) -> None:
+        """
+        Delete heartbeat record when workflow completes or step finishes.
+
+        Args:
+            workflow_id: ID of the workflow
+        """
+        async with self.conn.execute(
+            "DELETE FROM workflow_heartbeats WHERE workflow_id = ?",
+            (str(workflow_id),)
+        ):
+            await self.conn.commit()
+
+    async def get_stale_heartbeats(
+        self,
+        stale_threshold_seconds: int = 120
+    ) -> List[Dict[str, Any]]:
+        """
+        Find workflows with stale heartbeats (potential zombies).
+
+        A stale heartbeat indicates a worker may have crashed while processing
+        a workflow step.
+
+        Args:
+            stale_threshold_seconds: Consider heartbeats older than this as stale
+
+        Returns:
+            List of stale heartbeat records with workflow details
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT
+                h.workflow_id,
+                h.worker_id,
+                h.last_heartbeat,
+                h.current_step,
+                h.step_started_at,
+                h.metadata,
+                w.workflow_type,
+                w.status,
+                w.current_step as workflow_current_step
+            FROM workflow_heartbeats h
+            JOIN workflow_executions w ON h.workflow_id = w.id
+            WHERE datetime(h.last_heartbeat) < datetime('now', '-' || ? || ' seconds')
+            AND w.status IN ('RUNNING', 'WAITING_EXTERNAL_INPUT', 'WAITING_CHILD_HUMAN_INPUT')
+            ORDER BY h.last_heartbeat ASC
+            """,
+            (stale_threshold_seconds,)
+        )
+
+        rows = await cursor.fetchall()
+        return [
+            {
+                'workflow_id': row[0],
+                'worker_id': row[1],
+                'last_heartbeat': row[2],
+                'current_step': row[3],
+                'step_started_at': row[4],
+                'metadata': deserialize(row[5]) if row[5] else {},
+                'workflow_type': row[6],
+                'status': row[7],
+                'workflow_current_step': row[8]
+            }
+            for row in rows
+        ]
+
+    async def mark_workflow_as_crashed(
+        self,
+        workflow_id: uuid.UUID,
+        reason: str
+    ) -> None:
+        """
+        Mark a workflow as failed due to worker crash.
+
+        Updates the workflow status to FAILED_WORKER_CRASH and logs the reason.
+
+        Args:
+            workflow_id: ID of the workflow
+            reason: Description of why the workflow was marked as crashed
+        """
+        # Update workflow status
+        await self.conn.execute(
+            """
+            UPDATE workflow_executions
+            SET status = 'FAILED_WORKER_CRASH',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (str(workflow_id),)
+        )
+
+        # Log audit event
+        await self.conn.execute(
+            """
+            INSERT INTO workflow_audit_log (
+                workflow_id, event_type, step_name, recorded_at, metadata
+            )
+            VALUES (?, 'WORKER_CRASH_DETECTED', NULL, CURRENT_TIMESTAMP, ?)
+            """,
+            (
+                str(workflow_id),
+                serialize({'reason': reason, 'recovery_action': 'marked_as_failed'})
+            )
+        )
+
+        # Log execution event
+        await self.conn.execute(
+            """
+            INSERT INTO workflow_execution_logs (
+                workflow_id, log_level, message, logged_at, metadata
+            )
+            VALUES (?, 'ERROR', ?, CURRENT_TIMESTAMP, ?)
+            """,
+            (
+                str(workflow_id),
+                f"Workflow marked as FAILED_WORKER_CRASH: {reason}",
+                serialize({'recovery_action': 'zombie_scanner', 'automated': True})
+            )
+        )
+
+        await self.conn.commit()
 
     # ============================================================================
     # SYNCHRONOUS WRAPPER METHODS

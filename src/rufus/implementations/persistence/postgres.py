@@ -132,12 +132,12 @@ class PostgresPersistenceProvider(PersistenceProvider):
             # Upsert workflow execution
             await conn.execute("""
                 INSERT INTO workflow_executions
-                    (id, workflow_type, current_step, status, state,
+                    (id, workflow_type, workflow_version, definition_snapshot, current_step, status, state,
                      steps_config, state_model_path, updated_at, saga_mode,
                      completed_steps_stack, parent_execution_id, blocked_on_child_id,
                      data_region, priority, idempotency_key, metadata,
                      owner_id, org_id, encrypted_state, encryption_key_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
                 ON CONFLICT (id) DO UPDATE SET
                     current_step = EXCLUDED.current_step,
                     status = EXCLUDED.status,
@@ -155,6 +155,8 @@ class PostgresPersistenceProvider(PersistenceProvider):
             """,
                 workflow_dict['id'],
                 workflow_dict['workflow_type'],
+                workflow_dict.get('workflow_version'),
+                serialize(workflow_dict.get('definition_snapshot')) if workflow_dict.get('definition_snapshot') else None,
                 workflow_dict['current_step'],
                 workflow_dict['status'],
                 state_to_store,
@@ -188,7 +190,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                SELECT id, workflow_type, current_step, status,
+                SELECT id, workflow_type, workflow_version, definition_snapshot, current_step, status,
                        state, steps_config, state_model_path, saga_mode,
                        completed_steps_stack, parent_execution_id,
                        blocked_on_child_id, data_region, priority,
@@ -215,6 +217,8 @@ class PostgresPersistenceProvider(PersistenceProvider):
             workflow_dict = {
                 'id': str(row['id']),
                 'workflow_type': row['workflow_type'],
+                'workflow_version': row['workflow_version'],
+                'definition_snapshot': deserialize(row['definition_snapshot']) if row['definition_snapshot'] else None,
                 'current_step': row['current_step'],
                 'status': row['status'],
                 # Ensure state is a dict if it was a JSON string
@@ -604,6 +608,165 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     'max_retries': row['max_retries']
                 }
             return None
+
+    # --- Heartbeat Operations (Zombie Detection & Recovery) ---
+
+    async def upsert_heartbeat(
+        self,
+        workflow_id: uuid.UUID,
+        worker_id: str,
+        current_step: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Upsert heartbeat record for a workflow.
+
+        This is used by HeartbeatManager to track worker health. If a worker
+        crashes, the heartbeat becomes stale and can be detected by ZombieScanner.
+
+        Args:
+            workflow_id: ID of the workflow being processed
+            worker_id: Identifier of the worker
+            current_step: Name of the current step (optional)
+            metadata: Additional context (PID, hostname, etc.)
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO workflow_heartbeats (
+                    workflow_id, worker_id, last_heartbeat, current_step,
+                    step_started_at, metadata
+                )
+                VALUES ($1, $2, NOW(), $3, NOW(), $4)
+                ON CONFLICT (workflow_id)
+                DO UPDATE SET
+                    worker_id = EXCLUDED.worker_id,
+                    last_heartbeat = NOW(),
+                    current_step = EXCLUDED.current_step,
+                    metadata = EXCLUDED.metadata
+                """,
+                str(workflow_id),
+                worker_id,
+                current_step,
+                serialize(metadata or {})
+            )
+
+    async def delete_heartbeat(self, workflow_id: uuid.UUID) -> None:
+        """
+        Delete heartbeat record when workflow completes or step finishes.
+
+        Args:
+            workflow_id: ID of the workflow
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM workflow_heartbeats WHERE workflow_id = $1",
+                str(workflow_id)
+            )
+
+    async def get_stale_heartbeats(
+        self,
+        stale_threshold_seconds: int = 120
+    ) -> List[Dict[str, Any]]:
+        """
+        Find workflows with stale heartbeats (potential zombies).
+
+        A stale heartbeat indicates a worker may have crashed while processing
+        a workflow step.
+
+        Args:
+            stale_threshold_seconds: Consider heartbeats older than this as stale
+
+        Returns:
+            List of stale heartbeat records with workflow details
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    h.workflow_id,
+                    h.worker_id,
+                    h.last_heartbeat,
+                    h.current_step,
+                    h.step_started_at,
+                    h.metadata,
+                    w.workflow_type,
+                    w.status,
+                    w.current_step as workflow_current_step
+                FROM workflow_heartbeats h
+                JOIN workflow_executions w ON h.workflow_id = w.id::text
+                WHERE h.last_heartbeat < NOW() - INTERVAL '%s seconds'
+                AND w.status IN ('RUNNING', 'WAITING_EXTERNAL_INPUT', 'WAITING_CHILD_HUMAN_INPUT')
+                ORDER BY h.last_heartbeat ASC
+                """,
+                stale_threshold_seconds
+            )
+
+            return [
+                {
+                    'workflow_id': row['workflow_id'],
+                    'worker_id': row['worker_id'],
+                    'last_heartbeat': row['last_heartbeat'],
+                    'current_step': row['current_step'],
+                    'step_started_at': row['step_started_at'],
+                    'metadata': deserialize(row['metadata']) if row['metadata'] else {},
+                    'workflow_type': row['workflow_type'],
+                    'status': row['status'],
+                    'workflow_current_step': row['workflow_current_step']
+                }
+                for row in rows
+            ]
+
+    async def mark_workflow_as_crashed(
+        self,
+        workflow_id: uuid.UUID,
+        reason: str
+    ) -> None:
+        """
+        Mark a workflow as failed due to worker crash.
+
+        Updates the workflow status to FAILED_WORKER_CRASH and logs the reason.
+
+        Args:
+            workflow_id: ID of the workflow
+            reason: Description of why the workflow was marked as crashed
+        """
+        async with self.pool.acquire() as conn:
+            # Update workflow status
+            await conn.execute(
+                """
+                UPDATE workflow_executions
+                SET status = 'FAILED_WORKER_CRASH',
+                    updated_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                str(workflow_id)
+            )
+
+            # Log audit event
+            await conn.execute(
+                """
+                INSERT INTO workflow_audit_log (
+                    workflow_id, event_type, step_name, recorded_at, metadata
+                )
+                VALUES ($1::uuid, 'WORKER_CRASH_DETECTED', NULL, NOW(), $2)
+                """,
+                str(workflow_id),
+                serialize({'reason': reason, 'recovery_action': 'marked_as_failed'})
+            )
+
+            # Log execution event
+            await conn.execute(
+                """
+                INSERT INTO workflow_execution_logs (
+                    workflow_id, log_level, message, logged_at, metadata
+                )
+                VALUES ($1::uuid, 'ERROR', $2, NOW(), $3)
+                """,
+                str(workflow_id),
+                f"Workflow marked as FAILED_WORKER_CRASH: {reason}",
+                serialize({'recovery_action': 'zombie_scanner', 'automated': True})
+            )
 
     # --- Synchronous Bridge Methods (for Celery tasks) ---
 

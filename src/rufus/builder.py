@@ -155,7 +155,7 @@ class WorkflowBuilder:
         from rufus.models import (
             WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
-            MergeStrategy, MergeConflictBehavior
+            MergeStrategy, MergeConflictBehavior, JavaScriptWorkflowStep, JavaScriptConfig
         )
 
         steps = []
@@ -242,6 +242,20 @@ class WorkflowBuilder:
                     merge_conflict_behavior=merge_conflict_behavior
                 )
 
+            elif step_type_str == "JAVASCRIPT":
+                # Get the JavaScript configuration dictionary from the step configuration
+                js_config_dict = config.get("js_config", {})
+                js_config = JavaScriptConfig(**js_config_dict)
+                step = JavaScriptWorkflowStep(
+                    name=config["name"],
+                    js_config=js_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior
+                )
+
             elif step_type_str == "FIRE_AND_FORGET":
                 step = FireAndForgetWorkflowStep(
                     name=config["name"],
@@ -286,7 +300,7 @@ class WorkflowBuilder:
 
                 # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
                 # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
-                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "JAVASCRIPT", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
                    "." not in step_type_str and step_type_str not in cls._marketplace_steps:
                     raise ValueError(f"Unknown step type: '{step_type_str}'")
 
@@ -420,7 +434,7 @@ class WorkflowBuilder:
 
         # Use get_workflow_config to ensure env vars and parameters are processed
         workflow_config = self.get_workflow_config(workflow_type)
-        
+
         state_model_class = self._import_from_string(
             workflow_config["initial_state_model_path"])
 
@@ -430,11 +444,20 @@ class WorkflowBuilder:
         steps_config = workflow_config.get("steps", [])
         workflow_steps = self._build_steps_from_config(steps_config)
 
+        # Extract workflow version (if present in YAML)
+        workflow_version = workflow_config.get("workflow_version")
+
+        # Create definition snapshot to protect running workflows from YAML changes
+        # This is part of the Tier 2 workflow versioning enhancement
+        definition_snapshot = copy.deepcopy(workflow_config)
+
         # Import Workflow locally to avoid circular import at the top level
         from rufus.workflow import Workflow
 
         return Workflow(
             workflow_type=workflow_type,
+            workflow_version=workflow_version,
+            definition_snapshot=definition_snapshot,
             workflow_steps=workflow_steps,
             initial_state_model=initial_state,
             steps_config=steps_config,

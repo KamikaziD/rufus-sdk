@@ -164,69 +164,68 @@ async def get_configured_engine(
 
 
 @app.command()
-def validate(workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file.")):
+def validate(
+    workflow_file: Path = typer.Argument(..., help="Path to the workflow YAML file."),
+    strict: bool = typer.Option(False, "--strict", help="Perform comprehensive validation including function imports"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON")
+):
     """
-    Validates a Rufus workflow YAML file for syntax and basic structure.
+    Validates a Rufus workflow YAML file for syntax, structure, and correctness.
+
+    Basic validation checks:
+    - YAML syntax
+    - Required fields (workflow_type, steps, initial_state_model)
+    - Step structure
+    - Dependency references
+    - Route targets
+
+    Strict validation (--strict) additionally checks:
+    - Function paths can be imported
+    - State model is a valid Pydantic class
+    - Compensation functions exist
+    - Parallel task functions exist
+
+    Examples:
+        rufus validate workflow.yaml              # Basic validation
+        rufus validate workflow.yaml --strict     # Comprehensive validation
+        rufus validate workflow.yaml --json       # JSON output
     """
-    if not workflow_file.is_file():
-        typer.echo(f"Error: Workflow file not found at {workflow_file}", err=True)
-        raise typer.Exit(code=1)
+    from rufus_cli.validation import validate_workflow_file
 
-    try:
-        with open(workflow_file, "r") as f:
-            workflow_config = yaml.safe_load(f)
-        
-        if not isinstance(workflow_config, dict):
-            typer.echo(f"Error: Invalid YAML format in {workflow_file}. Expected a dictionary.", err=True)
-            raise typer.Exit(code=1)
+    is_valid, errors, warnings = validate_workflow_file(workflow_file, strict=strict)
 
-        if "workflow_type" not in workflow_config:
-            typer.echo(f"Error: 'workflow_type' missing in {workflow_file}", err=True)
-            raise typer.Exit(code=1)
-        if "steps" not in workflow_config or not isinstance(workflow_config["steps"], list):
-            typer.echo(f"Error: 'steps' section missing or not a list in {workflow_file}", err=True)
-            raise typer.Exit(code=1)
-        
-        # Minimal registry for validation
-        temp_registry_entry = {
-            workflow_config["workflow_type"]:
-                {
-                    "initial_state_model_path": "pydantic.BaseModel", # Generic model for validation
-                    "steps": workflow_config.get("steps", []),
-                    "parameters": workflow_config.get("parameters", {}),
-                    "env": workflow_config.get("env", {})
-                }
+    if json_output:
+        result = {
+            "valid": is_valid,
+            "file": str(workflow_file),
+            "errors": errors,
+            "warnings": warnings
         }
-        # A dummy WorkflowEngine to get a builder for validation
-        # No need to await initialize as it's a dummy run
-        persistence = InMemoryPersistence()
-        executor = SyncExecutor()
-        observer = LoggingObserver()
-        expression_evaluator_cls = SimpleExpressionEvaluator
-        template_engine_cls = Jinja2TemplateEngine
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        # Pretty output
+        if is_valid:
+            typer.secho(f"✓ Successfully validated {workflow_file}", fg=typer.colors.GREEN, bold=True)
+        else:
+            typer.secho(f"✗ Validation failed for {workflow_file}", fg=typer.colors.RED, bold=True, err=True)
 
-        engine = WorkflowEngine(
-            persistence=persistence,
-            executor=executor,
-            observer=observer,
-            workflow_registry=temp_registry_entry,
-            expression_evaluator_cls=expression_evaluator_cls,
-            template_engine_cls=template_engine_cls
-        )
+        if errors:
+            typer.secho(f"\n{len(errors)} Error(s):", fg=typer.colors.RED, bold=True, err=True)
+            for i, error in enumerate(errors, 1):
+                typer.secho(f"  {i}. {error}", fg=typer.colors.RED, err=True)
 
-        # Attempt to build steps to catch more errors
-        # Note: This will not fully validate func_paths unless they are importable
-        engine.workflow_builder._build_steps_from_config(workflow_config["steps"])
+        if warnings:
+            typer.secho(f"\n{len(warnings)} Warning(s):", fg=typer.colors.YELLOW, bold=True)
+            for i, warning in enumerate(warnings, 1):
+                typer.secho(f"  {i}. {warning}", fg=typer.colors.YELLOW)
 
+        if not is_valid:
+            if not strict and not any("import" in e.lower() for e in errors):
+                typer.secho(f"\nTip: Use --strict to check function imports and state models", fg=typer.colors.CYAN)
+        elif not warnings:
+            typer.secho(f"\nNo issues found!", fg=typer.colors.GREEN)
 
-        typer.echo(f"Successfully validated {workflow_file} (syntax and basic structure passed).")
-    except yaml.YAMLError as e:
-        typer.echo(f"Error: Invalid YAML syntax in {workflow_file}: {e}", err=True)
-        raise typer.Exit(code=1)
-    except Exception as e:
-        typer.echo(f"An unexpected error occurred during validation: {e}", err=True)
-        import traceback
-        traceback.print_exc()
+    if not is_valid:
         raise typer.Exit(code=1)
 
 
@@ -322,6 +321,161 @@ def run(
 
 
     asyncio.run(_run_workflow())
+
+
+@app.command(name="scan-zombies")
+def scan_zombies(
+    database_url: str = typer.Option(..., "--db", help="Database connection URL (postgresql:// or sqlite://)"),
+    fix: bool = typer.Option(False, "--fix", help="Automatically mark zombie workflows as FAILED_WORKER_CRASH"),
+    stale_threshold: int = typer.Option(120, "--threshold", help="Heartbeat stale threshold in seconds (default: 120)"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON")
+):
+    """
+    Scan for zombie workflows with stale heartbeats.
+
+    A zombie workflow is one where the worker crashed while processing a step,
+    leaving the workflow in RUNNING state with a stale heartbeat.
+
+    Example:
+        rufus scan-zombies --db postgresql://localhost/rufus --fix
+        rufus scan-zombies --db sqlite:///workflows.db --threshold 180 --json
+    """
+    async def _scan():
+        # Import persistence provider based on database URL
+        if database_url.startswith("postgresql://"):
+            from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+            persistence = PostgresPersistenceProvider(database_url)
+        elif database_url.startswith("sqlite://"):
+            from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+            db_path = database_url.replace("sqlite:///", "")
+            persistence = SQLitePersistenceProvider(db_path)
+        else:
+            typer.echo(f"Unsupported database URL: {database_url}", err=True)
+            raise typer.Exit(code=1)
+
+        try:
+            await persistence.initialize()
+
+            # Import and create zombie scanner
+            from rufus.zombie_scanner import ZombieScanner
+            scanner = ZombieScanner(persistence, stale_threshold_seconds=stale_threshold)
+
+            # Scan and optionally recover
+            summary = await scanner.scan_and_recover(
+                stale_threshold_seconds=stale_threshold,
+                dry_run=not fix
+            )
+
+            if json_output:
+                import json
+                typer.echo(json.dumps(summary, indent=2))
+            else:
+                typer.echo(f"\n{'='*60}")
+                typer.echo(f"Zombie Workflow Scan Results")
+                typer.echo(f"{'='*60}")
+                typer.echo(f"Scan time:          {summary['scan_time']}")
+                typer.echo(f"Duration:           {summary['duration_seconds']:.2f}s")
+                typer.echo(f"Stale threshold:    {summary['stale_threshold_seconds']}s")
+                typer.echo(f"Zombies found:      {summary['zombies_found']}")
+                typer.echo(f"Zombies recovered:  {summary['zombies_recovered']}")
+                typer.echo(f"Dry run:            {summary['dry_run']}")
+                typer.echo(f"{'='*60}\n")
+
+                if summary['zombies_found'] > 0:
+                    if fix:
+                        typer.echo(
+                            f"✓ Marked {summary['zombies_recovered']} zombie workflows as FAILED_WORKER_CRASH",
+                            fg=typer.colors.GREEN,
+                            bold=True
+                        )
+                    else:
+                        typer.echo(
+                            f"⚠ Found {summary['zombies_found']} zombie workflows. Run with --fix to recover them.",
+                            fg=typer.colors.YELLOW,
+                            bold=True
+                        )
+                else:
+                    typer.echo(
+                        "✓ No zombie workflows found",
+                        fg=typer.colors.GREEN,
+                        bold=True
+                    )
+
+        except Exception as e:
+            typer.echo(f"Error scanning for zombies: {e}", err=True)
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            if hasattr(persistence, 'close'):
+                await persistence.close()
+
+    asyncio.run(_scan())
+
+
+@app.command(name="zombie-daemon")
+def zombie_daemon(
+    database_url: str = typer.Option(..., "--db", help="Database connection URL"),
+    scan_interval: int = typer.Option(60, "--interval", help="Scan interval in seconds (default: 60)"),
+    stale_threshold: int = typer.Option(120, "--threshold", help="Heartbeat stale threshold in seconds (default: 120)")
+):
+    """
+    Run zombie scanner as a continuous background daemon.
+
+    The daemon will periodically scan for zombie workflows and automatically
+    mark them as FAILED_WORKER_CRASH.
+
+    Example:
+        rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+    """
+    async def _run_daemon():
+        # Import persistence provider based on database URL
+        if database_url.startswith("postgresql://"):
+            from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+            persistence = PostgresPersistenceProvider(database_url)
+        elif database_url.startswith("sqlite://"):
+            from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+            db_path = database_url.replace("sqlite:///", "")
+            persistence = SQLitePersistenceProvider(db_path)
+        else:
+            typer.echo(f"Unsupported database URL: {database_url}", err=True)
+            raise typer.Exit(code=1)
+
+        try:
+            await persistence.initialize()
+
+            # Import and create zombie scanner
+            from rufus.zombie_scanner import ZombieScanner
+            scanner = ZombieScanner(persistence, stale_threshold_seconds=stale_threshold)
+
+            typer.echo(f"\n{'='*60}")
+            typer.echo(f"Starting Zombie Scanner Daemon")
+            typer.echo(f"{'='*60}")
+            typer.echo(f"Database:          {database_url}")
+            typer.echo(f"Scan interval:     {scan_interval}s")
+            typer.echo(f"Stale threshold:   {stale_threshold}s")
+            typer.echo(f"{'='*60}\n")
+            typer.echo("Press Ctrl+C to stop\n")
+
+            # Run daemon
+            await scanner.run_daemon(
+                scan_interval_seconds=scan_interval,
+                stale_threshold_seconds=stale_threshold
+            )
+
+        except KeyboardInterrupt:
+            typer.echo("\n\nStopping zombie scanner daemon...", fg=typer.colors.YELLOW)
+            scanner.stop_daemon()
+        except Exception as e:
+            typer.echo(f"Error in zombie daemon: {e}", err=True)
+            import traceback
+            traceback.print_exc()
+            raise typer.Exit(code=1)
+        finally:
+            if hasattr(persistence, 'close'):
+                await persistence.close()
+
+    asyncio.run(_run_daemon())
 
 
 if __name__ == "__main__":

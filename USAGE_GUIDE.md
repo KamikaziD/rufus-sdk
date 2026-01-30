@@ -531,6 +531,618 @@ steps:
 *   Uses Jinja2-like syntax (`{{variable}}`) for dynamic values in `url`, `headers`, `body`, and `query_params`.
 *   Context for templating is the entire workflow state and available secrets.
 
+### 8.1 Polyglot Workflows (HTTP Steps)
+
+HTTP steps enable **polyglot workflows** - Python-orchestrated workflows that integrate with services written in any programming language. This is the primary mechanism for multi-language support in Rufus.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│         Orchestration Layer             │
+└───────────┬─────────────────────────────┘
+            │ HTTP/REST
+            ▼
+┌─────────────────────────────────────────┐
+│     External Services (Any Language)    │
+│  ├─ Go microservices                    │
+│  ├─ Rust ML inference                   │
+│  ├─ Node.js notification services       │
+│  ├─ Java enterprise APIs                │
+│  └─ Any HTTP-speaking service           │
+└─────────────────────────────────────────┘
+```
+
+#### Multi-Language Pipeline Example
+
+```yaml
+workflow_type: "PolyglotDataPipeline"
+description: "Process data using services in multiple languages"
+initial_state_model: "my_app.models.PipelineState"
+
+steps:
+  # Python: Data validation and business logic
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "my_app.steps.validate_input"
+    automate_next: true
+
+  # Go Service: High-performance concurrent processing
+  - name: "Process_Data_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/api/process"
+      headers:
+        Content-Type: "application/json"
+        X-Request-ID: "{{state.request_id}}"
+      body:
+        data: "{{state.validated_data}}"
+        options:
+          concurrency: 100
+          batch_size: 1000
+      timeout: 60
+    output_key: "go_processing_result"
+    automate_next: true
+
+  # Rust Service: Machine learning inference
+  - name: "ML_Inference_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml-service:8080/predict"
+      headers:
+        Content-Type: "application/json"
+      body:
+        features: "{{state.go_processing_result.features}}"
+        model_version: "v2.1"
+      timeout: 30
+    output_key: "ml_prediction"
+    automate_next: true
+
+  # Node.js: Send real-time notifications
+  - name: "Notify_User_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification-service:3000/api/notify"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{secrets.NOTIFICATION_API_KEY}}"
+      body:
+        user_id: "{{state.user_id}}"
+        channel: "email"
+        template: "processing_complete"
+        data:
+          result: "{{state.ml_prediction.result}}"
+          confidence: "{{state.ml_prediction.confidence}}"
+    automate_next: true
+
+  # Python: Final business logic and state update
+  - name: "Finalize_Processing"
+    type: "STANDARD"
+    function: "my_app.steps.finalize_processing"
+```
+
+#### Third-Party API Integration
+
+```yaml
+steps:
+  # Stripe: Payment processing
+  - name: "Create_Payment_Intent"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.stripe.com/v1/payment_intents"
+      headers:
+        Authorization: "Bearer {{secrets.STRIPE_SECRET_KEY}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        amount: "{{state.amount_cents}}"
+        currency: "usd"
+        customer: "{{state.stripe_customer_id}}"
+    output_key: "stripe_payment"
+    automate_next: true
+
+  # Twilio: SMS notification
+  - name: "Send_SMS"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{secrets.TWILIO_SID}}/Messages.json"
+      headers:
+        Authorization: "Basic {{secrets.TWILIO_AUTH_BASE64}}"
+        Content-Type: "application/x-www-form-urlencoded"
+      body:
+        To: "{{state.customer_phone}}"
+        From: "{{secrets.TWILIO_PHONE}}"
+        Body: "Payment of ${{state.amount}} received. Thank you!"
+    automate_next: true
+
+  # SendGrid: Email notification
+  - name: "Send_Email"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.sendgrid.com/v3/mail/send"
+      headers:
+        Authorization: "Bearer {{secrets.SENDGRID_API_KEY}}"
+        Content-Type: "application/json"
+      body:
+        personalizations:
+          - to:
+              - email: "{{state.customer_email}}"
+        from:
+          email: "noreply@example.com"
+        subject: "Payment Confirmation"
+        content:
+          - type: "text/plain"
+            value: "Your payment of ${{state.amount}} has been processed."
+```
+
+#### Microservices Orchestration Pattern
+
+```yaml
+workflow_type: "OrderFulfillment"
+steps:
+  # Inventory Service (Go)
+  - name: "Reserve_Inventory"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://inventory-service:8080/api/reserve"
+      body:
+        items: "{{state.order_items}}"
+        reservation_id: "{{state.order_id}}"
+      timeout: 10
+    output_key: "inventory_reservation"
+    automate_next: true
+
+  # Pricing Service (Rust)
+  - name: "Calculate_Final_Price"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://pricing-service:8080/api/calculate"
+      body:
+        items: "{{state.order_items}}"
+        customer_id: "{{state.customer_id}}"
+        promotions: "{{state.applied_promotions}}"
+      timeout: 5
+    output_key: "pricing_result"
+    automate_next: true
+
+  # Payment Service (Java)
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://payment-service:8080/api/charge"
+      body:
+        customer_id: "{{state.customer_id}}"
+        amount: "{{state.pricing_result.total}}"
+        payment_method: "{{state.payment_method_id}}"
+        idempotency_key: "{{state.order_id}}"
+      timeout: 30
+    output_key: "payment_result"
+    automate_next: true
+
+  # Shipping Service (Node.js)
+  - name: "Create_Shipment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://shipping-service:3000/api/shipments"
+      body:
+        order_id: "{{state.order_id}}"
+        items: "{{state.order_items}}"
+        address: "{{state.shipping_address}}"
+        carrier_preference: "{{state.carrier_preference}}"
+    output_key: "shipment"
+```
+
+#### Error Handling in Polyglot Workflows
+
+```yaml
+steps:
+  - name: "Call_External_Service"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://external-service/api/process"
+      body: "{{state.data}}"
+      timeout: 30
+      retry_policy:
+        max_attempts: 3
+        delay_seconds: 2
+        backoff_multiplier: 2
+    output_key: "service_response"
+    automate_next: true
+
+  - name: "Check_Response"
+    type: "DECISION"
+    function: "steps.check_service_response"
+    routes:
+      - condition: "state.service_response.status_code >= 400"
+        target: "Handle_Error"
+      - condition: "state.service_response.body.status == 'failed'"
+        target: "Handle_Error"
+      - default: "Continue_Processing"
+
+  - name: "Handle_Error"
+    type: "STANDARD"
+    function: "steps.handle_service_error"
+    automate_next: false  # Manual intervention may be needed
+```
+
+#### When to Use Polyglot Workflows
+
+**Ideal Use Cases:**
+- Integrating existing microservices in different languages
+- Leveraging language-specific strengths (Go for concurrency, Rust for ML)
+- Third-party API integrations (Stripe, Twilio, SendGrid, etc.)
+- Legacy system integration via REST APIs
+- Multi-team architectures with different tech stacks
+
+**Best Practices:**
+1. **Keep orchestration in Python** - Business logic and control flow in the workflow engine
+2. **Use HTTP steps for external calls** - Any language that speaks HTTP can be integrated
+3. **Implement idempotency** - External services should handle duplicate requests gracefully
+4. **Use service discovery** - Don't hardcode URLs in production
+5. **Configure appropriate timeouts** - Different services have different latency profiles
+6. **Handle errors gracefully** - Check response status codes and body for errors
+7. **Use retry policies** - Transient failures are common in distributed systems
+
+**Performance Considerations:**
+- HTTP steps add network latency compared to Python steps
+- Use connection pooling in high-throughput scenarios
+- Consider gRPC for performance-critical polyglot calls (planned feature)
+- Batch multiple operations where possible
+
+### 8.2 JavaScript Steps (Embedded V8)
+
+JavaScript steps provide **in-process polyglot execution** - data transformation and business logic written in JavaScript/TypeScript that runs directly within the workflow engine using an embedded V8 runtime (PyMiniRacer).
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│     Rufus Workflow Engine (Python)      │
+│                                         │
+│  ┌─────────────────────────────────┐    │
+│  │   Embedded V8 Runtime (PyMiniRacer)  │
+│  │   ├─ JavaScript execution       │    │
+│  │   ├─ TypeScript transpilation   │    │
+│  │   └─ Sandboxed environment      │    │
+│  └─────────────────────────────────┘    │
+└─────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- Zero network latency (in-process execution)
+- Strong sandboxing (V8 isolates)
+- TypeScript support with esbuild transpilation
+- Access to workflow state and context
+- Built-in utility functions (rufus.*)
+
+#### Installation
+
+```bash
+# Install py-mini-racer for V8 JavaScript execution
+pip install py-mini-racer
+
+# Optional: Install esbuild for TypeScript support
+npm install -g esbuild
+# or
+pip install esbuild
+```
+
+#### Basic Usage - Inline Code
+
+```yaml
+steps:
+  - name: "Calculate_Discount"
+    type: "JAVASCRIPT"
+    js_config:
+      code: |
+        const items = state.items;
+        const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discount = subtotal > 100 ? 0.1 : 0;
+        const total = subtotal * (1 - discount);
+        return {
+          subtotal: rufus.round(subtotal, 2),
+          discount_percent: discount * 100,
+          total: rufus.round(total, 2)
+        };
+      timeout_ms: 5000
+    output_key: "pricing"
+    automate_next: true
+```
+
+#### File-Based Scripts (Recommended)
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Transform_Data"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/transform.js"
+      timeout_ms: 10000
+      memory_limit_mb: 128
+    automate_next: true
+```
+
+**scripts/transform.js:**
+```javascript
+// Workflow state is available as `state`
+// Step context is available as `context`
+
+const users = state.raw_users;
+
+// Transform user data
+const transformed = users.map(user => ({
+  id: user.id,
+  fullName: `${user.first_name} ${user.last_name}`.trim(),
+  email: user.email.toLowerCase(),
+  createdAt: rufus.formatDate(user.created_at, 'iso'),
+  isActive: user.status === 'active'
+}));
+
+// Group by active status
+const grouped = rufus.groupBy(transformed, 'isActive');
+
+// Log for debugging (captured in workflow logs)
+rufus.log(`Processed ${transformed.length} users`);
+
+return {
+  users: transformed,
+  active_count: grouped.true?.length || 0,
+  inactive_count: grouped.false?.length || 0
+};
+```
+
+#### TypeScript Support
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Process_Order"
+    type: "JAVASCRIPT"
+    js_config:
+      script_path: "scripts/process-order.ts"
+      typescript: true  # Auto-detected from .ts extension
+      tsconfig_path: "./tsconfig.json"  # Optional
+    automate_next: true
+```
+
+**scripts/process-order.ts:**
+```typescript
+interface OrderItem {
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+interface OrderState {
+  items: OrderItem[];
+  customer_id: string;
+  discount_code?: string;
+}
+
+// Type-safe access to workflow state
+const order = state as unknown as OrderState;
+
+// Calculate totals with type safety
+const calculateTotal = (items: OrderItem[]): number => {
+  return items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+};
+
+const subtotal = calculateTotal(order.items);
+const discount = order.discount_code ? 0.1 : 0;
+const total = subtotal * (1 - discount);
+
+return {
+  subtotal,
+  discount,
+  total,
+  item_count: order.items.length
+};
+```
+
+#### Available Context
+
+JavaScript steps have access to:
+
+```javascript
+// Workflow state (read-only, frozen)
+state.user_id       // Access state fields
+state.items[0].price // Nested access
+
+// Step context (read-only, frozen)
+context.workflow_id    // Current workflow ID
+context.step_name      // Current step name
+context.workflow_type  // Workflow type
+```
+
+#### Built-in Utilities (rufus.*)
+
+The `rufus` object provides common utility functions:
+
+```javascript
+// Logging (captured for audit)
+rufus.log("Info message");
+rufus.warn("Warning message");
+rufus.error("Error message");
+
+// Date/Time
+rufus.now();          // ISO timestamp
+rufus.timestamp();    // Unix timestamp
+rufus.formatDate(date, 'iso|date|time');
+rufus.addDays(date, 5);
+rufus.diffDays(date1, date2);
+
+// Identifiers
+rufus.uuid();         // Generate UUID v4
+
+// Math
+rufus.round(3.14159, 2);   // 3.14
+rufus.clamp(15, 0, 10);    // 10
+rufus.sum([1, 2, 3]);      // 6
+rufus.avg([1, 2, 3]);      // 2
+rufus.min([1, 2, 3]);      // 1
+rufus.max([1, 2, 3]);      // 3
+
+// Strings
+rufus.slugify("Hello World");   // "hello-world"
+rufus.truncate("Long text", 5); // "Lo..."
+rufus.capitalize("hello");      // "Hello"
+rufus.camelCase("user_name");   // "userName"
+rufus.snakeCase("userName");    // "user_name"
+
+// Objects
+rufus.pick(obj, ['a', 'b']);    // Pick specific keys
+rufus.omit(obj, ['c']);         // Omit specific keys
+rufus.get(obj, 'a.b.c', default); // Deep get with default
+rufus.set(obj, 'a.b.c', value); // Deep set (returns new object)
+rufus.merge(obj1, obj2);        // Shallow merge
+
+// Arrays
+rufus.unique([1, 1, 2]);        // [1, 2]
+rufus.flatten([[1], [2]]);      // [1, 2]
+rufus.chunk([1, 2, 3, 4], 2);   // [[1, 2], [3, 4]]
+rufus.groupBy(arr, 'key');      // Group by key
+rufus.sortBy(arr, 'key');       // Sort by key
+rufus.first(arr, n);            // First n elements
+rufus.last(arr, n);             // Last n elements
+rufus.compact([0, 1, null, 2]); // [1, 2]
+
+// Validation
+rufus.isEmail("test@example.com");  // true
+rufus.isURL("https://...");         // true
+rufus.isUUID("...");                // true
+rufus.isEmpty(value);               // true/false
+rufus.isNumber(value);
+rufus.isString(value);
+rufus.isArray(value);
+rufus.isObject(value);
+
+// Type conversion
+rufus.toNumber("42", 0);       // 42
+rufus.toString(value);         // String
+rufus.toBoolean(value);        // Boolean
+rufus.toArray(value);          // Array
+
+// JSON
+rufus.parseJSON(str);          // Parse or null
+rufus.stringify(obj, pretty);  // JSON string
+```
+
+#### Configuration Options
+
+```yaml
+js_config:
+  # Script source (one required)
+  script_path: "scripts/process.js"  # Path to .js or .ts file
+  # OR
+  code: "return { value: state.x * 2 };"  # Inline code
+
+  # Execution limits
+  timeout_ms: 5000          # Max execution time (100-300000ms)
+  memory_limit_mb: 128      # Max V8 heap size (16-1024MB)
+
+  # TypeScript options
+  typescript: false         # Force TypeScript (auto-detected from .ts)
+  tsconfig_path: null       # Path to tsconfig.json
+
+  # Output
+  output_key: null          # Key to store result (default: merge at root)
+
+  # Advanced
+  strict_mode: true         # JavaScript strict mode
+```
+
+#### Security
+
+JavaScript steps run in a sandboxed V8 environment with:
+
+1. **Blocked Globals**: `eval`, `Function`, `setTimeout`, `require`, `process`, etc.
+2. **Frozen Prototypes**: Prevents prototype pollution attacks
+3. **Read-Only State**: Workflow state cannot be modified directly
+4. **Resource Limits**: Timeout and memory limits enforced
+5. **No I/O**: No file system, network, or process access
+
+#### Use Cases
+
+**1. Data Transformation:**
+```yaml
+- name: "Transform_API_Response"
+  type: "JAVASCRIPT"
+  js_config:
+    code: |
+      const response = state.api_response;
+      return {
+        users: response.data.users.map(u => ({
+          id: u.id,
+          name: u.full_name,
+          active: u.status === 'active'
+        })),
+        total: response.pagination.total_count
+      };
+```
+
+**2. Validation Logic:**
+```yaml
+- name: "Validate_Order"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/validate-order.js"
+  automate_next: true
+
+- name: "Handle_Validation"
+  type: "DECISION"
+  routes:
+    - condition: "state.validation.is_valid"
+      target: "Process_Order"
+    - default: "Reject_Order"
+```
+
+**3. Complex Calculations:**
+```yaml
+- name: "Calculate_Pricing"
+  type: "JAVASCRIPT"
+  js_config:
+    script_path: "scripts/pricing-engine.ts"
+    typescript: true
+    timeout_ms: 10000
+```
+
+#### JavaScript vs HTTP Steps
+
+| Feature | JavaScript Steps | HTTP Steps |
+|---------|------------------|------------|
+| Latency | ~5-50ms (in-process) | 50-500ms+ (network) |
+| Language | JavaScript/TypeScript | Any HTTP service |
+| Use Case | Data transformation, business logic | External services, APIs |
+| Security | V8 sandbox | Network isolation |
+| Dependencies | py-mini-racer | None |
+
+**When to Use JavaScript Steps:**
+- Data transformation and mapping
+- Complex calculations
+- Validation logic
+- Business rules
+- JSON manipulation
+- When Python performance is sufficient but JS is preferred
+
+**When to Use HTTP Steps:**
+- External API calls
+- Services in other languages (Go, Rust, Java)
+- Third-party integrations (Stripe, Twilio)
+- Long-running operations
+- When you need language-specific libraries
+
 ## 9. Advanced Node Types (The "Gears")
 
 These nodes provide high-level control flow and orchestration capabilities.
@@ -663,7 +1275,396 @@ steps:
         function: "my_app.services.call_service_b"
     merge_function_path: "my_app.utils.merge_service_results" # Custom function to combine results
 ```
-## 11. Troubleshooting YAML Configuration
+## 11. Best Practices & Critical Warnings
+
+### ⚠️ Executor Portability - CRITICAL
+
+**THE PROBLEM**: Step functions must be **stateless and process-isolated** to work across all execution providers.
+
+Developers often test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, fresh process per task). Code that works locally breaks in production because:
+
+- **SyncExecutor**: All steps run in the same Python process. Global variables, module-level state, and in-memory caches are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process/thread. No shared memory.
+
+**❌ BREAKS in Distributed Execution:**
+
+```python
+# Global state lost between steps
+global_cache = {}
+
+def step_a(state: MyState, context: StepContext):
+    global_cache['user_data'] = fetch_user(state.user_id)
+    return {}
+
+def step_b(state: MyState, context: StepContext):
+    user_data = global_cache['user_data']  # KeyError in Celery!
+    return {"name": user_data['name']}
+
+# Module-level state lost
+_connection = None
+
+def step_c(state: MyState, context: StepContext):
+    global _connection
+    if _connection is None:
+        _connection = create_db_connection()
+    _connection.query(...)  # Different worker, _connection is None!
+```
+
+**✅ WORKS Everywhere:**
+
+```python
+# Store in workflow state - persisted to database
+def step_a_correct(state: MyState, context: StepContext):
+    user_data = fetch_user(state.user_id)
+    state.user_data = user_data  # Persisted
+    return {"user_data": user_data}
+
+def step_b_correct(state: MyState, context: StepContext):
+    user_data = state.user_data  # Loaded from database
+    return {"name": user_data['name']}
+
+# Create resources per step
+def step_c_correct(state: MyState, context: StepContext):
+    connection = create_db_connection()  # New connection each time
+    result = connection.query(...)
+    return {"query_result": result}
+```
+
+**Golden Rules**:
+1. **Store everything in workflow state** - `state.field = value` persists
+2. **Return data from steps** - Return dict merges into state
+3. **No global variables** - Each step is isolated
+4. **No module-level state** - Don't rely on `_module_var`
+5. **Create resources per step** - DB connections, API clients created and cleaned up within each step
+
+**Test for Portability**:
+```python
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()  # Tests process isolation
+])
+def test_workflow_portable(executor):
+    builder = WorkflowBuilder(execution_provider=executor)
+    workflow = builder.create_workflow("MyWorkflow", initial_data={...})
+    # Should work with both executors
+```
+
+---
+
+### ⚠️ Dynamic Injection - USE WITH EXTREME CAUTION
+
+**THE PROBLEM**: Dynamic step injection makes workflows **non-deterministic** and extremely hard to debug.
+
+When workflows modify their own structure at runtime:
+1. **Debugging Difficulty**: Audit logs show steps not in YAML
+2. **Compensation Complexity**: Saga rollback must track injected steps
+3. **Non-Determinism**: Same workflow type + different data = different execution
+4. **Version Control**: Can't reconstruct execution from Git history
+5. **Audit Compliance**: Harder to prove regulatory compliance
+
+**When to Use** (Rare cases ONLY):
+- Plugin systems (steps defined by external packages)
+- Multi-tenant workflows (tenants provide custom logic)
+- A/B testing (controlled experiments)
+- Dynamic compliance (jurisdiction-specific rules)
+
+**Recommended Alternatives** (Use these instead):
+
+**1. DECISION Steps with Explicit Routes**:
+```yaml
+- name: "Check_Order_Value"
+  type: "DECISION"
+  function: "steps.check_order_value"
+  routes:
+    - condition: "state.amount > 10000"
+      target: "High_Value_Review"  # Visible in YAML!
+    - condition: "state.amount <= 10000"
+      target: "Standard_Processing"
+
+- name: "High_Value_Review"  # Explicit step
+  type: "STANDARD"
+  function: "steps.high_value_review"
+```
+
+**2. Conditional Logic Within Steps**:
+```python
+def process_order(state: OrderState, context: StepContext):
+    if state.amount > 10000:
+        perform_high_value_checks(state)
+    else:
+        perform_standard_checks(state)
+    return {"processed": True}
+```
+
+**3. Multiple Workflow Versions**:
+```yaml
+# order_processing_standard.yaml
+workflow_type: "OrderProcessing_Standard"
+
+# order_processing_high_value.yaml
+workflow_type: "OrderProcessing_HighValue"
+```
+
+---
+
+### General Best Practices
+
+**Idempotent Steps**:
+Design step functions to be idempotent - they can be called multiple times without changing the result beyond the initial call. Critical for retries and recovery.
+
+```python
+def charge_payment(state: OrderState, context: StepContext):
+    # Check if already charged
+    if state.payment_id:
+        return {"payment_id": state.payment_id, "already_charged": True}
+
+    payment_id = payment_api.charge(state.amount, idempotency_key=context.workflow_id)
+    state.payment_id = payment_id
+    return {"payment_id": payment_id}
+```
+
+**Small, Focused Steps**:
+Each step should do one thing well. Improves readability, testability, and reusability.
+
+**Clear State Models**:
+Define Pydantic state models clearly, ensuring they represent the evolving data accurately.
+
+```python
+class OrderState(BaseModel):
+    order_id: str
+    amount: Decimal
+    payment_id: Optional[str] = None  # Set after payment
+    shipment_id: Optional[str] = None  # Set after shipment
+    status: str = "pending"
+```
+
+**Version Control YAML**:
+Treat workflow YAML files as code. Store in Git, use pull requests for changes, and include in CI/CD.
+
+**Logging and Observability**:
+Integrate with WorkflowObserver to gain insights, debug issues, and monitor performance.
+
+**Leverage Package Auto-Discovery**:
+When creating reusable components, package them as `rufus-*` extensions. The SDK's auto-discovery will load them automatically.
+
+**Validate Workflows**:
+Use the CLI validator to catch errors early:
+
+```bash
+# Basic validation
+rufus validate workflow.yaml
+
+# Strict validation (includes import checks)
+rufus validate workflow.yaml --strict
+```
+
+**Performance Considerations**:
+- Use PostgreSQL connection pooling in production
+- Enable uvloop for async I/O performance
+- Use orjson for faster JSON serialization
+- Cache step function imports (automatic)
+
+---
+
+## 12. Production Reliability Features
+
+Rufus includes production-grade features to handle worker crashes and workflow definition changes.
+
+### 12.1 Zombie Workflow Recovery
+
+Automatically detect and recover workflows where the worker crashed during execution.
+
+**Quick Start - CLI**:
+```bash
+# Scan for zombie workflows (dry-run)
+rufus scan-zombies --db postgresql://localhost/rufus
+
+# Fix zombies automatically
+rufus scan-zombies --db postgresql://localhost/rufus --fix
+
+# Run continuous monitoring daemon
+rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+```
+
+**Programmatic Usage**:
+```python
+from rufus.zombie_scanner import ZombieScanner
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+# Setup
+persistence = PostgresPersistenceProvider("postgresql://localhost/rufus")
+await persistence.initialize()
+
+scanner = ZombieScanner(persistence, stale_threshold_seconds=120)
+
+# One-shot scan and recover
+summary = await scanner.scan_and_recover(dry_run=False)
+print(f"Recovered {summary['zombies_recovered']} zombie workflows")
+```
+
+**Heartbeat Configuration**:
+```python
+from rufus.heartbeat import HeartbeatManager
+
+# Heartbeats are automatic via execution provider
+# For custom execution logic:
+async def my_step(state: MyState, context: StepContext):
+    heartbeat = HeartbeatManager(
+        persistence=context.persistence,
+        workflow_id=context.workflow_id,
+        heartbeat_interval_seconds=30
+    )
+
+    async with heartbeat:  # Auto-start and cleanup
+        result = await long_running_operation()
+        return {"result": result}
+```
+
+**Production Deployment**:
+
+Option 1: Cron job (simple):
+```bash
+*/5 * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/zombie-scanner.log 2>&1
+```
+
+Option 2: Systemd daemon (recommended):
+```ini
+[Unit]
+Description=Rufus Zombie Scanner Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rufus zombie-daemon --db postgresql://localhost/rufus
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Option 3: Kubernetes CronJob:
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rufus-zombie-scanner
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: scanner
+            image: myapp/rufus:latest
+            command: ["rufus", "scan-zombies", "--db", "$(DATABASE_URL)", "--fix"]
+```
+
+**Configuration Guidelines**:
+
+| Step Duration | Heartbeat Interval | Stale Threshold | Scan Interval |
+|---------------|-------------------|-----------------|---------------|
+| < 1 minute    | 15s               | 60s             | 30s           |
+| 1-10 minutes  | 30s               | 120s            | 60s           |
+| 10+ minutes   | 60s               | 300s            | 120s          |
+
+**Key Rule**: Stale Threshold > 2 × Heartbeat Interval
+
+### 12.2 Workflow Versioning
+
+Protect running workflows from breaking YAML changes using automatic definition snapshots.
+
+**How It Works**:
+1. WorkflowBuilder snapshots complete YAML on workflow creation
+2. Snapshot stored in database with workflow
+3. Running workflows use their snapshot (immune to YAML changes)
+4. New workflows use latest YAML
+
+**Automatic (No Code Changes)**:
+```python
+# Snapshotting is automatic
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "123"}
+)
+
+# Snapshot automatically stored
+assert workflow.definition_snapshot is not None
+```
+
+**Explicit Versioning (Recommended)**:
+```yaml
+# config/order_processing.yaml
+workflow_type: "OrderProcessing"
+workflow_version: "2.0.0"  # Bump for breaking changes
+initial_state_model: "my_app.models.OrderState"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "my_app.steps.validate"
+```
+
+**Breaking Changes Strategy**:
+
+Option A: Update YAML in place (snapshot protects running workflows):
+```yaml
+# Before (v1.0.0)
+steps:
+  - name: "Human_Approval"  # Step exists
+  - name: "Process_Payment"
+
+# After (v2.0.0)
+steps:
+  # Human_Approval removed - running workflows still have it via snapshot!
+  - name: "Process_Payment"
+```
+
+Running workflows created with v1.0.0:
+- ✅ Still have "Human_Approval" (from snapshot)
+- ✅ Complete successfully
+
+New workflows created after deploy:
+- ✅ Use v2.0.0 (no "Human_Approval")
+- ✅ Follow new process
+
+Option B: Explicit versioning with separate YAMLs:
+```yaml
+# config/order_processing_v1.yaml (keep for compatibility)
+workflow_type: "OrderProcessing_v1"
+workflow_version: "1.0.0"
+
+# config/order_processing_v2.yaml (new deployments)
+workflow_type: "OrderProcessing_v2"
+workflow_version: "2.0.0"
+```
+
+**Checking Snapshots**:
+```python
+# Load workflow and inspect snapshot
+workflow = await persistence.load_workflow(workflow_id)
+snapshot = workflow['definition_snapshot']
+
+print(f"Workflow version: {snapshot.get('workflow_version')}")
+print(f"Steps: {[s['name'] for s in snapshot['steps']]}")
+```
+
+**Storage Overhead**:
+- ~5-10 KB per workflow (typical)
+- PostgreSQL: Compressed JSONB
+- SQLite: TEXT
+
+**Best Practices**:
+- ✅ Always bump `workflow_version` for breaking changes
+- ✅ Use semantic versioning (MAJOR.MINOR.PATCH)
+- ✅ Test YAML changes on staging first
+- ✅ Keep old YAMLs until running workflows complete (or rely on snapshots)
+- ❌ Don't make breaking changes without version bump
+- ❌ Don't delete workflow definitions immediately after deploy
+
+---
+
+## 13. Troubleshooting YAML Configuration
 
 ### Common Errors
 

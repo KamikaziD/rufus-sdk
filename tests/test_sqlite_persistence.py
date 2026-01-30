@@ -41,7 +41,9 @@ async def sqlite_provider():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             completed_at TEXT,
             idempotency_key TEXT UNIQUE,
-            metadata TEXT DEFAULT '{}'
+            metadata TEXT DEFAULT '{}',
+            workflow_version TEXT,
+            definition_snapshot TEXT
         );
 
         CREATE TABLE IF NOT EXISTS tasks (

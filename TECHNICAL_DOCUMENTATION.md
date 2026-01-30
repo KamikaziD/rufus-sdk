@@ -691,6 +691,410 @@ def process_item(state, context):
 
 ---
 
+## Polyglot Architecture (Multi-Language Support)
+
+Rufus supports polyglot workflows through HTTP Steps, enabling Python-orchestrated workflows to integrate with services written in any programming language.
+
+### Design Philosophy
+
+Rufus takes a **"Python-led orchestration"** approach to polyglot support:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Rufus SDK (Python)                       │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │              WorkflowEngine (Orchestrator)            │  │
+│  │   • State management         • Step sequencing        │  │
+│  │   • Control flow             • Error handling         │  │
+│  │   • Saga compensation        • Observability          │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           │                                  │
+│              ┌────────────┼────────────┐                    │
+│              ▼            ▼            ▼                    │
+│         Python        HTTP Steps   Sub-Workflows            │
+│          Steps      (Polyglot)     (Composition)            │
+└──────────────┬────────────┬────────────┬────────────────────┘
+               │            │            │
+               ▼            ▼            ▼
+         ┌─────────┐  ┌──────────┐  ┌──────────┐
+         │ Python  │  │   Any    │  │  Child   │
+         │Functions│  │ Language │  │ Workflow │
+         └─────────┘  └──────────┘  └──────────┘
+```
+
+**Key Principles:**
+
+1. **Orchestration in Python**: Workflow logic, state management, and control flow remain in Python
+2. **Execution Anywhere**: Individual steps can call services in any language via HTTP
+3. **Unified State**: All step results merge into a single workflow state
+4. **Provider Abstraction**: HTTP execution uses the same provider pattern as other step types
+
+### HTTP Step Implementation
+
+#### Core Components
+
+**HttpWorkflowStep Model** (`src/rufus/models.py`):
+```python
+class HttpWorkflowStep(WorkflowStep):
+    """Step that makes HTTP requests to external services."""
+    http_config: Dict[str, Any]  # Full HTTP configuration
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+```
+
+**WorkflowBuilder Loading** (`src/rufus/builder.py`):
+```python
+elif step_type_str == "HTTP":
+    http_config_param = config.get("http_config", {})
+    step = HttpWorkflowStep(
+        name=config["name"],
+        http_config=http_config_param,
+        required_input=config.get("required_input", []),
+        input_schema=input_schema,
+        automate_next=automate_next,
+        merge_strategy=merge_strategy,
+        merge_conflict_behavior=merge_conflict_behavior
+    )
+```
+
+**HTTP Execution** (via ExecutionProvider):
+```python
+async def execute_http_step(
+    self,
+    http_config: Dict[str, Any],
+    state_data: Dict[str, Any],
+    context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Execute HTTP request with templated configuration."""
+    # 1. Render templates with Jinja2
+    url = template_engine.render(http_config['url'], state_data)
+    headers = template_engine.render(http_config.get('headers', {}), state_data)
+    body = template_engine.render(http_config.get('body', {}), state_data)
+
+    # 2. Make HTTP request
+    async with httpx.AsyncClient() as client:
+        response = await client.request(
+            method=http_config.get('method', 'GET'),
+            url=url,
+            headers=headers,
+            json=body,
+            timeout=http_config.get('timeout', 30)
+        )
+
+    # 3. Parse and return response
+    return {
+        'status_code': response.status_code,
+        'body': response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
+        'headers': dict(response.headers)
+    }
+```
+
+### HTTP Step Configuration
+
+#### YAML Configuration Options
+
+```yaml
+- name: "Call_External_Service"
+  type: "HTTP"
+  http_config:
+    # Required
+    url: "https://api.example.com/endpoint"
+    method: "POST"  # GET, POST, PUT, DELETE, PATCH
+
+    # Optional - Request Configuration
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{state.auth_token}}"
+      X-Request-ID: "{{state.workflow_id}}"
+
+    body:  # For POST/PUT/PATCH
+      user_id: "{{state.user_id}}"
+      data: "{{state.payload}}"
+
+    query_params:  # URL query parameters
+      format: "json"
+      version: "v2"
+
+    timeout: 30  # Seconds (default: 30)
+
+    # Optional - Response Handling
+    output_key: "api_response"  # Key to store response in state
+    includes: ["body", "status_code"]  # Filter response fields
+
+    # Optional - Retry Policy
+    retry_policy:
+      max_attempts: 3
+      delay_seconds: 5
+      backoff_multiplier: 2
+
+  # Standard step options
+  automate_next: true
+  merge_strategy: "SHALLOW"  # or "DEEP"
+  merge_conflict_behavior: "PREFER_NEW"  # or "PREFER_OLD", "RAISE_ERROR"
+```
+
+#### Templating Support
+
+HTTP steps support Jinja2 templating for dynamic content:
+
+```yaml
+# URL templating
+url: "https://api.example.com/users/{{state.user_id}}/orders"
+
+# Header templating
+headers:
+  Authorization: "Bearer {{state.tokens.access_token}}"
+  X-Correlation-ID: "{{state.workflow_id}}-{{state.step_index}}"
+
+# Body templating (complex objects)
+body:
+  customer:
+    id: "{{state.customer.id}}"
+    email: "{{state.customer.email}}"
+  order:
+    items: "{{state.cart_items | tojson}}"
+    total: "{{state.order_total}}"
+```
+
+### Data Flow
+
+```
+HTTP Step Execution Flow:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. WorkflowEngine identifies HTTP step                      │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. ExecutionProvider receives http_config + state           │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. TemplateEngine renders URL, headers, body with state     │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 4. HTTP client (httpx) sends request to external service    │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 5. Response parsed (JSON/text) and returned                 │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 6. Result merged into workflow state via merge_strategy     │
+└──────────────────────┬──────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 7. Workflow continues to next step (if automate_next)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Polyglot Workflow Patterns
+
+#### Pattern 1: Language-Specific Processing
+
+Use the right language for each task:
+
+```yaml
+workflow_type: "OptimizedPipeline"
+steps:
+  # Python: Complex business logic
+  - name: "Apply_Business_Rules"
+    type: "STANDARD"
+    function: "steps.apply_rules"
+    automate_next: true
+
+  # Go: High-concurrency processing
+  - name: "Process_Concurrent_Tasks"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-service:8080/batch-process"
+      body:
+        items: "{{state.items}}"
+        concurrency: 100
+    automate_next: true
+
+  # Rust: ML inference
+  - name: "Run_ML_Model"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_items}}"
+    automate_next: true
+```
+
+#### Pattern 2: Third-Party API Integration
+
+```yaml
+steps:
+  - name: "Fetch_From_Stripe"
+    type: "HTTP"
+    http_config:
+      method: "GET"
+      url: "https://api.stripe.com/v1/customers/{{state.customer_id}}"
+      headers:
+        Authorization: "Bearer {{secrets.STRIPE_API_KEY}}"
+    automate_next: true
+
+  - name: "Send_Via_Twilio"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{secrets.TWILIO_SID}}/Messages.json"
+      headers:
+        Authorization: "Basic {{secrets.TWILIO_AUTH}}"
+      body:
+        To: "{{state.customer_phone}}"
+        Body: "Your payment of ${{state.amount}} was processed."
+```
+
+#### Pattern 3: Microservices Orchestration
+
+```yaml
+workflow_type: "OrderFulfillment"
+steps:
+  # Inventory Service (Go)
+  - name: "Check_Inventory"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://inventory-service/api/check"
+      body:
+        sku: "{{state.product_sku}}"
+        quantity: "{{state.quantity}}"
+    automate_next: true
+
+  # Payment Service (Java)
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://payment-service/api/charge"
+      body:
+        customer_id: "{{state.customer_id}}"
+        amount: "{{state.total_amount}}"
+    automate_next: true
+
+  # Shipping Service (Node.js)
+  - name: "Create_Shipment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://shipping-service/api/shipments"
+      body:
+        order_id: "{{state.order_id}}"
+        address: "{{state.shipping_address}}"
+```
+
+### Error Handling
+
+#### HTTP Error Responses
+
+```python
+# ExecutionProvider handles HTTP errors
+async def execute_http_step(...):
+    try:
+        response = await client.request(...)
+
+        # Check for HTTP errors
+        if response.status_code >= 400:
+            return {
+                'error': True,
+                'status_code': response.status_code,
+                'error_message': response.text,
+                'body': None
+            }
+
+        return {'body': response.json(), 'status_code': response.status_code}
+
+    except httpx.TimeoutException:
+        return {'error': True, 'error_message': 'Request timed out'}
+    except httpx.ConnectError:
+        return {'error': True, 'error_message': 'Connection failed'}
+```
+
+#### Workflow-Level Error Handling
+
+```yaml
+steps:
+  - name: "Call_Unreliable_Service"
+    type: "HTTP"
+    http_config:
+      url: "http://unreliable-service/api"
+      retry_policy:
+        max_attempts: 3
+        delay_seconds: 2
+    automate_next: true
+
+  - name: "Handle_Response"
+    type: "DECISION"
+    function: "steps.check_http_response"
+    routes:
+      - condition: "state.api_response.error == True"
+        target: "Handle_Error"
+      - default: "Process_Success"
+```
+
+### Performance Considerations
+
+#### Connection Pooling
+
+For high-throughput workflows, configure HTTP client pooling:
+
+```python
+# Recommended: Reuse HTTP client across requests
+class HttpExecutionProvider:
+    def __init__(self):
+        self.client = httpx.AsyncClient(
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100
+            ),
+            timeout=httpx.Timeout(30.0, connect=10.0)
+        )
+```
+
+#### Timeout Configuration
+
+| Service Type | Recommended Timeout |
+|--------------|---------------------|
+| Fast APIs (< 100ms) | 5 seconds |
+| Standard APIs | 30 seconds |
+| Slow processing | 120 seconds |
+| File uploads | 300 seconds |
+
+### Comparison with Alternatives
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **HTTP Steps (Current)** | Language-agnostic, simple, REST standard | Latency overhead, no streaming |
+| **gRPC Steps (Planned)** | High performance, streaming, typed | Complex setup, proto files |
+| **Celery Workers** | Python-native, existing infrastructure | Python-only |
+| **Language Bindings** | Native performance | Maintenance burden |
+
+### Future: gRPC Support (Planned)
+
+For performance-critical polyglot workflows, gRPC support is planned:
+
+```yaml
+# Future syntax (not yet implemented)
+- name: "Call_Go_Service"
+  type: "GRPC"
+  grpc_config:
+    service: "processing.ProcessingService"
+    method: "ProcessData"
+    endpoint: "go-service:50051"
+    message:
+      data: "{{state.data}}"
+```
+
+See [PERFORMANCE_OPTIMIZATION_PLAN.md](PERFORMANCE_OPTIMIZATION_PLAN.md) for gRPC roadmap.
+
+---
+
 ## Performance Considerations
 
 ### Latency
@@ -739,6 +1143,141 @@ def process_item(state, context):
 - Workflow registry: ~100KB-1MB (cached in memory)
 - Provider instances: ~10-50KB
 - Total: ~1-2MB per engine instance
+
+### Network Overhead Model
+
+Rufus uses an **embedded SDK architecture** that eliminates central orchestrator overhead:
+
+| Architecture | Orchestrator Hop | Persistence Hop | Total Network Calls/Step |
+|--------------|------------------|-----------------|--------------------------|
+| **Temporal/Cadence** | Yes (2x network) | Yes (2x) | **4 per step** |
+| **Rufus + PostgreSQL** | ❌ No | Yes (2x) | **2 per step** |
+| **Rufus + SQLite** | ❌ No | Local I/O only | **0 network calls** |
+| **Rufus + In-Memory** | ❌ No | ❌ No | **0** |
+
+**Key Advantage**: Workflows execute **in-process**, avoiding the Worker → Orchestrator → Worker round-trip. For PostgreSQL persistence, database I/O remains (load state, save state), but the central orchestrator bottleneck is eliminated.
+
+**Best Performance**: Use SQLite (`:memory:`) or In-Memory persistence for development/testing with zero network overhead.
+
+---
+
+## Critical Production Warnings
+
+### ⚠️ Executor Portability
+
+**CRITICAL ISSUE**: Step functions must be **stateless and process-isolated** to work across all ExecutionProviders.
+
+**The Problem**: Developers test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, separate processes). Code that works locally breaks in production.
+
+**Why It Breaks**:
+- **SyncExecutor**: All steps run in the same Python process. Global variables and module-level state are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process. No shared memory.
+
+**Anti-Patterns (will break in distributed execution)**:
+
+```python
+# ❌ Global state lost between steps
+global_cache = {}
+
+def step_a(state, context):
+    global_cache['data'] = expensive_computation()
+    return {}
+
+def step_b(state, context):
+    data = global_cache['data']  # KeyError in Celery!
+    return {"result": process(data)}
+
+# ❌ Module-level connection lost
+_db_connection = None
+
+def step_c(state, context):
+    global _db_connection
+    if not _db_connection:
+        _db_connection = create_connection()
+    _db_connection.query(...)  # Different worker, _db_connection is None!
+```
+
+**Correct Patterns (portable across all executors)**:
+
+```python
+# ✅ Store in workflow state
+def step_a_correct(state, context):
+    data = expensive_computation()
+    state.cached_data = data  # Persisted to database
+    return {"cached_data": data}
+
+def step_b_correct(state, context):
+    data = state.cached_data  # Loaded from database
+    return {"result": process(data)}
+
+# ✅ Create resources per step
+def step_c_correct(state, context):
+    connection = create_connection()  # Fresh connection
+    result = connection.query(...)
+    connection.close()
+    return {"query_result": result}
+```
+
+**Testing Strategy**:
+```python
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()
+])
+def test_workflow_executor_portable(executor):
+    """Ensure workflow works with both sync and distributed execution."""
+    builder = WorkflowBuilder(execution_provider=executor)
+    workflow = builder.create_workflow("TestWorkflow", initial_data={})
+    # Run test - should pass with both executors
+```
+
+### ⚠️ Dynamic Injection Caution
+
+**WARNING**: Dynamic step injection creates **non-deterministic workflows** that are difficult to debug and audit.
+
+**Problems**:
+1. **Audit Trail Mismatch**: Logs show steps not in YAML definition
+2. **Version Control**: Can't reconstruct execution from Git history
+3. **Debugging**: Developers see different workflow structure than execution trace
+4. **Compensation**: Saga rollback must track dynamically injected steps
+5. **Compliance**: Regulatory audits require deterministic processes
+
+**Recommended Alternatives**:
+
+**Use DECISION steps instead**:
+```yaml
+# Preferred: Explicit branching
+- name: "Check_Risk"
+  type: "DECISION"
+  function: "risk.check"
+  routes:
+    - condition: "state.risk_score > 80"
+      target: "Enhanced_Review"  # Visible in YAML
+    - condition: "state.risk_score <= 80"
+      target: "Standard_Review"
+```
+
+**Use conditional logic within steps**:
+```python
+def process_application(state, context):
+    if state.risk_score > 80:
+        enhanced_review_logic(state)
+    else:
+        standard_review_logic(state)
+    return {"reviewed": True}
+```
+
+**Only use dynamic injection for**:
+- Plugin systems (external package-defined steps)
+- Multi-tenant workflows (tenant-specific logic)
+- Controlled A/B testing
+- Jurisdiction-specific compliance rules
+
+**If dynamic injection is necessary**:
+- Enable full audit logging
+- Snapshot final workflow structure
+- Document reason thoroughly
+- Review regularly
 
 ---
 

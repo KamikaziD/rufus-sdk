@@ -430,6 +430,89 @@ Child workflows report status changes to parents:
 - Parent resumes when child completes
 - Child results available in `state.sub_workflow_results[workflow_type]`
 
+### Polyglot Support (HTTP Steps)
+
+Rufus supports **polyglot workflows** through HTTP Steps, enabling Python-orchestrated workflows to call services written in any programming language.
+
+**Architecture**:
+```
+Rufus Engine (Python) → HTTP/REST → External Services (Go/Rust/Node.js/Java/etc.)
+```
+
+**HTTP Step Configuration**:
+```yaml
+- name: "Call_Go_Service"
+  type: "HTTP"
+  http_config:
+    method: "POST"
+    url: "http://go-service:8080/api/process"
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{state.auth_token}}"
+    body:
+      user_id: "{{state.user_id}}"
+      data: "{{state.payload}}"
+    timeout: 30
+  output_key: "go_response"
+  automate_next: true
+```
+
+**Multi-Language Pipeline Example**:
+```yaml
+workflow_type: "PolyglotPipeline"
+steps:
+  # Python: Validation
+  - name: "Validate"
+    type: "STANDARD"
+    function: "steps.validate"
+    automate_next: true
+
+  # Go: High-performance processing
+  - name: "Process_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/process"
+      body: "{{state.validated_data}}"
+    automate_next: true
+
+  # Rust: ML inference
+  - name: "Predict_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_data}}"
+    automate_next: true
+
+  # Node.js: Notifications
+  - name: "Notify_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification:3000/send"
+      body:
+        user: "{{state.user_id}}"
+        result: "{{state.prediction}}"
+```
+
+**Key Features**:
+- Jinja2 templating for dynamic URLs, headers, and body
+- All HTTP methods supported (GET, POST, PUT, DELETE, PATCH)
+- Automatic JSON parsing of responses
+- Configurable timeouts and retry policies
+- Response merged into workflow state
+
+**Best Practices**:
+- Keep orchestration logic in Python
+- Implement idempotency in external services
+- Use service discovery for production URLs
+- Configure appropriate timeouts per service
+- Handle HTTP errors with DECISION steps
+
+**Documentation**: See [USAGE_GUIDE.md](USAGE_GUIDE.md#81-polyglot-workflows-http-steps) for complete polyglot documentation.
+
 ## Testing
 
 ### Using TestHarness
@@ -990,6 +1073,450 @@ Compare SQLite vs PostgreSQL performance:
 python tests/benchmarks/persistence_benchmark.py
 ```
 
+## Production Reliability Features (Tier 2)
+
+Rufus includes production-grade reliability features to handle worker crashes and workflow definition changes.
+
+### Zombie Workflow Recovery
+
+**Problem**: When a worker crashes while processing a workflow step, the workflow stays in `RUNNING` state forever with no way to detect or recover.
+
+**Solution**: Heartbeat-based zombie detection and automatic recovery.
+
+#### How It Works
+
+1. **HeartbeatManager** (worker-side) sends periodic heartbeats while processing steps
+2. **ZombieScanner** (monitoring process) detects stale heartbeats
+3. Zombie workflows automatically marked as `FAILED_WORKER_CRASH`
+4. Cleanup removes stale heartbeat records
+
+#### Using HeartbeatManager
+
+**In Step Functions** (automatic via execution provider):
+```python
+from rufus.heartbeat import HeartbeatManager
+
+async def long_running_step(state: MyState, context: StepContext):
+    # Heartbeat automatically managed by execution provider
+    # Just write your step logic
+    result = await process_payment(state.amount)
+    return {"payment_id": result.id}
+```
+
+**Manual Heartbeat Control** (advanced):
+```python
+from rufus.heartbeat import HeartbeatManager
+
+async def custom_step(state: MyState, context: StepContext):
+    # Manual heartbeat control for custom execution logic
+    heartbeat = HeartbeatManager(
+        persistence=context.persistence,
+        workflow_id=context.workflow_id,
+        heartbeat_interval_seconds=30
+    )
+
+    async with heartbeat:  # Auto-start and stop
+        # Long-running operation
+        result = await complex_computation(state)
+        return {"result": result}
+```
+
+**Configuration**:
+```python
+heartbeat = HeartbeatManager(
+    persistence=persistence_provider,
+    workflow_id=uuid.UUID(...),
+    worker_id="custom-worker-123",  # Optional, auto-generated if not provided
+    heartbeat_interval_seconds=30   # Default: 30s
+)
+
+# Start heartbeat
+await heartbeat.start(
+    current_step="Process_Payment",
+    metadata={"custom": "data"}
+)
+
+# ... execute step ...
+
+# Stop and cleanup
+await heartbeat.stop()
+```
+
+#### Using ZombieScanner
+
+**CLI - One-Shot Scan**:
+```bash
+# Scan for zombies (dry-run)
+rufus scan-zombies --db postgresql://localhost/rufus
+
+# Scan and fix
+rufus scan-zombies --db postgresql://localhost/rufus --fix
+
+# Custom threshold (default: 120s)
+rufus scan-zombies --db postgresql://localhost/rufus --fix --threshold 180
+
+# JSON output for monitoring
+rufus scan-zombies --db postgresql://localhost/rufus --json
+```
+
+**CLI - Continuous Daemon**:
+```bash
+# Run as background daemon
+rufus zombie-daemon --db postgresql://localhost/rufus
+
+# Custom scan interval and threshold
+rufus zombie-daemon --db postgresql://localhost/rufus --interval 60 --threshold 120
+```
+
+**Programmatic Usage**:
+```python
+from rufus.zombie_scanner import ZombieScanner
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+# Create scanner
+persistence = PostgresPersistenceProvider(db_url)
+await persistence.initialize()
+
+scanner = ZombieScanner(
+    persistence=persistence,
+    stale_threshold_seconds=120  # Heartbeats older than this are "stale"
+)
+
+# One-shot scan and recover
+summary = await scanner.scan_and_recover(dry_run=False)
+print(f"Found {summary['zombies_found']}, recovered {summary['zombies_recovered']}")
+
+# Or scan and recover separately
+zombies = await scanner.scan()
+recovered_count = await scanner.recover(zombies, dry_run=False)
+
+# Run as continuous daemon
+await scanner.run_daemon(
+    scan_interval_seconds=60,
+    stale_threshold_seconds=120
+)
+```
+
+#### Database Schema
+
+The `workflow_heartbeats` table tracks worker health:
+
+```sql
+CREATE TABLE workflow_heartbeats (
+    workflow_id UUID PRIMARY KEY REFERENCES workflow_executions(id) ON DELETE CASCADE,
+    worker_id VARCHAR(100) NOT NULL,
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    current_step VARCHAR(200),
+    step_started_at TIMESTAMPTZ,
+    metadata JSONB DEFAULT '{}'
+);
+
+CREATE INDEX idx_heartbeat_time ON workflow_heartbeats(last_heartbeat ASC);
+```
+
+#### Production Deployment
+
+**Option 1: Cron Job**
+```bash
+# Run every minute via cron
+* * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/rufus/zombie-scanner.log 2>&1
+```
+
+**Option 2: Systemd Service**
+```ini
+[Unit]
+Description=Rufus Zombie Workflow Scanner
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Option 3: Kubernetes CronJob**
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rufus-zombie-scanner
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: scanner
+            image: myapp/rufus:latest
+            command:
+            - rufus
+            - scan-zombies
+            - --db
+            - postgresql://postgres/rufus
+            - --fix
+          restartPolicy: OnFailure
+```
+
+#### Configuration Recommendations
+
+| Workload | Heartbeat Interval | Stale Threshold | Scan Interval |
+|----------|-------------------|-----------------|---------------|
+| **Fast steps** (< 1 min) | 15s | 60s | 30s |
+| **Medium steps** (1-10 min) | 30s | 120s | 60s |
+| **Long steps** (10+ min) | 60s | 300s | 120s |
+| **Very long steps** (hours) | 300s | 900s | 300s |
+
+**Key Rule**: `Stale Threshold > 2 × Heartbeat Interval` to avoid false positives.
+
+#### Monitoring
+
+**Metrics to Track**:
+- Zombie workflows detected per hour
+- Recovery success rate
+- Average time to detection
+- False positive rate
+
+**Alerts**:
+```python
+# Alert if many zombies detected
+if summary['zombies_found'] > 10:
+    send_alert("High zombie workflow count detected")
+
+# Alert if recovery fails
+if summary['zombies_recovered'] < summary['zombies_found']:
+    send_alert("Zombie recovery failures detected")
+```
+
+---
+
+### Workflow Versioning (Definition Snapshots)
+
+**Problem**: Deploying new YAML workflow definitions breaks running workflows. If 10,000 workflows are running and you deploy a YAML file that removes a step, those workflows fail when they try to resume.
+
+**Solution**: Snapshot workflow definitions at creation time. Running workflows use their snapshot, new workflows use the latest YAML.
+
+#### How It Works
+
+1. **WorkflowBuilder** snapshots complete workflow config on `create_workflow()`
+2. **Workflow** stores snapshot in `definition_snapshot` field
+3. **Persistence** saves snapshot to database (JSONB column)
+4. **On Resume**: Workflow uses snapshot, immune to YAML changes
+
+#### Automatic Snapshotting
+
+Snapshotting is **automatic** - no code changes required:
+
+```python
+# WorkflowBuilder automatically snapshots on create
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "12345"}
+)
+
+# Snapshot stored in workflow.definition_snapshot
+assert workflow.definition_snapshot is not None
+assert workflow.definition_snapshot['workflow_type'] == "OrderProcessing"
+```
+
+**What's Snapshotted**:
+- Complete workflow YAML config
+- All step definitions
+- State model path
+- Dependencies, routes, parallel tasks
+- Everything needed to reconstruct workflow execution
+
+#### Explicit Versioning
+
+**Optional**: Add `workflow_version` to YAML for explicit version tracking:
+
+```yaml
+workflow_type: "OrderProcessing"
+workflow_version: "1.5.0"  # Explicit version
+initial_state_model: "my_app.models.OrderState"
+description: "Order processing workflow"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "my_app.steps.validate_order"
+```
+
+Access version in code:
+```python
+workflow = await builder.create_workflow("OrderProcessing", initial_data)
+
+# Check version
+print(f"Workflow version: {workflow.workflow_version}")  # "1.5.0"
+```
+
+#### Breaking Changes Strategy
+
+**Option A: Keep Old YAML, Deploy New Version**
+
+```yaml
+# config/order_processing_v1.yaml (keep for running workflows)
+workflow_type: "OrderProcessing_v1"
+workflow_version: "1.0.0"
+steps:
+  - name: "Human_Approval"  # Legacy step
+
+# config/order_processing_v2.yaml (new deployments)
+workflow_type: "OrderProcessing_v2"
+workflow_version: "2.0.0"
+steps:
+  # Human_Approval removed
+```
+
+Register both:
+```yaml
+# config/workflow_registry.yaml
+workflows:
+  - type: "OrderProcessing_v1"
+    config_file: "order_processing_v1.yaml"
+    deprecated: true
+
+  - type: "OrderProcessing_v2"
+    config_file: "order_processing_v2.yaml"
+```
+
+**Option B: Rely on Snapshots (Recommended)**
+
+Just update the YAML - running workflows use their snapshot:
+
+```yaml
+# config/order_processing.yaml (updated)
+workflow_type: "OrderProcessing"
+workflow_version: "2.0.0"  # Bumped version
+steps:
+  # Human_Approval removed - running workflows unaffected!
+```
+
+Running workflows (created with v1.0.0):
+- Use their snapshot (still has Human_Approval)
+- Complete successfully
+
+New workflows (created after deploy):
+- Use new YAML (no Human_Approval)
+- Follow new process
+
+#### Version Compatibility Checking
+
+**Check compatibility when resuming workflows** (optional):
+
+```python
+from rufus.builder import WorkflowBuilder
+
+def check_version_compatibility(snapshot_version: str, current_version: str) -> bool:
+    """Check if workflow snapshot is compatible with current YAML."""
+    if not snapshot_version or not current_version:
+        return True  # No version specified - allow
+
+    snap_major = int(snapshot_version.split('.')[0])
+    curr_major = int(current_version.split('.')[0])
+
+    # Compatible if same major version
+    return snap_major == curr_major
+
+# In WorkflowBuilder.load_workflow:
+workflow_dict = await persistence.load_workflow(workflow_id)
+
+snapshot_version = workflow_dict.get('workflow_version')
+current_config = self.get_workflow_config(workflow_dict['workflow_type'])
+current_version = current_config.get('workflow_version')
+
+if not check_version_compatibility(snapshot_version, current_version):
+    raise ValueError(
+        f"Workflow version {snapshot_version} incompatible with "
+        f"current version {current_version}"
+    )
+```
+
+#### Database Schema
+
+The `workflow_executions` table includes version fields:
+
+```sql
+ALTER TABLE workflow_executions ADD COLUMN workflow_version VARCHAR(50);
+ALTER TABLE workflow_executions ADD COLUMN definition_snapshot JSONB;
+```
+
+**Storage Overhead**:
+- ~5-10 KB per workflow (typical)
+- PostgreSQL: Stored as compressed JSONB
+- SQLite: Stored as TEXT
+
+#### Migration Strategy
+
+**For Existing Workflows**:
+
+```sql
+-- Existing workflows without snapshots will have NULL
+-- This is backward compatible - they'll continue using current YAML
+SELECT COUNT(*) FROM workflow_executions WHERE definition_snapshot IS NULL;
+
+-- Optionally backfill snapshots for running workflows
+-- (requires custom migration script to reconstruct from current YAML)
+```
+
+#### Best Practices
+
+**✅ Do:**
+- Use automatic snapshotting (it's automatic!)
+- Bump `workflow_version` for breaking changes
+- Keep snapshots for audit/debugging
+- Test migrations on staging first
+
+**❌ Don't:**
+- Delete old YAML files immediately (wait for running workflows to complete)
+- Make breaking changes without version bump
+- Disable snapshotting (wastes the protection)
+
+#### Troubleshooting
+
+**Check Snapshot Contents**:
+```python
+workflow = await persistence.load_workflow(workflow_id)
+snapshot = workflow['definition_snapshot']
+
+print(f"Snapshot workflow_type: {snapshot['workflow_type']}")
+print(f"Snapshot version: {snapshot.get('workflow_version')}")
+print(f"Steps in snapshot: {[s['name'] for s in snapshot['steps']]}")
+```
+
+**Verify Snapshot Protection**:
+```python
+# Create workflow with v1 YAML
+workflow = await builder.create_workflow("MyWorkflow", initial_data)
+workflow_id = workflow.id
+
+# Deploy v2 YAML (breaking changes)
+# ... update YAML file ...
+
+# Resume workflow - should use v1 snapshot
+loaded_workflow = await persistence.load_workflow(workflow_id)
+snapshot = loaded_workflow['definition_snapshot']
+
+# Snapshot should have v1 steps, not v2
+assert snapshot['workflow_version'] == "1.0.0"
+```
+
+**Storage Analysis**:
+```sql
+-- Check snapshot storage usage
+SELECT
+    AVG(LENGTH(definition_snapshot::text)) AS avg_snapshot_size_bytes,
+    MAX(LENGTH(definition_snapshot::text)) AS max_snapshot_size_bytes
+FROM workflow_executions
+WHERE definition_snapshot IS NOT NULL;
+```
+
+---
+
 ## Important Notes
 
 - **Path Resolution**: All YAML paths resolved via `importlib.import_module`
@@ -997,9 +1524,200 @@ python tests/benchmarks/persistence_benchmark.py
 - **Provider Injection**: All providers injected via `Workflow.__init__` or `WorkflowBuilder`
 - **Async Execution**: Async steps dispatched to `ExecutionProvider`, not executed inline
 - **Error Handling**: Uncaught exceptions set workflow status to `FAILED`
-- **Dynamic Injection**: Evaluated after each step, can insert new steps at runtime
 - **Parallel Merge Conflicts**: Logged as warnings when tasks return overlapping keys
 - **Sub-Workflow Nesting**: Supports hierarchical composition with status propagation
+
+### ⚠️ Executor Portability Warning
+
+**CRITICAL**: Step functions must be **stateless and process-isolated** to work across all executors.
+
+**The Problem**: Developers often test with `SyncExecutionProvider` (single process, shared memory) and deploy with `CeleryExecutor` (distributed, fresh process per task). Code that works locally breaks in production because:
+
+- **SyncExecutor**: All steps run in the same Python process. Global variables, module-level state, and in-memory caches are shared.
+- **CeleryExecutor/ThreadPoolExecutor**: Each step runs in a separate worker process/thread. No shared memory.
+
+**Common Pitfalls**:
+
+```python
+# ❌ BREAKS in CeleryExecutor - global state lost between steps
+global_cache = {}
+
+def step_a(state: MyState, context: StepContext):
+    global_cache['user_data'] = fetch_user(state.user_id)
+    return {}
+
+def step_b(state: MyState, context: StepContext):
+    user_data = global_cache['user_data']  # KeyError in Celery!
+    return {"name": user_data['name']}
+
+# ❌ BREAKS in CeleryExecutor - module-level state lost
+_connection = None
+
+def step_c(state: MyState, context: StepContext):
+    global _connection
+    if _connection is None:
+        _connection = create_db_connection()  # Created in worker process
+    _connection.query(...)  # Different worker, _connection is None!
+
+# ✅ WORKS everywhere - state persisted in workflow state
+def step_a_correct(state: MyState, context: StepContext):
+    user_data = fetch_user(state.user_id)
+    state.user_data = user_data  # Persisted to database
+    return {"user_data": user_data}
+
+def step_b_correct(state: MyState, context: StepContext):
+    user_data = state.user_data  # Loaded from database
+    return {"name": user_data['name']}
+
+# ✅ WORKS everywhere - return data to workflow state
+def step_c_correct(state: MyState, context: StepContext):
+    # Create connection per step (Celery worker will clean up)
+    connection = create_db_connection()
+    result = connection.query(...)
+    return {"query_result": result}  # Result saved to state
+```
+
+**Best Practices**:
+1. **Store everything in workflow state** - `state.field = value` persists to database
+2. **Return data from steps** - Return dict merges into state automatically
+3. **No global variables** - Treat each step as isolated function
+4. **No module-level state** - Don't rely on `_module_var` between steps
+5. **Create resources per step** - Database connections, API clients, etc. should be created and cleaned up within each step
+
+**Testing for Portability**:
+```python
+import pytest
+from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+
+@pytest.mark.parametrize("executor", [
+    SyncExecutionProvider(),
+    ThreadPoolExecutionProvider()  # Closer to Celery behavior
+])
+def test_workflow_executor_portable(executor):
+    """Test that workflow works with both sync and threaded execution."""
+    builder = WorkflowBuilder(
+        config_dir="config/",
+        execution_provider=executor
+    )
+    workflow = builder.create_workflow("MyWorkflow", initial_data={...})
+    # Run workflow - should work with both executors
+    ...
+```
+
+**Quick Check**: If your step function uses `global`, module-level variables, or relies on state from previous steps not in the workflow state object, it will likely break in distributed execution.
+
+---
+
+### ⚠️ Dynamic Injection Caution
+
+**WARNING**: Dynamic step injection makes workflows **non-deterministic** and significantly harder to debug.
+
+**The Problem**: When a workflow modifies its own structure at runtime based on data, the execution trace no longer matches the YAML definition. This creates serious operational challenges:
+
+1. **Debugging Difficulty**: Audit logs show steps that don't exist in the workflow YAML file
+2. **Compensation Complexity**: Saga rollback must track dynamically injected steps
+3. **Non-Determinism**: Same workflow type with different data produces different execution paths
+4. **Version Control**: Cannot reconstruct execution from Git history (definition changed at runtime)
+5. **Audit Compliance**: Harder to prove regulatory compliance when workflow structure is dynamic
+
+**Example of the Problem**:
+
+```yaml
+# my_workflow.yaml
+steps:
+  - name: "Process_Order"
+    type: "STANDARD"
+    function: "steps.process_order"
+    dynamic_injection:
+      condition: "state.amount > 10000"
+      steps:
+        - name: "High_Value_Review"  # This step NOT in YAML!
+          function: "steps.high_value_review"
+      insert_after: "Process_Order"
+```
+
+**What happens**:
+- Low-value order ($100): Executes `Process_Order` → `Ship_Order` (matches YAML)
+- High-value order ($20,000): Executes `Process_Order` → `High_Value_Review` → `Ship_Order` (YAML + injected step)
+
+**When developer looks at audit log**: "Why did this workflow execute `High_Value_Review`? It's not in the YAML file!"
+
+**When to Use Dynamic Injection** (Rare cases only):
+1. **Plugin Systems**: Steps defined by external packages (e.g., `rufus-plugins`)
+2. **Multi-Tenant Workflows**: Tenants provide custom validation logic
+3. **A/B Testing**: Controlled experiments with workflow variations
+4. **Dynamic Compliance**: Regulatory requirements vary by jurisdiction
+
+**Recommended Alternatives** (Use these instead):
+
+**1. DECISION Steps with Explicit Routes**:
+```yaml
+steps:
+  - name: "Check_Order_Value"
+    type: "DECISION"
+    function: "steps.check_order_value"
+    routes:
+      - condition: "state.amount > 10000"
+        target: "High_Value_Review"  # Visible in YAML!
+      - condition: "state.amount <= 10000"
+        target: "Standard_Processing"
+
+  - name: "High_Value_Review"  # Explicit step
+    type: "STANDARD"
+    function: "steps.high_value_review"
+    dependencies: ["Check_Order_Value"]
+```
+
+**2. Conditional Logic Within Steps**:
+```python
+def process_order(state: OrderState, context: StepContext):
+    if state.amount > 10000:
+        # High-value logic inline
+        perform_high_value_checks(state)
+    else:
+        # Standard logic
+        perform_standard_checks(state)
+    return {"processed": True}
+```
+
+**3. Multiple Workflow Versions**:
+```yaml
+# order_processing_standard.yaml
+workflow_type: "OrderProcessing_Standard"
+
+# order_processing_high_value.yaml
+workflow_type: "OrderProcessing_HighValue"
+steps:
+  - name: "High_Value_Review"  # Explicit in this version
+```
+
+**If You Must Use Dynamic Injection**:
+1. **Enable Full Audit Logging**: Record when steps were injected and why
+2. **Snapshot Workflow Definition**: Save final workflow structure to database
+3. **Add Comments**: Document why dynamic injection is necessary
+4. **Limit Scope**: Only inject in specific, well-documented scenarios
+5. **Review Regularly**: Periodic audits of dynamic injection usage
+
+**Configuration Example** (if necessary):
+```yaml
+steps:
+  - name: "Process_Data"
+    type: "STANDARD"
+    function: "steps.process_data"
+    dynamic_injection:
+      # DOCUMENT WHY THIS IS NEEDED
+      # Reason: Multi-tenant workflow, tenants define custom validation
+      condition: "state.tenant_config.has_custom_validation"
+      steps:
+        - name: "Custom_Validation"
+          function: "state.tenant_config.validation_function"
+      insert_after: "Process_Data"
+      # Log injection for audit
+      audit_injection: true
+```
+
+**Remember**: Dynamic injection is a **power tool** that trades debuggability for flexibility. Use sparingly and document thoroughly.
 
 ## Recent Migration (SDK Extraction)
 
