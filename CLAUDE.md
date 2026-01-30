@@ -45,6 +45,50 @@ pytest tests/sdk/test_workflow.py::test_workflow_initialization
 ```
 
 ### Running the CLI
+
+**Configuration Management:**
+```bash
+rufus config show               # Show current configuration
+rufus config set-persistence    # Set persistence provider (interactive)
+rufus config set-execution      # Set execution provider (interactive)
+rufus config set-default        # Set default behaviors (interactive)
+rufus config reset              # Reset to defaults
+rufus config path               # Show config file location
+```
+
+**Workflow Management:**
+```bash
+# List and inspect workflows
+rufus list [--status ACTIVE] [--type OrderProcessing] [--limit 10]
+rufus show <workflow-id> [--state] [--logs]
+
+# Start and control workflows
+rufus start <workflow-type> [--data '{"field": "value"}']
+rufus resume <workflow-id> [--input '{"approval": true}']
+rufus retry <workflow-id> [--from-step StepName]
+rufus cancel <workflow-id> [--force] [--reason "User cancelled"]
+
+# Monitoring and debugging
+rufus logs <workflow-id> [--step StepName] [--level ERROR] [--limit 100]
+rufus metrics [--workflow-id <id>] [--type execution_time]
+```
+
+**Database Management:**
+```bash
+rufus db init [--db-url postgresql://...]  # Initialize database schema
+rufus db migrate [--dry-run]               # Apply pending migrations
+rufus db status                            # Show migration status
+rufus db stats                             # Show database statistics
+rufus db validate                          # Validate schema definition
+```
+
+**Zombie Workflow Recovery:**
+```bash
+rufus scan-zombies [--fix] [--threshold 120]  # Scan for zombie workflows
+rufus zombie-daemon [--interval 60]           # Run scanner as daemon
+```
+
+**Legacy Commands (Preserved):**
 ```bash
 # Validate a workflow YAML file
 rufus validate config/my_workflow.yaml
@@ -54,6 +98,15 @@ rufus run config/my_workflow.yaml -d '{"field": "value"}'
 
 # Specify custom registry
 rufus run config/my_workflow.yaml --registry config/workflow_registry.yaml
+```
+
+**Alternative Subcommand Syntax:**
+```bash
+# All workflow commands also available via subcommands
+rufus workflow list              # Same as: rufus list
+rufus workflow start <type>      # Same as: rufus start <type>
+rufus workflow show <id>         # Same as: rufus show <id>
+# ... etc for all workflow commands
 ```
 
 ### Running the Server (Optional)
