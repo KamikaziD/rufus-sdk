@@ -195,6 +195,56 @@ async def test_report_child_status_completed(mock_providers):
     # Note: next_step is not called automatically - auto-resume not yet implemented (see TODO in engine.py:142-144)
 
 @pytest.mark.asyncio
+async def test_report_child_status_auto_resume_async_executor(mock_providers):
+    """
+    Tests that auto-resume is triggered for async executors when child completes.
+    """
+    # Create a non-SyncExecutor mock (simulates Celery/ThreadPool)
+    from rufus.implementations.execution.sync import SyncExecutor
+
+    # Ensure the executor is NOT a SyncExecutor
+    async_executor = MagicMock()
+    async_executor.initialize = AsyncMock()  # Make initialize async
+    async_executor.dispatch_independent_workflow = MagicMock()
+    mock_providers["executor"] = async_executor
+
+    engine = WorkflowEngine(**mock_providers)
+    await engine.initialize()
+
+    parent_id = "parent-async-123"
+    child_id = "child-async-456"
+
+    mock_parent_workflow = MagicMock(spec=Workflow)
+    mock_parent_workflow.id = parent_id
+    mock_parent_workflow.status = "PENDING_SUB_WORKFLOW"
+    mock_parent_workflow.blocked_on_child_id = child_id
+    mock_parent_workflow.current_step = 0
+    mock_parent_workflow.current_step_name = "SubWorkflow"
+    mock_parent_workflow.metadata = {}
+    mock_parent_workflow.state = MagicMock(spec=BaseModel)
+    mock_parent_workflow.to_dict.return_value = {}
+    mock_parent_workflow._notify_status_change = AsyncMock()
+
+    mock_child_workflow = MagicMock(spec=Workflow)
+    mock_child_workflow.id = child_id
+    mock_child_workflow.workflow_type = "ChildWorkflow"
+    mock_child_workflow.state = MagicMock(spec=BaseModel)
+    mock_child_workflow.state.model_dump.return_value = {"completed": True}
+
+    engine.get_workflow = AsyncMock(side_effect=[mock_parent_workflow, mock_child_workflow])
+
+    await engine.report_child_status(
+        child_id=child_id,
+        parent_id=parent_id,
+        child_new_status="COMPLETED",
+        child_result={"output": "success"}
+    )
+
+    # Verify auto-resume was triggered for async executor
+    async_executor.dispatch_independent_workflow.assert_called_once_with(parent_id)
+
+
+@pytest.mark.asyncio
 async def test_report_child_status_failed(mock_providers):
     """
     Tests report_child_status when a child workflow fails.
