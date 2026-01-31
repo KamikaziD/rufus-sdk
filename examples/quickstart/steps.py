@@ -10,7 +10,7 @@ And returns:
 """
 
 from rufus.models import StepContext
-from state_models import GreetingState
+from examples.quickstart.state_models import GreetingState
 
 
 def generate_greeting(state: GreetingState, context: StepContext):

@@ -8,20 +8,20 @@
 
 workflow_type: "GreetingWorkflow"
 workflow_version: "1.0"
-initial_state_model: "state_models.GreetingState"
+initial_state_model: "examples.quickstart.state_models.GreetingState"
 description: "A simple greeting workflow demonstrating Rufus basics"
 
 steps:
   # Step 1: Generate the greeting message
   - name: "Generate_Greeting"
     type: "STANDARD"  # Synchronous execution
-    function: "steps.generate_greeting"  # Python function path
+    function: "examples.quickstart.steps.generate_greeting"  # Python function path
     automate_next: true  # Automatically proceed to next step
     dependencies: []  # No dependencies (first step)
 
   # Step 2: Format the output
   - name: "Format_Output"
     type: "STANDARD"
-    function: "steps.format_output"
+    function: "examples.quickstart.steps.format_output"
     automate_next: false  # Last step, no need to continue
     dependencies: ["Generate_Greeting"]  # Waits for step 1 to complete

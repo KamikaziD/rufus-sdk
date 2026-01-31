@@ -280,15 +280,25 @@ def start_workflow(
                     formatter.print_error(f"Config file not found: {config_file}")
                     raise typer.Exit(code=1)
 
+                # Add parent directory of config file to Python path for imports
+                # This allows examples to import their own modules
+                import sys
+                config_dir = config_file.parent.absolute()
+                project_root = config_dir.parent.parent  # Go up to project root for examples/quickstart case
+                if str(project_root) not in sys.path:
+                    sys.path.insert(0, str(project_root))
+
                 with open(config_file, "r") as f:
                     workflow_config = yaml.safe_load(f)
 
                 wf_type = workflow_config.get("workflow_type", workflow_type)
                 workflow_registry[wf_type] = {
-                    "initial_state_model_path": workflow_config.get("initial_state_model_path", "pydantic.BaseModel"),
+                    # YAML uses 'initial_state_model', builder expects 'initial_state_model_path'
+                    "initial_state_model_path": workflow_config.get("initial_state_model", "pydantic.BaseModel"),
                     "steps": workflow_config.get("steps", []),
                     "parameters": workflow_config.get("parameters", {}),
-                    "env": workflow_config.get("env", {})
+                    "env": workflow_config.get("env", {}),
+                    "workflow_version": workflow_config.get("workflow_version")
                 }
             else:
                 # Try to find config file automatically
