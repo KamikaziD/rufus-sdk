@@ -6,6 +6,7 @@ Demonstrates SQLite persistence with a straightforward example.
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 
 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 
@@ -22,54 +23,15 @@ async def main():
     await persistence.initialize()
     print("   ✓ SQLite provider initialized\n")
 
-    # Create schema
-    print("2. Creating database schema...")
-    await persistence.conn.executescript("""
-        CREATE TABLE workflow_executions (
-            id TEXT PRIMARY KEY,
-            workflow_type TEXT NOT NULL,
-            current_step INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL,
-            state TEXT NOT NULL DEFAULT '{}',
-            steps_config TEXT NOT NULL DEFAULT '[]',
-            state_model_path TEXT NOT NULL,
-            saga_mode INTEGER DEFAULT 0,
-            completed_steps_stack TEXT DEFAULT '[]',
-            parent_execution_id TEXT,
-            blocked_on_child_id TEXT,
-            data_region TEXT DEFAULT 'us-east-1',
-            priority INTEGER DEFAULT 5,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            completed_at TEXT,
-            idempotency_key TEXT UNIQUE,
-            metadata TEXT DEFAULT '{}'
-        );
+    # Apply demo schema
+    print("2. Applying database schema...")
+    schema_path = Path(__file__).parent / "demo_schema.sql"
 
-        CREATE TABLE workflow_execution_logs (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workflow_id TEXT NOT NULL,
-            step_name TEXT,
-            log_level TEXT NOT NULL,
-            message TEXT NOT NULL,
-            logged_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            metadata TEXT DEFAULT '{}'
-        );
+    with open(schema_path, 'r') as f:
+        schema_sql = f.read()
 
-        CREATE TABLE workflow_metrics (
-            metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workflow_id TEXT NOT NULL,
-            workflow_type TEXT,
-            execution_id TEXT,
-            step_name TEXT,
-            metric_name TEXT NOT NULL,
-            metric_value REAL NOT NULL,
-            unit TEXT,
-            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            tags TEXT DEFAULT '{}'
-        );
-    """)
-    print("   ✓ Schema created\n")
+    await persistence.conn.executescript(schema_sql)
+    print("   ✓ Schema applied\n")
 
     # Create a workflow
     print("3. Creating a sample workflow...")
@@ -77,6 +39,7 @@ async def main():
     workflow_data = {
         'id': workflow_id,
         'workflow_type': 'DemoWorkflow',
+        'workflow_version': '1.0.0',
         'current_step': 0,
         'status': 'ACTIVE',
         'state': {

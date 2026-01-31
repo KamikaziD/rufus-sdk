@@ -35,6 +35,155 @@ from rufus.providers.persistence import PersistenceProvider
 from rufus.utils.serialization import serialize, deserialize
 
 
+# SQLite schema definition - matches PostgreSQL schema with type conversions
+SQLITE_SCHEMA = """
+-- Core workflow execution state
+CREATE TABLE IF NOT EXISTS workflow_executions (
+    id TEXT PRIMARY KEY,
+    workflow_type TEXT NOT NULL,
+    workflow_version TEXT,
+    definition_snapshot TEXT,
+    current_step INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT '{}',
+    steps_config TEXT NOT NULL DEFAULT '[]',
+    state_model_path TEXT NOT NULL,
+    saga_mode INTEGER DEFAULT 0,
+    completed_steps_stack TEXT DEFAULT '[]',
+    parent_execution_id TEXT,
+    blocked_on_child_id TEXT,
+    data_region TEXT DEFAULT 'us-east-1',
+    priority INTEGER DEFAULT 5,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    idempotency_key TEXT UNIQUE,
+    metadata TEXT DEFAULT '{}',
+    FOREIGN KEY (parent_execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
+-- Task queue
+CREATE TABLE IF NOT EXISTS tasks (
+    task_id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    step_name TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    worker_id TEXT,
+    claimed_at TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    last_error TEXT,
+    task_data TEXT,
+    result TEXT,
+    idempotency_key TEXT UNIQUE,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
+-- Compensation log (Saga pattern)
+CREATE TABLE IF NOT EXISTS compensation_log (
+    log_id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    step_name TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    action_type TEXT NOT NULL,
+    action_result TEXT,
+    error_message TEXT,
+    executed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    executed_by TEXT,
+    state_before TEXT,
+    state_after TEXT,
+    FOREIGN KEY (execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
+-- Audit log
+CREATE TABLE IF NOT EXISTS workflow_audit_log (
+    audit_id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    execution_id TEXT,
+    event_type TEXT NOT NULL,
+    step_name TEXT,
+    user_id TEXT,
+    worker_id TEXT,
+    recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    old_state TEXT,
+    new_state TEXT,
+    state_diff TEXT,
+    decision_rationale TEXT,
+    metadata TEXT DEFAULT '{}',
+    ip_address TEXT,
+    user_agent TEXT
+);
+
+-- Execution logs
+CREATE TABLE IF NOT EXISTS workflow_execution_logs (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL,
+    execution_id TEXT,
+    step_name TEXT,
+    log_level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    logged_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    worker_id TEXT,
+    metadata TEXT DEFAULT '{}',
+    trace_id TEXT,
+    correlation_id TEXT
+);
+
+-- Metrics
+CREATE TABLE IF NOT EXISTS workflow_metrics (
+    metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL,
+    workflow_type TEXT,
+    execution_id TEXT,
+    step_name TEXT,
+    metric_name TEXT NOT NULL,
+    metric_value REAL NOT NULL,
+    unit TEXT,
+    recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    tags TEXT DEFAULT '{}'
+);
+
+-- Heartbeat tracking (zombie detection & recovery)
+CREATE TABLE IF NOT EXISTS workflow_heartbeats (
+    workflow_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    last_heartbeat TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    current_step TEXT,
+    step_started_at TEXT,
+    metadata TEXT DEFAULT '{}',
+    FOREIGN KEY (workflow_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_executions(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_type ON workflow_executions(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_priority ON workflow_executions(priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_execution ON tasks(execution_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_logs_workflow ON workflow_execution_logs(workflow_id, logged_at DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_workflow ON workflow_metrics(workflow_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_heartbeat_time ON workflow_heartbeats(last_heartbeat ASC);
+
+-- Triggers for updated_at timestamps
+CREATE TRIGGER IF NOT EXISTS update_workflow_timestamp
+AFTER UPDATE ON workflow_executions
+BEGIN
+    UPDATE workflow_executions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_task_timestamp
+AFTER UPDATE ON tasks
+BEGIN
+    UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE task_id = NEW.task_id;
+END;
+"""
+
+
 class SQLitePersistenceProvider(PersistenceProvider):
     """SQLite-backed workflow persistence for development and testing"""
 
@@ -42,7 +191,8 @@ class SQLitePersistenceProvider(PersistenceProvider):
         self,
         db_path: str = ":memory:",
         timeout: float = 5.0,
-        check_same_thread: bool = False
+        check_same_thread: bool = False,
+        auto_init: bool = True
     ):
         """
         Initialize SQLite persistence provider
@@ -51,15 +201,17 @@ class SQLitePersistenceProvider(PersistenceProvider):
             db_path: Path to SQLite database file or ":memory:" for in-memory
             timeout: Database lock timeout in seconds
             check_same_thread: SQLite thread safety check (disable for async)
+            auto_init: Auto-create schema if missing (default: True for dev convenience)
         """
         self.db_path = db_path
         self.timeout = timeout
         self.check_same_thread = check_same_thread
+        self.auto_init = auto_init
         self.conn: Optional[aiosqlite.Connection] = None
         self._initialized = False
 
     async def initialize(self):
-        """Create database connection and verify schema"""
+        """Create database connection and initialize schema if needed"""
         if self._initialized:
             return
 
@@ -82,17 +234,24 @@ class SQLitePersistenceProvider(PersistenceProvider):
             if self.db_path != ":memory:":
                 await self.conn.execute("PRAGMA journal_mode = WAL")
 
-            # Verify schema exists
+            # Check if schema exists
             async with self.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_executions'"
             ) as cursor:
                 result = await cursor.fetchone()
 
             if not result:
-                logger.warning(
-                    "workflow_executions table not found. "
-                    "Please run migrations: python tools/migrate.py --db sqlite:///" + self.db_path + " --up"
-                )
+                if self.auto_init:
+                    # Auto-create schema
+                    logger.info(f"Schema not found, auto-initializing database: {self.db_path}")
+                    await self._create_schema()
+                    logger.info("Schema created successfully")
+                else:
+                    # Warn user to run migrations
+                    logger.warning(
+                        "workflow_executions table not found. "
+                        "Run 'rufus db init' or set auto_init=True"
+                    )
 
             self._initialized = True
             logger.info(f"SQLite workflow store initialized (db={self.db_path})")
@@ -100,6 +259,11 @@ class SQLitePersistenceProvider(PersistenceProvider):
         except Exception as e:
             logger.error(f"Failed to initialize SQLite store: {e}")
             raise
+
+    async def _create_schema(self):
+        """Create database schema using executescript"""
+        await self.conn.executescript(SQLITE_SCHEMA)
+        await self.conn.commit()
 
     async def close(self):
         """Close database connection"""

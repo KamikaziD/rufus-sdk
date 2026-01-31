@@ -44,7 +44,10 @@ async def create_persistence_provider(config: Config) -> PersistenceProvider:
         db_dir = Path(db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
 
-        provider = SQLitePersistenceProvider(db_path=db_path)
+        provider = SQLitePersistenceProvider(
+            db_path=db_path,
+            auto_init=config.persistence.sqlite.auto_init
+        )
 
     elif provider_type == "postgres":
         from rufus.implementations.persistence.postgres import PostgresPersistenceProvider

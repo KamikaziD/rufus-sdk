@@ -15,6 +15,7 @@ from dataclasses import dataclass, asdict
 class SQLiteConfig:
     """SQLite persistence configuration"""
     db_path: str = "~/.rufus/workflows.db"
+    auto_init: bool = True  # Auto-create schema if missing (dev convenience)
 
 
 @dataclass
@@ -178,6 +179,8 @@ class ConfigManager:
         if provider == "sqlite":
             if "db_path" in kwargs:
                 config.persistence.sqlite.db_path = kwargs["db_path"]
+            if "auto_init" in kwargs:
+                config.persistence.sqlite.auto_init = kwargs["auto_init"]
         elif provider == "postgres":
             if "db_url" in kwargs:
                 config.persistence.postgres.db_url = kwargs["db_url"]
@@ -227,7 +230,8 @@ class ConfigManager:
         return PersistenceConfig(
             provider=data.get("provider", "memory"),
             sqlite=SQLiteConfig(
-                db_path=sqlite_data.get("db_path", "~/.rufus/workflows.db")
+                db_path=sqlite_data.get("db_path", "~/.rufus/workflows.db"),
+                auto_init=sqlite_data.get("auto_init", True)
             ),
             postgres=PostgresConfig(
                 db_url=postgres_data.get("db_url", "postgresql://localhost/rufus"),
@@ -263,7 +267,8 @@ class ConfigManager:
             "persistence": {
                 "provider": config.persistence.provider,
                 "sqlite": {
-                    "db_path": config.persistence.sqlite.db_path
+                    "db_path": config.persistence.sqlite.db_path,
+                    "auto_init": config.persistence.sqlite.auto_init
                 },
                 "postgres": {
                     "db_url": config.persistence.postgres.db_url,
