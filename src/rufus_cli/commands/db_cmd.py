@@ -89,6 +89,8 @@ def init(
 CREATE TABLE IF NOT EXISTS workflow_executions (
     id TEXT PRIMARY KEY,
     workflow_type TEXT NOT NULL,
+    workflow_version TEXT,
+    definition_snapshot TEXT,
     current_step INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT '{}',
@@ -194,6 +196,17 @@ CREATE TABLE IF NOT EXISTS workflow_metrics (
     tags TEXT DEFAULT '{}'
 );
 
+-- Heartbeat tracking (zombie detection & recovery)
+CREATE TABLE IF NOT EXISTS workflow_heartbeats (
+    workflow_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    last_heartbeat TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    current_step TEXT,
+    step_started_at TEXT,
+    metadata TEXT DEFAULT '{}',
+    FOREIGN KEY (workflow_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_executions(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_type ON workflow_executions(workflow_type);
@@ -202,6 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_execution ON tasks(execution_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_logs_workflow ON workflow_execution_logs(workflow_id, logged_at DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_workflow ON workflow_metrics(workflow_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_heartbeat_time ON workflow_heartbeats(last_heartbeat ASC);
 
 -- Triggers for updated_at timestamps
 CREATE TRIGGER IF NOT EXISTS update_workflow_timestamp

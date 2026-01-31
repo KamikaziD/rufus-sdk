@@ -7,4 +7,6 @@ __pycache__/
 *.pyc
 .DS_Store
 htmlcov/
-.coverage
+.coverage*.db
+*.db-shm
+*.db-wal
