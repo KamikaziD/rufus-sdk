@@ -1,9 +1,0 @@
-workflow_type: "NotificationWorkflow"
-description: "Simple fire-and-forget notification."
-initial_state_model: "state_models.NotificationState"
-
-steps:
-  - name: "Send_Notification"
-    type: "STANDARD"
-    function: "workflow_utils.send_notification_step"
-    automate_next: true
