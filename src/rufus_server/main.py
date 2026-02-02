@@ -69,12 +69,16 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+# --- Device Service ---
+from rufus_server.device_service import DeviceService
+
 # --- Global Instances ---
 persistence_provider: Optional[PersistenceProvider] = None
 execution_provider: Optional[ExecutionProvider] = None
 workflow_observer: Optional[WorkflowObserver] = None
 workflow_engine: Optional[WorkflowEngine] = None
 workflow_registry_config: Dict[str, Any] = {}
+device_service: Optional[DeviceService] = None
 
 
 # --- User Context ---
@@ -142,6 +146,10 @@ async def startup_event():
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine
     )
+
+    # Initialize Device Service
+    global device_service
+    device_service = DeviceService(persistence_provider)
 
     print("Rufus Edge Control Plane started.")
 
@@ -303,18 +311,33 @@ async def get_workflow_executions(
 @app.post("/api/v1/devices/register", response_model=DeviceRegistrationResponse)
 async def register_device(
     request_data: DeviceRegistrationRequest,
-    x_api_key: str = Header(..., alias="X-API-Key")
+    x_registration_key: str = Header(..., alias="X-Registration-Key")
 ):
-    """
-    Register an edge device with the control plane.
+    """Register an edge device with the control plane."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
 
-    TODO: Implement device registration:
-    - Validate registration API key
-    - Create device record in database
-    - Generate device-specific API key
-    - Return config and sync URLs
-    """
-    raise HTTPException(status_code=501, detail="Device registration not yet implemented")
+    # Validate registration key (in production, verify against allowed keys)
+    expected_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+    if x_registration_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid registration key")
+
+    try:
+        result = await device_service.register_device(
+            device_id=request_data.device_id,
+            device_type=request_data.device_type,
+            device_name=request_data.device_name,
+            merchant_id=request_data.merchant_id,
+            firmware_version=request_data.firmware_version,
+            sdk_version=request_data.sdk_version,
+            location=request_data.location,
+            capabilities=request_data.capabilities,
+        )
+        return DeviceRegistrationResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {e}")
 
 
 @app.get("/api/v1/devices/{device_id}/config")
@@ -323,15 +346,49 @@ async def get_device_config(
     if_none_match: Optional[str] = Header(None, alias="If-None-Match"),
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """
-    Get device configuration with ETag support.
+    """Get device configuration with ETag support for caching."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
 
-    TODO: Implement config pull:
-    - Authenticate device
-    - Check ETag for caching
-    - Return config with workflows, fraud rules, floor limits
-    """
-    raise HTTPException(status_code=501, detail="Config pull not yet implemented")
+    # Authenticate device
+    if not await device_service.authenticate_device(device_id, x_api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Get active config
+    config = await device_service.get_active_config()
+    if not config:
+        # Return default config if none exists
+        config = {
+            "config_version": "default",
+            "etag": "default",
+            "config_data": json.dumps({
+                "floor_limit": 25.00,
+                "max_offline_transactions": 100,
+                "fraud_rules": [],
+                "features": {"offline_mode": True},
+                "workflows": {},
+            })
+        }
+
+    current_etag = config.get("etag", "")
+
+    # Check If-None-Match for caching
+    if if_none_match and if_none_match == current_etag:
+        return Response(status_code=304)
+
+    # Parse config_data if it's a string
+    config_data = config.get("config_data", "{}")
+    if isinstance(config_data, str):
+        config_data = json.loads(config_data)
+
+    return JSONResponse(
+        content={
+            "version": config.get("config_version"),
+            "updated_at": config.get("created_at"),
+            **config_data,
+        },
+        headers={"ETag": current_etag}
+    )
 
 
 @app.post("/api/v1/devices/{device_id}/heartbeat", response_model=DeviceHeartbeatResponse)
@@ -340,15 +397,21 @@ async def device_heartbeat(
     request_data: DeviceHeartbeatRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """
-    Receive device heartbeat.
+    """Receive device heartbeat and return pending commands."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
 
-    TODO: Implement heartbeat:
-    - Update device status
-    - Check for pending commands
-    - Return acknowledgment
-    """
-    raise HTTPException(status_code=501, detail="Heartbeat not yet implemented")
+    # Authenticate device
+    if not await device_service.authenticate_device(device_id, x_api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    result = await device_service.process_heartbeat(
+        device_id=device_id,
+        status=request_data.device_status,
+        metrics=request_data.metrics,
+    )
+
+    return DeviceHeartbeatResponse(**result)
 
 
 @app.post("/api/v1/devices/{device_id}/sync", response_model=SyncResponse)
@@ -357,16 +420,38 @@ async def sync_device_transactions(
     request_data: SyncRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """
-    Receive offline transactions from edge device (Store-and-Forward).
+    """Receive offline transactions from edge device (Store-and-Forward)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
 
-    TODO: Implement sync:
-    - Decrypt transaction blobs
-    - Validate idempotency keys
-    - Queue for settlement
-    - Return acknowledgment
-    """
-    raise HTTPException(status_code=501, detail="Transaction sync not yet implemented")
+    # Authenticate device
+    if not await device_service.authenticate_device(device_id, x_api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Convert request transactions to dict format
+    transactions = [
+        {
+            "transaction_id": t.transaction_id,
+            "idempotency_key": f"{device_id}:{t.transaction_id}",
+            "encrypted_payload": t.encrypted_blob,
+            "encryption_key_id": t.encryption_key_id,
+        }
+        for t in request_data.transactions
+    ]
+
+    result = await device_service.sync_transactions(
+        device_id=device_id,
+        transactions=transactions,
+    )
+
+    # Convert to response format
+    from rufus_server.api_models import SyncAck
+    return SyncResponse(
+        accepted=[SyncAck(**a) for a in result["accepted"]],
+        rejected=[SyncAck(**r) for r in result["rejected"]],
+        server_sequence=result.get("server_sequence", 0),
+        next_sync_delay=30,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

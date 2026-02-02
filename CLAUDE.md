@@ -4,11 +4,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rufus is a Python-native, SDK-first workflow engine designed for orchestrating complex business processes and AI pipelines. It emphasizes a declarative, developer-friendly approach where workflows are defined in YAML and executed via an embedded SDK. The project consists of:
+**Rufus Edge** is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides:
+
+- **Offline-first architecture** with SQLite for edge deployment
+- **Store-and-Forward (SAF)** for offline payment transactions
+- **Cloud control plane** for device fleet management
+- **ETag-based config push** for fraud rules and workflow updates
+- **Saga pattern** for transaction compensation/rollback
+- **PCI-DSS ready** architecture with encryption support
+
+The project consists of:
 
 1. **Core SDK** (`src/rufus/`) - The reusable workflow engine library
-2. **CLI Tool** (`src/rufus_cli/`) - Comprehensive command-line interface with 21 commands for workflow management, database operations, and monitoring
-3. **Server** (`src/rufus_server/`) - Optional FastAPI wrapper for REST API access
+2. **Edge Agent** (`src/rufus_edge/`) - Runtime for edge devices with offline support
+3. **Cloud Control Plane** (`src/rufus_server/`) - FastAPI server for device management
+4. **CLI Tool** (`src/rufus_cli/`) - Command-line interface for workflow management
+
+### Fintech Edge Architecture
+
+```
+CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
+├── Device Registry API                    ├── RufusEdgeAgent
+├── Config Server (ETag)         <─────>   ├── SyncManager (SAF)
+├── Transaction Sync API                   ├── ConfigManager
+└── Settlement Gateway                     └── Local Workflows
+```
+
+### Key Use Cases
+
+| Use Case | Description |
+|----------|-------------|
+| **Store-and-Forward** | Process payments offline, sync when online |
+| **TMS Config Push** | Hot-deploy fraud rules without firmware updates |
+| **Transaction Compensation** | Saga-based rollback for failed operations |
+| **Offline Floor Limits** | Approve small transactions without network |
 
 The architecture separates workflow definition (YAML) from implementation (Python functions) and decouples core engine logic from external dependencies through pluggable provider interfaces.
 
