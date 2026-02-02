@@ -23,7 +23,6 @@ from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
@@ -49,25 +48,30 @@ async def run_payment_demo():
     # Initialize observer
     observer = LoggingObserver()
 
-    # Load workflow registry
+    # Load workflow registry with inline config
     import yaml
     config_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'config')
     registry_path = os.path.join(config_dir, 'workflow_registry.yaml')
+    workflow_path = os.path.join(config_dir, 'payment_workflow.yaml')
 
-    with open(registry_path, 'r') as f:
-        registry_config = yaml.safe_load(f)
+    # Load workflow definition
+    with open(workflow_path, 'r') as f:
+        workflow_config = yaml.safe_load(f)
 
-    workflow_registry = {wf['type']: wf for wf in registry_config.get('workflows', [])}
+    # Build registry with full workflow config embedded
+    workflow_registry = {
+        "PaymentAuthorization": {
+            "type": "PaymentAuthorization",
+            "initial_state_model_path": "rufus_edge.models.PaymentState",
+            "steps": workflow_config.get("steps", []),
+        }
+    }
 
-    # Create workflow builder
+    # Create workflow builder (new API)
     builder = WorkflowBuilder(
-        config_dir=config_dir,
         workflow_registry=workflow_registry,
-        persistence_provider=persistence,
-        execution_provider=executor,
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
-        observer=observer,
     )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -79,6 +83,12 @@ async def run_payment_demo():
 
     workflow1 = await builder.create_workflow(
         workflow_type="PaymentAuthorization",
+        persistence_provider=persistence,
+        execution_provider=executor,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=observer,
         initial_data={
             "transaction_id": f"txn_{uuid.uuid4().hex[:8]}",
             "idempotency_key": f"demo1_{uuid.uuid4().hex}",
@@ -94,7 +104,7 @@ async def run_payment_demo():
 
     # Execute workflow
     while workflow1.status == "ACTIVE":
-        result, next_step = await workflow1.next_step()
+        result, next_step = await workflow1.next_step({})
         print(f"  Step completed: {workflow1.current_step_name} -> {next_step or 'done'}")
 
     print(f"\n  Result: {workflow1.status}")
@@ -109,6 +119,12 @@ async def run_payment_demo():
 
     workflow2 = await builder.create_workflow(
         workflow_type="PaymentAuthorization",
+        persistence_provider=persistence,
+        execution_provider=executor,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=observer,
         initial_data={
             "transaction_id": f"txn_{uuid.uuid4().hex[:8]}",
             "idempotency_key": f"demo2_{uuid.uuid4().hex}",
@@ -123,7 +139,7 @@ async def run_payment_demo():
     )
 
     while workflow2.status == "ACTIVE":
-        result, next_step = await workflow2.next_step()
+        result, next_step = await workflow2.next_step({})
         print(f"  Step completed: {workflow2.current_step_name} -> {next_step or 'done'}")
 
     print(f"\n  Result: {workflow2.status}")
@@ -139,6 +155,12 @@ async def run_payment_demo():
 
     workflow3 = await builder.create_workflow(
         workflow_type="PaymentAuthorization",
+        persistence_provider=persistence,
+        execution_provider=executor,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=observer,
         initial_data={
             "transaction_id": f"txn_{uuid.uuid4().hex[:8]}",
             "idempotency_key": f"demo3_{uuid.uuid4().hex}",
@@ -153,7 +175,7 @@ async def run_payment_demo():
     )
 
     while workflow3.status == "ACTIVE":
-        result, next_step = await workflow3.next_step()
+        result, next_step = await workflow3.next_step({})
         print(f"  Step completed: {workflow3.current_step_name} -> {next_step or 'done'}")
 
     print(f"\n  Result: {workflow3.status}")

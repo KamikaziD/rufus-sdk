@@ -10,55 +10,43 @@ steps:
   # Step 1: Validate payment request
   - name: "Validate_Payment"
     type: "STANDARD"
-    function: "examples.payment_terminal.steps.validate_payment"
+    function: "rufus_edge.payment_steps.validate_payment"
     description: "Validate card token and amount"
     automate_next: true
 
-  # Step 2: Check network connectivity
+  # Step 2: Check network connectivity (uses WorkflowJumpDirective for routing)
   - name: "Check_Connectivity"
-    type: "DECISION"
-    function: "examples.payment_terminal.steps.check_connectivity"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.check_connectivity"
     description: "Determine if device is online or offline"
-    routes:
-      - condition: "state.is_online == True"
-        target: "Online_Authorization"
-      - condition: "state.is_online == False"
-        target: "Check_Floor_Limit"
 
   # Step 3a: Online path - call payment gateway
   - name: "Online_Authorization"
     type: "STANDARD"
-    function: "examples.payment_terminal.steps.authorize_online"
+    function: "rufus_edge.payment_steps.authorize_online"
     description: "Send authorization request to payment gateway"
-    compensate_function: "examples.payment_terminal.steps.void_authorization"
-    automate_next: true
+    compensate_function: "rufus_edge.payment_steps.void_authorization"
 
-  # Step 3b: Offline path - check floor limit
+  # Step 3b: Offline path - check floor limit (uses WorkflowJumpDirective for routing)
   - name: "Check_Floor_Limit"
-    type: "DECISION"
-    function: "examples.payment_terminal.steps.check_floor_limit"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.check_floor_limit"
     description: "Check if amount is under floor limit for offline approval"
-    routes:
-      - condition: "state.floor_limit_checked == True and state.amount <= 25.00"
-        target: "Offline_Approval"
-      - condition: "state.floor_limit_checked == True and state.amount > 25.00"
-        target: "Decline_Offline"
 
   # Step 4a: Offline approval
   - name: "Offline_Approval"
     type: "STANDARD"
-    function: "examples.payment_terminal.steps.approve_offline"
+    function: "rufus_edge.payment_steps.approve_offline"
     description: "Approve transaction offline and queue for sync"
-    automate_next: true
 
   # Step 4b: Decline (over floor limit)
   - name: "Decline_Offline"
     type: "STANDARD"
-    function: "examples.payment_terminal.steps.decline_offline"
+    function: "rufus_edge.payment_steps.decline_offline"
     description: "Decline transaction - amount exceeds offline floor limit"
 
   # Step 5: Complete transaction
   - name: "Complete_Transaction"
     type: "STANDARD"
-    function: "examples.payment_terminal.steps.complete_transaction"
+    function: "rufus_edge.payment_steps.complete_transaction"
     description: "Finalize transaction and return result"
