@@ -1,498 +1,396 @@
-# Rufus SDK - Quickstart Guide
+# Rufus SDK - Quick Start Guide
 
-Get started with Rufus in 5 minutes. This guide will walk you through installing the SDK, creating your first workflow, and executing it.
+Get started with Rufus in under 5 minutes. This guide walks you through installation and running your first workflow.
 
 ## What is Rufus?
 
-Rufus is a Python-native, SDK-first workflow engine for orchestrating complex business processes and AI pipelines. Unlike server-based workflow engines, Rufus embeds directly into your Python applications.
+Rufus is a **Python-native, SDK-first workflow engine** for orchestrating complex business processes and AI pipelines. Unlike heavyweight systems like Temporal or Airflow, Rufus embeds directly into your Python applications with zero infrastructure requirements.
 
-**Key Features:**
-- **SDK-First**: Embed directly in Django, Flask, FastAPI, or any Python app
-- **Declarative**: Define workflows in YAML, not code
-- **Pluggable**: Swap persistence, execution, and observability providers
-- **Production-Ready**: Saga patterns, parallel execution, human-in-the-loop
+**Key Benefits:**
+- ✅ **Embedded SDK** - No external servers required, runs in-process
+- ✅ **SQLite Built-In** - Start immediately with embedded database
+- ✅ **Declarative YAML** - Define workflows without writing orchestration code
+- ✅ **Production-Ready** - Saga patterns, parallel execution, human-in-the-loop
+- ✅ **Type-Safe** - Pydantic validation catches errors before runtime
 
-## Installation
+---
+
+## Installation (2 minutes)
 
 ### Prerequisites
-
 - Python 3.9 or higher
-- pip or poetry
+- pip
 
-### Install Rufus SDK
+### Install Rufus
 
 ```bash
-# Clone the repository (until PyPI release)
-git clone https://github.com/your-org/rufus.git
-cd rufus
+# Clone the repository
+git clone https://github.com/your-org/rufus-sdk.git
+cd rufus-sdk
 
-# Install with pip
+# Install in development mode
 pip install -e .
 
-# Or with poetry
-poetry install
+# Install core dependencies
+pip install aiosqlite orjson asyncpg uvloop
 ```
 
 ### Verify Installation
 
 ```bash
-# Check CLI is available
+# Test CLI
 rufus --help
 
-# Run Python import test
-python -c "from rufus.engine import WorkflowEngine; print('Rufus SDK installed successfully!')"
+# Test SDK import
+python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus SDK ready!')"
 ```
 
-## Your First Workflow (5 Minutes)
+---
 
-Let's create a simple greeting workflow that demonstrates Rufus basics.
+## Run Your First Workflow (3 minutes)
 
-### Step 1: Create Project Structure
+### Option 1: SQLite Task Manager Demo (Recommended)
+
+The simplest way to see Rufus in action:
 
 ```bash
-mkdir my_workflow_project
-cd my_workflow_project
-touch greeting_workflow.yaml workflow_registry.yaml state_models.py steps.py run_workflow.py
+cd examples/sqlite_task_manager
+python simple_demo.py
 ```
 
-### Step 2: Define State Model (`state_models.py`)
-
-State models use Pydantic for validation:
-
-```python
-from pydantic import BaseModel
-from typing import Optional
-
-class GreetingState(BaseModel):
-    """State for the greeting workflow."""
-    name: str
-    greeting: Optional[str] = None
-    formatted_output: Optional[str] = None
-```
-
-### Step 3: Implement Step Functions (`steps.py`)
-
-Step functions receive state and context:
-
-```python
-from rufus.models import StepContext
-from state_models import GreetingState
-
-def generate_greeting(state: GreetingState, context: StepContext):
-    """Generate a personalized greeting."""
-    print(f"[{context.step_name}] Generating greeting for: {state.name}")
-    state.greeting = f"Hello, {state.name}!"
-    return {"greeting": state.greeting}
-
-def format_output(state: GreetingState, context: StepContext):
-    """Format the final output."""
-    print(f"[{context.step_name}] Formatting output...")
-    state.formatted_output = f">>> {state.greeting} <<<"
-    return {"formatted_output": state.formatted_output}
-```
-
-### Step 4: Define Workflow (`greeting_workflow.yaml`)
-
-Workflows are declarative YAML configurations:
-
-```yaml
-workflow_type: "GreetingWorkflow"
-workflow_version: "1.0"
-initial_state_model: "state_models.GreetingState"
-
-steps:
-  - name: "Generate_Greeting"
-    type: "STANDARD"
-    function: "steps.generate_greeting"
-    automate_next: true
-
-  - name: "Format_Output"
-    type: "STANDARD"
-    function: "steps.format_output"
-    dependencies: ["Generate_Greeting"]
-```
-
-### Step 5: Register Workflow (`workflow_registry.yaml`)
-
-The registry maps workflow types to their configurations:
-
-```yaml
-workflows:
-  - type: "GreetingWorkflow"
-    description: "Simple greeting workflow"
-    config_file: "greeting_workflow.yaml"
-    initial_state_model: "state_models.GreetingState"
-```
-
-### Step 6: Execute Workflow (`run_workflow.py`)
-
-```python
-import asyncio
-import sys
-from pathlib import Path
-import yaml
-
-# Add current directory to Python path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from rufus.engine import WorkflowEngine
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-
-async def main():
-    # Load workflow registry
-    with open("workflow_registry.yaml") as f:
-        registry_config = yaml.safe_load(f)
-
-    # Build registry dict
-    workflow_registry = {}
-    for workflow in registry_config["workflows"]:
-        with open(workflow["config_file"]) as f:
-            workflow_config = yaml.safe_load(f)
-        workflow_registry[workflow["type"]] = {
-            "initial_state_model_path": workflow["initial_state_model"],
-            "steps": workflow_config["steps"],
-            "workflow_version": workflow_config.get("workflow_version", "1.0"),
-        }
-
-    # Initialize engine with providers
-    engine = WorkflowEngine(
-        persistence=InMemoryPersistence(),
-        executor=SyncExecutor(),
-        observer=LoggingObserver(),
-        workflow_registry=workflow_registry,
-        expression_evaluator_cls=SimpleExpressionEvaluator,
-        template_engine_cls=Jinja2TemplateEngine,
-    )
-    await engine.initialize()
-
-    # Start workflow with initial data
-    initial_data = {"name": "World"}
-    workflow = await engine.start_workflow(
-        workflow_type="GreetingWorkflow",
-        initial_data=initial_data
-    )
-
-    print(f"✓ Workflow started: {workflow.id}")
-    print(f"  Status: {workflow.status}\n")
-
-    # Execute steps
-    while workflow.status == "ACTIVE":
-        result = await workflow.next_step(user_input={})
-        print(f"  Step completed: {result}\n")
-
-    # Display results
-    print(f"✓ Workflow completed!")
-    print(f"  Final output: {workflow.state.formatted_output}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### Step 7: Run It!
-
-```bash
-python run_workflow.py
-```
+**What this demonstrates:**
+- ✅ In-memory SQLite database (no setup required)
+- ✅ Workflow creation and execution
+- ✅ State persistence
+- ✅ Logging and metrics
 
 **Expected Output:**
+```
+======================================================================
+  RUFUS SDK - SQLITE SIMPLE DEMO
+======================================================================
+
+🗄️  Using in-memory SQLite database
+
+1. Initializing SQLite persistence...
+   ✓ SQLite provider initialized
+
+2. Creating a sample workflow...
+   ✓ Workflow created: demo_workflow_001
+
+[... more output ...]
+
+======================================================================
+  DEMO COMPLETED SUCCESSFULLY
+======================================================================
+```
+
+### Option 2: Interactive Quickstart Example
+
+Run the full quickstart example with proper Python path:
+
+```bash
+cd /path/to/rufus-sdk
+PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
+```
+
+**What this demonstrates:**
+- ✅ Workflow builder initialization
+- ✅ Sequential step execution
+- ✅ State management with Pydantic models
+- ✅ Automated step chaining
+
+---
+
+## Understanding What Just Happened
+
+### Architecture Overview
 
 ```
-[SyncExecutor] Initialized.
-✓ Workflow started: abc-123-def
-  Status: ACTIVE
-
-[Generate_Greeting] Generating greeting for: World
-  Step completed: ({'greeting': 'Hello, World!'}, None)
-
-[Format_Output] Formatting output...
-  Step completed: ({'formatted_output': '>>> Hello, World! <<<'}, None)
-
-✓ Workflow completed!
-  Final output: >>> Hello, World! <<<
-```
-
-## Understanding the Example
-
-### Architecture
-
-```
-Your Application (run_workflow.py)
-    ↓
-WorkflowEngine (orchestrator)
-    ↓
-Providers (pluggable components)
-    ├── Persistence: InMemoryPersistence
-    ├── Executor: SyncExecutor
-    └── Observer: LoggingObserver
-    ↓
-Your Workflow (greeting_workflow.yaml)
-    ├── Step 1: generate_greeting
-    └── Step 2: format_output
+┌─────────────────────────────────────────┐
+│         Your Application                │
+│  ┌───────────────────────────────────┐  │
+│  │   Workflow (YAML + Python)        │  │
+│  │   - State Model (Pydantic)        │  │
+│  │   - Step Functions (Python)       │  │
+│  │   - Workflow Config (YAML)        │  │
+│  └───────────────┬───────────────────┘  │
+│                  │                       │
+│  ┌───────────────▼───────────────────┐  │
+│  │      WorkflowBuilder/Engine       │  │
+│  │      (Orchestration Logic)        │  │
+│  └───────────────┬───────────────────┘  │
+│                  │                       │
+│     ┌────────────┼────────────┐         │
+│     ▼            ▼             ▼         │
+│ Persistence  Execution   Observability  │
+│  Provider     Provider      Provider    │
+│  (SQLite)     (Sync)       (Logging)    │
+└─────┬────────────┬─────────────┬────────┘
+      │            │             │
+  ┌───▼───┐    ┌───▼───┐     ┌──▼──┐
+  │  DB   │    │Workers│     │Logs │
+  │(File) │    │(Local)│     │(CLI)│
+  └───────┘    └───────┘     └─────┘
 ```
 
 ### Key Concepts
 
-1. **State Model** (`GreetingState`) - Pydantic model defining workflow data
-2. **Step Functions** - Python functions that transform state
-3. **Workflow Definition** - YAML file declaring step sequence
-4. **WorkflowEngine** - Orchestrates execution with pluggable providers
-5. **Providers** - Abstractions for persistence, execution, and observability
+**1. State Model (Pydantic)**
+- Defines workflow data structure
+- Type validation
+- Serialized to database
 
-### Step Function Signature
+**2. Step Functions (Python)**
+- Receive `state` and `context`
+- Return dict to update state
+- Isolated, testable functions
 
-All step functions follow this pattern:
+**3. Workflow Config (YAML)**
+- Declarative step definitions
+- Dependencies and routing
+- No orchestration code needed
 
-```python
-def step_name(state: StateModel, context: StepContext) -> Dict[str, Any]:
-    # Access current state
-    value = state.field_name
+**4. Providers (Pluggable)**
+- **Persistence** - Where state is stored (SQLite, PostgreSQL, Redis)
+- **Execution** - How steps run (Sync, Thread Pool, Celery)
+- **Observability** - What you see (Logging, Metrics)
 
-    # Modify state
-    state.new_field = "value"
-
-    # Return result dict (merged into state)
-    return {"key": "value"}
-```
-
-The `StepContext` provides:
-- `workflow_id` - Unique workflow identifier
-- `step_name` - Current step name
-- `validated_input` - User input (for human-in-the-loop)
-- `previous_step_result` - Result from previous step
+---
 
 ## Next Steps
 
-### 1. Try the Complete Quickstart Example
-
-We provide a full working example:
+### 1. Try More Examples
 
 ```bash
-cd examples/quickstart
-python run_quickstart.py
-```
+# Simple task workflow
+cd examples/sqlite_task_manager
+python main.py
 
-See [examples/quickstart/README.md](examples/quickstart/README.md) for details.
-
-### 2. Explore Complex Features
-
-Try the loan application example showcasing:
-- Parallel execution
-- Conditional branching
-- Dynamic step injection
-- Human-in-the-loop
-- Saga compensation
-
-```bash
+# Complex loan application workflow
 cd examples/loan_application
-python run_loan_sync.py
+python run_loan_workflow.py
+
+# FastAPI integration
+cd examples/fastapi_api
+uvicorn main:app --reload
 ```
 
-See [examples/loan_application/README.md](examples/loan_application/README.md) for details.
+### 2. Create Your Own Workflow
 
-### 3. Customize Providers
-
-#### Use PostgreSQL for Persistence
-
+**Step 1: Define State Model**
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistence
+# my_workflow/state_models.py
+from pydantic import BaseModel
+from typing import Optional
 
-persistence = PostgresPersistence(
-    db_url="postgresql://user:pass@localhost/rufus_db"
-)
+class MyWorkflowState(BaseModel):
+    user_id: str
+    status: Optional[str] = None
+    result: Optional[dict] = None
 ```
 
-#### Use Celery for Async Execution
-
+**Step 2: Implement Step Functions**
 ```python
-from rufus.implementations.execution.celery import CeleryExecutor
-from celery import Celery
+# my_workflow/steps.py
+from rufus.models import StepContext
+from state_models import MyWorkflowState
 
-celery_app = Celery('workflows', broker='redis://localhost:6379')
-executor = CeleryExecutor(celery_app=celery_app)
+def process_data(state: MyWorkflowState, context: StepContext) -> dict:
+    """Process user data."""
+    state.status = "processing"
+    # Your business logic here
+    return {"processed": True}
 ```
 
-### 4. Add Workflow Features
-
-#### Parallel Execution
-
+**Step 3: Define Workflow YAML**
 ```yaml
-- name: "Run_Parallel_Tasks"
-  type: "PARALLEL"
-  automate_next: true
-  tasks:
-    - name: "Task_A"
-      function: "steps.task_a"
-    - name: "Task_B"
-      function: "steps.task_b"
+# my_workflow/workflow.yaml
+workflow_type: "MyWorkflow"
+workflow_version: "1.0"
+initial_state_model: "my_workflow.state_models.MyWorkflowState"
+
+steps:
+  - name: "Process_Data"
+    type: "STANDARD"
+    function: "my_workflow.steps.process_data"
+    automate_next: true
 ```
 
-#### Conditional Branching
-
+**Step 4: Execute**
 ```python
-from rufus.models import WorkflowJumpDirective
+# my_workflow/run.py
+import asyncio
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from rufus.implementations.execution.sync import SyncExecutionProvider
 
-def evaluate_condition(state: MyState, context: StepContext):
-    if state.score > 80:
-        raise WorkflowJumpDirective(target_step_name="Approved_Path")
-    else:
-        raise WorkflowJumpDirective(target_step_name="Rejected_Path")
+async def main():
+    # Initialize providers
+    persistence = SQLitePersistenceProvider(db_path=":memory:")
+    await persistence.initialize()
+
+    # Create builder
+    builder = WorkflowBuilder(
+        config_dir="my_workflow/",
+        persistence_provider=persistence,
+        execution_provider=SyncExecutionProvider()
+    )
+
+    # Start workflow
+    workflow = await builder.create_workflow(
+        workflow_type="MyWorkflow",
+        initial_data={"user_id": "123"}
+    )
+
+    # Execute steps
+    while workflow.status == "ACTIVE":
+        await workflow.next_step()
+
+    print(f"✅ Workflow completed: {workflow.status}")
+    print(f"Final state: {workflow.state}")
+
+asyncio.run(main())
 ```
 
-#### Human-in-the-Loop
+### 3. Explore Documentation
 
+- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Core concepts and common patterns
+- **[docs/ADVANCED_GUIDE.md](docs/ADVANCED_GUIDE.md)** - Advanced features and production patterns
+- **[docs/FEATURES_AND_CAPABILITIES.md](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature reference
+- **[YAML_GUIDE.md](YAML_GUIDE.md)** - YAML configuration reference
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** - CLI command reference
+
+### 4. Learn Key Features
+
+**Human-in-the-Loop**
 ```python
 from rufus.models import WorkflowPauseDirective
 
-def request_approval(state: MyState, context: StepContext):
-    state.status = "PENDING_APPROVAL"
-    raise WorkflowPauseDirective(result={"message": "Waiting for approval"})
-
-def process_approval(state: MyState, context: StepContext):
-    decision = context.validated_input.decision
-    state.approved = (decision == "APPROVED")
-    return {"approved": state.approved}
+def approval_step(state, context):
+    raise WorkflowPauseDirective(result={"awaiting_approval": True})
 ```
 
-## Common Patterns
-
-### Pattern 1: Multi-Step Processing Pipeline
-
+**Parallel Execution**
 ```yaml
-steps:
-  - name: "Validate_Input"
-    type: "STANDARD"
-    function: "steps.validate"
-    automate_next: true
-
-  - name: "Transform_Data"
-    type: "STANDARD"
-    function: "steps.transform"
-    dependencies: ["Validate_Input"]
-    automate_next: true
-
-  - name: "Save_Results"
-    type: "STANDARD"
-    function: "steps.save"
-    dependencies: ["Transform_Data"]
+- name: "Risk_Assessment"
+  type: "PARALLEL"
+  tasks:
+    - name: "Credit_Check"
+      function: "checks.credit"
+    - name: "Fraud_Detection"
+      function: "checks.fraud"
 ```
 
-### Pattern 2: Fork-Join Parallelism
-
+**Saga Pattern (Rollback)**
 ```yaml
-steps:
-  - name: "Fetch_Data"
-    type: "STANDARD"
-    function: "steps.fetch"
-    automate_next: true
-
-  - name: "Parallel_Processing"
-    type: "PARALLEL"
-    dependencies: ["Fetch_Data"]
-    automate_next: true
-    tasks:
-      - name: "Process_A"
-        function: "steps.process_a"
-      - name: "Process_B"
-        function: "steps.process_b"
-
-  - name: "Merge_Results"
-    type: "STANDARD"
-    function: "steps.merge"
-    dependencies: ["Parallel_Processing"]
+- name: "Charge_Payment"
+  function: "payments.charge"
+  compensate_function: "payments.refund"  # Auto-rollback on failure
 ```
 
-### Pattern 3: Approval Workflow
-
-```yaml
-steps:
-  - name: "Submit_Request"
-    type: "STANDARD"
-    function: "steps.submit"
-    automate_next: true
-
-  - name: "Request_Approval"
-    type: "STANDARD"
-    function: "steps.request_approval"
-    dependencies: ["Submit_Request"]
-
-  - name: "Process_Decision"
-    type: "STANDARD"
-    function: "steps.process_decision"
-    input_model: "models.ApprovalInput"
-    dependencies: ["Request_Approval"]
-    automate_next: true
-```
-
-## Troubleshooting
-
-### Import Errors
-
-**Problem:** `ModuleNotFoundError: No module named 'rufus'`
-
-**Solution:**
-```bash
-pip install -e /path/to/rufus
-```
-
-### Step Function Not Found
-
-**Problem:** `ImportError: cannot import name 'my_function'`
-
-**Solution:** Ensure your function path in YAML matches the actual module and function:
-```yaml
-function: "steps.my_function"  # Must match steps.py module
-```
-
-### Workflow Won't Advance
-
-**Problem:** Workflow status stays `ACTIVE` but doesn't progress
-
-**Solution:** Check `automate_next: true` is set on steps that should auto-advance:
-```yaml
-- name: "My_Step"
-  type: "STANDARD"
-  function: "steps.my_step"
-  automate_next: true  # ← Required for auto-advance
-```
-
-### State Not Updating
-
-**Problem:** Step executes but state doesn't change
-
-**Solution:** Ensure your step function modifies the state object directly:
+**Sub-Workflows**
 ```python
-def my_step(state: MyState, context: StepContext):
-    state.field = "new_value"  # ← Direct mutation
-    return {"field": "new_value"}  # ← Also merged in
+from rufus.models import StartSubWorkflowDirective
+
+def trigger_kyc(state, context):
+    raise StartSubWorkflowDirective(
+        workflow_type="KYC_Verification",
+        initial_data={"user_id": state.user_id}
+    )
 ```
 
-## Learn More
+---
 
-- **[README.md](README.md)** - Project overview and features
-- **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep dive
-- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migrating from Confucius
-- **[API_REFERENCE.md](API_REFERENCE.md)** - Complete API documentation
-- **[examples/](examples/)** - More working examples
+## Common Issues
 
-## Get Help
+### Import Error: "No module named 'rufus'"
+**Solution:** Install the SDK in editable mode:
+```bash
+pip install -e .
+```
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/rufus/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/rufus/discussions)
-- **Examples**: Check `examples/` directory for working code
+### Module Not Found: "examples.quickstart.steps"
+**Solution:** Run from project root with PYTHONPATH:
+```bash
+PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
+```
 
-## What's Next?
+### Database Schema Missing
+**Solution:** Initialize database schema:
+```bash
+rufus db init
+```
 
-Now that you've created your first workflow, you can:
+### Missing Dependencies
+**Solution:** Install all dependencies:
+```bash
+pip install aiosqlite orjson asyncpg uvloop
+```
 
-1. **Add more steps** to build complex business logic
-2. **Use parallel execution** to speed up independent operations
-3. **Add human-in-the-loop** steps for approvals and reviews
-4. **Switch to PostgreSQL** for durable persistence
-5. **Deploy with Celery** for distributed execution
-6. **Build a REST API** around your workflows with Flask/FastAPI
+---
 
-Happy orchestrating! 🎯
+## Quick Command Reference
+
+```bash
+# Configuration
+rufus config show                # Show current config
+rufus config set-persistence     # Choose database (SQLite/PostgreSQL)
+rufus config set-execution       # Choose executor (sync/thread_pool)
+
+# Workflow Management
+rufus list                       # List all workflows
+rufus start <workflow-type>      # Start a workflow
+rufus show <workflow-id>         # Show workflow details
+rufus resume <workflow-id>       # Resume paused workflow
+rufus cancel <workflow-id>       # Cancel running workflow
+
+# Database Management
+rufus db init                    # Initialize database schema
+rufus db migrate                 # Apply migrations
+rufus db status                  # Check migration status
+
+# Monitoring
+rufus logs <workflow-id>         # View workflow logs
+rufus metrics                    # View performance metrics
+
+# Validation
+rufus validate workflow.yaml     # Validate YAML syntax
+```
+
+---
+
+## What Makes Rufus Different?
+
+| Feature | Rufus | Temporal | Airflow | AWS Step Functions |
+|---------|-------|----------|---------|-------------------|
+| **Setup Complexity** | Zero (embedded SQLite) | High (cluster required) | Medium (server + DB) | Low (AWS only) |
+| **Deployment** | In-process | Distributed | Server-based | Cloud-only |
+| **Language** | Python-native | Polyglot | Python | JSON DSL |
+| **Cost** | Free | Infrastructure costs | Infrastructure costs | Pay-per-execution |
+| **Vendor Lock-in** | None | None | None | AWS only |
+
+---
+
+## Next Steps Checklist
+
+- [ ] Run sqlite_task_manager demo successfully
+- [ ] Understand State, Steps, and Providers
+- [ ] Try modifying an example workflow
+- [ ] Create your own simple workflow
+- [ ] Read USAGE_GUIDE.md for common patterns
+- [ ] Explore advanced features (Saga, Parallel, Sub-workflows)
+- [ ] Join the community (link to Discord/GitHub)
+
+---
+
+**🎉 You're ready to build production workflows with Rufus!**
+
+For questions or issues:
+- 📖 [Full Documentation](docs/README.md)
+- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+
+---
+
+**Last Updated:** 2026-02-02

@@ -889,37 +889,35 @@ assert workflow.state.status == "completed"
 
 ## 📖 Documentation
 
-### Core Documentation
+### Getting Started
 
-- **[CLAUDE.md](CLAUDE.md)** - Complete developer guide with critical warnings
-- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Comprehensive usage documentation and best practices
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Core concepts and common patterns
+- **[examples/](examples/)** - Working examples (SQLite task manager, loan application, API integrations)
+
+### Reference Documentation
+
 - **[YAML_GUIDE.md](YAML_GUIDE.md)** - Complete YAML workflow syntax reference
 - **[API_REFERENCE.md](API_REFERENCE.md)** - SDK API documentation
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** - CLI command reference
+- **[docs/FEATURES_AND_CAPABILITIES.md](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature catalog
+- **[docs/OUTSTANDING_FEATURES.md](docs/OUTSTANDING_FEATURES.md)** - Roadmap and planned features
+
+### Advanced Topics
+
+- **[CLAUDE.md](CLAUDE.md)** - Complete developer guide with advanced features and critical warnings
 - **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep-dive
-
-### CLI & Tools
-
-- **[docs/CLI_USAGE_GUIDE.md](docs/CLI_USAGE_GUIDE.md)** - Complete CLI command reference
-- **[docs/CLI_QUICK_REFERENCE.md](docs/CLI_QUICK_REFERENCE.md)** - One-page CLI cheat sheet
-- **[schema/README.md](schema/README.md)** - JSON Schema and IDE integration guide
-
-### Database & Operations
-
-- **[migrations/README.md](migrations/README.md)** - Database schema management guide
-- **[SQLITE_IMPLEMENTATION_PLAN.md](SQLITE_IMPLEMENTATION_PLAN.md)** - SQLite integration details
-- **[PERFORMANCE_OPTIMIZATION_PLAN.md](PERFORMANCE_OPTIMIZATION_PLAN.md)** - Performance optimization strategy
-
-### Architecture & Planning
-
-- **[ARCHITECTURE_REVIEW_RESPONSE.md](ARCHITECTURE_REVIEW_RESPONSE.md)** - Tier 1 & 2 enhancement plan
-- **[TIER1_IMPLEMENTATION_SUMMARY.md](TIER1_IMPLEMENTATION_SUMMARY.md)** - Recent improvements summary
 - **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migration from legacy systems
+
+### All Documentation
+
+- **[docs/README.md](docs/README.md)** - Complete documentation index and navigation guide
 
 ---
 
 ## 🚦 Project Status
 
-**Current Version**: Alpha (v0.1.0)
+**Current Version**: Pre-release (v0.9.0)
 
 ### ✅ Recent Completions
 
