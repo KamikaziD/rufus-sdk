@@ -427,7 +427,7 @@ Initialize, migrate, and monitor your Rufus database.
 
 ### `rufus db init`
 
-Initialize database schema.
+Initialize database schema by applying all migrations.
 
 ```bash
 # Initialize using configured database
@@ -438,21 +438,38 @@ rufus db init --db-url sqlite:///path/to/db.sqlite
 rufus db init --db-url postgresql://user:pass@localhost/rufus
 ```
 
-**What it does:**
-- Creates all required tables (workflow_executions, tasks, logs, metrics, etc.)
-- Creates indexes for performance
-- Sets up triggers for automatic timestamps
-- Enables foreign key constraints (SQLite)
-- Enables WAL mode (SQLite)
+**How It Works:**
+- Uses **migration files** as single source of truth (`migrations/*.sql`)
+- Creates `schema_migrations` table to track applied versions
+- Applies all pending migrations in order
+- Idempotent - safe to run multiple times
 
-**SQLite Schema:**
-- 6 tables: workflow_executions, tasks, compensation_log, audit_log, execution_logs, metrics
-- 7 indexes for query performance
-- 2 triggers for timestamp management
+**What it creates:**
+- All required tables (workflow_executions, tasks, logs, metrics, heartbeats, etc.)
+- Performance indexes for query optimization
+- Triggers for automatic timestamps
+- Foreign key constraints (enforced)
+- WAL mode enabled (SQLite only)
 
-**PostgreSQL Schema:**
-- Same tables with PostgreSQL-specific optimizations
-- Managed via migration system
+**Tables Created:**
+- `workflow_executions` - Core workflow state and metadata
+- `workflow_heartbeats` - Worker health tracking for zombie detection
+- `tasks` - Distributed task queue
+- `compensation_log` - Saga pattern rollback actions
+- `workflow_audit_log` - Complete audit trail
+- `workflow_execution_logs` - Debug and monitoring logs
+- `workflow_metrics` - Performance analytics
+- `schema_migrations` - Migration version tracking
+
+**SQLite Auto-Init:**
+For development convenience, SQLite databases automatically initialize on first use:
+```python
+# Schema automatically created via migrations
+persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
+await persistence.initialize()  # Creates schema if missing
+```
+
+**Note:** Both `rufus db init` and SQLite auto-init use the same migration files, ensuring schema consistency.
 
 ### `rufus db migrate`
 

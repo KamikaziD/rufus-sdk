@@ -577,29 +577,56 @@ Rufus uses a **unified schema definition** system to support multiple databases 
 
 ### Schema Management
 
-All schemas generated from a single source of truth:
+**Unified Migration System** - All database initialization uses migrations as the single source of truth:
 
 ```
-migrations/schema.yaml (unified definition)
+migrations/*.sql (migration files)
            │
     ┌──────┴──────┐
     ▼             ▼
-PostgreSQL     SQLite
- .sql files    .sql files
+rufus db init  auto_init=True
+(CLI command)  (SQLite only)
+    │             │
+    └─────┬───────┘
+          ▼
+  MigrationManager
+  (applies migrations)
 ```
 
-**Tools**:
+**Initialize Database**:
 ```bash
-# Generate migrations from schema
-python tools/compile_schema.py --all
+# Option 1: CLI command (PostgreSQL or SQLite)
+rufus db init
 
-# Validate schema consistency
-python tools/validate_schema.py --all
-
-# Apply migrations
-python tools/migrate.py --db postgresql://... --up
-python tools/migrate.py --db sqlite:///workflows.db --up
+# Option 2: Auto-init (SQLite only, enabled by default)
+# Database schema automatically created on first use
+persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
+await persistence.initialize()  # Schema created if missing
 ```
+
+**Migration Management**:
+```bash
+# Check migration status
+rufus db status
+
+# Apply pending migrations
+rufus db migrate
+
+# Dry-run (preview migrations)
+rufus db migrate --dry-run
+
+# View database statistics
+rufus db stats
+
+# Validate schema integrity
+rufus db validate
+```
+
+**Key Features**:
+- ✅ **No schema drift** - Both CLI and auto-init use identical migrations
+- ✅ **Version tracking** - `schema_migrations` table tracks applied migrations
+- ✅ **Zero-setup SQLite** - Auto-init creates schema on first use
+- ✅ **Production-ready** - Same migrations for dev (SQLite) and prod (PostgreSQL)
 
 ### Usage Examples
 
@@ -618,11 +645,14 @@ persistence = PostgresPersistenceProvider(
 ```python
 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 
-# In-memory (testing)
-persistence = SQLitePersistenceProvider(db_path=":memory:")
+# In-memory (testing) - schema auto-created
+persistence = SQLitePersistenceProvider(db_path=":memory:", auto_init=True)
 
-# File-based (development)
-persistence = SQLitePersistenceProvider(db_path="workflows.db")
+# File-based (development) - schema auto-created if missing
+persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
+
+# Disable auto-init (use rufus db init instead)
+persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=False)
 ```
 
 **In-Memory (Testing)**:

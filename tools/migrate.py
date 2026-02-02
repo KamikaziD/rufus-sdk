@@ -76,31 +76,52 @@ class Migration:
 class MigrationManager:
     """Manages database schema migrations"""
 
-    def __init__(self, db_url: str, migrations_dir: str = "migrations"):
+    def __init__(self, db_url: str = None, migrations_dir: str = "migrations", db_type: str = None, conn=None):
+        """
+        Initialize MigrationManager.
+
+        Args:
+            db_url: Database URL (optional if conn provided)
+            migrations_dir: Directory containing migration files
+            db_type: Database type ('postgres' or 'sqlite', optional if db_url provided)
+            conn: Existing database connection (optional, will create new if not provided)
+        """
         self.db_url = db_url
         self.migrations_dir = Path(migrations_dir)
+        self._owns_connection = conn is None  # Track if we created the connection
+        self.conn = conn
 
-        # Parse database type from URL
-        parsed = urlparse(db_url)
-        self.db_type = parsed.scheme.split('+')[0]  # Handle postgres+asyncpg
-
-        if self.db_type == 'postgresql':
-            self.db_type = 'postgres'
+        # Determine database type
+        if db_type:
+            self.db_type = db_type
+        elif db_url:
+            # Parse database type from URL
+            parsed = urlparse(db_url)
+            self.db_type = parsed.scheme.split('+')[0]  # Handle postgres+asyncpg
+            if self.db_type == 'postgresql':
+                self.db_type = 'postgres'
+        else:
+            raise ValueError("Either db_url or db_type must be provided")
 
         if self.db_type not in ['postgres', 'sqlite']:
             raise ValueError(f"Unsupported database type: {self.db_type}")
 
-        # Check dependencies
-        if self.db_type == 'postgres' and not ASYNCPG_AVAILABLE:
-            raise ImportError("asyncpg is required for PostgreSQL migrations. Install with: pip install asyncpg")
+        # Check dependencies only if we need to create a connection
+        if self._owns_connection:
+            if self.db_type == 'postgres' and not ASYNCPG_AVAILABLE:
+                raise ImportError("asyncpg is required for PostgreSQL migrations. Install with: pip install asyncpg")
 
-        if self.db_type == 'sqlite' and not AIOSQLITE_AVAILABLE:
-            raise ImportError("aiosqlite is required for SQLite migrations. Install with: pip install aiosqlite")
-
-        self.conn = None
+            if self.db_type == 'sqlite' and not AIOSQLITE_AVAILABLE:
+                raise ImportError("aiosqlite is required for SQLite migrations. Install with: pip install aiosqlite")
 
     async def connect(self):
-        """Connect to the database"""
+        """Connect to the database (only if we don't already have a connection)"""
+        if self.conn is not None:
+            return  # Already connected (using external connection)
+
+        if not self.db_url:
+            raise ValueError("Cannot connect: no db_url provided and no existing connection")
+
         if self.db_type == 'postgres':
             self.conn = await asyncpg.connect(self.db_url)
         else:  # sqlite
@@ -109,14 +130,15 @@ class MigrationManager:
             self.conn = await aiosqlite.connect(db_path)
 
     async def close(self):
-        """Close database connection"""
-        if self.conn:
+        """Close database connection (only if we created it)"""
+        if self.conn and self._owns_connection:
             if self.db_type == 'postgres':
                 await self.conn.close()
             else:
                 await self.conn.close()
+            self.conn = None
 
-    async def init_schema_migrations_table(self):
+    async def init_schema_migrations_table(self, silent: bool = False):
         """Create schema_migrations table if it doesn't exist"""
         if self.db_type == 'postgres':
             await self.conn.execute("""
@@ -138,7 +160,8 @@ class MigrationManager:
             """)
             await self.conn.commit()
 
-        print("✓ Initialized schema_migrations table")
+        if not silent:
+            print("✓ Initialized schema_migrations table")
 
     async def get_applied_versions(self) -> List[int]:
         """Get list of applied migration versions"""
@@ -179,9 +202,10 @@ class MigrationManager:
         pending = [m for m in all_migrations if m.version not in applied_versions]
         return sorted(pending)
 
-    async def apply_migration(self, migration: Migration):
+    async def apply_migration(self, migration: Migration, silent: bool = False):
         """Apply a single migration"""
-        print(f"\n▶ Applying migration {migration.version:03d}: {migration.name}")
+        if not silent:
+            print(f"\n▶ Applying migration {migration.version:03d}: {migration.name}")
 
         # Read migration file
         with open(migration.filepath, 'r') as f:
@@ -199,12 +223,9 @@ class MigrationManager:
                     migration.name
                 )
             else:  # sqlite
-                # SQLite needs to execute statements one at a time
-                # Split by semicolon and execute each statement
-                statements = [s.strip() for s in sql.split(';') if s.strip()]
-
-                for statement in statements:
-                    await self.conn.execute(statement)
+                # Use executescript for SQLite to handle multi-statement SQL
+                # This properly handles triggers with BEGIN...END blocks
+                await self.conn.executescript(sql)
 
                 # Record in schema_migrations
                 await self.conn.execute(
@@ -214,35 +235,56 @@ class MigrationManager:
 
                 await self.conn.commit()
 
-            print(f"  ✓ Successfully applied migration {migration.version:03d}")
+            if not silent:
+                print(f"  ✓ Successfully applied migration {migration.version:03d}")
 
         except Exception as e:
-            print(f"  ✗ Failed to apply migration {migration.version:03d}: {e}", file=sys.stderr)
+            if not silent:
+                print(f"  ✗ Failed to apply migration {migration.version:03d}: {e}", file=sys.stderr)
             if self.db_type == 'sqlite':
                 await self.conn.rollback()
             raise
 
-    async def migrate_up(self, target_version: Optional[int] = None):
+    async def migrate_up(self, target_version: Optional[int] = None, silent: bool = False):
         """Apply pending migrations up to target version (or all if None)"""
         pending = await self.get_pending_migrations()
 
         if not pending:
-            print("✓ No pending migrations")
+            if not silent:
+                print("✓ No pending migrations")
             return
 
         if target_version:
             pending = [m for m in pending if m.version <= target_version]
 
         if not pending:
-            print(f"✓ No migrations to apply up to version {target_version}")
+            if not silent:
+                print(f"✓ No migrations to apply up to version {target_version}")
             return
 
-        print(f"\nApplying {len(pending)} migration(s)...")
+        if not silent:
+            print(f"\nApplying {len(pending)} migration(s)...")
 
         for migration in pending:
-            await self.apply_migration(migration)
+            await self.apply_migration(migration, silent=silent)
 
-        print(f"\n✅ Successfully applied {len(pending)} migration(s)")
+        if not silent:
+            print(f"\n✅ Successfully applied {len(pending)} migration(s)")
+
+    async def init_fresh_database(self, silent: bool = False):
+        """
+        Initialize a fresh database by applying all migrations.
+
+        This is used by auto-init and db init commands.
+
+        Args:
+            silent: If True, suppress output messages
+        """
+        # Initialize schema_migrations table
+        await self.init_schema_migrations_table(silent=silent)
+
+        # Apply all migrations
+        await self.migrate_up(silent=silent)
 
     async def status(self):
         """Show migration status"""

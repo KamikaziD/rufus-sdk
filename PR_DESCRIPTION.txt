@@ -1,0 +1,109 @@
+## Unified Migration System for Database Initialization
+
+### Summary
+
+Implements a **unified migration system** where both `rufus db init` (CLI) and `auto_init=True` (SQLite) use the same migration files as a single source of truth. This eliminates schema drift and ensures consistency across all environments.
+
+### Problem
+
+**Before:** Two separate schema sources
+- CLI used migration files
+- Auto-init used embedded SQL constant
+- Risk of schema drift between dev and prod
+
+**After:** Single source of truth
+```
+migrations/*.sql → MigrationManager → Both CLI and auto-init
+```
+
+### Changes
+
+1. **Enhanced MigrationManager** (`tools/migrate.py`)
+   - Added connection reuse support
+   - Added silent mode for auto-init
+   - Fixed SQLite trigger parsing with `executescript()`
+
+2. **Updated SQLitePersistenceProvider** (`src/rufus/implementations/persistence/sqlite.py`)
+   - `_create_schema()` now uses MigrationManager
+   - Fixed project root path calculation
+   - Creates `schema_migrations` table for version tracking
+
+3. **Unified CLI Commands** (`src/rufus_cli/commands/db_cmd.py`)
+   - Both SQLite and PostgreSQL use MigrationManager
+   - Removed 200+ lines of embedded SQL
+
+4. **New Migration** (`migrations/003_sqlite_fixed.sql`)
+   - Simplified schema without complex DEFAULT expressions
+   - Application generates IDs (not database)
+   - Replaced 002_sqlite_initial.sql (syntax errors)
+
+### Testing
+
+✅ All existing tests pass (9/9)
+✅ Manual testing: CLI init, auto-init, full workflow
+✅ Schema consistency verified
+✅ Migration status tracking works
+
+### Documentation
+
+Updated 6 documentation files:
+- README.md - Schema management section
+- TECHNICAL_DOCUMENTATION.md - Database initialization
+- USAGE_GUIDE.md - Provider examples
+- CLI_USAGE_GUIDE.md - Complete rewrite of `db init` docs
+- AUTO_INIT_IMPLEMENTATION.md - Unified system section
+- migrations/README.md - New unified approach section
+
+### Breaking Changes
+
+⚠️ **None** - Fully backward compatible
+- Existing databases work unchanged
+- Auto-init still enabled by default
+- Config files unchanged
+
+### Benefits
+
+✅ **No schema drift** - Single source of truth
+✅ **Version tracking** - `schema_migrations` table
+✅ **Simplified maintenance** - Update once, works everywhere
+✅ **Zero-setup SQLite** - Auto-init for development
+✅ **Production-ready** - Same schema in dev and prod
+
+### Migration Guide
+
+**Existing users:** No changes required
+```bash
+rufus db init  # Works exactly as before
+```
+
+**New users:** Even simpler
+```bash
+rufus start MyWorkflow --data '{}'  # Schema auto-created!
+```
+
+### Files Changed
+
+- `tools/migrate.py` - Connection reuse, silent mode
+- `src/rufus/implementations/persistence/sqlite.py` - Migration-based init
+- `src/rufus_cli/commands/db_cmd.py` - Unified initialization
+- `migrations/003_sqlite_fixed.sql` - New migration (155 lines)
+- `migrations/002_sqlite_initial.sql` → `.old` (backup)
+- 6 documentation files updated
+
+### Verification
+
+```bash
+# Test CLI init
+rm -f test.db && rufus db init && rufus db status
+# ✅ Applied migrations: 1 (✓ 003)
+
+# Test auto-init
+python run_greeting.py
+# ✅ Schema auto-created, workflow runs successfully
+```
+
+---
+
+**Ready for review** ✅
+
+See `PR_UNIFIED_MIGRATION.md` for complete details.

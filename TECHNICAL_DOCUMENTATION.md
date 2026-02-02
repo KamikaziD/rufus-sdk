@@ -1356,9 +1356,56 @@ cd rufus
 # Install dependencies
 pip install -e ".[all]"
 
+# Initialize database (optional - SQLite uses auto-init by default)
+rufus db init
+
 # Run tests
 pytest tests/
 ```
+
+### Database Initialization
+
+Rufus uses a **unified migration system** where all database initialization (CLI and auto-init) uses migrations as the single source of truth.
+
+**Automatic Initialization (SQLite only)**:
+```python
+# Schema automatically created on first use (default behavior)
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
+await persistence.initialize()  # Schema created via migrations if missing
+```
+
+**Manual Initialization (All databases)**:
+```bash
+# PostgreSQL
+rufus db init --db-url postgresql://user:pass@localhost/rufus
+
+# SQLite
+rufus db init --db-url sqlite:///workflows.db
+
+# Use config file
+rufus config set-persistence  # Interactive setup
+rufus db init                 # Uses config
+```
+
+**Migration Management**:
+```bash
+# Check migration status
+rufus db status
+
+# Apply pending migrations
+rufus db migrate
+
+# View database statistics
+rufus db stats
+```
+
+**Key Features**:
+- ✅ **Single source of truth** - All init methods use migration files
+- ✅ **Version tracking** - `schema_migrations` table tracks applied versions
+- ✅ **Zero-setup SQLite** - Auto-init for development convenience
+- ✅ **Production-ready** - Same migrations for dev and prod
 
 ### Code Standards
 

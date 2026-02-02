@@ -280,16 +280,29 @@ async def main():
     # --- 2. Initialize SDK Providers ---
     # Choose your desired implementations for persistence, execution, and observability
     persistence_provider = InMemoryPersistence() # For development and testing
-    # persistence_provider = SQLitePersistenceProvider(db_path="workflows.db") # For development (embedded DB)
-    # persistence_provider = PostgresPersistenceProvider(db_url="postgresql://user:password@host:port/db") # For production
+
+    # SQLite (Development) - Schema auto-created via migrations
+    # persistence_provider = SQLitePersistenceProvider(
+    #     db_path="workflows.db",
+    #     auto_init=True  # Automatically creates schema if missing (default)
+    # )
+
+    # PostgreSQL (Production) - Use 'rufus db init' to create schema first
+    # persistence_provider = PostgresPersistenceProvider(
+    #     db_url="postgresql://user:password@host:port/db"
+    # )
+
     execution_provider = SyncExecutor() # For synchronous execution
     # execution_provider = CeleryExecutor(celery_app=my_celery_app_instance)
     workflow_observer = LoggingObserver() # Logs events to console
 
     # Initialize providers (important for async providers)
-    await persistence_provider.initialize()
+    await persistence_provider.initialize()  # SQLite auto-init happens here
     await workflow_observer.initialize()
     # execution_provider.initialize() is called internally by WorkflowEngine if it exists
+
+    # Note: For SQLite with auto_init=True, schema is automatically created via
+    # migrations on first initialize(). For PostgreSQL, run 'rufus db init' first.
 
     # --- 3. Instantiate WorkflowEngine ---
     engine = WorkflowEngine(

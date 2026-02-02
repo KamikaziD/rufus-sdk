@@ -261,9 +261,40 @@ class SQLitePersistenceProvider(PersistenceProvider):
             raise
 
     async def _create_schema(self):
-        """Create database schema using executescript"""
-        await self.conn.executescript(SQLITE_SCHEMA)
-        await self.conn.commit()
+        """Create database schema by applying all migrations"""
+        import sys
+        from pathlib import Path
+
+        # Add tools directory to path so we can import migrate
+        # __file__ is src/rufus/implementations/persistence/sqlite.py
+        # Need 5 parents to get to project root: persistence -> implementations -> rufus -> src -> root
+        project_root = Path(__file__).parent.parent.parent.parent.parent
+        tools_dir = project_root / "tools"
+        if str(tools_dir) not in sys.path:
+            sys.path.insert(0, str(tools_dir))
+
+        try:
+            from migrate import MigrationManager
+
+            # Determine migrations directory
+            migrations_dir = project_root / "migrations"
+
+            # Create migration manager with existing connection
+            manager = MigrationManager(
+                db_type='sqlite',
+                conn=self.conn,
+                migrations_dir=str(migrations_dir)
+            )
+
+            # Apply all migrations (silent mode for auto-init)
+            await manager.init_fresh_database(silent=True)
+
+        except ImportError as e:
+            logger.error(f"Failed to import MigrationManager: {e}")
+            logger.warning("Falling back to embedded schema")
+            # Fallback to embedded schema if migration tools not available
+            await self.conn.executescript(SQLITE_SCHEMA)
+            await self.conn.commit()
 
     async def close(self):
         """Close database connection"""
