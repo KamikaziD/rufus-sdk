@@ -5,7 +5,6 @@ anyio==4.12.1
 async-timeout==5.0.1
 aiosqlite>=0.19.0
 asyncpg==0.31.0
-backports.asyncio.runner==1.2.0
 billiard==4.2.4
 celery==5.6.2
 certifi==2026.1.4
@@ -53,7 +52,6 @@ PyYAML==6.0.3
 redis==7.1.0
 requests==2.32.5
 rich==14.2.0
-rufus @ file:///Users/kim/PycharmProjects/rufus
 shellingham==1.5.4
 six==1.17.0
 slowapi==0.1.9
@@ -74,3 +72,4 @@ watchfiles==1.1.1
 wcwidth==0.2.14
 websockets==16.0
 wrapt==2.0.1
+# rufus is installed via pip install -e . in editable mode
