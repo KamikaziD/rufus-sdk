@@ -200,19 +200,28 @@ async def demo_inference(provider):
 
 
 async def run_edge_loop():
-    """Main edge agent loop."""
+    """Main edge agent loop with automatic updates."""
     print("\n" + "="*60)
-    print("  EDGE AGENT LOOP")
+    print("  EDGE AGENT LOOP (with Auto-Update)")
     print("="*60 + "\n")
 
     print("  Starting continuous polling...")
+    print("  Updates will be automatically installed with Saga rollback")
     print("  Press Ctrl+C to stop\n")
 
     from rufus.implementations.inference.factory import InferenceFactory
+    from artifact_updater import ArtifactUpdater, UpdateInstruction
+
     factory = InferenceFactory()
+    updater = ArtifactUpdater(
+        artifacts_dir=ARTIFACTS_DIR,
+        cloud_url=CLOUD_URL,
+        api_key=API_KEY
+    )
 
     poll_count = 0
     poll_interval = 60  # seconds
+    current_artifact = None  # Track currently installed artifact
 
     import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -222,21 +231,62 @@ async def run_edge_loop():
 
             try:
                 identity = factory.get_hardware_identity(DEVICE_ID)
+                identity_dict = identity.to_dict()
+                identity_dict['current_artifact'] = current_artifact
 
                 response = await client.post(
                     f"{CLOUD_URL}/api/v1/update-check",
-                    json=identity.to_dict(),
+                    json=identity_dict,
                     headers={"X-API-Key": API_KEY}
                 )
 
                 if response.status_code == 200:
                     data = response.json()
-                    status = "UPDATE" if data.get('needs_update') else "OK"
+                    needs_update = data.get('needs_update')
                     artifact = data.get('artifact', '-')
-                    print(f"  [{timestamp}] Poll #{poll_count}: {status} | Artifact: {artifact}")
 
-                    if data.get('needs_update'):
-                        print(f"               -> Would download: {data.get('artifact_url')}")
+                    status_str = "UPDATE AVAILABLE" if needs_update else "UP-TO-DATE"
+                    print(f"  [{timestamp}] Poll #{poll_count}: {status_str} | {artifact}")
+
+                    if needs_update:
+                        print(f"\n  {'─'*58}")
+                        print(f"  UPDATE DETECTED: {artifact}")
+                        print(f"  {'─'*58}")
+
+                        # Create update instruction
+                        instruction = UpdateInstruction(
+                            needs_update=True,
+                            artifact=data.get('artifact'),
+                            artifact_url=data.get('artifact_url'),
+                            artifact_hash=data.get('artifact_hash'),
+                            policy_id=data.get('policy_id'),
+                            policy_version=data.get('policy_version'),
+                            message=data.get('message')
+                        )
+
+                        # Progress callback
+                        def update_progress(status, message):
+                            print(f"    [{status.value}] {message}")
+
+                        # Perform update with Saga rollback
+                        result = await updater.perform_update(
+                            instruction,
+                            DEVICE_ID,
+                            current_artifact,
+                            update_progress
+                        )
+
+                        if result.success:
+                            print(f"  ✓ Update completed: {artifact}")
+                            current_artifact = artifact
+                        else:
+                            print(f"  ✗ Update failed: {result.error}")
+                            if result.rollback_performed:
+                                print(f"  ↶ Rollback successful - system restored")
+                            else:
+                                print(f"  ⚠ Rollback failed - manual intervention may be needed")
+
+                        print(f"  {'─'*58}\n")
                 else:
                     print(f"  [{timestamp}] Poll #{poll_count}: HTTP {response.status_code}")
 

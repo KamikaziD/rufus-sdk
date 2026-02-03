@@ -353,6 +353,48 @@ async def register_device(
         raise HTTPException(status_code=500, detail=f"Registration failed: {e}")
 
 
+@app.get("/api/v1/devices")
+async def list_devices(
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List all registered devices."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    # In production, filter by org_id from user context
+    devices = await device_service.list_devices(
+        status=status,
+        limit=limit,
+        offset=offset
+    )
+
+    return {
+        "total": len(devices),
+        "devices": devices,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@app.get("/api/v1/devices/{device_id}")
+async def get_device(
+    device_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get details of a specific device."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    device = await device_service.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    return device
+
+
 @app.get("/api/v1/devices/{device_id}/config")
 async def get_device_config(
     device_id: str,

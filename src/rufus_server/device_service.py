@@ -92,7 +92,7 @@ class DeviceService:
         return device.get("api_key_hash") == api_key_hash
 
     async def _get_device(self, device_id: str) -> Optional[Dict[str, Any]]:
-        """Get device by ID."""
+        """Get device by ID (internal, includes sensitive data)."""
         result = await self.persistence.execute(
             "SELECT * FROM edge_devices WHERE device_id = ?",
             (device_id,)
@@ -102,6 +102,46 @@ class DeviceService:
             columns = [desc[0] for desc in result.description]
             return dict(zip(columns, rows[0]))
         return None
+
+    async def get_device(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """Get device by ID (public, excludes sensitive data)."""
+        device = await self._get_device(device_id)
+        if device:
+            # Remove sensitive fields
+            device.pop('api_key_hash', None)
+            device.pop('public_key', None)
+        return device
+
+    async def list_devices(
+        self,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """List all registered devices."""
+        query = "SELECT * FROM edge_devices"
+        params = []
+
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+
+        query += f" ORDER BY registered_at DESC LIMIT {limit} OFFSET {offset}"
+
+        result = await self.persistence.execute(query, tuple(params) if params else ())
+        rows = await result.fetchall()
+
+        devices = []
+        if rows:
+            columns = [desc[0] for desc in result.description]
+            for row in rows:
+                device = dict(zip(columns, row))
+                # Remove sensitive fields
+                device.pop('api_key_hash', None)
+                device.pop('public_key', None)
+                devices.append(device)
+
+        return devices
 
     # ─────────────────────────────────────────────────────────────────────────
     # Config Management
