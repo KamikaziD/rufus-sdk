@@ -211,10 +211,18 @@ async def run_edge_loop():
 
     from rufus.implementations.inference.factory import InferenceFactory
     from artifact_updater import ArtifactUpdater, UpdateInstruction
+    from command_handler import CommandHandler
 
     factory = InferenceFactory()
     updater = ArtifactUpdater(
         artifacts_dir=ARTIFACTS_DIR,
+        cloud_url=CLOUD_URL,
+        api_key=API_KEY
+    )
+
+    # Initialize command handler
+    command_handler = CommandHandler(
+        device_id=DEVICE_ID,
         cloud_url=CLOUD_URL,
         api_key=API_KEY
     )
@@ -227,6 +235,37 @@ async def run_edge_loop():
 
     import httpx
     import time
+
+    # WebSocket handler for critical commands
+    async def websocket_handler():
+        """Maintain WebSocket connection for critical commands."""
+        import websockets
+        while True:
+            try:
+                ws_url = CLOUD_URL.replace("http://", "ws://").replace("https://", "wss://")
+                ws_url = f"{ws_url}/api/v1/devices/{DEVICE_ID}/ws"
+
+                async with websockets.connect(ws_url) as websocket:
+                    logger.info("WebSocket connected for critical commands")
+
+                    while True:
+                        message = await websocket.recv()
+                        import json
+                        data = json.loads(message)
+
+                        if data.get('type') == 'command':
+                            command = data.get('command')
+                            logger.info(f"Received critical command via WebSocket: {command.get('command_type')}")
+                            await command_handler.process_commands([command])
+                        elif data.get('type') == 'ping':
+                            await websocket.send(json.dumps({"type": "pong"}))
+            except Exception as e:
+                logger.warning(f"WebSocket connection lost: {e}, reconnecting in 10s...")
+                await asyncio.sleep(10)
+
+    # Start WebSocket handler in background (runs independently)
+    asyncio.create_task(websocket_handler())
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             poll_count += 1
@@ -236,7 +275,7 @@ async def run_edge_loop():
             # Send heartbeat if interval has passed
             if current_time - last_heartbeat >= heartbeat_interval:
                 try:
-                    await client.post(
+                    response = await client.post(
                         f"{CLOUD_URL}/api/v1/devices/{DEVICE_ID}/heartbeat",
                         json={
                             "device_status": "online",
@@ -247,6 +286,14 @@ async def run_edge_loop():
                         headers={"X-API-Key": API_KEY}
                     )
                     last_heartbeat = current_time
+
+                    # Process commands from heartbeat response
+                    if response.status_code == 200:
+                        heartbeat_data = response.json()
+                        commands = heartbeat_data.get('commands', [])
+                        if commands:
+                            logger.info(f"Received {len(commands)} command(s) from heartbeat")
+                            await command_handler.process_commands(commands)
                 except Exception as e:
                     logger.warning(f"Heartbeat failed: {e}")
 

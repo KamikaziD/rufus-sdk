@@ -20,6 +20,9 @@ from dotenv import load_dotenv
 import yaml
 import asyncio
 from typing import Optional, Any, Dict, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -818,6 +821,220 @@ async def download_artifact(artifact_name: str):
         filename=artifact_name,
         media_type="application/octet-stream"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Remote Command System
+# ─────────────────────────────────────────────────────────────────────────────
+
+from rufus_server.command_types import (
+    CommandType, CommandPriority, DeviceCommand,
+    get_command_priority, should_use_websocket
+)
+
+# WebSocket connections for real-time commands
+websocket_connections: Dict[str, WebSocket] = {}
+
+
+@app.post("/api/v1/devices/{device_id}/commands")
+async def send_device_command(
+    device_id: str,
+    command: DeviceCommand,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Send a command to an edge device.
+
+    Commands are routed based on priority:
+    - CRITICAL: Sent via WebSocket (if connected), otherwise queued
+    - HIGH/NORMAL/LOW: Queued and delivered via heartbeat
+
+    Example commands:
+    ```json
+    {
+      "type": "restart",
+      "data": {"delay_seconds": 10},
+      "priority": "normal"
+    }
+    ```
+
+    Command types:
+    - Device: restart, shutdown, reboot
+    - Config: update_config, reload_config
+    - Maintenance: backup, schedule_backup, clear_cache, health_check
+    - Workflow: start_workflow, cancel_workflow, retry_workflow
+    - Critical: emergency_stop, fraud_alert, security_lockdown
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    # Validate device exists
+    device = await device_service.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    # Determine priority and routing
+    priority = get_command_priority(command.type)
+    use_websocket = should_use_websocket(command.type)
+
+    # Try WebSocket first for critical commands
+    if use_websocket and device_id in websocket_connections:
+        ws = websocket_connections[device_id]
+        try:
+            await ws.send_json({
+                "type": "command",
+                "command": command.to_dict()
+            })
+            return {
+                "command_id": None,  # WebSocket commands don't get queued
+                "device_id": device_id,
+                "type": command.type,
+                "status": "sent_via_websocket",
+                "delivery": "immediate"
+            }
+        except Exception as e:
+            logger.warning(f"WebSocket send failed, falling back to queue: {e}")
+
+    # Queue command for heartbeat delivery
+    command_id = await device_service.send_command(
+        device_id=device_id,
+        command_type=command.type,
+        command_data=command.data,
+        expires_in_seconds=command.timeout_seconds
+    )
+
+    delivery_method = "websocket_fallback" if use_websocket else "heartbeat"
+
+    return {
+        "command_id": command_id,
+        "device_id": device_id,
+        "type": command.type,
+        "priority": priority,
+        "status": "queued",
+        "delivery_method": delivery_method,
+        "estimated_delivery": "within 30 seconds" if not use_websocket else "immediate (via websocket)",
+        "expires_in": command.timeout_seconds
+    }
+
+
+@app.post("/api/v1/devices/{device_id}/commands/{command_id}/status")
+async def update_command_status(
+    device_id: str,
+    command_id: str,
+    status_update: dict
+):
+    """
+    Device reports command execution status.
+
+    Status values:
+    - received: Command received by device
+    - executing: Command is being executed
+    - completed: Command completed successfully
+    - failed: Command execution failed
+    """
+    # TODO: Store command execution results
+    # For now, just log it
+    import logging
+    logger = logging.getLogger(__name__)
+
+    status = status_update.get("status")
+    result = status_update.get("result")
+    error = status_update.get("error")
+
+    logger.info(
+        f"Device {device_id} - Command {command_id}: {status} "
+        f"(result={result}, error={error})"
+    )
+
+    return {"ack": True, "received": True}
+
+
+@app.websocket("/api/v1/devices/{device_id}/ws")
+async def device_websocket(websocket: WebSocket, device_id: str):
+    """
+    WebSocket endpoint for real-time device communication.
+
+    Used for:
+    - Critical commands (emergency stop, fraud alerts)
+    - Real-time monitoring
+    - Bidirectional streaming
+
+    Connection lifecycle:
+    1. Device connects with API key in query params
+    2. Server accepts connection
+    3. Device sends heartbeats
+    4. Server can push commands instantly
+    5. Device reports command results
+    """
+    # Accept connection
+    await websocket.accept()
+
+    # TODO: Authenticate device (check API key from query params)
+    # For demo, we'll accept all connections
+
+    # Register connection
+    websocket_connections[device_id] = websocket
+    logger.info(f"WebSocket connected: {device_id}")
+
+    try:
+        while True:
+            # Receive messages from device
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+
+            if message_type == "heartbeat":
+                # WebSocket heartbeat (more frequent than HTTP heartbeat)
+                await websocket.send_json({
+                    "type": "heartbeat_ack",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+
+            elif message_type == "command_result":
+                # Device reporting command execution result
+                command_id = data.get("command_id")
+                status = data.get("status")
+                result = data.get("result")
+                logger.info(f"Device {device_id} command result: {command_id} = {status}")
+
+                # Send acknowledgment
+                await websocket.send_json({
+                    "type": "command_result_ack",
+                    "command_id": command_id
+                })
+
+            elif message_type == "log":
+                # Real-time log streaming
+                log_data = data.get("data")
+                logger.info(f"Device {device_id} log: {log_data}")
+
+            else:
+                logger.warning(f"Unknown message type from {device_id}: {message_type}")
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {device_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for {device_id}: {e}")
+    finally:
+        # Cleanup connection
+        if device_id in websocket_connections:
+            del websocket_connections[device_id]
+        logger.info(f"WebSocket cleanup: {device_id}")
+
+
+@app.get("/api/v1/devices/{device_id}/connection")
+async def get_device_connection_status(
+    device_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Check if device has an active WebSocket connection."""
+    is_connected = device_id in websocket_connections
+
+    return {
+        "device_id": device_id,
+        "websocket_connected": is_connected,
+        "connection_type": "websocket" if is_connected else "heartbeat_only",
+        "can_send_critical_commands": is_connected
+    }
 
 
 @app.get("/api/v1/rollout/status")

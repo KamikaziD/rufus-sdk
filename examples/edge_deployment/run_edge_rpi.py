@@ -251,6 +251,44 @@ async def main():
             print(f"  Polling every {args.poll_interval} seconds...")
             print("  Press Ctrl+C to stop\n")
 
+            # Initialize command handler
+            from command_handler import CommandHandler
+            command_handler = CommandHandler(
+                device_id=args.device_id,
+                cloud_url=args.cloud_url,
+                api_key=args.api_key
+            )
+
+            # WebSocket handler for critical commands
+            async def websocket_handler():
+                """Maintain WebSocket connection for critical commands."""
+                import websockets
+                while True:
+                    try:
+                        ws_url = args.cloud_url.replace("http://", "ws://").replace("https://", "wss://")
+                        ws_url = f"{ws_url}/api/v1/devices/{args.device_id}/ws"
+
+                        async with websockets.connect(ws_url) as websocket:
+                            logger.info("WebSocket connected for critical commands")
+
+                            while True:
+                                message = await websocket.recv()
+                                import json
+                                data = json.loads(message)
+
+                                if data.get('type') == 'command':
+                                    command = data.get('command')
+                                    logger.info(f"Received critical command via WebSocket: {command.get('command_type')}")
+                                    await command_handler.process_commands([command])
+                                elif data.get('type') == 'ping':
+                                    await websocket.send(json.dumps({"type": "pong"}))
+                    except Exception as e:
+                        logger.warning(f"WebSocket connection lost: {e}, reconnecting in 10s...")
+                        await asyncio.sleep(10)
+
+            # Start WebSocket handler in background (runs independently)
+            asyncio.create_task(websocket_handler())
+
             poll_count = 0
             heartbeat_interval = 30  # Send heartbeat every 30 seconds
             last_heartbeat = 0
@@ -264,7 +302,7 @@ async def main():
                 # Send heartbeat if interval has passed
                 if current_time - last_heartbeat >= heartbeat_interval:
                     try:
-                        await client.post(
+                        response = await client.post(
                             f"{args.cloud_url}/api/v1/devices/{args.device_id}/heartbeat",
                             json={
                                 "device_status": "online",
@@ -275,6 +313,14 @@ async def main():
                             headers={"X-API-Key": args.api_key}
                         )
                         last_heartbeat = current_time
+
+                        # Process commands from heartbeat response
+                        if response.status_code == 200:
+                            heartbeat_data = response.json()
+                            commands = heartbeat_data.get('commands', [])
+                            if commands:
+                                logger.info(f"Received {len(commands)} command(s) from heartbeat")
+                                await command_handler.process_commands(commands)
                     except Exception as e:
                         logger.warning(f"Heartbeat failed: {e}")
 

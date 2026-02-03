@@ -21,6 +21,12 @@ uvloop>=0.19.0
 # HTTP client (for HTTP steps and edge check-in)
 httpx>=0.25.0
 
+# WebSocket client (for real-time device commands)
+websockets>=12.0
+
+# System monitoring (for device health checks)
+psutil>=5.9.0
+
 # AI Inference (optional - for edge AI workflows)
 # Install one or both depending on your models:
 #   pip install onnxruntime           # For ONNX models (CPU)

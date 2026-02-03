@@ -3,10 +3,19 @@
 Cloud Admin Tool - Manage Devices and View Rollout Status
 
 Usage:
-    python cloud_admin.py list-devices
-    python cloud_admin.py list-policies
-    python cloud_admin.py rollout-status
+    python cloud_admin.py list-devices [status]
     python cloud_admin.py device-info <device-id>
+    python cloud_admin.py list-policies [status]
+    python cloud_admin.py rollout-status [policy-id]
+    python cloud_admin.py send-command <device-id> <command-type> [data-json]
+    python cloud_admin.py list-commands <device-id> [status]
+    python cloud_admin.py command-status <device-id> <command-id>
+
+Command Examples:
+    python cloud_admin.py send-command macbook-m4-001 restart '{"delay_seconds": 10}'
+    python cloud_admin.py send-command macbook-m4-001 health_check
+    python cloud_admin.py send-command macbook-m4-001 backup '{"target": "cloud"}'
+    python cloud_admin.py send-command macbook-m4-001 emergency_stop '{"reason": "Security incident"}'
 """
 
 import asyncio
@@ -164,6 +173,131 @@ async def rollout_status(policy_id: Optional[str] = None):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+async def send_command(device_id: str, command_type: str, data: Optional[dict] = None):
+    """Send a command to a specific device."""
+    print("\n" + "="*70)
+    print(f"  SEND COMMAND: {command_type} → {device_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            payload = {
+                "type": command_type,
+                "data": data or {}
+            }
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/devices/{device_id}/commands",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Command sent successfully")
+                print(f"  Command ID:       {result.get('command_id')}")
+                print(f"  Status:           {result.get('status')}")
+                print(f"  Delivery Method:  {result.get('delivery_method')}")
+                if result.get('delivered_at'):
+                    print(f"  Delivered:        {result.get('delivered_at')}")
+                else:
+                    print(f"  Queued:           {result.get('created_at')}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_commands(device_id: str, status: Optional[str] = None):
+    """List commands for a specific device."""
+    print("\n" + "="*70)
+    print(f"  DEVICE COMMANDS: {device_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {}
+            if status:
+                params["status"] = status
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/devices/{device_id}/commands",
+                params=params
+            )
+
+            if response.status_code == 200:
+                commands = response.json()
+
+                if not commands:
+                    print("  No commands found\n")
+                    return
+
+                for cmd in commands:
+                    status_icon = {
+                        'pending': '⏳',
+                        'delivered': '📤',
+                        'completed': '✓',
+                        'failed': '✗'
+                    }.get(cmd['status'], '○')
+
+                    print(f"  {status_icon} {cmd['command_type']} (ID: {cmd['command_id'][:8]}...)")
+                    print(f"    Status:       {cmd['status']}")
+                    print(f"    Created:      {cmd.get('created_at', 'N/A')}")
+                    if cmd.get('completed_at'):
+                        print(f"    Completed:    {cmd['completed_at']}")
+                    if cmd.get('error'):
+                        print(f"    Error:        {cmd['error']}")
+                    print()
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_command_status(device_id: str, command_id: str):
+    """Get status of a specific command."""
+    print("\n" + "="*70)
+    print(f"  COMMAND STATUS: {command_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/devices/{device_id}/commands/{command_id}/status"
+            )
+
+            if response.status_code == 200:
+                cmd = response.json()
+
+                print(f"  Command Type:     {cmd['command_type']}")
+                print(f"  Status:           {cmd['status']}")
+                print(f"  Device ID:        {cmd['device_id']}")
+                print(f"  Created:          {cmd.get('created_at', 'N/A')}")
+
+                if cmd.get('delivered_at'):
+                    print(f"  Delivered:        {cmd['delivered_at']}")
+                if cmd.get('completed_at'):
+                    print(f"  Completed:        {cmd['completed_at']}")
+
+                if cmd.get('result'):
+                    print(f"\n  Result:")
+                    print(f"    {json.dumps(cmd['result'], indent=4)}")
+
+                if cmd.get('error'):
+                    print(f"\n  Error:            {cmd['error']}")
+                print()
+            elif response.status_code == 404:
+                print(f"  Command not found: {command_id}\n")
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -172,6 +306,9 @@ async def main():
         print("  python cloud_admin.py device-info <device-id>")
         print("  python cloud_admin.py list-policies [status]")
         print("  python cloud_admin.py rollout-status [policy-id]")
+        print("  python cloud_admin.py send-command <device-id> <command-type> [data-json]")
+        print("  python cloud_admin.py list-commands <device-id> [status]")
+        print("  python cloud_admin.py command-status <device-id> <command-id>")
         print()
         return
 
@@ -194,6 +331,29 @@ async def main():
     elif command == "rollout-status":
         policy_id = sys.argv[2] if len(sys.argv) > 2 else None
         await rollout_status(policy_id)
+
+    elif command == "send-command":
+        if len(sys.argv) < 4:
+            print("Error: device-id and command-type required")
+            return
+        device_id = sys.argv[2]
+        command_type = sys.argv[3]
+        data = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
+        await send_command(device_id, command_type, data)
+
+    elif command == "list-commands":
+        if len(sys.argv) < 3:
+            print("Error: device-id required")
+            return
+        device_id = sys.argv[2]
+        status = sys.argv[3] if len(sys.argv) > 3 else None
+        await list_commands(device_id, status)
+
+    elif command == "command-status":
+        if len(sys.argv) < 4:
+            print("Error: device-id and command-id required")
+            return
+        await get_command_status(sys.argv[2], sys.argv[3])
 
     else:
         print(f"Unknown command: {command}")
