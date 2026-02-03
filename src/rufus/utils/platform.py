@@ -288,6 +288,9 @@ def get_coreml_options(
     """
     Get CoreML execution provider options for ONNX Runtime.
 
+    Note: coreml_flags was introduced in ONNX Runtime 1.16+.
+    For older versions, CoreML will use default settings.
+
     Args:
         use_neural_engine: Use Apple Neural Engine when possible
         use_cpu_only: Force CPU-only execution (disable GPU/ANE)
@@ -295,7 +298,21 @@ def get_coreml_options(
 
     Returns:
         Dict of CoreML provider options for ONNX Runtime.
+        Returns empty dict if coreml_flags not supported.
     """
+    # Check if ONNX Runtime version supports coreml_flags
+    try:
+        import onnxruntime as ort
+        version = tuple(map(int, ort.__version__.split('.')[:2]))
+
+        # coreml_flags introduced in 1.16, but became stable in 1.17+
+        if version < (1, 17):
+            logger.debug(f"ONNX Runtime {ort.__version__} doesn't support coreml_flags, using defaults")
+            return {}
+    except Exception:
+        # Can't determine version, return empty to be safe
+        return {}
+
     options = {
         "coreml_flags": 0,
     }
