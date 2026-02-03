@@ -10,6 +10,10 @@ Usage:
     python cloud_admin.py send-command <device-id> <command-type> [data-json] [retry-policy-json]
     python cloud_admin.py list-commands <device-id> [status]
     python cloud_admin.py command-status <device-id> <command-id>
+    python cloud_admin.py broadcast-command <filter-json> <command-type> [data-json] [rollout-json]
+    python cloud_admin.py list-broadcasts [status]
+    python cloud_admin.py broadcast-status <broadcast-id>
+    python cloud_admin.py cancel-broadcast <broadcast-id>
 
 Command Examples:
     python cloud_admin.py send-command macbook-m4-001 restart '{"delay_seconds": 10}'
@@ -23,6 +27,19 @@ Command Examples with Retry:
 
     # Fixed delay (5 retries, 30s each)
     python cloud_admin.py send-command rpi5-001 backup '{"target": "cloud"}' '{"max_retries": 5, "initial_delay_seconds": 30, "backoff_strategy": "fixed"}'
+
+Broadcast Examples:
+    # All devices in merchant
+    python cloud_admin.py broadcast-command '{"merchant_id": "merchant-123", "status": "online"}' update_config '{"floor_limit": 50.00}'
+
+    # Progressive rollout (canary: 10%, 50%, 100%)
+    python cloud_admin.py broadcast-command '{"device_type": "macbook"}' restart '{"delay_seconds": 10}' '{"strategy": "canary", "phases": [0.1, 0.5, 1.0], "wait_seconds": 300}'
+
+    # Check broadcast status
+    python cloud_admin.py broadcast-status <broadcast-id>
+
+    # Cancel broadcast
+    python cloud_admin.py cancel-broadcast <broadcast-id>
 """
 
 import asyncio
@@ -316,17 +333,192 @@ async def get_command_status(device_id: str, command_id: str):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+async def broadcast_command(
+    filter_json: dict,
+    command_type: str,
+    data: Optional[dict] = None,
+    rollout_config: Optional[dict] = None
+):
+    """Broadcast command to multiple devices."""
+    print("\n" + "="*70)
+    print(f"  BROADCAST COMMAND: {command_type}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            payload = {
+                "command_type": command_type,
+                "command_data": data or {},
+                "target_filter": filter_json
+            }
+
+            if rollout_config:
+                payload["rollout_config"] = rollout_config
+
+            print(f"  Target Filter:    {json.dumps(filter_json)}")
+            if rollout_config:
+                print(f"  Rollout Strategy: {rollout_config.get('strategy', 'all_at_once')}")
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/broadcasts",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"\n  ✓ Broadcast created successfully")
+                print(f"  Broadcast ID:     {result.get('broadcast_id')}")
+                print(f"  Status:           {result.get('status')}")
+                print(f"  Message:          {result.get('message')}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_broadcast_status(broadcast_id: str):
+    """Get broadcast execution progress."""
+    print("\n" + "="*70)
+    print(f"  BROADCAST STATUS: {broadcast_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(f"{CLOUD_URL}/api/v1/broadcasts/{broadcast_id}")
+
+            if response.status_code == 200:
+                progress = response.json()
+
+                print(f"  Command Type:     {progress['command_type']}")
+                print(f"  Status:           {progress['status']}")
+                print(f"\n  Progress:")
+                print(f"    Total Devices:    {progress['total_devices']}")
+                print(f"    Completed:        {progress['completed_devices']}")
+                print(f"    Failed:           {progress['failed_devices']}")
+                print(f"    In Progress:      {progress['in_progress_devices']}")
+                print(f"    Pending:          {progress['pending_devices']}")
+                print(f"\n  Rates:")
+                print(f"    Success Rate:     {progress['success_rate']:.1%}")
+                print(f"    Failure Rate:     {progress['failure_rate']:.1%}")
+                print(f"\n  Timeline:")
+                print(f"    Created:          {progress.get('created_at', 'N/A')}")
+                if progress.get('started_at'):
+                    print(f"    Started:          {progress['started_at']}")
+                if progress.get('completed_at'):
+                    print(f"    Completed:        {progress['completed_at']}")
+                if progress.get('error_message'):
+                    print(f"\n  Error:            {progress['error_message']}")
+                print()
+
+            elif response.status_code == 404:
+                print(f"  Broadcast not found: {broadcast_id}\n")
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_broadcasts(status: Optional[str] = None):
+    """List recent broadcasts."""
+    print("\n" + "="*70)
+    print("  RECENT BROADCASTS")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {}
+            if status:
+                params["status"] = status
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/broadcasts",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                broadcasts = data.get("broadcasts", [])
+
+                if not broadcasts:
+                    print("  No broadcasts found\n")
+                    return
+
+                for bc in broadcasts:
+                    status_icon = {
+                        'pending': '⏳',
+                        'in_progress': '🔄',
+                        'completed': '✓',
+                        'failed': '✗',
+                        'paused': '⏸',
+                        'cancelled': '🚫'
+                    }.get(bc['status'], '○')
+
+                    print(f"  {status_icon} {bc['command_type']} (ID: {bc['broadcast_id'][:8]}...)")
+                    print(f"    Status:       {bc['status']}")
+                    print(f"    Devices:      {bc['completed_devices']}/{bc['total_devices']} completed")
+                    print(f"    Created:      {bc.get('created_at', 'N/A')}")
+                    print()
+
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def cancel_broadcast(broadcast_id: str):
+    """Cancel ongoing broadcast."""
+    print("\n" + "="*70)
+    print(f"  CANCEL BROADCAST: {broadcast_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.delete(f"{CLOUD_URL}/api/v1/broadcasts/{broadcast_id}")
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Broadcast cancelled successfully")
+                print(f"  Broadcast ID:     {result['broadcast_id']}")
+                print(f"  Status:           {result['status']}")
+                print()
+            elif response.status_code == 400:
+                print(f"  ✗ Cannot cancel broadcast (already completed or not found)")
+                print(f"  {response.text}\n")
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
         print("\nUsage:")
-        print("  python cloud_admin.py list-devices [status]")
-        print("  python cloud_admin.py device-info <device-id>")
-        print("  python cloud_admin.py list-policies [status]")
-        print("  python cloud_admin.py rollout-status [policy-id]")
-        print("  python cloud_admin.py send-command <device-id> <command-type> [data-json]")
-        print("  python cloud_admin.py list-commands <device-id> [status]")
-        print("  python cloud_admin.py command-status <device-id> <command-id>")
+        print("  Device Management:")
+        print("    python cloud_admin.py list-devices [status]")
+        print("    python cloud_admin.py device-info <device-id>")
+        print()
+        print("  Policies:")
+        print("    python cloud_admin.py list-policies [status]")
+        print("    python cloud_admin.py rollout-status [policy-id]")
+        print()
+        print("  Commands (Single Device):")
+        print("    python cloud_admin.py send-command <device-id> <command-type> [data-json] [retry-json]")
+        print("    python cloud_admin.py list-commands <device-id> [status]")
+        print("    python cloud_admin.py command-status <device-id> <command-id>")
+        print()
+        print("  Commands (Multi-Device Broadcast):")
+        print("    python cloud_admin.py broadcast-command <filter-json> <command-type> [data-json] [rollout-json]")
+        print("    python cloud_admin.py list-broadcasts [status]")
+        print("    python cloud_admin.py broadcast-status <broadcast-id>")
+        print("    python cloud_admin.py cancel-broadcast <broadcast-id>")
         print()
         return
 
@@ -373,6 +565,32 @@ async def main():
             print("Error: device-id and command-id required")
             return
         await get_command_status(sys.argv[2], sys.argv[3])
+
+    elif command == "broadcast-command":
+        if len(sys.argv) < 4:
+            print("Error: filter-json and command-type required")
+            return
+        filter_json = json.loads(sys.argv[2])
+        command_type = sys.argv[3]
+        data = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
+        rollout_config = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
+        await broadcast_command(filter_json, command_type, data, rollout_config)
+
+    elif command == "list-broadcasts":
+        status = sys.argv[2] if len(sys.argv) > 2 else None
+        await list_broadcasts(status)
+
+    elif command == "broadcast-status":
+        if len(sys.argv) < 3:
+            print("Error: broadcast-id required")
+            return
+        await get_broadcast_status(sys.argv[2])
+
+    elif command == "cancel-broadcast":
+        if len(sys.argv) < 3:
+            print("Error: broadcast-id required")
+            return
+        await cancel_broadcast(sys.argv[2])
 
     else:
         print(f"Unknown command: {command}")

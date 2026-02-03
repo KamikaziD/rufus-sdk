@@ -1072,4 +1072,150 @@ async def get_rollout_status(policy_id: Optional[str] = None):
     }
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Broadcast Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+# Global broadcast service instance
+broadcast_service = None
+
+
+@app.post("/api/v1/broadcasts")
+async def create_broadcast(
+    broadcast_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create a multi-device command broadcast.
+
+    Examples:
+    ```json
+    // All devices in region
+    {
+      "command_type": "update_config",
+      "command_data": {"floor_limit": 50.00},
+      "target_filter": {
+        "merchant_id": "merchant-123",
+        "status": "online"
+      }
+    }
+
+    // Progressive rollout
+    {
+      "command_type": "restart",
+      "command_data": {"delay_seconds": 10},
+      "target_filter": {
+        "device_type": "macbook",
+        "status": "online"
+      },
+      "rollout_config": {
+        "strategy": "canary",
+        "phases": [0.1, 0.5, 1.0],
+        "wait_seconds": 300,
+        "circuit_breaker_threshold": 0.2
+      }
+    }
+    ```
+    """
+    global broadcast_service
+
+    if not broadcast_service:
+        from rufus_server.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService(persistence, device_service)
+
+    from rufus_server.broadcast import CommandBroadcast, TargetFilter, RolloutConfig
+
+    # Parse broadcast config
+    target_filter = TargetFilter(**broadcast_data.get("target_filter", {}))
+
+    rollout_config = None
+    if "rollout_config" in broadcast_data:
+        rollout_config = RolloutConfig(**broadcast_data["rollout_config"])
+
+    broadcast = CommandBroadcast(
+        command_type=broadcast_data["command_type"],
+        command_data=broadcast_data.get("command_data", {}),
+        target_filter=target_filter,
+        rollout_config=rollout_config,
+        created_by=user.get("user_id") if user else None
+    )
+
+    # Create broadcast
+    broadcast_id = await broadcast_service.create_broadcast(broadcast)
+
+    return {
+        "broadcast_id": broadcast_id,
+        "status": "created",
+        "message": "Broadcast created and execution started"
+    }
+
+
+@app.get("/api/v1/broadcasts/{broadcast_id}")
+async def get_broadcast_status(
+    broadcast_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get broadcast execution progress."""
+    global broadcast_service
+
+    if not broadcast_service:
+        from rufus_server.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService(persistence, device_service)
+
+    progress = await broadcast_service.get_broadcast_progress(broadcast_id)
+
+    if not progress:
+        raise HTTPException(status_code=404, detail="Broadcast not found")
+
+    return progress.dict()
+
+
+@app.get("/api/v1/broadcasts")
+async def list_broadcasts(
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List recent broadcasts."""
+    global broadcast_service
+
+    if not broadcast_service:
+        from rufus_server.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService(persistence, device_service)
+
+    broadcasts = await broadcast_service.list_broadcasts(status=status, limit=limit)
+
+    return {
+        "total": len(broadcasts),
+        "broadcasts": broadcasts
+    }
+
+
+@app.delete("/api/v1/broadcasts/{broadcast_id}")
+async def cancel_broadcast(
+    broadcast_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Cancel ongoing broadcast."""
+    global broadcast_service
+
+    if not broadcast_service:
+        from rufus_server.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService(persistence, device_service)
+
+    success = await broadcast_service.cancel_broadcast(broadcast_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot cancel broadcast (already completed or not found)"
+        )
+
+    return {
+        "broadcast_id": broadcast_id,
+        "status": "cancelled",
+        "message": "Broadcast cancelled successfully"
+    }
+
+
 # To run: uvicorn rufus_server.main:app --reload
