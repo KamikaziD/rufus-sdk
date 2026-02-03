@@ -1,0 +1,30 @@
+# Rufus Edge - AI Inference Dependencies (Optional)
+#
+# Install these for on-device AI inference support.
+# Choose based on your models and hardware:
+#
+# For ONNX models (recommended for Apple Silicon, NVIDIA):
+#   pip install -r requirements-inference.txt
+#
+# For TFLite models (recommended for Edge TPU, Raspberry Pi):
+#   pip install tflite-runtime  # Lightweight
+#   pip install tensorflow      # Full TensorFlow (includes TFLite)
+
+# Core dependency for all inference
+numpy>=1.24.0,<2.0.0
+
+# ONNX Runtime - Cross-platform ML inference
+# Supports: CPU, CUDA, TensorRT, CoreML (Apple Silicon)
+onnxruntime>=1.16.0
+
+# Alternative: ONNX Runtime with GPU support (NVIDIA only)
+# onnxruntime-gpu>=1.16.0
+
+# TensorFlow Lite Runtime (optional, lightweight alternative)
+# Uncomment if you need TFLite support:
+# tflite-runtime>=2.14.0
+
+# Full TensorFlow (includes TFLite, but much larger)
+# Only install if you need training or full TF features:
+# tensorflow>=2.15.0
+# tensorflow-metal>=1.0.0  # For Apple Silicon GPU acceleration
