@@ -34,61 +34,96 @@ CREATE INDEX IF NOT EXISTS idx_workflow_parent ON workflow_executions(parent_exe
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_idempotency ON workflow_executions(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- ─────────────────────────────────────────────────────────────────────────
--- Device Registry Table
+-- Edge Devices Table (for device registry and management)
 -- ─────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS devices (
+CREATE TABLE IF NOT EXISTS edge_devices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     device_id VARCHAR(100) UNIQUE NOT NULL,
     device_type VARCHAR(50) NOT NULL,
     device_name VARCHAR(200),
     merchant_id VARCHAR(100),
-    api_key VARCHAR(255) NOT NULL,
+    location VARCHAR(200),
+    api_key_hash VARCHAR(64) NOT NULL,
+    public_key TEXT,
     firmware_version VARCHAR(50),
     sdk_version VARCHAR(50),
-    location JSONB DEFAULT '{}',
-    capabilities JSONB DEFAULT '{}',
-    status VARCHAR(50) DEFAULT 'registered',
-    last_heartbeat TIMESTAMPTZ,
+    capabilities TEXT DEFAULT '[]',
+    status VARCHAR(50) DEFAULT 'online',
+    metadata TEXT DEFAULT '{}',
+    last_heartbeat_at TIMESTAMPTZ,
+    last_sync_at TIMESTAMPTZ,
     registered_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_device_merchant ON devices(merchant_id);
-CREATE INDEX IF NOT EXISTS idx_device_status ON devices(status);
+CREATE INDEX IF NOT EXISTS idx_edge_device_merchant ON edge_devices(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_edge_device_status ON edge_devices(status);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Device Commands Table (for sending commands to edge devices)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS device_commands (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    command_id VARCHAR(100) UNIQUE NOT NULL,
+    device_id VARCHAR(100) NOT NULL REFERENCES edge_devices(device_id) ON DELETE CASCADE,
+    command_type VARCHAR(100) NOT NULL,
+    command_data TEXT DEFAULT '{}',
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    sent_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_command_device ON device_commands(device_id);
+CREATE INDEX IF NOT EXISTS idx_device_command_status ON device_commands(status);
+CREATE INDEX IF NOT EXISTS idx_device_command_expires ON device_commands(expires_at);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS device_configs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    config_id UUID DEFAULT uuid_generate_v4(),
     config_version VARCHAR(50) NOT NULL,
-    config_data JSONB NOT NULL DEFAULT '{}',
+    config_data TEXT NOT NULL DEFAULT '{}',
     etag VARCHAR(64) NOT NULL,
-    status VARCHAR(20) DEFAULT 'active',
+    is_active BOOLEAN DEFAULT false,
+    created_by VARCHAR(100),
+    description TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_config_status ON device_configs(status);
+CREATE INDEX IF NOT EXISTS idx_config_active ON device_configs(is_active);
+CREATE INDEX IF NOT EXISTS idx_config_version ON device_configs(config_version);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- SAF Transactions Table (Store-and-Forward)
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS saf_transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    device_id VARCHAR(100) NOT NULL,
     transaction_id VARCHAR(100) NOT NULL,
     idempotency_key VARCHAR(255) UNIQUE NOT NULL,
-    encrypted_payload TEXT NOT NULL,
+    device_id VARCHAR(100) NOT NULL,
+    merchant_id VARCHAR(100),
+    amount_cents BIGINT,
+    currency VARCHAR(3),
+    card_token VARCHAR(255),
+    card_last_four VARCHAR(4),
+    encrypted_payload TEXT,
     encryption_key_id VARCHAR(100),
     status VARCHAR(50) DEFAULT 'pending',
-    received_at TIMESTAMPTZ DEFAULT NOW(),
+    synced_at TIMESTAMPTZ,
     processed_at TIMESTAMPTZ,
     settlement_batch_id VARCHAR(100),
-    error_message TEXT
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_saf_device ON saf_transactions(device_id);
 CREATE INDEX IF NOT EXISTS idx_saf_status ON saf_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_saf_idempotency ON saf_transactions(idempotency_key);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Policy Assignments Table (for persistence - currently in-memory)
@@ -140,7 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_name ON policies(policy_name);
 -- ─────────────────────────────────────────────────────────────────────────
 -- Insert default configuration
 -- ─────────────────────────────────────────────────────────────────────────
-INSERT INTO device_configs (config_version, config_data, etag, status)
+INSERT INTO device_configs (config_version, config_data, etag, is_active, description)
 VALUES (
     '1.0.0',
     '{
@@ -155,7 +190,8 @@ VALUES (
         "models": {}
     }',
     'default-etag-v1',
-    'active'
+    true,
+    'Default configuration for edge devices'
 ) ON CONFLICT DO NOTHING;
 
 -- Grant permissions

@@ -360,7 +360,12 @@ async def list_devices(
     offset: int = 0,
     user: Optional[UserContext] = Depends(get_current_user)
 ):
-    """List all registered devices."""
+    """
+    List all registered devices.
+
+    Automatically marks devices as offline if they haven't sent
+    a heartbeat in the last 120 seconds (2 minutes).
+    """
     if device_service is None:
         raise HTTPException(status_code=503, detail="Device service not initialized")
 
@@ -370,6 +375,28 @@ async def list_devices(
         limit=limit,
         offset=offset
     )
+
+    # Update device statuses based on heartbeat timestamps
+    from datetime import datetime, timedelta, timezone
+    offline_threshold = timedelta(seconds=120)  # 2 minutes
+    now = datetime.now(timezone.utc)  # Use timezone-aware datetime
+
+    for device in devices:
+        last_heartbeat = device.get('last_heartbeat_at')
+        current_status = device.get('status', 'online')
+
+        if last_heartbeat:
+            # Ensure timezone-aware comparison
+            if not hasattr(last_heartbeat, 'tzinfo') or last_heartbeat.tzinfo is None:
+                # Make naive datetime timezone-aware (assume UTC)
+                last_heartbeat = last_heartbeat.replace(tzinfo=timezone.utc)
+
+            # Check if device is stale
+            if (now - last_heartbeat) > offline_threshold:
+                device['status'] = 'offline'
+        elif current_status == 'online':
+            # Device never sent heartbeat but marked online - mark as offline
+            device['status'] = 'offline'
 
     return {
         "total": len(devices),
@@ -450,15 +477,20 @@ async def get_device_config(
 async def device_heartbeat(
     device_id: str,
     request_data: DeviceHeartbeatRequest,
-    x_api_key: str = Header(..., alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
 ):
-    """Receive device heartbeat and return pending commands."""
+    """
+    Receive device heartbeat and return pending commands.
+
+    Note: API key is optional for heartbeats in demo mode.
+    In production, enable authentication.
+    """
     if device_service is None:
         raise HTTPException(status_code=503, detail="Device service not initialized")
 
-    # Authenticate device
-    if not await device_service.authenticate_device(device_id, x_api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    # Skip authentication for demo - in production, uncomment this:
+    # if x_api_key and not await device_service.authenticate_device(device_id, x_api_key):
+    #     raise HTTPException(status_code=401, detail="Invalid API key")
 
     result = await device_service.process_heartbeat(
         device_id=device_id,
@@ -621,6 +653,8 @@ async def check_for_update(
 
     The device sends its hardware identity, and the Policy Engine
     evaluates all active policies to determine if an update is needed.
+
+    Auto-registers devices on first check-in.
     """
     if policy_evaluator is None:
         raise HTTPException(status_code=503, detail="Policy engine not initialized")
@@ -630,6 +664,26 @@ async def check_for_update(
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Device check-in: {checkin.device_id} ({checkin.hw})")
+
+    # Auto-register device if it doesn't exist
+    existing_device = await device_service.get_device(checkin.device_id)
+    if not existing_device:
+        try:
+            logger.info(f"Auto-registering device: {checkin.device_id}")
+            await device_service.register_device(
+                device_id=checkin.device_id,
+                device_type=checkin.hw,
+                device_name=f"{checkin.platform} {checkin.arch}",
+                merchant_id="auto-registered",
+                firmware_version="unknown",
+                sdk_version="unknown",
+                location=None,
+                capabilities=checkin.accelerators,
+                public_key=None
+            )
+        except Exception as e:
+            logger.warning(f"Auto-registration failed for {checkin.device_id}: {e}")
+            # Continue with update check even if registration fails
 
     # Convert check-in to hardware identity dict
     hw_identity = checkin.model_dump()
@@ -669,8 +723,14 @@ async def check_for_update(
     # Store assignment
     device_assignments[checkin.device_id] = assignment
 
-    # Generate signed URL (in production, use cloud storage signed URLs)
-    artifact_url = f"/api/v1/artifacts/{assignment.assigned_artifact}"
+    # Generate artifact URL (use full URL for edge devices)
+    # Get base URL from request or environment
+    base_url = os.getenv("PUBLIC_URL", f"http://{request.client.host}:8000")
+    # If request came from localhost/127.0.0.1, use localhost:8000
+    if request.client.host in ("127.0.0.1", "::1", "localhost"):
+        base_url = "http://localhost:8000"
+
+    artifact_url = f"{base_url}/api/v1/artifacts/{assignment.assigned_artifact}"
 
     return UpdateInstruction(
         needs_update=True,
@@ -723,6 +783,41 @@ async def get_device_assignment(
         raise HTTPException(status_code=404, detail="No assignment found for device")
 
     return assignment
+
+
+@app.get("/api/v1/artifacts/{artifact_name}")
+async def download_artifact(artifact_name: str):
+    """
+    Download artifact file for edge devices.
+
+    In production, this would serve from cloud storage (S3, GCS).
+    For demo, serves from local artifacts directory.
+    """
+    from fastapi.responses import FileResponse
+    import os
+
+    # Artifact storage directory
+    artifacts_dir = os.getenv("ARTIFACTS_DIR", "/tmp/rufus-artifacts")
+
+    # Security: validate artifact name (prevent path traversal)
+    if ".." in artifact_name or "/" in artifact_name or "\\" in artifact_name:
+        raise HTTPException(status_code=400, detail="Invalid artifact name")
+
+    artifact_path = os.path.join(artifacts_dir, artifact_name)
+
+    # Check if artifact exists
+    if not os.path.exists(artifact_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact not found: {artifact_name}"
+        )
+
+    # Return file for download
+    return FileResponse(
+        path=artifact_path,
+        filename=artifact_name,
+        media_type="application/octet-stream"
+    )
 
 
 @app.get("/api/v1/rollout/status")

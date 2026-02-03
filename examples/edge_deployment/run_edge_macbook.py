@@ -221,13 +221,34 @@ async def run_edge_loop():
 
     poll_count = 0
     poll_interval = 60  # seconds
+    heartbeat_interval = 30  # Send heartbeat every 30 seconds
+    last_heartbeat = 0
     current_artifact = None  # Track currently installed artifact
 
     import httpx
+    import time
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             poll_count += 1
             timestamp = datetime.now().strftime('%H:%M:%S')
+            current_time = time.time()
+
+            # Send heartbeat if interval has passed
+            if current_time - last_heartbeat >= heartbeat_interval:
+                try:
+                    await client.post(
+                        f"{CLOUD_URL}/api/v1/devices/{DEVICE_ID}/heartbeat",
+                        json={
+                            "device_status": "online",
+                            "active_workflows": 0,
+                            "pending_sync": 0,
+                            "metrics": {}
+                        },
+                        headers={"X-API-Key": API_KEY}
+                    )
+                    last_heartbeat = current_time
+                except Exception as e:
+                    logger.warning(f"Heartbeat failed: {e}")
 
             try:
                 identity = factory.get_hardware_identity(DEVICE_ID)

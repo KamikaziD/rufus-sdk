@@ -29,6 +29,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY config/ ./config/
 
+# Create artifacts directory and demo artifact
+RUN mkdir -p /app/artifacts && \
+    echo "Demo PEX artifact for vision_v2_coreml" > /app/artifacts/vision_v2_coreml.pex && \
+    chmod 644 /app/artifacts/vision_v2_coreml.pex
+
 # Create non-root user for security
 RUN useradd -m -u 1000 rufus && chown -R rufus:rufus /app
 USER rufus

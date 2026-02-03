@@ -252,9 +252,31 @@ async def main():
             print("  Press Ctrl+C to stop\n")
 
             poll_count = 0
+            heartbeat_interval = 30  # Send heartbeat every 30 seconds
+            last_heartbeat = 0
+
+            import time
             while True:
                 poll_count += 1
                 timestamp = datetime.now().strftime('%H:%M:%S')
+                current_time = time.time()
+
+                # Send heartbeat if interval has passed
+                if current_time - last_heartbeat >= heartbeat_interval:
+                    try:
+                        await client.post(
+                            f"{args.cloud_url}/api/v1/devices/{args.device_id}/heartbeat",
+                            json={
+                                "device_status": "online",
+                                "active_workflows": 0,
+                                "pending_sync": 0,
+                                "metrics": {}
+                            },
+                            headers={"X-API-Key": args.api_key}
+                        )
+                        last_heartbeat = current_time
+                    except Exception as e:
+                        logger.warning(f"Heartbeat failed: {e}")
 
                 # Update system info (RAM, temp may change)
                 system_info = get_system_info()

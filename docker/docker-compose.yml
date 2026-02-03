@@ -6,14 +6,12 @@
 #
 # Services:
 #   - rufus-server: FastAPI control plane (port 8000)
-#   - postgres: PostgreSQL database (port 5432)
+#   - postgres: PostgreSQL database (port 5433)
 #
 # Access:
 #   - API: http://localhost:8000
 #   - Docs: http://localhost:8000/docs
 #   - Health: http://localhost:8000/health
-
-version: '3.8'
 
 services:
   # ─────────────────────────────────────────────────────────────────────────
@@ -30,7 +28,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rufus -d rufus_cloud"]
       interval: 10s
@@ -55,8 +53,13 @@ services:
       # Server settings
       RUFUS_REGISTRATION_KEY: demo-registration-key-2024
 
+      # Artifacts
+      ARTIFACTS_DIR: /app/artifacts
+
       # Logging
       LOG_LEVEL: INFO
+    volumes:
+      - artifacts_data:/app/artifacts
     ports:
       - "8000:8000"
     depends_on:
@@ -77,3 +80,4 @@ networks:
 
 volumes:
   postgres_data:
+  artifacts_data:
