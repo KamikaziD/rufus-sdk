@@ -73,12 +73,19 @@ CREATE TABLE IF NOT EXISTS device_commands (
     sent_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
-    error_message TEXT
+    error_message TEXT,
+    -- Retry policy and tracking
+    retry_policy JSONB DEFAULT NULL,
+    retry_count INT DEFAULT 0,
+    max_retries INT DEFAULT 0,
+    next_retry_at TIMESTAMPTZ DEFAULT NULL,
+    last_retry_at TIMESTAMPTZ DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_command_device ON device_commands(device_id);
 CREATE INDEX IF NOT EXISTS idx_device_command_status ON device_commands(status);
 CREATE INDEX IF NOT EXISTS idx_device_command_expires ON device_commands(expires_at);
+CREATE INDEX IF NOT EXISTS idx_device_command_retry ON device_commands(next_retry_at) WHERE status = 'failed' AND next_retry_at IS NOT NULL;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table

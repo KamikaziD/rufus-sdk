@@ -367,28 +367,54 @@ class DeviceService:
         command_type: str,
         command_data: Optional[Dict[str, Any]] = None,
         expires_in_seconds: int = 3600,
+        retry_policy: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Queue a command for a device."""
+        """
+        Queue a command for a device.
+
+        Args:
+            device_id: Target device ID
+            command_type: Type of command to execute
+            command_data: Command parameters
+            expires_in_seconds: Time until command expires
+            retry_policy: Optional retry configuration
+                Example: {
+                    "max_retries": 3,
+                    "initial_delay_seconds": 10,
+                    "backoff_strategy": "exponential"
+                }
+
+        Returns:
+            command_id: Unique command identifier
+        """
         import uuid
         import json
 
         command_id = str(uuid.uuid4())
         expires_at = (datetime.utcnow() + timedelta(seconds=expires_in_seconds))
+
+        # Extract max_retries for quick filtering
+        max_retries = retry_policy.get("max_retries", 0) if retry_policy else 0
+
         async with self.persistence.pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO device_commands (
-                    command_id, device_id, command_type, command_data, expires_at
-                ) VALUES ($1, $2, $3, $4, $5)
+                    command_id, device_id, command_type, command_data,
+                    expires_at, retry_policy, max_retries
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 command_id,
                 device_id,
                 command_type,
                 json.dumps(command_data or {}),
-                expires_at
+                expires_at,
+                json.dumps(retry_policy) if retry_policy else None,
+                max_retries
             )
 
-        logger.info(f"Queued command {command_type} for device {device_id}")
+        retry_info = f" (with {max_retries} retries)" if max_retries > 0 else ""
+        logger.info(f"Queued command {command_type} for device {device_id}{retry_info}")
         return command_id
 
     async def list_commands(
@@ -483,30 +509,88 @@ class DeviceService:
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None
     ) -> bool:
-        """Update command status (called by device when reporting back)."""
+        """
+        Update command status (called by device when reporting back).
+
+        Handles automatic retry scheduling for failed commands.
+        """
         import json
+        from .retry_policy import RetryPolicy
 
         async with self.persistence.pool.acquire() as conn:
-            # Build update query dynamically based on what's provided
+            # First, get current command state
+            cmd = await conn.fetchrow(
+                """
+                SELECT retry_policy, retry_count, max_retries
+                FROM device_commands
+                WHERE device_id = $1 AND command_id = $2
+                """,
+                device_id,
+                command_id
+            )
+
+            if not cmd:
+                return False
+
+            # Build update query
             updates = ["status = $3"]
             params = [device_id, command_id, status]
             param_count = 3
 
+            # Handle completed commands
             if status == "completed":
                 param_count += 1
                 updates.append(f"completed_at = ${param_count}")
                 params.append(datetime.utcnow())
 
+                # Clear retry fields on success
+                updates.append("next_retry_at = NULL")
+
+            # Handle failed commands with retry policy
+            elif status == "failed" and cmd["retry_policy"]:
+                retry_policy_dict = json.loads(cmd["retry_policy"])
+                retry_policy = RetryPolicy.from_dict(retry_policy_dict)
+                retry_count = cmd["retry_count"]
+
+                if retry_policy.should_retry(retry_count):
+                    # Schedule retry
+                    next_retry = retry_policy.calculate_next_retry(retry_count)
+
+                    param_count += 1
+                    updates.append(f"retry_count = ${param_count}")
+                    params.append(retry_count + 1)
+
+                    param_count += 1
+                    updates.append(f"next_retry_at = ${param_count}")
+                    params.append(next_retry)
+
+                    param_count += 1
+                    updates.append(f"last_retry_at = ${param_count}")
+                    params.append(datetime.utcnow())
+
+                    logger.info(
+                        f"Command {command_id} failed, scheduling retry {retry_count + 1}/{retry_policy.max_retries} "
+                        f"at {next_retry.isoformat()}"
+                    )
+                else:
+                    # No more retries
+                    logger.warning(
+                        f"Command {command_id} failed permanently after {retry_count} retries"
+                    )
+
+            # Store result if provided
             if result:
                 param_count += 1
                 updates.append(f"command_data = ${param_count}")
                 params.append(json.dumps(result))
 
+            # Store error message
             if error:
                 param_count += 1
                 updates.append(f"error_message = ${param_count}")
                 params.append(error)
 
+            # Execute update
             query = f"""
                 UPDATE device_commands
                 SET {', '.join(updates)}
@@ -515,3 +599,55 @@ class DeviceService:
 
             result = await conn.execute(query, *params)
             return result != "UPDATE 0"
+
+    async def process_retries(self) -> Dict[str, int]:
+        """
+        Process commands pending retry.
+
+        Called by background worker to re-queue failed commands.
+
+        Returns:
+            Dict with retry statistics
+        """
+        async with self.persistence.pool.acquire() as conn:
+            # Find commands ready for retry
+            rows = await conn.fetch(
+                """
+                SELECT command_id, device_id, command_type, retry_count
+                FROM device_commands
+                WHERE status = 'failed'
+                  AND next_retry_at IS NOT NULL
+                  AND next_retry_at <= $1
+                  AND retry_count < max_retries
+                ORDER BY next_retry_at ASC
+                LIMIT 100
+                """,
+                datetime.utcnow()
+            )
+
+            retried_count = 0
+            for row in rows:
+                # Reset command to pending for retry
+                result = await conn.execute(
+                    """
+                    UPDATE device_commands
+                    SET status = 'pending',
+                        next_retry_at = NULL,
+                        sent_at = NULL,
+                        error_message = NULL
+                    WHERE command_id = $1
+                    """,
+                    row["command_id"]
+                )
+
+                if result != "UPDATE 0":
+                    retried_count += 1
+                    logger.info(
+                        f"Retrying command {row['command_type']} for device {row['device_id']} "
+                        f"(attempt {row['retry_count'] + 1})"
+                    )
+
+            return {
+                "retries_processed": retried_count,
+                "timestamp": datetime.utcnow().isoformat()
+            }

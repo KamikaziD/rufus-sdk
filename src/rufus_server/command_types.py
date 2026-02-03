@@ -5,7 +5,7 @@ Defines command types and their routing (heartbeat vs websocket).
 """
 
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
 
@@ -113,11 +113,31 @@ def should_use_websocket(command_type: str) -> bool:
 
 
 class DeviceCommand(BaseModel):
-    """Device command model."""
+    """
+    Device command model.
+
+    Example with retry policy:
+    ```json
+    {
+      "type": "restart",
+      "data": {"delay_seconds": 10},
+      "priority": "normal",
+      "timeout_seconds": 300,
+      "retry_policy": {
+        "max_retries": 3,
+        "initial_delay_seconds": 10,
+        "backoff_strategy": "exponential",
+        "backoff_multiplier": 2.0,
+        "max_delay_seconds": 300
+      }
+    }
+    ```
+    """
     type: str
     data: Dict[str, Any] = {}
     priority: CommandPriority = CommandPriority.NORMAL
     timeout_seconds: int = 300
+    retry_policy: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -125,5 +145,6 @@ class DeviceCommand(BaseModel):
             "type": self.type,
             "data": self.data,
             "priority": self.priority,
-            "timeout_seconds": self.timeout_seconds
+            "timeout_seconds": self.timeout_seconds,
+            "retry_policy": self.retry_policy
         }

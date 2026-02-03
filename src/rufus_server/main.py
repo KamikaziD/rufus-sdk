@@ -900,7 +900,8 @@ async def send_device_command(
         device_id=device_id,
         command_type=command.type,
         command_data=command.data,
-        expires_in_seconds=command.timeout_seconds
+        expires_in_seconds=command.timeout_seconds,
+        retry_policy=command.retry_policy
     )
 
     delivery_method = "websocket_fallback" if use_websocket else "heartbeat"

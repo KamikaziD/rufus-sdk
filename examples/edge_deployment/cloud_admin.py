@@ -7,7 +7,7 @@ Usage:
     python cloud_admin.py device-info <device-id>
     python cloud_admin.py list-policies [status]
     python cloud_admin.py rollout-status [policy-id]
-    python cloud_admin.py send-command <device-id> <command-type> [data-json]
+    python cloud_admin.py send-command <device-id> <command-type> [data-json] [retry-policy-json]
     python cloud_admin.py list-commands <device-id> [status]
     python cloud_admin.py command-status <device-id> <command-id>
 
@@ -16,6 +16,13 @@ Command Examples:
     python cloud_admin.py send-command macbook-m4-001 health_check
     python cloud_admin.py send-command macbook-m4-001 backup '{"target": "cloud"}'
     python cloud_admin.py send-command macbook-m4-001 emergency_stop '{"reason": "Security incident"}'
+
+Command Examples with Retry:
+    # Exponential backoff (3 retries)
+    python cloud_admin.py send-command macbook-m4-001 sync_now '{}' '{"max_retries": 3, "initial_delay_seconds": 10, "backoff_strategy": "exponential"}'
+
+    # Fixed delay (5 retries, 30s each)
+    python cloud_admin.py send-command rpi5-001 backup '{"target": "cloud"}' '{"max_retries": 5, "initial_delay_seconds": 30, "backoff_strategy": "fixed"}'
 """
 
 import asyncio
@@ -173,7 +180,12 @@ async def rollout_status(policy_id: Optional[str] = None):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
-async def send_command(device_id: str, command_type: str, data: Optional[dict] = None):
+async def send_command(
+    device_id: str,
+    command_type: str,
+    data: Optional[dict] = None,
+    retry_policy: Optional[dict] = None
+):
     """Send a command to a specific device."""
     print("\n" + "="*70)
     print(f"  SEND COMMAND: {command_type} → {device_id}")
@@ -185,6 +197,12 @@ async def send_command(device_id: str, command_type: str, data: Optional[dict] =
                 "type": command_type,
                 "data": data or {}
             }
+
+            # Add retry policy if provided
+            if retry_policy:
+                payload["retry_policy"] = retry_policy
+                print(f"  Retry Policy:     {retry_policy.get('max_retries', 0)} retries, "
+                      f"{retry_policy.get('backoff_strategy', 'exponential')} backoff")
 
             response = await client.post(
                 f"{CLOUD_URL}/api/v1/devices/{device_id}/commands",
@@ -339,7 +357,8 @@ async def main():
         device_id = sys.argv[2]
         command_type = sys.argv[3]
         data = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
-        await send_command(device_id, command_type, data)
+        retry_policy = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
+        await send_command(device_id, command_type, data, retry_policy)
 
     elif command == "list-commands":
         if len(sys.argv) < 3:
