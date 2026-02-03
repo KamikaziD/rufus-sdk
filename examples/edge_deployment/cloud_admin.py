@@ -671,6 +671,163 @@ async def apply_template_broadcast(
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Command Batch Functions
+# ═════════════════════════════════════════════════════════════════════════
+
+async def create_batch(device_id: str, commands_json: str, execution_mode: str = "sequential"):
+    """
+    Create an atomic multi-command batch.
+
+    Args:
+        device_id: Target device ID
+        commands_json: JSON array of commands with type, data, and optional sequence
+        execution_mode: "sequential" or "parallel"
+
+    Examples:
+        Sequential: '[{"type":"clear_cache","data":{},"sequence":1},{"type":"sync_now","data":{},"sequence":2}]'
+        Parallel: '[{"type":"health_check","data":{}},{"type":"sync_now","data":{}}]'
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            commands = json.loads(commands_json)
+
+            payload = {
+                "device_id": device_id,
+                "commands": commands,
+                "execution_mode": execution_mode
+            }
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/batches",
+                json=payload,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Batch created successfully")
+            print(f"  Batch ID: {result['batch_id']}")
+            print(f"  Device: {device_id}")
+            print(f"  Total Commands: {result['total_commands']}")
+            print(f"  Execution Mode: {result['execution_mode']}")
+            print(f"  Status: {result['status']}\n")
+
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Invalid JSON: {e}\n")
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_batch_status(batch_id: str):
+    """Get batch execution progress."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/batches/{batch_id}",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            progress = response.json()
+
+            print(f"\nBatch: {progress['batch_id']}")
+            print(f"  Device: {progress['device_id']}")
+            print(f"  Status: {progress['status']}")
+            print(f"  Execution Mode: {progress['execution_mode']}")
+            print(f"  Total Commands: {progress['total_commands']}")
+            print(f"  Completed: {progress['completed_commands']}")
+            print(f"  Failed: {progress['failed_commands']}")
+            print(f"  Pending: {progress['pending_commands']}")
+            print(f"  Success Rate: {progress['success_rate']:.1%}")
+            print(f"  Created: {progress['created_at']}")
+
+            if progress['started_at']:
+                print(f"  Started: {progress['started_at']}")
+            if progress['completed_at']:
+                print(f"  Completed: {progress['completed_at']}")
+            if progress['error_message']:
+                print(f"  Error: {progress['error_message']}")
+
+            # Show command statuses
+            if progress['command_statuses']:
+                print(f"\n  Commands:")
+                for cmd in progress['command_statuses']:
+                    status_icon = "✓" if cmd['status'] == "completed" else "✗" if cmd['status'] == "failed" else "⋯"
+                    print(f"    {status_icon} [{cmd['sequence']}] {cmd['command_type']} - {cmd['status']}")
+                    if cmd.get('error'):
+                        print(f"        Error: {cmd['error']}")
+
+            print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_batches(device_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50):
+    """List command batches with optional filters."""
+    async with httpx.AsyncClient() as client:
+        try:
+            params = {"limit": limit}
+            if device_id:
+                params["device_id"] = device_id
+            if status:
+                params["status"] = status
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/batches",
+                params=params,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            batches = result["batches"]
+            count = result["count"]
+
+            if count == 0:
+                print("\nNo batches found\n")
+                return
+
+            print(f"\nFound {count} batch(es):\n")
+            for batch in batches:
+                status_icon = "✓" if batch['status'] == "completed" else "✗" if batch['status'] == "failed" else "⋯"
+                print(f"{status_icon} {batch['batch_id'][:8]}... ({batch['device_id']})")
+                print(f"  Status: {batch['status']} | Mode: {batch['execution_mode']}")
+                print(f"  Progress: {batch['completed_commands']}/{batch['total_commands']} completed, {batch['failed_commands']} failed")
+                print(f"  Created: {batch['created_at']}")
+                print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def cancel_batch(batch_id: str):
+    """Cancel a pending batch."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.delete(
+                f"{CLOUD_URL}/api/v1/batches/{batch_id}",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Batch cancelled")
+            print(f"  Batch ID: {result['batch_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -699,6 +856,12 @@ async def main():
         print("    python cloud_admin.py get-template <template-name>")
         print("    python cloud_admin.py apply-template <template-name> <device-id> [variables-json]")
         print("    python cloud_admin.py apply-template-broadcast <template-name> <filter-json> [variables-json] [rollout-json]")
+        print()
+        print("  Command Batches (Atomic Multi-Command):")
+        print("    python cloud_admin.py create-batch <device-id> <commands-json> [execution-mode]")
+        print("    python cloud_admin.py list-batches [device-id] [status]")
+        print("    python cloud_admin.py batch-status <batch-id>")
+        print("    python cloud_admin.py cancel-batch <batch-id>")
         print()
         return
 
@@ -799,6 +962,32 @@ async def main():
         variables = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
         rollout_config = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
         await apply_template_broadcast(template_name, target_filter, variables, rollout_config)
+
+    elif command == "create-batch":
+        if len(sys.argv) < 4:
+            print("Error: device-id and commands-json required")
+            return
+        device_id = sys.argv[2]
+        commands_json = sys.argv[3]
+        execution_mode = sys.argv[4] if len(sys.argv) > 4 else "sequential"
+        await create_batch(device_id, commands_json, execution_mode)
+
+    elif command == "list-batches":
+        device_id = sys.argv[2] if len(sys.argv) > 2 else None
+        status = sys.argv[3] if len(sys.argv) > 3 else None
+        await list_batches(device_id, status)
+
+    elif command == "batch-status":
+        if len(sys.argv) < 3:
+            print("Error: batch-id required")
+            return
+        await get_batch_status(sys.argv[2])
+
+    elif command == "cancel-batch":
+        if len(sys.argv) < 3:
+            print("Error: batch-id required")
+            return
+        await cancel_batch(sys.argv[2])
 
     else:
         print(f"Unknown command: {command}")

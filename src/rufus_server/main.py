@@ -1079,6 +1079,7 @@ async def get_rollout_status(policy_id: Optional[str] = None):
 # Global service instances
 broadcast_service = None
 template_service = None
+batch_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -1404,6 +1405,161 @@ async def apply_template(
             status_code=400,
             detail="Must specify either 'device_id' or 'target_filter'"
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Command Batch Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/batches")
+async def create_batch(
+    batch_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create an atomic multi-command batch.
+
+    Examples:
+    ```json
+    // Sequential execution
+    {
+      "device_id": "macbook-m4-001",
+      "commands": [
+        {"type": "clear_cache", "data": {}, "sequence": 1},
+        {"type": "sync_now", "data": {}, "sequence": 2},
+        {"type": "restart", "data": {"delay_seconds": 30}, "sequence": 3}
+      ],
+      "execution_mode": "sequential"
+    }
+
+    // Parallel execution
+    {
+      "device_id": "macbook-m4-001",
+      "commands": [
+        {"type": "health_check", "data": {}},
+        {"type": "sync_now", "data": {}},
+        {"type": "clear_cache", "data": {}}
+      ],
+      "execution_mode": "parallel"
+    }
+    ```
+    """
+    global batch_service
+
+    if not batch_service:
+        from rufus_server.batch_service import BatchService
+        batch_service = BatchService(persistence, device_service)
+
+    from rufus_server.batching import CommandBatch, BatchCommand, ExecutionMode
+
+    # Parse batch config
+    commands = [BatchCommand(**cmd) for cmd in batch_data["commands"]]
+
+    batch = CommandBatch(
+        device_id=batch_data["device_id"],
+        commands=commands,
+        execution_mode=ExecutionMode(batch_data.get("execution_mode", "sequential"))
+    )
+
+    # Create batch
+    batch_id = await batch_service.create_batch(batch)
+
+    return {
+        "batch_id": batch_id,
+        "status": "created",
+        "total_commands": len(commands),
+        "execution_mode": batch.execution_mode.value,
+        "message": "Batch created successfully"
+    }
+
+
+@app.get("/api/v1/batches/{batch_id}")
+async def get_batch_progress(
+    batch_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get batch execution progress."""
+    global batch_service
+
+    if not batch_service:
+        from rufus_server.batch_service import BatchService
+        batch_service = BatchService(persistence, device_service)
+
+    progress = await batch_service.get_batch_progress(batch_id)
+
+    if not progress:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    return {
+        "batch_id": progress.batch_id,
+        "device_id": progress.device_id,
+        "status": progress.status.value,
+        "execution_mode": progress.execution_mode.value,
+        "total_commands": progress.total_commands,
+        "completed_commands": progress.completed_commands,
+        "failed_commands": progress.failed_commands,
+        "pending_commands": progress.pending_commands,
+        "success_rate": progress.success_rate,
+        "failure_rate": progress.failure_rate,
+        "created_at": progress.created_at.isoformat(),
+        "started_at": progress.started_at.isoformat() if progress.started_at else None,
+        "completed_at": progress.completed_at.isoformat() if progress.completed_at else None,
+        "error_message": progress.error_message,
+        "command_statuses": progress.command_statuses
+    }
+
+
+@app.get("/api/v1/batches")
+async def list_batches(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List command batches with optional filters."""
+    global batch_service
+
+    if not batch_service:
+        from rufus_server.batch_service import BatchService
+        batch_service = BatchService(persistence, device_service)
+
+    batches = await batch_service.list_batches(
+        device_id=device_id,
+        status=status,
+        limit=limit
+    )
+
+    return {
+        "batches": batches,
+        "count": len(batches)
+    }
+
+
+@app.delete("/api/v1/batches/{batch_id}")
+async def cancel_batch(
+    batch_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Cancel a pending batch."""
+    global batch_service
+
+    if not batch_service:
+        from rufus_server.batch_service import BatchService
+        batch_service = BatchService(persistence, device_service)
+
+    success = await batch_service.cancel_batch(batch_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Batch not found or already in progress/completed"
+        )
+
+    return {
+        "batch_id": batch_id,
+        "status": "cancelled",
+        "message": "Batch cancelled successfully"
+    }
 
 
 # To run: uvicorn rufus_server.main:app --reload
