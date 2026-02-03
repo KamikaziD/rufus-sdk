@@ -119,6 +119,27 @@ ADD COLUMN IF NOT EXISTS broadcast_id VARCHAR(100) REFERENCES command_broadcasts
 CREATE INDEX IF NOT EXISTS idx_device_command_broadcast ON device_commands(broadcast_id);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Command Templates Table (for reusable command sets)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS command_templates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    template_name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    commands JSONB NOT NULL,
+    variables JSONB DEFAULT '[]',
+    created_by VARCHAR(100),
+    version VARCHAR(50) DEFAULT '1.0.0',
+    is_active BOOLEAN DEFAULT true,
+    tags JSONB DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_name ON command_templates(template_name);
+CREATE INDEX IF NOT EXISTS idx_template_active ON command_templates(is_active);
+CREATE INDEX IF NOT EXISTS idx_template_tags ON command_templates USING GIN(tags);
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS device_configs (

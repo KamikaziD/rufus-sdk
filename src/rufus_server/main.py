@@ -1076,8 +1076,9 @@ async def get_rollout_status(policy_id: Optional[str] = None):
 # Broadcast Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-# Global broadcast service instance
+# Global service instances
 broadcast_service = None
+template_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -1216,6 +1217,193 @@ async def cancel_broadcast(
         "status": "cancelled",
         "message": "Broadcast cancelled successfully"
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Template Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/templates")
+async def create_template(
+    template_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create a command template.
+
+    Example:
+    ```json
+    {
+      "template_name": "soft-restart",
+      "description": "Graceful restart with cleanup",
+      "commands": [
+        {"type": "clear_cache", "data": {}},
+        {"type": "restart", "data": {"delay_seconds": "{{delay}}"}}
+      ],
+      "variables": [
+        {"name": "delay", "type": "integer", "default": 30}
+      ],
+      "tags": ["maintenance"]
+    }
+    ```
+    """
+    global template_service
+
+    if not template_service:
+        from rufus_server.template_service import TemplateService
+        template_service = TemplateService(persistence, device_service)
+
+    from rufus_server.templates import CommandTemplate
+
+    template = CommandTemplate(**template_data)
+    template.created_by = user.get("user_id") if user else None
+
+    template_name = await template_service.create_template(template)
+
+    return {
+        "template_name": template_name,
+        "status": "created",
+        "message": f"Template '{template_name}' created successfully"
+    }
+
+
+@app.get("/api/v1/templates/{template_name}")
+async def get_template(
+    template_name: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get template details."""
+    global template_service
+
+    if not template_service:
+        from rufus_server.template_service import TemplateService
+        template_service = TemplateService(persistence, device_service)
+
+    template = await template_service.get_template(template_name)
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    return template.dict()
+
+
+@app.get("/api/v1/templates")
+async def list_templates(
+    active_only: bool = True,
+    tag: Optional[str] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List available templates."""
+    global template_service
+
+    if not template_service:
+        from rufus_server.template_service import TemplateService
+        template_service = TemplateService(persistence, device_service)
+
+    tags = [tag] if tag else None
+    templates = await template_service.list_templates(active_only=active_only, tags=tags)
+
+    return {
+        "total": len(templates),
+        "templates": templates
+    }
+
+
+@app.delete("/api/v1/templates/{template_name}")
+async def delete_template(
+    template_name: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Delete a template (soft delete)."""
+    global template_service
+
+    if not template_service:
+        from rufus_server.template_service import TemplateService
+        template_service = TemplateService(persistence, device_service)
+
+    success = await template_service.delete_template(template_name)
+
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Template not found or already deleted"
+        )
+
+    return {
+        "template_name": template_name,
+        "status": "deleted",
+        "message": f"Template '{template_name}' deleted successfully"
+    }
+
+
+@app.post("/api/v1/templates/{template_name}/apply")
+async def apply_template(
+    template_name: str,
+    apply_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Apply template to device(s).
+
+    Single device:
+    ```json
+    {
+      "device_id": "macbook-m4-001",
+      "variables": {"delay": 60}
+    }
+    ```
+
+    Broadcast:
+    ```json
+    {
+      "target_filter": {"merchant_id": "merchant-123"},
+      "variables": {"delay": 60},
+      "rollout_config": {"strategy": "canary", "phases": [0.1, 1.0]}
+    }
+    ```
+    """
+    global template_service
+
+    if not template_service:
+        from rufus_server.template_service import TemplateService
+        template_service = TemplateService(persistence, device_service)
+
+    variables = apply_data.get("variables", {})
+
+    # Single device or broadcast?
+    if "device_id" in apply_data:
+        # Single device
+        command_ids = await template_service.apply_template_to_device(
+            template_name=template_name,
+            device_id=apply_data["device_id"],
+            variables=variables
+        )
+
+        return {
+            "template_name": template_name,
+            "device_id": apply_data["device_id"],
+            "command_ids": command_ids,
+            "message": f"Template applied: {len(command_ids)} commands created"
+        }
+    elif "target_filter" in apply_data:
+        # Broadcast
+        broadcast_id = await template_service.apply_template_broadcast(
+            template_name=template_name,
+            target_filter=apply_data["target_filter"],
+            variables=variables,
+            rollout_config=apply_data.get("rollout_config")
+        )
+
+        return {
+            "template_name": template_name,
+            "broadcast_id": broadcast_id,
+            "message": "Template applied as broadcast"
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Must specify either 'device_id' or 'target_filter'"
+        )
 
 
 # To run: uvicorn rufus_server.main:app --reload

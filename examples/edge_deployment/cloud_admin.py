@@ -14,6 +14,10 @@ Usage:
     python cloud_admin.py list-broadcasts [status]
     python cloud_admin.py broadcast-status <broadcast-id>
     python cloud_admin.py cancel-broadcast <broadcast-id>
+    python cloud_admin.py list-templates
+    python cloud_admin.py get-template <template-name>
+    python cloud_admin.py apply-template <template-name> <device-id> [variables-json]
+    python cloud_admin.py apply-template-broadcast <template-name> <filter-json> [variables-json] [rollout-json]
 
 Command Examples:
     python cloud_admin.py send-command macbook-m4-001 restart '{"delay_seconds": 10}'
@@ -40,6 +44,19 @@ Broadcast Examples:
 
     # Cancel broadcast
     python cloud_admin.py cancel-broadcast <broadcast-id>
+
+Template Examples:
+    # List available templates
+    python cloud_admin.py list-templates
+
+    # Get template details
+    python cloud_admin.py get-template soft-restart
+
+    # Apply template to single device
+    python cloud_admin.py apply-template soft-restart macbook-m4-001 '{"delay_seconds": 60}'
+
+    # Apply template as broadcast
+    python cloud_admin.py apply-template-broadcast security-lockdown '{"merchant_id": "merchant-123"}'
 """
 
 import asyncio
@@ -497,6 +514,163 @@ async def cancel_broadcast(broadcast_id: str):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+async def list_templates():
+    """List available command templates."""
+    print("\n" + "="*70)
+    print("  COMMAND TEMPLATES")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(f"{CLOUD_URL}/api/v1/templates")
+
+            if response.status_code == 200:
+                data = response.json()
+                templates = data.get("templates", [])
+
+                if not templates:
+                    print("  No templates found\n")
+                    return
+
+                for tmpl in templates:
+                    tags_str = ", ".join(tmpl.get("tags", []))
+                    print(f"  📋 {tmpl['template_name']} (v{tmpl.get('version', '1.0.0')})")
+                    print(f"    Description:  {tmpl['description']}")
+                    print(f"    Commands:     {tmpl['command_count']}")
+                    print(f"    Tags:         {tags_str}")
+                    print()
+
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_template(template_name: str):
+    """Get template details."""
+    print("\n" + "="*70)
+    print(f"  TEMPLATE: {template_name}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(f"{CLOUD_URL}/api/v1/templates/{template_name}")
+
+            if response.status_code == 200:
+                tmpl = response.json()
+
+                print(f"  Name:         {tmpl['template_name']}")
+                print(f"  Description:  {tmpl['description']}")
+                print(f"  Version:      {tmpl.get('version', '1.0.0')}")
+                print(f"  Tags:         {', '.join(tmpl.get('tags', []))}")
+
+                print(f"\n  Commands:")
+                for idx, cmd in enumerate(tmpl['commands'], start=1):
+                    print(f"    {idx}. {cmd['type']}")
+                    if cmd.get('data'):
+                        print(f"       Data: {json.dumps(cmd['data'])}")
+
+                if tmpl.get('variables'):
+                    print(f"\n  Variables:")
+                    for var in tmpl['variables']:
+                        required_str = " (required)" if var.get('required') else ""
+                        default_str = f" [default: {var.get('default')}]" if var.get('default') is not None else ""
+                        print(f"    • {var['name']}: {var.get('description', '')}{required_str}{default_str}")
+
+                print()
+
+            elif response.status_code == 404:
+                print(f"  Template not found: {template_name}\n")
+            else:
+                print(f"  Error: HTTP {response.status_code}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def apply_template_to_device(
+    template_name: str,
+    device_id: str,
+    variables: Optional[dict] = None
+):
+    """Apply template to a single device."""
+    print("\n" + "="*70)
+    print(f"  APPLY TEMPLATE: {template_name} → {device_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            payload = {
+                "device_id": device_id,
+                "variables": variables or {}
+            }
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/templates/{template_name}/apply",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Template applied successfully")
+                print(f"  Template:       {result['template_name']}")
+                print(f"  Device:         {result['device_id']}")
+                print(f"  Commands:       {len(result['command_ids'])} created")
+                print(f"  Command IDs:    {', '.join([cid[:8] + '...' for cid in result['command_ids']])}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def apply_template_broadcast(
+    template_name: str,
+    target_filter: dict,
+    variables: Optional[dict] = None,
+    rollout_config: Optional[dict] = None
+):
+    """Apply template as broadcast to multiple devices."""
+    print("\n" + "="*70)
+    print(f"  APPLY TEMPLATE (BROADCAST): {template_name}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            payload = {
+                "target_filter": target_filter,
+                "variables": variables or {}
+            }
+
+            if rollout_config:
+                payload["rollout_config"] = rollout_config
+
+            print(f"  Template:       {template_name}")
+            print(f"  Target Filter:  {json.dumps(target_filter)}")
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/templates/{template_name}/apply",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"\n  ✓ Template applied as broadcast")
+                print(f"  Template:       {result['template_name']}")
+                print(f"  Broadcast ID:   {result['broadcast_id']}")
+                print(f"  Message:        {result['message']}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -519,6 +693,12 @@ async def main():
         print("    python cloud_admin.py list-broadcasts [status]")
         print("    python cloud_admin.py broadcast-status <broadcast-id>")
         print("    python cloud_admin.py cancel-broadcast <broadcast-id>")
+        print()
+        print("  Command Templates:")
+        print("    python cloud_admin.py list-templates")
+        print("    python cloud_admin.py get-template <template-name>")
+        print("    python cloud_admin.py apply-template <template-name> <device-id> [variables-json]")
+        print("    python cloud_admin.py apply-template-broadcast <template-name> <filter-json> [variables-json] [rollout-json]")
         print()
         return
 
@@ -591,6 +771,34 @@ async def main():
             print("Error: broadcast-id required")
             return
         await cancel_broadcast(sys.argv[2])
+
+    elif command == "list-templates":
+        await list_templates()
+
+    elif command == "get-template":
+        if len(sys.argv) < 3:
+            print("Error: template-name required")
+            return
+        await get_template(sys.argv[2])
+
+    elif command == "apply-template":
+        if len(sys.argv) < 4:
+            print("Error: template-name and device-id required")
+            return
+        template_name = sys.argv[2]
+        device_id = sys.argv[3]
+        variables = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
+        await apply_template_to_device(template_name, device_id, variables)
+
+    elif command == "apply-template-broadcast":
+        if len(sys.argv) < 4:
+            print("Error: template-name and filter-json required")
+            return
+        template_name = sys.argv[2]
+        target_filter = json.loads(sys.argv[3])
+        variables = json.loads(sys.argv[4]) if len(sys.argv) > 4 else None
+        rollout_config = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
+        await apply_template_broadcast(template_name, target_filter, variables, rollout_config)
 
     else:
         print(f"Unknown command: {command}")
