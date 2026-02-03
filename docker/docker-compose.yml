@@ -1,0 +1,79 @@
+# Rufus Edge Cloud Platform - Docker Compose
+#
+# Usage:
+#   cd docker
+#   docker compose up -d
+#
+# Services:
+#   - rufus-server: FastAPI control plane (port 8000)
+#   - postgres: PostgreSQL database (port 5432)
+#
+# Access:
+#   - API: http://localhost:8000
+#   - Docs: http://localhost:8000/docs
+#   - Health: http://localhost:8000/health
+
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: rufus-postgres
+    environment:
+      POSTGRES_USER: rufus
+      POSTGRES_PASSWORD: rufus_secret_2024
+      POSTGRES_DB: rufus_cloud
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rufus -d rufus_cloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rufus-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Rufus Cloud Control Plane
+  # ─────────────────────────────────────────────────────────────────────────
+  rufus-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: rufus-cloud
+    environment:
+      # Database
+      DATABASE_URL: postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_cloud
+      WORKFLOW_STORAGE: postgres
+
+      # Server settings
+      RUFUS_REGISTRATION_KEY: demo-registration-key-2024
+
+      # Logging
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+networks:
+  rufus-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
