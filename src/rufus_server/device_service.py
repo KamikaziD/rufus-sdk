@@ -356,7 +356,7 @@ class DeviceService:
                 # Mark as sent
                 await conn.execute(
                     "UPDATE device_commands SET status = 'sent', sent_at = $1 WHERE command_id = $2",
-                    datetime.utcnow().isoformat(), row["command_id"]
+                    datetime.utcnow(), row["command_id"]
                 )
 
             return commands
@@ -390,3 +390,128 @@ class DeviceService:
 
         logger.info(f"Queued command {command_type} for device {device_id}")
         return command_id
+
+    async def list_commands(
+        self,
+        device_id: str,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List commands for a device, optionally filtered by status."""
+        import json
+
+        async with self.persistence.pool.acquire() as conn:
+            if status:
+                rows = await conn.fetch(
+                    """
+                    SELECT command_id, command_type, command_data, status,
+                           created_at, sent_at, completed_at, error_message
+                    FROM device_commands
+                    WHERE device_id = $1 AND status = $2
+                    ORDER BY created_at DESC
+                    """,
+                    device_id,
+                    status
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT command_id, command_type, command_data, status,
+                           created_at, sent_at, completed_at, error_message
+                    FROM device_commands
+                    WHERE device_id = $1
+                    ORDER BY created_at DESC
+                    """,
+                    device_id
+                )
+
+            commands = []
+            for row in rows:
+                commands.append({
+                    "command_id": row["command_id"],
+                    "command_type": row["command_type"],
+                    "command_data": row["command_data"],
+                    "status": row["status"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "sent_at": row["sent_at"].isoformat() if row["sent_at"] else None,
+                    "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                    "error": row["error_message"],
+                })
+
+            return commands
+
+    async def get_command_status(
+        self,
+        device_id: str,
+        command_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get status of a specific command."""
+        import json
+
+        async with self.persistence.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT command_id, device_id, command_type, command_data, status,
+                       created_at, sent_at, completed_at, error_message
+                FROM device_commands
+                WHERE device_id = $1 AND command_id = $2
+                """,
+                device_id,
+                command_id
+            )
+
+            if not row:
+                return None
+
+            return {
+                "command_id": row["command_id"],
+                "device_id": row["device_id"],
+                "command_type": row["command_type"],
+                "command_data": row["command_data"],
+                "status": row["status"],
+                "result": json.loads(row["command_data"]) if row["command_data"] else {},
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "delivered_at": row["sent_at"].isoformat() if row["sent_at"] else None,
+                "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                "error": row["error_message"],
+            }
+
+    async def update_command_status(
+        self,
+        device_id: str,
+        command_id: str,
+        status: str,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None
+    ) -> bool:
+        """Update command status (called by device when reporting back)."""
+        import json
+
+        async with self.persistence.pool.acquire() as conn:
+            # Build update query dynamically based on what's provided
+            updates = ["status = $3"]
+            params = [device_id, command_id, status]
+            param_count = 3
+
+            if status == "completed":
+                param_count += 1
+                updates.append(f"completed_at = ${param_count}")
+                params.append(datetime.utcnow())
+
+            if result:
+                param_count += 1
+                updates.append(f"command_data = ${param_count}")
+                params.append(json.dumps(result))
+
+            if error:
+                param_count += 1
+                updates.append(f"error_message = ${param_count}")
+                params.append(error)
+
+            query = f"""
+                UPDATE device_commands
+                SET {', '.join(updates)}
+                WHERE device_id = $1 AND command_id = $2
+            """
+
+            result = await conn.execute(query, *params)
+            return result != "UPDATE 0"
