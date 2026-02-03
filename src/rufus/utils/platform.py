@@ -288,48 +288,43 @@ def get_coreml_options(
     """
     Get CoreML execution provider options for ONNX Runtime.
 
-    Note: coreml_flags was introduced in ONNX Runtime 1.16+.
-    For older versions, CoreML will use default settings.
+    Note: CoreML provider_options support is inconsistent across ONNX Runtime versions.
+    The coreml_flags parameter causes errors in many versions (1.16-1.23+).
+    For maximum compatibility, we return empty options and let CoreML use defaults.
+
+    CoreML will still work and utilize the Neural Engine - you just can't
+    fine-tune the settings programmatically.
 
     Args:
-        use_neural_engine: Use Apple Neural Engine when possible
-        use_cpu_only: Force CPU-only execution (disable GPU/ANE)
-        enable_on_subgraph: Enable CoreML on subgraphs
+        use_neural_engine: Use Apple Neural Engine when possible (currently ignored)
+        use_cpu_only: Force CPU-only execution (currently ignored)
+        enable_on_subgraph: Enable CoreML on subgraphs (currently ignored)
 
     Returns:
-        Dict of CoreML provider options for ONNX Runtime.
-        Returns empty dict if coreml_flags not supported.
+        Empty dict - CoreML uses default settings for maximum compatibility.
     """
-    # Check if ONNX Runtime version supports coreml_flags
+    # DISABLED: coreml_flags causes "Unknown option" errors across many ONNX Runtime versions
+    # CoreML will still work with default settings (including Neural Engine support)
     try:
         import onnxruntime as ort
-        version = tuple(map(int, ort.__version__.split('.')[:2]))
-
-        # coreml_flags introduced in 1.16, but became stable in 1.17+
-        if version < (1, 17):
-            logger.debug(f"ONNX Runtime {ort.__version__} doesn't support coreml_flags, using defaults")
-            return {}
+        logger.debug(
+            f"ONNX Runtime {ort.__version__}: Using CoreML default settings "
+            "(provider_options disabled for compatibility)"
+        )
     except Exception:
-        # Can't determine version, return empty to be safe
-        return {}
+        pass
 
-    options = {
-        "coreml_flags": 0,
-    }
+    return {}
 
-    if use_cpu_only:
-        # COREML_FLAG_USE_CPU_ONLY = 0x001
-        options["coreml_flags"] |= 0x001
-    elif use_neural_engine:
-        # COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE = 0x004
-        # This prefers Neural Engine when available
-        options["coreml_flags"] |= 0x004
-
-    if enable_on_subgraph:
-        # COREML_FLAG_ENABLE_ON_SUBGRAPH = 0x002
-        options["coreml_flags"] |= 0x002
-
-    return options
+    # Original implementation (disabled for compatibility):
+    # options = {"coreml_flags": 0}
+    # if use_cpu_only:
+    #     options["coreml_flags"] |= 0x001  # COREML_FLAG_USE_CPU_ONLY
+    # elif use_neural_engine:
+    #     options["coreml_flags"] |= 0x004  # COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE
+    # if enable_on_subgraph:
+    #     options["coreml_flags"] |= 0x002  # COREML_FLAG_ENABLE_ON_SUBGRAPH
+    # return options
 
 
 def log_platform_info():

@@ -417,11 +417,10 @@ class InferenceFactory:
                     coreml_opts if p == "CoreMLExecutionProvider" else {}
                     for p in providers
                 ]
-            elif use_neural_engine:
-                # ONNX Runtime version doesn't support advanced CoreML config
-                logger.info(
-                    "CoreML will use default settings. For Neural Engine control, "
-                    "upgrade ONNX Runtime: pip install --upgrade onnxruntime"
+            else:
+                # CoreML provider_options disabled for compatibility
+                logger.debug(
+                    "CoreML using default settings (provider_options disabled for compatibility)"
                 )
 
         provider = ONNXInferenceProvider(
@@ -441,12 +440,15 @@ class InferenceFactory:
         if provider_options:
             logger.info(
                 f"Created ONNX provider: providers={providers}, "
-                f"neural_engine={use_neural_engine}, options={provider_options}"
+                f"options={provider_options}"
             )
         else:
+            # No provider options (CoreML will use defaults)
+            coreml_msg = ""
+            if "CoreMLExecutionProvider" in providers:
+                coreml_msg = " (CoreML will use default settings including Neural Engine)"
             logger.info(
-                f"Created ONNX provider: providers={providers}, "
-                f"neural_engine={use_neural_engine} (using default CoreML settings)"
+                f"Created ONNX provider: providers={providers}{coreml_msg}"
             )
 
         return provider
