@@ -117,6 +117,117 @@ class JavaScriptWorkflowStep(WorkflowStep):
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
 
 
+class AIInferenceConfig(BaseModel):
+    """Configuration for AI/ML inference step execution."""
+
+    # Model identification
+    model_name: str = Field(
+        ...,
+        description="Unique name for the model (matches loaded model name)"
+    )
+    model_path: Optional[str] = Field(
+        None,
+        description="Path to model file (if not pre-loaded)"
+    )
+    model_version: str = Field(
+        "1.0.0",
+        description="Model version for tracking"
+    )
+
+    # Runtime selection
+    runtime: str = Field(
+        "tflite",
+        description="Inference runtime: 'tflite', 'onnx', or 'custom'"
+    )
+
+    # Input configuration
+    input_source: str = Field(
+        ...,
+        description="State path to input data (e.g., 'state.sensor_data')"
+    )
+    preprocessing: Optional[str] = Field(
+        None,
+        description="Preprocessing to apply: 'normalize', 'resize', 'none'"
+    )
+    preprocessing_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters for preprocessing (e.g., {'mean': 0.5, 'std': 0.5})"
+    )
+
+    # Output configuration
+    output_key: str = Field(
+        "inference_result",
+        description="Key to store inference result in state"
+    )
+    postprocessing: Optional[str] = Field(
+        None,
+        description="Postprocessing to apply: 'softmax', 'threshold', 'argmax', 'none'"
+    )
+    postprocessing_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters for postprocessing (e.g., {'threshold': 0.5})"
+    )
+
+    # Thresholding for decision routing
+    threshold: Optional[float] = Field(
+        None,
+        description="Threshold for binary classification decisions"
+    )
+    threshold_key: str = Field(
+        "prediction",
+        description="Key in result to apply threshold to"
+    )
+
+    # Error handling
+    fallback_on_error: str = Field(
+        "skip",
+        description="Behavior on error: 'skip', 'fail', 'default'"
+    )
+    default_result: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Default result to use when fallback_on_error='default'"
+    )
+
+    # Performance options
+    timeout_ms: int = Field(
+        5000,
+        ge=100,
+        le=60000,
+        description="Maximum inference time in milliseconds"
+    )
+
+    model_config = {"extra": "forbid"}
+
+
+class AIInferenceWorkflowStep(WorkflowStep):
+    """
+    Workflow step that runs AI/ML model inference.
+
+    Supports TensorFlow Lite, ONNX Runtime, and custom inference providers.
+    Automatically handles model loading, preprocessing, inference, and postprocessing.
+
+    Example YAML:
+        - name: "Detect_Anomaly"
+          type: "AI_INFERENCE"
+          ai_config:
+            model_name: "anomaly_detector"
+            model_path: "models/anomaly_detector.tflite"
+            runtime: "tflite"
+            input_source: "state.sensor_readings"
+            preprocessing: "normalize"
+            output_key: "anomaly_result"
+            postprocessing: "threshold"
+            postprocessing_params:
+              threshold: 0.7
+            threshold: 0.7
+          automate_next: true
+    """
+
+    ai_config: AIInferenceConfig
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+
 class ParallelExecutionTask(BaseModel):
     name: str
     func_path: str # Path to the function for parallel execution

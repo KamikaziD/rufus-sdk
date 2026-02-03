@@ -214,6 +214,22 @@ class DeviceConfig(BaseModel):
         description="Workflow definitions keyed by type"
     )
 
+    # AI/ML Model configurations
+    models: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="AI model configurations for on-device inference"
+    )
+    # Example model config:
+    # {
+    #     "anomaly_detector": {
+    #         "version": "1.2.0",
+    #         "url": "https://models.example.com/anomaly_v1.2.tflite",
+    #         "hash": "sha256:abc123...",
+    #         "runtime": "tflite",
+    #         "size_kb": 312
+    #     }
+    # }
+
     # Cloud endpoints
     sync_url: Optional[str] = Field(None, description="URL for transaction sync")
     heartbeat_url: Optional[str] = Field(None, description="URL for heartbeat")

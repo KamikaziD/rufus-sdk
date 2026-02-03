@@ -1,0 +1,74 @@
+# Vital Signs Monitoring Workflow
+# Real-time health monitoring with on-device AI anomaly detection
+#
+# This workflow demonstrates:
+# - Sensor data collection
+# - Feature extraction
+# - Threshold-based alerting
+# - AI-powered anomaly detection
+# - Store-and-Forward for offline alerts
+
+workflow_type: "VitalMonitoring"
+workflow_version: "1.0.0"
+description: "Patient vital signs monitoring with AI anomaly detection"
+initial_state_model: "examples.healthcare_wearable.models.VitalMonitoringState"
+
+steps:
+  # Step 1: Read sensor data from wearable
+  - name: "Read_Sensors"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.read_sensors"
+    description: "Collect vital signs from wearable sensors"
+    automate_next: true
+
+  # Step 2: Extract features for model input
+  - name: "Extract_Features"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.extract_features"
+    description: "Convert sensor readings to model features"
+    automate_next: true
+
+  # Step 3: Check basic safety thresholds
+  - name: "Check_Thresholds"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.check_thresholds"
+    description: "Immediate alerting for clearly dangerous readings"
+    automate_next: true
+
+  # Step 4: Run AI anomaly detection model
+  - name: "Detect_Anomaly"
+    type: "AI_INFERENCE"
+    description: "On-device ML inference for anomaly detection"
+    ai_config:
+      model_name: "vital_anomaly_detector"
+      model_path: "examples/healthcare_wearable/models/anomaly_detector.tflite"
+      runtime: "tflite"
+      input_source: "state.features"
+      preprocessing: "none"  # Features already normalized
+      output_key: "inference_result"
+      postprocessing: "threshold"
+      postprocessing_params:
+        threshold: 0.7
+      threshold: 0.7
+      fallback_on_error: "skip"  # Don't fail if model unavailable
+      timeout_ms: 1000
+    automate_next: true
+
+  # Step 5: Process anomaly result and decide action
+  - name: "Process_Anomaly"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.process_anomaly_result"
+    description: "Evaluate AI output and generate alert if needed"
+
+  # Step 6: Send alert (jumped to if anomaly detected)
+  - name: "Send_Alert"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.send_alert"
+    description: "Send health alert to caregivers"
+    automate_next: true
+
+  # Step 7: Log readings and complete
+  - name: "Log_Readings"
+    type: "STANDARD"
+    function: "examples.healthcare_wearable.steps.log_readings"
+    description: "Persist readings locally for sync"
