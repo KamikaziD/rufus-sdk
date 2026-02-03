@@ -6,11 +6,12 @@ Handles:
 - Hot-reload of workflow definitions
 - Fraud rule injection
 - Feature flag updates
+- Policy-based artifact management (via Cloud Policy Engine)
 """
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
 import hashlib
 import httpx
@@ -18,6 +19,44 @@ import httpx
 from rufus_edge.models import DeviceConfig
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Update Instruction Models (matches server-side policy_engine.py)
+# ============================================================================
+
+class UpdateInstruction:
+    """Artifact update instruction from Cloud Policy Engine."""
+
+    def __init__(
+        self,
+        needs_update: bool,
+        artifact: Optional[str] = None,
+        artifact_url: Optional[str] = None,
+        artifact_hash: Optional[str] = None,
+        policy_id: Optional[str] = None,
+        policy_version: Optional[str] = None,
+        message: Optional[str] = None,
+    ):
+        self.needs_update = needs_update
+        self.artifact = artifact
+        self.artifact_url = artifact_url
+        self.artifact_hash = artifact_hash
+        self.policy_id = policy_id
+        self.policy_version = policy_version
+        self.message = message
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "UpdateInstruction":
+        return cls(
+            needs_update=data.get("needs_update", False),
+            artifact=data.get("artifact"),
+            artifact_url=data.get("artifact_url"),
+            artifact_hash=data.get("artifact_hash"),
+            policy_id=data.get("policy_id"),
+            policy_version=data.get("policy_version"),
+            message=data.get("message"),
+        )
 
 
 class ConfigManager:
@@ -467,3 +506,204 @@ class ConfigManager:
                         logger.error(f"Failed to reload model {model_name}: {e}")
 
         return results
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Policy Engine Integration - Artifact Update Checking
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def check_for_artifact_update(
+        self,
+        current_artifact: Optional[str] = None,
+        current_hash: Optional[str] = None,
+    ) -> UpdateInstruction:
+        """
+        Check Cloud Policy Engine for artifact updates.
+
+        This is the edge-side component of the "Hardware Handshake":
+        1. Device sends its Hardware Identity
+        2. Cloud evaluates active Policies
+        3. Cloud returns appropriate artifact instruction
+
+        Args:
+            current_artifact: Currently running artifact filename
+            current_hash: Hash of current artifact for verification
+
+        Returns:
+            UpdateInstruction with details about any available update
+        """
+        if not self._http_client:
+            logger.error("HTTP client not initialized")
+            return UpdateInstruction(needs_update=False, message="HTTP client not initialized")
+
+        try:
+            # Build hardware identity
+            hw_identity = await self._get_hardware_identity()
+            hw_identity["current_artifact"] = current_artifact
+            hw_identity["current_hash"] = current_hash
+
+            # Call update-check endpoint
+            response = await self._http_client.post(
+                f"{self.config_url}/api/v1/update-check",
+                json=hw_identity,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                instruction = UpdateInstruction.from_dict(data)
+
+                if instruction.needs_update:
+                    logger.info(
+                        f"Artifact update available: {instruction.artifact} "
+                        f"(policy: {instruction.policy_version})"
+                    )
+                else:
+                    logger.debug(f"No update needed: {instruction.message}")
+
+                return instruction
+
+            else:
+                logger.error(f"Update check failed: HTTP {response.status_code}")
+                return UpdateInstruction(
+                    needs_update=False,
+                    message=f"HTTP {response.status_code}"
+                )
+
+        except httpx.RequestError as e:
+            logger.warning(f"Update check network error: {e}")
+            return UpdateInstruction(needs_update=False, message=str(e))
+
+    async def _get_hardware_identity(self) -> Dict[str, Any]:
+        """
+        Get hardware identity for Policy Engine check-in.
+
+        Uses InferenceFactory if available for full hardware detection.
+        """
+        try:
+            from rufus.implementations.inference.factory import InferenceFactory
+            factory = InferenceFactory()
+            identity = factory.get_hardware_identity(self.device_id)
+            return identity.to_dict()
+        except ImportError:
+            # Fallback to basic detection
+            pass
+
+        try:
+            from rufus.utils.platform import get_platform_info
+            info = get_platform_info()
+            return {
+                "device_id": self.device_id,
+                "hw": "APPLE_SILICON" if info.is_apple_silicon else "CPU",
+                "platform": info.system,
+                "arch": info.machine,
+                "accelerators": [a.value for a in info.accelerators],
+                "supports_neural_engine": info.is_apple_silicon,
+            }
+        except ImportError:
+            pass
+
+        # Minimal fallback
+        import platform
+        return {
+            "device_id": self.device_id,
+            "hw": "CPU",
+            "platform": platform.system(),
+            "arch": platform.machine(),
+            "accelerators": ["cpu"],
+        }
+
+    async def download_artifact(
+        self,
+        instruction: UpdateInstruction,
+        destination_dir: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> Optional[str]:
+        """
+        Download artifact based on Policy Engine instruction.
+
+        Args:
+            instruction: UpdateInstruction from check_for_artifact_update
+            destination_dir: Directory to save the artifact
+            progress_callback: Optional callback(bytes_downloaded, total_bytes)
+
+        Returns:
+            Path to downloaded artifact, or None if failed
+        """
+        if not instruction.needs_update or not instruction.artifact_url:
+            logger.warning("No artifact URL in update instruction")
+            return None
+
+        if not self._http_client:
+            logger.error("HTTP client not initialized")
+            return None
+
+        try:
+            import os
+            from pathlib import Path
+
+            # Ensure directory exists
+            Path(destination_dir).mkdir(parents=True, exist_ok=True)
+
+            destination_path = os.path.join(destination_dir, instruction.artifact)
+
+            logger.info(f"Downloading artifact {instruction.artifact}")
+
+            # Stream download
+            async with self._http_client.stream("GET", instruction.artifact_url) as response:
+                if response.status_code != 200:
+                    logger.error(f"Artifact download failed: HTTP {response.status_code}")
+                    return None
+
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+
+                hasher = hashlib.sha256()
+
+                with open(destination_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        hasher.update(chunk)
+                        downloaded += len(chunk)
+
+                        if progress_callback and total_size > 0:
+                            progress_callback(downloaded, total_size)
+
+            # Verify hash if provided
+            if instruction.artifact_hash:
+                actual_hash = hasher.hexdigest()
+                expected = instruction.artifact_hash.replace("sha256:", "")
+                if not actual_hash.startswith(expected[:min(len(expected), 16)]):
+                    logger.error(
+                        f"Artifact hash mismatch: expected {expected}, got {actual_hash}"
+                    )
+                    os.remove(destination_path)
+                    return None
+
+            logger.info(f"Artifact downloaded successfully: {destination_path}")
+
+            # Report download status to cloud
+            await self._report_update_status("downloading")
+
+            return destination_path
+
+        except Exception as e:
+            logger.error(f"Artifact download error: {e}")
+            await self._report_update_status("failed", str(e))
+            return None
+
+    async def _report_update_status(
+        self,
+        status: str,
+        error_message: Optional[str] = None
+    ):
+        """Report artifact update status to Cloud Policy Engine."""
+        if not self._http_client:
+            return
+
+        try:
+            await self._http_client.post(
+                f"{self.config_url}/api/v1/devices/{self.device_id}/update-status",
+                params={"status": status},
+                json={"error_message": error_message} if error_message else None,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to report update status: {e}")

@@ -72,6 +72,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # --- Device Service ---
 from rufus_server.device_service import DeviceService
 
+# --- Policy Engine ---
+from rufus_server.policy_engine import (
+    Policy, PolicyRule, PolicyStatus, RolloutConfig, RolloutStrategy,
+    PolicyEvaluator, DeviceCheckIn, UpdateInstruction, DeviceAssignment,
+    AssignmentStatus,
+)
+
 # --- Global Instances ---
 persistence_provider: Optional[PersistenceProvider] = None
 execution_provider: Optional[ExecutionProvider] = None
@@ -79,6 +86,8 @@ workflow_observer: Optional[WorkflowObserver] = None
 workflow_engine: Optional[WorkflowEngine] = None
 workflow_registry_config: Dict[str, Any] = {}
 device_service: Optional[DeviceService] = None
+policy_evaluator: Optional[PolicyEvaluator] = None
+device_assignments: Dict[str, DeviceAssignment] = {}  # In-memory for now
 
 
 # --- User Context ---
@@ -150,6 +159,10 @@ async def startup_event():
     # Initialize Device Service
     global device_service
     device_service = DeviceService(persistence_provider)
+
+    # Initialize Policy Engine
+    global policy_evaluator
+    policy_evaluator = PolicyEvaluator()
 
     print("Rufus Edge Control Plane started.")
 
@@ -471,6 +484,237 @@ if templates_path.is_dir():
     async def read_root(request: Request):
         """Serves the debug UI's main page."""
         return templates.TemplateResponse("index.html", {"request": request})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Policy Engine APIs
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/v1/policies", response_model=Policy)
+async def create_policy(
+    policy: Policy,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Create a new deployment policy."""
+    if policy_evaluator is None:
+        raise HTTPException(status_code=503, detail="Policy engine not initialized")
+
+    policy.created_by = user.user_id if user else None
+    policy_evaluator.add_policy(policy)
+
+    return policy
+
+
+@app.get("/api/v1/policies", response_model=List[Policy])
+async def list_policies(
+    status: Optional[PolicyStatus] = None,
+):
+    """List all policies, optionally filtered by status."""
+    if policy_evaluator is None:
+        raise HTTPException(status_code=503, detail="Policy engine not initialized")
+
+    policies = list(policy_evaluator._policies.values())
+
+    if status:
+        policies = [p for p in policies if p.status == status]
+
+    return policies
+
+
+@app.get("/api/v1/policies/{policy_id}", response_model=Policy)
+async def get_policy(policy_id: str):
+    """Get a specific policy by ID."""
+    if policy_evaluator is None:
+        raise HTTPException(status_code=503, detail="Policy engine not initialized")
+
+    from uuid import UUID
+    try:
+        pid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid policy ID format")
+
+    policy = policy_evaluator._policies.get(pid)
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    return policy
+
+
+@app.put("/api/v1/policies/{policy_id}/status")
+async def update_policy_status(
+    policy_id: str,
+    new_status: PolicyStatus,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Update policy status (activate, pause, archive)."""
+    if policy_evaluator is None:
+        raise HTTPException(status_code=503, detail="Policy engine not initialized")
+
+    from uuid import UUID
+    try:
+        pid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid policy ID format")
+
+    policy = policy_evaluator._policies.get(pid)
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    from datetime import datetime
+    policy.status = new_status
+    policy.updated_at = datetime.utcnow()
+
+    return {"status": "updated", "new_status": new_status}
+
+
+@app.post("/api/v1/update-check", response_model=UpdateInstruction)
+@limiter.limit("60/minute")
+async def check_for_update(
+    request: Request,
+    checkin: DeviceCheckIn,
+    x_api_key: str = Header(..., alias="X-API-Key")
+):
+    """
+    Device check-in endpoint for update polling.
+
+    The device sends its hardware identity, and the Policy Engine
+    evaluates all active policies to determine if an update is needed.
+    """
+    if policy_evaluator is None:
+        raise HTTPException(status_code=503, detail="Policy engine not initialized")
+
+    # Authenticate device (in production, verify X-API-Key)
+    # For now, just log the check-in
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Device check-in: {checkin.device_id} ({checkin.hw})")
+
+    # Convert check-in to hardware identity dict
+    hw_identity = checkin.model_dump()
+
+    # Check current assignment
+    current_assignment = device_assignments.get(checkin.device_id)
+
+    # Evaluate policies
+    assignment = policy_evaluator.get_assignment(
+        device_id=checkin.device_id,
+        hardware_identity=hw_identity,
+    )
+
+    if not assignment:
+        return UpdateInstruction(
+            needs_update=False,
+            message="No matching policy found"
+        )
+
+    # Check canary status
+    policy = policy_evaluator._policies.get(assignment.policy_id)
+    if policy and not policy_evaluator.should_deploy_canary(checkin.device_id, policy):
+        return UpdateInstruction(
+            needs_update=False,
+            message="Device not in canary rollout group"
+        )
+
+    # Check if update is needed
+    if checkin.current_artifact == assignment.assigned_artifact:
+        if checkin.current_hash and assignment.artifact_hash:
+            if checkin.current_hash == assignment.artifact_hash:
+                return UpdateInstruction(
+                    needs_update=False,
+                    message="Already running latest version"
+                )
+
+    # Store assignment
+    device_assignments[checkin.device_id] = assignment
+
+    # Generate signed URL (in production, use cloud storage signed URLs)
+    artifact_url = f"/api/v1/artifacts/{assignment.assigned_artifact}"
+
+    return UpdateInstruction(
+        needs_update=True,
+        artifact=assignment.assigned_artifact,
+        artifact_url=artifact_url,
+        artifact_hash=assignment.artifact_hash,
+        policy_id=assignment.policy_id,
+        policy_version=assignment.policy_version,
+        message="Update available"
+    )
+
+
+@app.post("/api/v1/devices/{device_id}/update-status")
+async def report_update_status(
+    device_id: str,
+    status: AssignmentStatus,
+    error_message: Optional[str] = None,
+    x_api_key: str = Header(..., alias="X-API-Key")
+):
+    """Report artifact installation status."""
+    assignment = device_assignments.get(device_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No assignment found for device")
+
+    from datetime import datetime
+    assignment.status = status
+
+    if status == AssignmentStatus.INSTALLED:
+        assignment.installed_at = datetime.utcnow()
+        assignment.current_artifact = assignment.assigned_artifact
+        assignment.current_hash = assignment.artifact_hash
+    elif status == AssignmentStatus.FAILED:
+        assignment.failed_at = datetime.utcnow()
+        assignment.error_message = error_message
+        assignment.retry_count += 1
+    elif status == AssignmentStatus.DOWNLOADING:
+        assignment.downloaded_at = datetime.utcnow()
+
+    return {"status": "recorded", "assignment_status": status}
+
+
+@app.get("/api/v1/devices/{device_id}/assignment")
+async def get_device_assignment(
+    device_id: str,
+    x_api_key: str = Header(..., alias="X-API-Key")
+):
+    """Get current artifact assignment for a device."""
+    assignment = device_assignments.get(device_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No assignment found for device")
+
+    return assignment
+
+
+@app.get("/api/v1/rollout/status")
+async def get_rollout_status(policy_id: Optional[str] = None):
+    """Get rollout status across all devices."""
+    if not device_assignments:
+        return {
+            "total_devices": 0,
+            "status_breakdown": {},
+            "by_policy": {}
+        }
+
+    from collections import Counter
+
+    # Count by status
+    status_counts = Counter(a.status for a in device_assignments.values())
+
+    # Count by policy
+    by_policy: Dict[str, Dict[str, int]] = {}
+    for assignment in device_assignments.values():
+        pid = str(assignment.policy_id)
+        if pid not in by_policy:
+            by_policy[pid] = Counter()
+        by_policy[pid][assignment.status] += 1
+
+    # Filter by policy if specified
+    if policy_id:
+        by_policy = {k: v for k, v in by_policy.items() if k == policy_id}
+
+    return {
+        "total_devices": len(device_assignments),
+        "status_breakdown": dict(status_counts),
+        "by_policy": {k: dict(v) for k, v in by_policy.items()}
+    }
 
 
 # To run: uvicorn rufus_server.main:app --reload

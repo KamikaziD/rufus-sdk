@@ -7,8 +7,21 @@ Supports models from PyTorch, TensorFlow, scikit-learn, and other frameworks.
 Features:
 - Cross-platform inference
 - CPU and GPU execution providers
-- Optimized for Intel, ARM, and NVIDIA hardware
+- Apple Silicon support via CoreML execution provider (Neural Engine)
+- Optimized for Intel, ARM, NVIDIA, and Apple hardware
 - Support for quantized INT8 models
+
+Apple Silicon Support:
+    The CoreMLExecutionProvider enables hardware acceleration on Apple Silicon:
+    - Neural Engine: Dedicated ML accelerator (16+ TOPS)
+    - GPU: Metal-based GPU acceleration
+    - CPU: Optimized ARM CPU execution
+
+    Example for Apple Silicon:
+        provider = ONNXInferenceProvider(
+            providers=['CoreMLExecutionProvider', 'CPUExecutionProvider'],
+            provider_options=[{'coreml_flags': 0x004}, {}]  # Use Neural Engine
+        )
 """
 
 import logging
@@ -64,6 +77,7 @@ class ONNXInferenceProvider(InferenceProvider):
     def __init__(
         self,
         providers: Optional[List[str]] = None,
+        provider_options: Optional[List[Dict[str, Any]]] = None,
         graph_optimization_level: str = "all",
         intra_op_threads: int = 4,
         inter_op_threads: int = 1,
@@ -76,6 +90,12 @@ class ONNXInferenceProvider(InferenceProvider):
                       Default: ['CPUExecutionProvider']
                       Options: 'CUDAExecutionProvider', 'TensorrtExecutionProvider',
                               'CoreMLExecutionProvider', 'CPUExecutionProvider'
+            provider_options: List of option dicts for each provider (same order as providers).
+                             For CoreML: {'coreml_flags': 0x004} enables Neural Engine.
+                             CoreML flags:
+                               - 0x001: COREML_FLAG_USE_CPU_ONLY
+                               - 0x002: COREML_FLAG_ENABLE_ON_SUBGRAPH
+                               - 0x004: COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE
             graph_optimization_level: Optimization level ('disabled', 'basic', 'extended', 'all')
             intra_op_threads: Threads for parallel execution within operators
             inter_op_threads: Threads for parallel execution across operators
@@ -86,6 +106,7 @@ class ONNXInferenceProvider(InferenceProvider):
             )
 
         self.providers = providers or ['CPUExecutionProvider']
+        self.provider_options = provider_options
         self.graph_optimization_level = graph_optimization_level
         self.intra_op_threads = intra_op_threads
         self.inter_op_threads = inter_op_threads
@@ -93,6 +114,7 @@ class ONNXInferenceProvider(InferenceProvider):
         self._models: Dict[str, Dict[str, Any]] = {}
         self._session_options = None
         self._initialized = False
+        self._provider_options = provider_options  # Can be set by factory
 
     @property
     def runtime(self) -> InferenceRuntime:
@@ -187,12 +209,23 @@ class ONNXInferenceProvider(InferenceProvider):
         # Create inference session
         session_options = kwargs.get("session_options") or self._session_options
         providers = kwargs.get("providers") or self.providers
+        provider_options = kwargs.get("provider_options") or self._provider_options
 
-        session = _ort.InferenceSession(
-            model_path,
-            sess_options=session_options,
-            providers=providers,
-        )
+        # Create session with or without provider options
+        if provider_options:
+            session = _ort.InferenceSession(
+                model_path,
+                sess_options=session_options,
+                providers=providers,
+                provider_options=provider_options,
+            )
+            logger.info(f"Created session with provider options: {provider_options}")
+        else:
+            session = _ort.InferenceSession(
+                model_path,
+                sess_options=session_options,
+                providers=providers,
+            )
 
         # Get input/output details
         inputs = session.get_inputs()

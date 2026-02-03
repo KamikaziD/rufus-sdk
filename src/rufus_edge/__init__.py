@@ -28,7 +28,7 @@ Example usage:
 
 from rufus_edge.agent import RufusEdgeAgent
 from rufus_edge.sync_manager import SyncManager
-from rufus_edge.config_manager import ConfigManager
+from rufus_edge.config_manager import ConfigManager, UpdateInstruction
 from rufus_edge.inference_executor import (
     InferenceExecutor,
     get_inference_executor,
@@ -47,6 +47,7 @@ __all__ = [
     "RufusEdgeAgent",
     "SyncManager",
     "ConfigManager",
+    "UpdateInstruction",
     "InferenceExecutor",
     "get_inference_executor",
     "initialize_inference_executor",
