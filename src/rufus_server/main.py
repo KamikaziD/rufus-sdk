@@ -1080,6 +1080,7 @@ async def get_rollout_status(policy_id: Optional[str] = None):
 broadcast_service = None
 template_service = None
 batch_service = None
+schedule_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -1559,6 +1560,295 @@ async def cancel_batch(
         "batch_id": batch_id,
         "status": "cancelled",
         "message": "Batch cancelled successfully"
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Command Schedule Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/schedules")
+async def create_schedule(
+    schedule_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create a command schedule (one-time or recurring).
+
+    Examples:
+    ```json
+    // One-time schedule
+    {
+      "schedule_name": "Maintenance restart",
+      "device_id": "macbook-m4-001",
+      "command_type": "restart",
+      "command_data": {"delay_seconds": 10},
+      "schedule_type": "one_time",
+      "execute_at": "2026-02-05T02:00:00Z"
+    }
+
+    // Recurring schedule with cron
+    {
+      "schedule_name": "Daily health check",
+      "device_id": "pos-terminal-042",
+      "command_type": "health_check",
+      "command_data": {},
+      "schedule_type": "recurring",
+      "cron_expression": "0 2 * * *",
+      "timezone": "America/New_York",
+      "maintenance_window_start": "02:00:00",
+      "maintenance_window_end": "06:00:00"
+    }
+
+    // Fleet recurring schedule
+    {
+      "schedule_name": "Weekly cache clear",
+      "target_filter": {"device_type": "macbook", "status": "online"},
+      "command_type": "clear_cache",
+      "command_data": {},
+      "schedule_type": "recurring",
+      "cron_expression": "0 3 * * 0",
+      "max_executions": 52
+    }
+    ```
+    """
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    from rufus_server.scheduling import CommandSchedule
+    from datetime import time
+
+    # Parse maintenance window times if provided
+    if "maintenance_window_start" in schedule_data:
+        from datetime import datetime
+        schedule_data["maintenance_window_start"] = datetime.strptime(
+            schedule_data["maintenance_window_start"], "%H:%M:%S"
+        ).time()
+
+    if "maintenance_window_end" in schedule_data:
+        from datetime import datetime
+        schedule_data["maintenance_window_end"] = datetime.strptime(
+            schedule_data["maintenance_window_end"], "%H:%M:%S"
+        ).time()
+
+    # Parse execute_at if provided
+    if "execute_at" in schedule_data and isinstance(schedule_data["execute_at"], str):
+        from datetime import datetime
+        schedule_data["execute_at"] = datetime.fromisoformat(
+            schedule_data["execute_at"].replace("Z", "+00:00")
+        )
+
+    # Add created_by from user context
+    if user:
+        schedule_data["created_by"] = user.get("user_id")
+
+    # Create schedule
+    schedule = CommandSchedule(**schedule_data)
+    schedule_id = await schedule_service.create_schedule(schedule)
+
+    return {
+        "schedule_id": schedule_id,
+        "status": "created",
+        "message": "Schedule created successfully"
+    }
+
+
+@app.get("/api/v1/schedules/{schedule_id}")
+async def get_schedule(
+    schedule_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get schedule details and execution history."""
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    progress = await schedule_service.get_schedule(schedule_id)
+
+    if not progress:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    return {
+        "schedule_id": progress.schedule_id,
+        "schedule_name": progress.schedule_name,
+        "device_id": progress.device_id,
+        "target_filter": progress.target_filter,
+        "command_type": progress.command_type,
+        "schedule_type": progress.schedule_type.value,
+        "status": progress.status.value,
+        "execution_count": progress.execution_count,
+        "max_executions": progress.max_executions,
+        "next_execution_at": progress.next_execution_at.isoformat() if progress.next_execution_at else None,
+        "last_execution_at": progress.last_execution_at.isoformat() if progress.last_execution_at else None,
+        "cron_expression": progress.cron_expression,
+        "timezone": progress.timezone,
+        "created_at": progress.created_at.isoformat(),
+        "updated_at": progress.updated_at.isoformat(),
+        "expires_at": progress.expires_at.isoformat() if progress.expires_at else None,
+        "recent_executions": progress.recent_executions,
+        "error_message": progress.error_message
+    }
+
+
+@app.get("/api/v1/schedules")
+async def list_schedules(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    schedule_type: Optional[str] = None,
+    limit: int = 50,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List command schedules with optional filters."""
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    schedules = await schedule_service.list_schedules(
+        device_id=device_id,
+        status=status,
+        schedule_type=schedule_type,
+        limit=limit
+    )
+
+    return {
+        "schedules": schedules,
+        "count": len(schedules)
+    }
+
+
+@app.post("/api/v1/schedules/{schedule_id}/pause")
+async def pause_schedule(
+    schedule_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Pause an active schedule."""
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    success = await schedule_service.pause_schedule(schedule_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule not found or not active"
+        )
+
+    return {
+        "schedule_id": schedule_id,
+        "status": "paused",
+        "message": "Schedule paused successfully"
+    }
+
+
+@app.post("/api/v1/schedules/{schedule_id}/resume")
+async def resume_schedule(
+    schedule_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Resume a paused schedule."""
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    success = await schedule_service.resume_schedule(schedule_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule not found or not paused"
+        )
+
+    return {
+        "schedule_id": schedule_id,
+        "status": "active",
+        "message": "Schedule resumed successfully"
+    }
+
+
+@app.delete("/api/v1/schedules/{schedule_id}")
+async def cancel_schedule(
+    schedule_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Cancel a schedule."""
+    global schedule_service, device_service, broadcast_service
+
+    if not schedule_service:
+        from rufus_server.schedule_service import ScheduleService
+
+        if not device_service:
+            device_service = DeviceService(persistence)
+
+        if not broadcast_service:
+            from rufus_server.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService(persistence, device_service)
+
+        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+
+    success = await schedule_service.cancel_schedule(schedule_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule not found or already completed/cancelled"
+        )
+
+    return {
+        "schedule_id": schedule_id,
+        "status": "cancelled",
+        "message": "Schedule cancelled successfully"
     }
 
 

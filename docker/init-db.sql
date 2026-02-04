@@ -168,6 +168,72 @@ ADD COLUMN IF NOT EXISTS batch_sequence INT DEFAULT NULL;
 CREATE INDEX IF NOT EXISTS idx_device_command_batch ON device_commands(batch_id, batch_sequence);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Command Schedules Table (for scheduled and recurring commands)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS command_schedules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    schedule_id VARCHAR(100) UNIQUE NOT NULL,
+    schedule_name VARCHAR(200),
+    device_id VARCHAR(100) REFERENCES edge_devices(device_id) ON DELETE CASCADE,
+    target_filter JSONB DEFAULT NULL,
+    command_type VARCHAR(100) NOT NULL,
+    command_data TEXT DEFAULT '{}',
+    schedule_type VARCHAR(50) NOT NULL,
+    execute_at TIMESTAMPTZ,
+    cron_expression VARCHAR(100),
+    timezone VARCHAR(50) DEFAULT 'UTC',
+    status VARCHAR(50) DEFAULT 'active',
+    next_execution_at TIMESTAMPTZ,
+    last_execution_at TIMESTAMPTZ,
+    execution_count INT DEFAULT 0,
+    max_executions INT DEFAULT NULL,
+    maintenance_window_start TIME,
+    maintenance_window_end TIME,
+    created_by VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,
+    error_message TEXT,
+    retry_policy JSONB DEFAULT NULL,
+    CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('one_time', 'recurring')),
+    CONSTRAINT one_time_requires_execute_at CHECK (
+        (schedule_type = 'one_time' AND execute_at IS NOT NULL) OR
+        (schedule_type != 'one_time')
+    ),
+    CONSTRAINT recurring_requires_cron CHECK (
+        (schedule_type = 'recurring' AND cron_expression IS NOT NULL) OR
+        (schedule_type != 'recurring')
+    ),
+    CONSTRAINT device_or_filter CHECK (
+        (device_id IS NOT NULL AND target_filter IS NULL) OR
+        (device_id IS NULL AND target_filter IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_next_execution ON command_schedules(next_execution_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_schedule_device ON command_schedules(device_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_status ON command_schedules(status);
+CREATE INDEX IF NOT EXISTS idx_schedule_type ON command_schedules(schedule_type);
+
+CREATE TABLE IF NOT EXISTS schedule_executions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    schedule_id VARCHAR(100) NOT NULL REFERENCES command_schedules(schedule_id) ON DELETE CASCADE,
+    execution_number INT NOT NULL,
+    scheduled_for TIMESTAMPTZ NOT NULL,
+    executed_at TIMESTAMPTZ,
+    status VARCHAR(50) DEFAULT 'pending',
+    command_id VARCHAR(100),
+    broadcast_id VARCHAR(100),
+    result_summary TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_execution_schedule ON schedule_executions(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_execution_status ON schedule_executions(status);
+CREATE INDEX IF NOT EXISTS idx_schedule_execution_scheduled_for ON schedule_executions(scheduled_for);
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS device_configs (

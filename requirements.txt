@@ -50,6 +50,9 @@ rich>=13.0.0
 # Environment
 python-dotenv>=1.0.0
 
+# Scheduling (for cron expressions)
+croniter>=2.0.0
+
 # Encryption (for PCI-DSS compliance)
 cryptography>=41.0.0
 

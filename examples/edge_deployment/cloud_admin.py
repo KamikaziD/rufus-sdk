@@ -828,6 +828,216 @@ async def cancel_batch(batch_id: str):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Command Schedule Functions
+# ═════════════════════════════════════════════════════════════════════════
+
+async def create_schedule(
+    schedule_json: str
+):
+    """
+    Create a command schedule (one-time or recurring).
+
+    Args:
+        schedule_json: JSON schedule configuration
+
+    Examples:
+        One-time: '{"schedule_name":"Restart","device_id":"dev-001","command_type":"restart","command_data":{},"schedule_type":"one_time","execute_at":"2026-02-05T02:00:00Z"}'
+        Recurring: '{"schedule_name":"Daily check","device_id":"dev-001","command_type":"health_check","command_data":{},"schedule_type":"recurring","cron_expression":"0 2 * * *"}'
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            schedule_data = json.loads(schedule_json)
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/schedules",
+                json=schedule_data,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Schedule created successfully")
+            print(f"  Schedule ID: {result['schedule_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Invalid JSON: {e}\n")
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_schedule_status(schedule_id: str):
+    """Get schedule details and execution history."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/schedules/{schedule_id}",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            schedule = response.json()
+
+            print(f"\nSchedule: {schedule['schedule_id']}")
+            if schedule['schedule_name']:
+                print(f"  Name: {schedule['schedule_name']}")
+            print(f"  Device: {schedule['device_id'] or 'Fleet'}")
+            print(f"  Command: {schedule['command_type']}")
+            print(f"  Type: {schedule['schedule_type']}")
+            print(f"  Status: {schedule['status']}")
+            print(f"  Execution Count: {schedule['execution_count']}")
+
+            if schedule['max_executions']:
+                print(f"  Max Executions: {schedule['max_executions']}")
+
+            if schedule['next_execution_at']:
+                print(f"  Next Execution: {schedule['next_execution_at']}")
+
+            if schedule['last_execution_at']:
+                print(f"  Last Execution: {schedule['last_execution_at']}")
+
+            if schedule['cron_expression']:
+                print(f"  Cron: {schedule['cron_expression']}")
+                print(f"  Timezone: {schedule['timezone']}")
+
+            print(f"  Created: {schedule['created_at']}")
+
+            # Show recent executions
+            if schedule['recent_executions']:
+                print(f"\n  Recent Executions:")
+                for exec in schedule['recent_executions']:
+                    status_icon = "✓" if exec['status'] == "completed" else "✗" if exec['status'] == "failed" else "⋯"
+                    print(f"    {status_icon} #{exec['execution_number']} - {exec['status']}")
+                    print(f"       Scheduled: {exec['scheduled_for']}")
+                    if exec['executed_at']:
+                        print(f"       Executed: {exec['executed_at']}")
+                    if exec['error_message']:
+                        print(f"       Error: {exec['error_message']}")
+
+            print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_schedules(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    schedule_type: Optional[str] = None,
+    limit: int = 50
+):
+    """List command schedules with optional filters."""
+    async with httpx.AsyncClient() as client:
+        try:
+            params = {"limit": limit}
+            if device_id:
+                params["device_id"] = device_id
+            if status:
+                params["status"] = status
+            if schedule_type:
+                params["schedule_type"] = schedule_type
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/schedules",
+                params=params,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            schedules = result["schedules"]
+            count = result["count"]
+
+            if count == 0:
+                print("\nNo schedules found\n")
+                return
+
+            print(f"\nFound {count} schedule(s):\n")
+            for schedule in schedules:
+                status_icon = "✓" if schedule['status'] == "active" else "⏸" if schedule['status'] == "paused" else "✗"
+                print(f"{status_icon} {schedule['schedule_id'][:8]}... - {schedule.get('schedule_name', schedule['command_type'])}")
+                print(f"  Device: {schedule['device_id'] or 'Fleet'}")
+                print(f"  Type: {schedule['schedule_type']} | Status: {schedule['status']}")
+                print(f"  Executions: {schedule['execution_count']}/{schedule['max_executions'] or '∞'}")
+
+                if schedule['next_execution_at']:
+                    print(f"  Next: {schedule['next_execution_at']}")
+
+                print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def pause_schedule(schedule_id: str):
+    """Pause an active schedule."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/schedules/{schedule_id}/pause",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Schedule paused")
+            print(f"  Schedule ID: {result['schedule_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def resume_schedule(schedule_id: str):
+    """Resume a paused schedule."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/schedules/{schedule_id}/resume",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Schedule resumed")
+            print(f"  Schedule ID: {result['schedule_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def cancel_schedule(schedule_id: str):
+    """Cancel a schedule."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.delete(
+                f"{CLOUD_URL}/api/v1/schedules/{schedule_id}",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Schedule cancelled")
+            print(f"  Schedule ID: {result['schedule_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -862,6 +1072,14 @@ async def main():
         print("    python cloud_admin.py list-batches [device-id] [status]")
         print("    python cloud_admin.py batch-status <batch-id>")
         print("    python cloud_admin.py cancel-batch <batch-id>")
+        print()
+        print("  Command Scheduling:")
+        print("    python cloud_admin.py create-schedule <schedule-json>")
+        print("    python cloud_admin.py list-schedules [device-id] [status] [schedule-type]")
+        print("    python cloud_admin.py schedule-status <schedule-id>")
+        print("    python cloud_admin.py pause-schedule <schedule-id>")
+        print("    python cloud_admin.py resume-schedule <schedule-id>")
+        print("    python cloud_admin.py cancel-schedule <schedule-id>")
         print()
         return
 
@@ -988,6 +1206,42 @@ async def main():
             print("Error: batch-id required")
             return
         await cancel_batch(sys.argv[2])
+
+    elif command == "create-schedule":
+        if len(sys.argv) < 3:
+            print("Error: schedule-json required")
+            return
+        await create_schedule(sys.argv[2])
+
+    elif command == "list-schedules":
+        device_id = sys.argv[2] if len(sys.argv) > 2 else None
+        status = sys.argv[3] if len(sys.argv) > 3 else None
+        schedule_type = sys.argv[4] if len(sys.argv) > 4 else None
+        await list_schedules(device_id, status, schedule_type)
+
+    elif command == "schedule-status":
+        if len(sys.argv) < 3:
+            print("Error: schedule-id required")
+            return
+        await get_schedule_status(sys.argv[2])
+
+    elif command == "pause-schedule":
+        if len(sys.argv) < 3:
+            print("Error: schedule-id required")
+            return
+        await pause_schedule(sys.argv[2])
+
+    elif command == "resume-schedule":
+        if len(sys.argv) < 3:
+            print("Error: schedule-id required")
+            return
+        await resume_schedule(sys.argv[2])
+
+    elif command == "cancel-schedule":
+        if len(sys.argv) < 3:
+            print("Error: schedule-id required")
+            return
+        await cancel_schedule(sys.argv[2])
 
     else:
         print(f"Unknown command: {command}")
