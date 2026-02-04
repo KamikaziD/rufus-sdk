@@ -410,6 +410,123 @@ CREATE INDEX IF NOT EXISTS idx_approval_response_approval ON approval_responses(
 CREATE INDEX IF NOT EXISTS idx_approval_response_approver ON approval_responses(approver_id);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Command Versioning (Track command definition changes)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS command_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    command_type VARCHAR(100) NOT NULL,
+    version VARCHAR(50) NOT NULL,
+    schema_definition JSONB NOT NULL,
+    changelog TEXT,
+    is_active BOOLEAN DEFAULT true,
+    is_deprecated BOOLEAN DEFAULT false,
+    deprecated_reason TEXT,
+    created_by VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(command_type, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_version_type ON command_versions(command_type);
+CREATE INDEX IF NOT EXISTS idx_command_version_active ON command_versions(is_active);
+
+ALTER TABLE device_commands
+ADD COLUMN IF NOT EXISTS command_version VARCHAR(50);
+
+CREATE INDEX IF NOT EXISTS idx_device_command_version ON device_commands(command_type, command_version);
+
+CREATE TABLE IF NOT EXISTS command_changelog (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    command_type VARCHAR(100) NOT NULL,
+    from_version VARCHAR(50),
+    to_version VARCHAR(50) NOT NULL,
+    change_type VARCHAR(50) NOT NULL,
+    changes JSONB NOT NULL,
+    migration_guide TEXT,
+    created_by VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_changelog_command ON command_changelog(command_type);
+CREATE INDEX IF NOT EXISTS idx_changelog_version ON command_changelog(to_version);
+
+INSERT INTO command_versions (command_type, version, schema_definition, changelog, created_by) VALUES
+    ('restart', '1.0.0', '{"type":"object","properties":{"delay_seconds":{"type":"integer","minimum":0,"maximum":300}},"required":[]}', 'Initial version', 'system'),
+    ('health_check', '1.0.0', '{"type":"object","properties":{},"required":[]}', 'Initial version', 'system'),
+    ('update_firmware', '1.0.0', '{"type":"object","properties":{"version":{"type":"string"},"url":{"type":"string","format":"uri"}},"required":["version"]}', 'Initial version', 'system'),
+    ('clear_cache', '1.0.0', '{"type":"object","properties":{"cache_type":{"type":"string","enum":["all","temp","logs"]}},"required":[]}', 'Initial version', 'system')
+ON CONFLICT (command_type, version) DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Webhooks and Rate Limiting
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS webhook_registrations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    webhook_id VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    url TEXT NOT NULL,
+    events JSONB NOT NULL,
+    secret VARCHAR(100),
+    headers JSONB DEFAULT '{}',
+    retry_policy JSONB DEFAULT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_by VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_active ON webhook_registrations(is_active);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    webhook_id VARCHAR(100) NOT NULL REFERENCES webhook_registrations(webhook_id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    event_data JSONB NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending',
+    http_status INT,
+    response_body TEXT,
+    error_message TEXT,
+    attempt_count INT DEFAULT 0,
+    delivered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_deliveries(webhook_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_status ON webhook_deliveries(status);
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_created ON webhook_deliveries(created_at);
+
+CREATE TABLE IF NOT EXISTS rate_limit_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rule_name VARCHAR(100) UNIQUE NOT NULL,
+    resource_pattern VARCHAR(200) NOT NULL,
+    limit_per_window INT NOT NULL,
+    window_seconds INT NOT NULL,
+    scope VARCHAR(50) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_active ON rate_limit_rules(is_active);
+
+INSERT INTO rate_limit_rules (rule_name, resource_pattern, limit_per_window, window_seconds, scope) VALUES
+    ('global_api_limit', '/api/v1/*', 1000, 60, 'ip'),
+    ('command_creation_limit', '/api/v1/commands', 100, 60, 'user'),
+    ('approval_limit', '/api/v1/approvals', 50, 60, 'user')
+ON CONFLICT (rule_name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS rate_limit_tracking (
+    id BIGSERIAL PRIMARY KEY,
+    identifier VARCHAR(200) NOT NULL,
+    resource VARCHAR(200) NOT NULL,
+    request_count INT DEFAULT 1,
+    window_start TIMESTAMPTZ DEFAULT NOW(),
+    window_end TIMESTAMPTZ NOT NULL,
+    last_request TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_identifier ON rate_limit_tracking(identifier, resource, window_end);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_cleanup ON rate_limit_tracking(window_end) WHERE window_end < NOW();
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS device_configs (
