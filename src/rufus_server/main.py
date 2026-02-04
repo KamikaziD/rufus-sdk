@@ -1082,6 +1082,7 @@ template_service = None
 batch_service = None
 schedule_service = None
 audit_service = None
+authorization_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -2077,6 +2078,278 @@ async def get_audit_stats(
         "failed_events": failed,
         "events_by_type": {row["event_type"]: row["count"] for row in events_by_type},
         "events_by_actor": {row["actor_type"]: row["count"] for row in events_by_actor}
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Command Authorization Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/authorization/check")
+async def check_authorization(
+    check_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Check if user is authorized to execute a command.
+
+    Example:
+    ```json
+    {
+      "user_id": "user-123",
+      "command_type": "update_firmware",
+      "device_type": "macbook"
+    }
+    ```
+    """
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    result = await authorization_service.check_authorization(
+        user_id=check_data["user_id"],
+        command_type=check_data["command_type"],
+        device_type=check_data.get("device_type")
+    )
+
+    return {
+        "authorized": result.authorized,
+        "requires_approval": result.requires_approval,
+        "user_roles": result.user_roles,
+        "missing_roles": result.missing_roles,
+        "reason": result.reason,
+        "policy": {
+            "policy_name": result.policy.policy_name,
+            "risk_level": result.policy.risk_level.value,
+            "approvers_required": result.policy.approvers_required
+        } if result.policy else None
+    }
+
+
+@app.post("/api/v1/approvals")
+async def request_approval(
+    approval_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Request approval for a command.
+
+    Example:
+    ```json
+    {
+      "command_type": "update_firmware",
+      "command_data": {"version": "2.5.0"},
+      "device_id": "macbook-m4-001",
+      "requested_by": "user-123",
+      "approvers_required": 2,
+      "approval_timeout_seconds": 3600,
+      "risk_level": "critical",
+      "reason": "Critical security patch"
+    }
+    ```
+    """
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    from rufus_server.authorization import ApprovalRequest
+
+    request = ApprovalRequest(**approval_data)
+    approval_id = await authorization_service.request_approval(request)
+
+    return {
+        "approval_id": approval_id,
+        "status": "pending",
+        "message": "Approval request created"
+    }
+
+
+@app.get("/api/v1/approvals/{approval_id}")
+async def get_approval(
+    approval_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get approval request details."""
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    approval = await authorization_service.get_approval(approval_id)
+
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+
+    return {
+        "approval_id": approval.approval_id,
+        "command_type": approval.command_type,
+        "command_data": approval.command_data,
+        "device_id": approval.device_id,
+        "target_filter": approval.target_filter,
+        "requested_by": approval.requested_by,
+        "requested_at": approval.requested_at.isoformat(),
+        "status": approval.status.value,
+        "approvers_required": approval.approvers_required,
+        "approvers_count": approval.approvers_count,
+        "expires_at": approval.expires_at.isoformat(),
+        "completed_at": approval.completed_at.isoformat() if approval.completed_at else None,
+        "reason": approval.reason,
+        "command_id": approval.command_id,
+        "risk_level": approval.risk_level.value,
+        "responses": approval.responses
+    }
+
+
+@app.get("/api/v1/approvals")
+async def list_approvals(
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List approval requests."""
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    approvals = await authorization_service.list_approvals(
+        user_id=user_id,
+        status=status,
+        limit=limit
+    )
+
+    return {
+        "approvals": approvals,
+        "count": len(approvals)
+    }
+
+
+@app.post("/api/v1/approvals/{approval_id}/approve")
+async def approve_command(
+    approval_id: str,
+    approval_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Approve a command.
+
+    Example:
+    ```json
+    {
+      "approver_id": "user-456",
+      "comment": "Approved - security patch is critical"
+    }
+    ```
+    """
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    from rufus_server.authorization import ApprovalResponse
+
+    success = await authorization_service.respond_to_approval(
+        approval_id=approval_id,
+        approver_id=approval_data["approver_id"],
+        response=ApprovalResponse.APPROVED,
+        comment=approval_data.get("comment")
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot approve (already responded, expired, or not pending)"
+        )
+
+    return {
+        "approval_id": approval_id,
+        "status": "approved",
+        "message": "Approval recorded"
+    }
+
+
+@app.post("/api/v1/approvals/{approval_id}/reject")
+async def reject_command(
+    approval_id: str,
+    rejection_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Reject a command.
+
+    Example:
+    ```json
+    {
+      "approver_id": "user-456",
+      "comment": "Rejected - need more testing first"
+    }
+    ```
+    """
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    from rufus_server.authorization import ApprovalResponse
+
+    success = await authorization_service.respond_to_approval(
+        approval_id=approval_id,
+        approver_id=rejection_data["approver_id"],
+        response=ApprovalResponse.REJECTED,
+        comment=rejection_data.get("comment")
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot reject (already responded, expired, or not pending)"
+        )
+
+    return {
+        "approval_id": approval_id,
+        "status": "rejected",
+        "message": "Rejection recorded"
+    }
+
+
+@app.delete("/api/v1/approvals/{approval_id}")
+async def cancel_approval(
+    approval_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Cancel a pending approval request."""
+    global authorization_service
+
+    if not authorization_service:
+        from rufus_server.authorization_service import AuthorizationService
+        authorization_service = AuthorizationService(persistence)
+
+    # Extract user_id from user context
+    user_id = user.get("user_id") if user else None
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+
+    success = await authorization_service.cancel_approval(approval_id, user_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot cancel (not found, not your request, or not pending)"
+        )
+
+    return {
+        "approval_id": approval_id,
+        "status": "cancelled",
+        "message": "Approval request cancelled"
     }
 
 

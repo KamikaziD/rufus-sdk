@@ -1197,6 +1197,214 @@ async def get_audit_stats(
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Authorization Functions
+# ═════════════════════════════════════════════════════════════════════════
+
+async def check_authorization(user_id: str, command_type: str, device_type: Optional[str] = None):
+    """Check if user is authorized to execute a command."""
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {
+                "user_id": user_id,
+                "command_type": command_type
+            }
+            if device_type:
+                payload["device_type"] = device_type
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/authorization/check",
+                json=payload,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\nAuthorization Check: {command_type}")
+            print(f"  User: {user_id}")
+            print(f"  Authorized: {'✓ Yes' if result['authorized'] else '✗ No'}")
+            print(f"  Requires Approval: {'Yes' if result['requires_approval'] else 'No'}")
+            print(f"  User Roles: {', '.join(result['user_roles'])}")
+
+            if result['missing_roles']:
+                print(f"  Missing Roles: {', '.join(result['missing_roles'])}")
+
+            if result['policy']:
+                print(f"  Policy: {result['policy']['policy_name']}")
+                print(f"  Risk Level: {result['policy']['risk_level']}")
+                if result['requires_approval']:
+                    print(f"  Approvers Required: {result['policy']['approvers_required']}")
+
+            print(f"  Reason: {result['reason']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def request_approval(approval_json: str):
+    """Request approval for a command."""
+    async with httpx.AsyncClient() as client:
+        try:
+            approval_data = json.loads(approval_json)
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/approvals",
+                json=approval_data,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Approval request created")
+            print(f"  Approval ID: {result['approval_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Invalid JSON: {e}\n")
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_approval_status(approval_id: str):
+    """Get approval request status."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/approvals/{approval_id}",
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            approval = response.json()
+
+            print(f"\nApproval: {approval['approval_id']}")
+            print(f"  Command: {approval['command_type']}")
+            print(f"  Device: {approval['device_id'] or 'Fleet'}")
+            print(f"  Requested By: {approval['requested_by']}")
+            print(f"  Requested At: {approval['requested_at']}")
+            print(f"  Status: {approval['status']}")
+            print(f"  Risk Level: {approval['risk_level']}")
+            print(f"  Approvals: {approval['approvers_count']}/{approval['approvers_required']}")
+            print(f"  Expires: {approval['expires_at']}")
+
+            if approval['reason']:
+                print(f"  Reason: {approval['reason']}")
+
+            if approval['responses']:
+                print(f"\n  Responses:")
+                for resp in approval['responses']:
+                    icon = "✓" if resp['response'] == "approved" else "✗"
+                    print(f"    {icon} {resp['approver_id']} - {resp['response']}")
+                    if resp['comment']:
+                        print(f"       Comment: {resp['comment']}")
+
+            print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_pending_approvals(user_id: Optional[str] = None, status: Optional[str] = None):
+    """List approval requests."""
+    async with httpx.AsyncClient() as client:
+        try:
+            params = {}
+            if user_id:
+                params["user_id"] = user_id
+            if status:
+                params["status"] = status
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/approvals",
+                params=params,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            approvals = result["approvals"]
+            count = result["count"]
+
+            if count == 0:
+                print("\nNo approval requests found\n")
+                return
+
+            print(f"\nFound {count} approval request(s):\n")
+            for approval in approvals:
+                status_icon = "⋯" if approval['status'] == "pending" else "✓" if approval['status'] == "approved" else "✗"
+                print(f"{status_icon} {approval['approval_id'][:8]}... - {approval['command_type']}")
+                print(f"  Device: {approval['device_id'] or 'Fleet'}")
+                print(f"  Requested By: {approval['requested_by']}")
+                print(f"  Status: {approval['status']} | Risk: {approval['risk_level']}")
+                print(f"  Approvals: {approval['approvers_count']}/{approval['approvers_required']}")
+                print(f"  Expires: {approval['expires_at']}")
+                if approval['reason']:
+                    print(f"  Reason: {approval['reason']}")
+                print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def approve_command(approval_id: str, approver_id: str, comment: Optional[str] = None):
+    """Approve a command."""
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {"approver_id": approver_id}
+            if comment:
+                payload["comment"] = comment
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/approvals/{approval_id}/approve",
+                json=payload,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Approval recorded")
+            print(f"  Approval ID: {result['approval_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def reject_command(approval_id: str, approver_id: str, comment: Optional[str] = None):
+    """Reject a command."""
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {"approver_id": approver_id}
+            if comment:
+                payload["comment"] = comment
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/approvals/{approval_id}/reject",
+                json=payload,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"\n✓ Rejection recorded")
+            print(f"  Approval ID: {result['approval_id']}")
+            print(f"  Status: {result['status']}\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -1244,6 +1452,14 @@ async def main():
         print("    python cloud_admin.py audit-query [start-time] [end-time] [device-id] [event-type] [limit]")
         print("    python cloud_admin.py audit-export <output-file> [format] [start-time] [end-time] [device-id]")
         print("    python cloud_admin.py audit-stats [start-time] [end-time]")
+        print()
+        print("  Authorization & Approvals:")
+        print("    python cloud_admin.py check-authorization <user-id> <command-type> [device-type]")
+        print("    python cloud_admin.py request-approval <approval-json>")
+        print("    python cloud_admin.py list-approvals [user-id] [status]")
+        print("    python cloud_admin.py approval-status <approval-id>")
+        print("    python cloud_admin.py approve-command <approval-id> <approver-id> [comment]")
+        print("    python cloud_admin.py reject-command <approval-id> <approver-id> [comment]")
         print()
         return
 
@@ -1430,6 +1646,50 @@ async def main():
         start_time = sys.argv[2] if len(sys.argv) > 2 else None
         end_time = sys.argv[3] if len(sys.argv) > 3 else None
         await get_audit_stats(start_time, end_time)
+
+    elif command == "check-authorization":
+        if len(sys.argv) < 4:
+            print("Error: user-id and command-type required")
+            return
+        user_id = sys.argv[2]
+        command_type = sys.argv[3]
+        device_type = sys.argv[4] if len(sys.argv) > 4 else None
+        await check_authorization(user_id, command_type, device_type)
+
+    elif command == "request-approval":
+        if len(sys.argv) < 3:
+            print("Error: approval-json required")
+            return
+        await request_approval(sys.argv[2])
+
+    elif command == "list-approvals":
+        user_id = sys.argv[2] if len(sys.argv) > 2 else None
+        status = sys.argv[3] if len(sys.argv) > 3 else None
+        await list_pending_approvals(user_id, status)
+
+    elif command == "approval-status":
+        if len(sys.argv) < 3:
+            print("Error: approval-id required")
+            return
+        await get_approval_status(sys.argv[2])
+
+    elif command == "approve-command":
+        if len(sys.argv) < 4:
+            print("Error: approval-id and approver-id required")
+            return
+        approval_id = sys.argv[2]
+        approver_id = sys.argv[3]
+        comment = sys.argv[4] if len(sys.argv) > 4 else None
+        await approve_command(approval_id, approver_id, comment)
+
+    elif command == "reject-command":
+        if len(sys.argv) < 4:
+            print("Error: approval-id and approver-id required")
+            return
+        approval_id = sys.argv[2]
+        approver_id = sys.argv[3]
+        comment = sys.argv[4] if len(sys.argv) > 4 else None
+        await reject_command(approval_id, approver_id, comment)
 
     else:
         print(f"Unknown command: {command}")
