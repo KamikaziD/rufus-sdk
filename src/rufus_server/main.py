@@ -1081,6 +1081,7 @@ broadcast_service = None
 template_service = None
 batch_service = None
 schedule_service = None
+audit_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -1849,6 +1850,233 @@ async def cancel_schedule(
         "schedule_id": schedule_id,
         "status": "cancelled",
         "message": "Schedule cancelled successfully"
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Command Audit Log Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/audit/query")
+async def query_audit_logs(
+    query_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Query audit logs with filters.
+
+    Example:
+    ```json
+    {
+      "start_time": "2026-02-01T00:00:00Z",
+      "end_time": "2026-02-04T23:59:59Z",
+      "device_id": "macbook-m4-001",
+      "event_types": ["command_created", "command_completed"],
+      "limit": 100,
+      "offset": 0
+    }
+    ```
+    """
+    global audit_service
+
+    if not audit_service:
+        from rufus_server.audit_service import AuditService
+        audit_service = AuditService(persistence)
+
+    from rufus_server.audit import AuditQuery
+    from datetime import datetime
+
+    # Parse datetime strings
+    if "start_time" in query_data and isinstance(query_data["start_time"], str):
+        query_data["start_time"] = datetime.fromisoformat(
+            query_data["start_time"].replace("Z", "+00:00")
+        )
+
+    if "end_time" in query_data and isinstance(query_data["end_time"], str):
+        query_data["end_time"] = datetime.fromisoformat(
+            query_data["end_time"].replace("Z", "+00:00")
+        )
+
+    query = AuditQuery(**query_data)
+    result = await audit_service.query_logs(query)
+
+    return {
+        "entries": [
+            {
+                "audit_id": entry.audit_id,
+                "event_type": entry.event_type,
+                "command_type": entry.command_type,
+                "device_id": entry.device_id,
+                "merchant_id": entry.merchant_id,
+                "actor_type": entry.actor_type,
+                "actor_id": entry.actor_id,
+                "status": entry.status,
+                "timestamp": entry.timestamp.isoformat(),
+                "error_message": entry.error_message,
+                "compliance_tags": entry.compliance_tags
+            }
+            for entry in result.entries
+        ],
+        "total_count": result.total_count,
+        "limit": result.limit,
+        "offset": result.offset,
+        "has_more": result.has_more
+    }
+
+
+@app.post("/api/v1/audit/export")
+async def export_audit_logs(
+    export_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Export audit logs in specified format (JSON, CSV, JSONL).
+
+    Example:
+    ```json
+    {
+      "query": {
+        "start_time": "2026-02-01T00:00:00Z",
+        "end_time": "2026-02-04T23:59:59Z",
+        "device_id": "macbook-m4-001"
+      },
+      "format": "csv"
+    }
+    ```
+    """
+    global audit_service
+
+    if not audit_service:
+        from rufus_server.audit_service import AuditService
+        audit_service = AuditService(persistence)
+
+    from rufus_server.audit import AuditQuery, AuditExportFormat
+    from datetime import datetime
+
+    # Parse query
+    query_data = export_data.get("query", {})
+
+    # Parse datetime strings
+    if "start_time" in query_data and isinstance(query_data["start_time"], str):
+        query_data["start_time"] = datetime.fromisoformat(
+            query_data["start_time"].replace("Z", "+00:00")
+        )
+
+    if "end_time" in query_data and isinstance(query_data["end_time"], str):
+        query_data["end_time"] = datetime.fromisoformat(
+            query_data["end_time"].replace("Z", "+00:00")
+        )
+
+    query = AuditQuery(**query_data)
+
+    # Get export format
+    export_format = AuditExportFormat(export_data.get("format", "json"))
+
+    # Export logs
+    export_data_str = await audit_service.export_logs(query, export_format)
+
+    # Determine content type
+    content_types = {
+        AuditExportFormat.JSON: "application/json",
+        AuditExportFormat.CSV: "text/csv",
+        AuditExportFormat.JSONL: "application/x-ndjson"
+    }
+
+    return Response(
+        content=export_data_str,
+        media_type=content_types[export_format],
+        headers={
+            "Content-Disposition": f"attachment; filename=audit_log_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.{export_format.value}"
+        }
+    )
+
+
+@app.get("/api/v1/audit/stats")
+async def get_audit_stats(
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get audit log statistics."""
+    global audit_service
+
+    if not audit_service:
+        from rufus_server.audit_service import AuditService
+        audit_service = AuditService(persistence)
+
+    from datetime import datetime, timedelta
+
+    # Default to last 7 days
+    if not start_time:
+        start_dt = datetime.utcnow() - timedelta(days=7)
+    else:
+        start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+
+    if not end_time:
+        end_dt = datetime.utcnow()
+    else:
+        end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+
+    async with persistence.pool.acquire() as conn:
+        # Total events
+        total = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM command_audit_log
+            WHERE timestamp >= $1 AND timestamp <= $2
+            """,
+            start_dt,
+            end_dt
+        )
+
+        # Events by type
+        events_by_type = await conn.fetch(
+            """
+            SELECT event_type, COUNT(*) as count
+            FROM command_audit_log
+            WHERE timestamp >= $1 AND timestamp <= $2
+            GROUP BY event_type
+            ORDER BY count DESC
+            LIMIT 10
+            """,
+            start_dt,
+            end_dt
+        )
+
+        # Events by actor
+        events_by_actor = await conn.fetch(
+            """
+            SELECT actor_type, COUNT(*) as count
+            FROM command_audit_log
+            WHERE timestamp >= $1 AND timestamp <= $2
+            GROUP BY actor_type
+            ORDER BY count DESC
+            """,
+            start_dt,
+            end_dt
+        )
+
+        # Failed events
+        failed = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM command_audit_log
+            WHERE timestamp >= $1 AND timestamp <= $2
+              AND status = 'failed'
+            """,
+            start_dt,
+            end_dt
+        )
+
+    return {
+        "period": {
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat()
+        },
+        "total_events": total,
+        "failed_events": failed,
+        "events_by_type": {row["event_type"]: row["count"] for row in events_by_type},
+        "events_by_actor": {row["actor_type"]: row["count"] for row in events_by_actor}
     }
 
 

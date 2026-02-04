@@ -1038,6 +1038,165 @@ async def cancel_schedule(schedule_id: str):
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Audit Log Functions
+# ═════════════════════════════════════════════════════════════════════════
+
+async def query_audit_logs(
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    device_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    limit: int = 100
+):
+    """Query audit logs."""
+    async with httpx.AsyncClient() as client:
+        try:
+            query = {"limit": limit}
+
+            if start_time:
+                query["start_time"] = start_time
+            if end_time:
+                query["end_time"] = end_time
+            if device_id:
+                query["device_id"] = device_id
+            if event_type:
+                query["event_types"] = [event_type]
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/audit/query",
+                json=query,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            entries = result["entries"]
+            total = result["total_count"]
+
+            if total == 0:
+                print("\nNo audit logs found\n")
+                return
+
+            print(f"\nFound {total} audit log(s) (showing {len(entries)}):\n")
+
+            for entry in entries:
+                status_icon = "✓" if entry['status'] == "completed" else "✗" if entry['status'] == "failed" else "⋯"
+                print(f"{status_icon} [{entry['timestamp']}] {entry['event_type']}")
+                print(f"  Device: {entry['device_id'] or 'N/A'}")
+                print(f"  Actor: {entry['actor_type']}/{entry['actor_id']}")
+
+                if entry['command_type']:
+                    print(f"  Command: {entry['command_type']}")
+
+                if entry['error_message']:
+                    print(f"  Error: {entry['error_message']}")
+
+                if entry['compliance_tags']:
+                    print(f"  Tags: {', '.join(entry['compliance_tags'])}")
+
+                print()
+
+            if result['has_more']:
+                print(f"  ... and {total - len(entries)} more (use --limit to see more)\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def export_audit_logs(
+    output_file: str,
+    export_format: str = "json",
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    device_id: Optional[str] = None
+):
+    """Export audit logs to file."""
+    async with httpx.AsyncClient() as client:
+        try:
+            query = {}
+
+            if start_time:
+                query["start_time"] = start_time
+            if end_time:
+                query["end_time"] = end_time
+            if device_id:
+                query["device_id"] = device_id
+
+            payload = {
+                "query": query,
+                "format": export_format
+            }
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/audit/export",
+                json=payload,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+
+            # Write to file
+            with open(output_file, 'w') as f:
+                f.write(response.text)
+
+            print(f"\n✓ Audit logs exported to {output_file}")
+            print(f"  Format: {export_format}")
+            print(f"  Size: {len(response.text)} bytes\n")
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+        except IOError as e:
+            print(f"  ✗ Failed to write file: {e}\n")
+
+
+async def get_audit_stats(
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None
+):
+    """Get audit log statistics."""
+    async with httpx.AsyncClient() as client:
+        try:
+            params = {}
+            if start_time:
+                params["start_time"] = start_time
+            if end_time:
+                params["end_time"] = end_time
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/audit/stats",
+                params=params,
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            )
+            response.raise_for_status()
+            stats = response.json()
+
+            print(f"\nAudit Log Statistics")
+            print(f"  Period: {stats['period']['start']} to {stats['period']['end']}")
+            print(f"  Total Events: {stats['total_events']}")
+            print(f"  Failed Events: {stats['failed_events']}")
+
+            if stats['events_by_type']:
+                print(f"\n  Top Event Types:")
+                for event_type, count in list(stats['events_by_type'].items())[:10]:
+                    print(f"    {event_type}: {count}")
+
+            if stats['events_by_actor']:
+                print(f"\n  Events by Actor Type:")
+                for actor_type, count in stats['events_by_actor'].items():
+                    print(f"    {actor_type}: {count}")
+
+            print()
+
+        except httpx.HTTPStatusError as e:
+            print(f"  ✗ Error: {e.response.json()}\n")
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -1080,6 +1239,11 @@ async def main():
         print("    python cloud_admin.py pause-schedule <schedule-id>")
         print("    python cloud_admin.py resume-schedule <schedule-id>")
         print("    python cloud_admin.py cancel-schedule <schedule-id>")
+        print()
+        print("  Audit Logs:")
+        print("    python cloud_admin.py audit-query [start-time] [end-time] [device-id] [event-type] [limit]")
+        print("    python cloud_admin.py audit-export <output-file> [format] [start-time] [end-time] [device-id]")
+        print("    python cloud_admin.py audit-stats [start-time] [end-time]")
         print()
         return
 
@@ -1242,6 +1406,30 @@ async def main():
             print("Error: schedule-id required")
             return
         await cancel_schedule(sys.argv[2])
+
+    elif command == "audit-query":
+        start_time = sys.argv[2] if len(sys.argv) > 2 else None
+        end_time = sys.argv[3] if len(sys.argv) > 3 else None
+        device_id = sys.argv[4] if len(sys.argv) > 4 else None
+        event_type = sys.argv[5] if len(sys.argv) > 5 else None
+        limit = int(sys.argv[6]) if len(sys.argv) > 6 else 100
+        await query_audit_logs(start_time, end_time, device_id, event_type, limit)
+
+    elif command == "audit-export":
+        if len(sys.argv) < 3:
+            print("Error: output-file required")
+            return
+        output_file = sys.argv[2]
+        export_format = sys.argv[3] if len(sys.argv) > 3 else "json"
+        start_time = sys.argv[4] if len(sys.argv) > 4 else None
+        end_time = sys.argv[5] if len(sys.argv) > 5 else None
+        device_id = sys.argv[6] if len(sys.argv) > 6 else None
+        await export_audit_logs(output_file, export_format, start_time, end_time, device_id)
+
+    elif command == "audit-stats":
+        start_time = sys.argv[2] if len(sys.argv) > 2 else None
+        end_time = sys.argv[3] if len(sys.argv) > 3 else None
+        await get_audit_stats(start_time, end_time)
 
     else:
         print(f"Unknown command: {command}")

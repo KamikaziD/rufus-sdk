@@ -234,6 +234,79 @@ CREATE INDEX IF NOT EXISTS idx_schedule_execution_status ON schedule_executions(
 CREATE INDEX IF NOT EXISTS idx_schedule_execution_scheduled_for ON schedule_executions(scheduled_for);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Command Audit Log (for compliance tracking)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS command_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    audit_id VARCHAR(100) UNIQUE NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    command_id VARCHAR(100),
+    broadcast_id VARCHAR(100),
+    batch_id VARCHAR(100),
+    schedule_id VARCHAR(100),
+    device_id VARCHAR(100),
+    device_type VARCHAR(50),
+    merchant_id VARCHAR(100),
+    command_type VARCHAR(100),
+    command_data JSONB DEFAULT '{}',
+    actor_type VARCHAR(50),
+    actor_id VARCHAR(100),
+    actor_ip VARCHAR(45),
+    user_agent TEXT,
+    status VARCHAR(50),
+    result_data JSONB DEFAULT '{}',
+    error_message TEXT,
+    timestamp TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    duration_ms INT,
+    session_id VARCHAR(100),
+    request_id VARCHAR(100),
+    parent_audit_id VARCHAR(100),
+    data_region VARCHAR(50),
+    compliance_tags JSONB DEFAULT '[]',
+    searchable_text TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('english',
+            COALESCE(event_type, '') || ' ' ||
+            COALESCE(command_type, '') || ' ' ||
+            COALESCE(device_id, '') || ' ' ||
+            COALESCE(actor_id, '')
+        )
+    ) STORED
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON command_audit_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_device ON command_audit_log(device_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_command_id ON command_audit_log(command_id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON command_audit_log(actor_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_event_type ON command_audit_log(event_type, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_merchant ON command_audit_log(merchant_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON command_audit_log(status);
+CREATE INDEX IF NOT EXISTS idx_audit_search ON command_audit_log USING GIN(searchable_text);
+CREATE INDEX IF NOT EXISTS idx_audit_device_event ON command_audit_log(device_id, event_type, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_actor_event ON command_audit_log(actor_id, event_type, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS audit_retention_policies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    policy_name VARCHAR(100) UNIQUE NOT NULL,
+    retention_days INT NOT NULL,
+    event_types JSONB DEFAULT '[]',
+    archive_before_delete BOOLEAN DEFAULT true,
+    archive_location TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO audit_retention_policies (
+    policy_name, retention_days, event_types, archive_before_delete, is_active
+) VALUES (
+    'pci_compliance_default',
+    2555,
+    '[]',
+    true,
+    true
+) ON CONFLICT (policy_name) DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS device_configs (
