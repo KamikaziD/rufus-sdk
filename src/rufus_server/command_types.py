@@ -135,6 +135,7 @@ class DeviceCommand(BaseModel):
     """
     type: str
     data: Dict[str, Any] = {}
+    version: Optional[str] = None  # Command schema version
     priority: CommandPriority = CommandPriority.NORMAL
     timeout_seconds: int = 300
     retry_policy: Optional[Dict[str, Any]] = None

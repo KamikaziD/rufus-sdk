@@ -22,8 +22,9 @@ class DeviceService:
     Service layer for device management operations.
     """
 
-    def __init__(self, persistence):
+    def __init__(self, persistence, version_service=None):
         self.persistence = persistence
+        self.version_service = version_service  # Optional for backward compat
 
     # ─────────────────────────────────────────────────────────────────────────
     # Device Registration
@@ -366,6 +367,7 @@ class DeviceService:
         device_id: str,
         command_type: str,
         command_data: Optional[Dict[str, Any]] = None,
+        command_version: Optional[str] = None,
         expires_in_seconds: int = 3600,
         retry_policy: Optional[Dict[str, Any]] = None,
     ) -> str:
@@ -376,6 +378,7 @@ class DeviceService:
             device_id: Target device ID
             command_type: Type of command to execute
             command_data: Command parameters
+            command_version: Command schema version (optional, defaults to latest)
             expires_in_seconds: Time until command expires
             retry_policy: Optional retry configuration
                 Example: {
@@ -390,6 +393,23 @@ class DeviceService:
         import uuid
         import json
 
+        # Get version (explicit or latest)
+        if self.version_service:
+            if not command_version:
+                latest = await self.version_service.get_latest_version(command_type)
+                command_version = latest.version if latest else "1.0.0"
+
+            # Validate command data against schema
+            validation = await self.version_service.validate_command_data(
+                command_type, command_version, command_data or {}
+            )
+            if not validation.valid:
+                raise ValueError(f"Invalid command data: {', '.join(validation.errors)}")
+
+            # Log warnings (e.g., deprecated version)
+            for warning in validation.warnings:
+                logger.warning(f"Command validation warning: {warning}")
+
         command_id = str(uuid.uuid4())
         expires_at = (datetime.utcnow() + timedelta(seconds=expires_in_seconds))
 
@@ -401,20 +421,22 @@ class DeviceService:
                 """
                 INSERT INTO device_commands (
                     command_id, device_id, command_type, command_data,
-                    expires_at, retry_policy, max_retries
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    command_version, expires_at, retry_policy, max_retries
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """,
                 command_id,
                 device_id,
                 command_type,
                 json.dumps(command_data or {}),
+                command_version,
                 expires_at,
                 json.dumps(retry_policy) if retry_policy else None,
                 max_retries
             )
 
         retry_info = f" (with {max_retries} retries)" if max_retries > 0 else ""
-        logger.info(f"Queued command {command_type} for device {device_id}{retry_info}")
+        version_info = f"@{command_version}" if command_version else ""
+        logger.info(f"Queued command {command_type}{version_info} for device {device_id}{retry_info}")
         return command_id
 
     async def list_commands(

@@ -91,6 +91,7 @@ workflow_registry_config: Dict[str, Any] = {}
 device_service: Optional[DeviceService] = None
 policy_evaluator: Optional[PolicyEvaluator] = None
 device_assignments: Dict[str, DeviceAssignment] = {}  # In-memory for now
+version_service = None  # Command version service
 
 
 # --- User Context ---
@@ -177,7 +178,7 @@ async def add_rate_limit_headers(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
-    global rate_limit_service
+    global rate_limit_service, version_service
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -225,9 +226,13 @@ async def startup_event():
         template_engine_cls=Jinja2TemplateEngine
     )
 
-    # Initialize Device Service
+    # Initialize Version Service
+    from rufus_server.version_service import VersionService
+    version_service = VersionService(persistence_provider)
+
+    # Initialize Device Service (with version service)
     global device_service
-    device_service = DeviceService(persistence_provider)
+    device_service = DeviceService(persistence_provider, version_service)
 
     # Initialize Policy Engine
     global policy_evaluator
@@ -972,6 +977,7 @@ async def send_device_command(
         device_id=device_id,
         command_type=command.type,
         command_data=command.data,
+        command_version=command.version,
         expires_in_seconds=command.timeout_seconds,
         retry_policy=command.retry_policy
     )
@@ -1107,6 +1113,257 @@ async def get_device_connection_status(
         "websocket_connected": is_connected,
         "connection_type": "websocket" if is_connected else "heartbeat_only",
         "can_send_critical_commands": is_connected
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Command Version Management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/commands/versions")
+async def list_command_versions(
+    command_type: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    limit: int = 100,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    List all command versions.
+
+    Query params:
+    - command_type: Filter by specific command type
+    - is_active: Filter by active status
+    - limit: Maximum results (default: 100)
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    versions = await version_service.list_versions(
+        command_type=command_type,
+        is_active=is_active,
+        limit=limit
+    )
+
+    return {
+        "versions": versions,
+        "total": len(versions)
+    }
+
+
+@app.get("/api/v1/commands/versions/{version_id}")
+async def get_command_version(
+    version_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get specific command version details including schema."""
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    version = await version_service.get_version(version_id)
+
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    return version.dict()
+
+
+@app.get("/api/v1/commands/{command_type}/versions")
+async def list_command_type_versions(
+    command_type: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List all versions for a specific command type."""
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    versions = await version_service.list_versions(command_type=command_type)
+
+    return {
+        "command_type": command_type,
+        "versions": versions,
+        "total": len(versions)
+    }
+
+
+@app.get("/api/v1/commands/{command_type}/versions/latest")
+async def get_latest_command_version(
+    command_type: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get latest active version for a command type."""
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    version = await version_service.get_latest_version(command_type)
+
+    if not version:
+        raise HTTPException(status_code=404, detail="No version found for command type")
+
+    return version.dict()
+
+
+@app.post("/api/v1/commands/{command_type}/validate")
+async def validate_command_data(
+    command_type: str,
+    request_body: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Validate command data against schema.
+
+    Body: {
+        "version": "1.0.0",
+        "data": { ... command data ... }
+    }
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    version = request_body.get("version")
+    data = request_body.get("data", {})
+
+    if not version:
+        raise HTTPException(status_code=400, detail="Version required")
+
+    validation = await version_service.validate_command_data(
+        command_type, version, data
+    )
+
+    return {
+        "valid": validation.valid,
+        "errors": validation.errors,
+        "warnings": validation.warnings
+    }
+
+
+@app.get("/api/v1/commands/{command_type}/changelog")
+async def get_command_changelog(
+    command_type: str,
+    from_version: Optional[str] = None,
+    to_version: Optional[str] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Get changelog between versions.
+
+    Query params:
+    - from_version: Starting version (optional)
+    - to_version: Ending version (optional)
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    changelog = await version_service.get_changelog(
+        command_type, from_version, to_version
+    )
+
+    return {
+        "command_type": command_type,
+        "changelog": changelog,
+        "total_entries": len(changelog)
+    }
+
+
+# Admin-only endpoints
+
+@app.post("/api/v1/admin/commands/versions")
+async def create_command_version(
+    version_data: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create new command version (admin only).
+
+    Body: {
+        "command_type": "restart",
+        "version": "2.0.0",
+        "schema_definition": { ... JSON Schema ... },
+        "changelog": "Added new parameter...",
+        "created_by": "admin_user"
+    }
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    # TODO: Add admin check
+    # if not user or not user.is_admin:
+    #     raise HTTPException(status_code=403, detail="Admin access required")
+
+    from rufus_server.version_service import CommandVersion
+
+    try:
+        version = CommandVersion(**version_data)
+        version_id = await version_service.create_version(version)
+
+        return {
+            "version_id": version_id,
+            "command_type": version.command_type,
+            "version": version.version,
+            "status": "created"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/v1/admin/commands/versions/{version_id}")
+async def update_command_version(
+    version_id: str,
+    updates: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Update command version (admin only).
+
+    Allowed updates:
+    - is_active: bool
+    - is_deprecated: bool
+    - deprecated_reason: str
+    - changelog: str
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    # TODO: Add admin check
+
+    success = await version_service.update_version(version_id, updates)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Version not found or no valid updates")
+
+    return {
+        "version_id": version_id,
+        "status": "updated"
+    }
+
+
+@app.post("/api/v1/admin/commands/versions/{version_id}/deprecate")
+async def deprecate_command_version(
+    version_id: str,
+    reason_data: Dict[str, str],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Deprecate command version (admin only).
+
+    Body: {
+        "reason": "Replaced by version 2.0.0"
+    }
+    """
+    if version_service is None:
+        raise HTTPException(status_code=503, detail="Version service not initialized")
+
+    # TODO: Add admin check
+
+    reason = reason_data.get("reason", "No reason provided")
+    success = await version_service.deprecate_version(version_id, reason)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    return {
+        "version_id": version_id,
+        "status": "deprecated",
+        "reason": reason
     }
 
 
