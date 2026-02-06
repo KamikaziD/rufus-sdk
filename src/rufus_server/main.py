@@ -122,7 +122,7 @@ def rate_limit_check(resource_pattern: str):
         @app.post("/api/v1/devices/{device_id}/commands")
         async def endpoint(
             ...,
-            _: None = Depends(rate_limit_check("/api/v1/commands"))
+            _: None = rate_limit_check("/api/v1/commands")
         ):
             ...
     """
@@ -297,7 +297,7 @@ async def start_workflow(
     request: Request,
     request_data: WorkflowStartRequest,
     user: Optional[UserContext] = Depends(get_current_user),
-    _: None = Depends(rate_limit_check("/api/v1/workflow/start"))
+    _: None = rate_limit_check("/api/v1/workflow/start")
 ):
     """Start a new workflow."""
     if workflow_engine is None:
@@ -922,7 +922,7 @@ async def send_device_command(
     device_id: str,
     command: DeviceCommand,
     user: Optional[UserContext] = Depends(get_current_user),
-    _: None = Depends(rate_limit_check("/api/v1/commands"))
+    _: None = rate_limit_check("/api/v1/commands")
 ):
     """
     Send a command to an edge device.

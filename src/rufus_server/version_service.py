@@ -145,9 +145,9 @@ class VersionService:
         if not row:
             return None
 
-        # Parse schema_definition from JSON string for SQLite
+        # Parse schema_definition from JSON string (handles both SQLite and PostgreSQL)
         schema_def = row['schema_definition']
-        if self._is_sqlite and isinstance(schema_def, str):
+        if isinstance(schema_def, str):
             schema_def = json.loads(schema_def)
 
         # Convert boolean values for SQLite
@@ -200,9 +200,9 @@ class VersionService:
         if not row:
             return None
 
-        # Parse schema_definition from JSON string for SQLite
+        # Parse schema_definition from JSON string (handles both SQLite and PostgreSQL)
         schema_def = row['schema_definition']
-        if self._is_sqlite and isinstance(schema_def, str):
+        if isinstance(schema_def, str):
             schema_def = json.loads(schema_def)
 
         # Convert boolean values for SQLite
@@ -471,6 +471,10 @@ class VersionService:
                 return None
 
             schema = row['schema_definition']
+
+            # Parse schema if it's a string (handles both SQLite and PostgreSQL)
+            if isinstance(schema, str):
+                schema = json.loads(schema)
 
             # Cache schema
             self._schema_cache[cache_key] = schema
