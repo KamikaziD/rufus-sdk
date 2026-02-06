@@ -108,10 +108,76 @@ async def get_current_user(
     return None
 
 
+# --- Rate Limiting Dependency ---
+def rate_limit_check(resource_pattern: str):
+    """
+    Dependency that checks rate limits before endpoint execution.
+
+    Args:
+        resource_pattern: Resource pattern to match (e.g., '/api/v1/commands')
+
+    Usage:
+        @app.post("/api/v1/devices/{device_id}/commands")
+        async def endpoint(
+            ...,
+            _: None = Depends(rate_limit_check("/api/v1/commands"))
+        ):
+            ...
+    """
+    async def dependency(request: Request, user: Optional[UserContext] = Depends(get_current_user)):
+        if not rate_limit_service:
+            return None  # Rate limiting not initialized
+
+        # Get identifier (user or IP)
+        identifier = f"user:{user.user_id}" if user else f"ip:{request.client.host}"
+        scope = "user" if user else "ip"
+
+        # Check limit
+        result = await rate_limit_service.check_rate_limit(
+            identifier, resource_pattern, scope
+        )
+
+        # Raise 429 if exceeded
+        if not result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. Try again in {result.retry_after}s",
+                headers={
+                    "X-RateLimit-Limit": str(result.limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(int(result.reset_at.timestamp())),
+                    "Retry-After": str(result.retry_after)
+                }
+            )
+
+        # Record request and store for headers
+        await rate_limit_service.record_request(identifier, resource_pattern, scope)
+        request.state.rate_limit_info = result
+        return None
+
+    return Depends(dependency)
+
+
+# --- Rate Limit Response Middleware ---
+@app.middleware("http")
+async def add_rate_limit_headers(request: Request, call_next):
+    """Add X-RateLimit-* headers to responses."""
+    response = await call_next(request)
+
+    if hasattr(request.state, "rate_limit_info"):
+        info = request.state.rate_limit_info
+        response.headers["X-RateLimit-Limit"] = str(info.limit)
+        response.headers["X-RateLimit-Remaining"] = str(info.remaining)
+        response.headers["X-RateLimit-Reset"] = str(int(info.reset_at.timestamp()))
+
+    return response
+
+
 # --- Startup/Shutdown ---
 @app.on_event("startup")
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
+    global rate_limit_service
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -167,6 +233,10 @@ async def startup_event():
     global policy_evaluator
     policy_evaluator = PolicyEvaluator()
 
+    # Initialize Rate Limit Service
+    from rufus_server.rate_limit_service import RateLimitService
+    rate_limit_service = RateLimitService(persistence_provider)
+
     print("Rufus Edge Control Plane started.")
 
 
@@ -216,7 +286,8 @@ async def get_available_workflows():
 async def start_workflow(
     request: Request,
     request_data: WorkflowStartRequest,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: Optional[UserContext] = Depends(get_current_user),
+    _: None = Depends(rate_limit_check("/api/v1/workflow/start"))
 ):
     """Start a new workflow."""
     if workflow_engine is None:
@@ -840,7 +911,8 @@ websocket_connections: Dict[str, WebSocket] = {}
 async def send_device_command(
     device_id: str,
     command: DeviceCommand,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: Optional[UserContext] = Depends(get_current_user),
+    _: None = Depends(rate_limit_check("/api/v1/commands"))
 ):
     """
     Send a command to an edge device.
@@ -1083,6 +1155,7 @@ batch_service = None
 schedule_service = None
 audit_service = None
 authorization_service = None
+rate_limit_service = None
 
 
 @app.post("/api/v1/broadcasts")
@@ -2350,6 +2423,207 @@ async def cancel_approval(
         "approval_id": approval_id,
         "status": "cancelled",
         "message": "Approval request cancelled"
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Rate Limiting Endpoints
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/rate-limits/status")
+async def get_rate_limit_status(
+    request: Request,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Get current rate limit status for authenticated user or IP.
+
+    Returns remaining quota and reset times for all applicable rules.
+    """
+    if not rate_limit_service:
+        raise HTTPException(status_code=503, detail="Rate limiting not initialized")
+
+    # Get identifier (user or IP)
+    identifier = f"user:{user.user_id}" if user else f"ip:{request.client.host}"
+
+    # Get status for all rules
+    status = await rate_limit_service.get_limit_status(identifier)
+
+    return {
+        "identifier": identifier,
+        "limits": [
+            {
+                "rule_name": limit.rule_name,
+                "resource_pattern": limit.resource_pattern,
+                "limit": limit.limit,
+                "used": limit.used,
+                "remaining": limit.remaining,
+                "window_seconds": limit.window_seconds,
+                "resets_at": limit.resets_at.isoformat()
+            }
+            for limit in status.values()
+        ]
+    }
+
+
+@app.get("/api/v1/admin/rate-limits")
+async def list_rate_limits(
+    is_active: Optional[bool] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    List all rate limit rules.
+
+    Admin endpoint - requires admin privileges in production.
+    """
+    if not rate_limit_service:
+        raise HTTPException(status_code=503, detail="Rate limiting not initialized")
+
+    # TODO: Add admin check in production
+    # if not user or not user.is_admin:
+    #     raise HTTPException(status_code=403, detail="Admin access required")
+
+    rules = await rate_limit_service.get_rules(is_active=is_active)
+
+    return {
+        "rules": [
+            {
+                "rule_name": rule.rule_name,
+                "resource_pattern": rule.resource_pattern,
+                "scope": rule.scope,
+                "limit_per_window": rule.limit_per_window,
+                "window_seconds": rule.window_seconds,
+                "is_active": rule.is_active,
+                "created_at": rule.created_at.isoformat(),
+                "updated_at": rule.updated_at.isoformat()
+            }
+            for rule in rules
+        ],
+        "total": len(rules)
+    }
+
+
+@app.put("/api/v1/admin/rate-limits/{rule_name}")
+async def update_rate_limit(
+    rule_name: str,
+    update_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Update an existing rate limit rule.
+
+    Admin endpoint - requires admin privileges in production.
+
+    Example:
+    ```json
+    {
+      "limit_per_window": 150,
+      "window_seconds": 60,
+      "is_active": true
+    }
+    ```
+    """
+    if not rate_limit_service:
+        raise HTTPException(status_code=503, detail="Rate limiting not initialized")
+
+    # TODO: Add admin check in production
+    # if not user or not user.is_admin:
+    #     raise HTTPException(status_code=403, detail="Admin access required")
+
+    success = await rate_limit_service.update_rule(
+        rule_name=rule_name,
+        limit_per_window=update_data.get("limit_per_window"),
+        window_seconds=update_data.get("window_seconds"),
+        is_active=update_data.get("is_active")
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Rate limit rule not found")
+
+    return {
+        "rule_name": rule_name,
+        "status": "updated",
+        "message": "Rate limit rule updated successfully"
+    }
+
+
+@app.post("/api/v1/admin/rate-limits")
+async def create_rate_limit(
+    rule_data: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Create a new rate limit rule.
+
+    Admin endpoint - requires admin privileges in production.
+
+    Example:
+    ```json
+    {
+      "rule_name": "api_requests",
+      "resource_pattern": "/api/v1/*",
+      "scope": "ip",
+      "limit_per_window": 1000,
+      "window_seconds": 60,
+      "is_active": true
+    }
+    ```
+    """
+    if not rate_limit_service:
+        raise HTTPException(status_code=503, detail="Rate limiting not initialized")
+
+    # TODO: Add admin check in production
+    # if not user or not user.is_admin:
+    #     raise HTTPException(status_code=403, detail="Admin access required")
+
+    success = await rate_limit_service.create_rule(
+        rule_name=rule_data["rule_name"],
+        resource_pattern=rule_data["resource_pattern"],
+        scope=rule_data["scope"],
+        limit_per_window=rule_data["limit_per_window"],
+        window_seconds=rule_data["window_seconds"],
+        is_active=rule_data.get("is_active", True)
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Rate limit rule already exists or invalid data"
+        )
+
+    return {
+        "rule_name": rule_data["rule_name"],
+        "status": "created",
+        "message": "Rate limit rule created successfully"
+    }
+
+
+@app.delete("/api/v1/admin/rate-limits/{rule_name}")
+async def delete_rate_limit(
+    rule_name: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Deactivate a rate limit rule (soft delete).
+
+    Admin endpoint - requires admin privileges in production.
+    """
+    if not rate_limit_service:
+        raise HTTPException(status_code=503, detail="Rate limiting not initialized")
+
+    # TODO: Add admin check in production
+    # if not user or not user.is_admin:
+    #     raise HTTPException(status_code=403, detail="Admin access required")
+
+    success = await rate_limit_service.delete_rule(rule_name)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Rate limit rule not found")
+
+    return {
+        "rule_name": rule_name,
+        "status": "deactivated",
+        "message": "Rate limit rule deactivated successfully"
     }
 
 

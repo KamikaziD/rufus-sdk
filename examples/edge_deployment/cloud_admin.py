@@ -1405,6 +1405,190 @@ async def reject_command(approval_id: str, approver_id: str, comment: Optional[s
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Rate Limiting Functions
+# ═════════════════════════════════════════════════════════════════════════
+
+async def get_rate_limit_status(identifier: Optional[str] = None):
+    """Get current rate limit status for user or IP."""
+    print("\n" + "="*70)
+    print("  RATE LIMIT STATUS")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            headers = {}
+            if identifier and identifier.startswith("user:"):
+                headers["X-User-ID"] = identifier.replace("user:", "")
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/rate-limits/status",
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                identifier = result.get("identifier", "Unknown")
+                limits = result.get("limits", [])
+
+                print(f"  Identifier: {identifier}")
+                print()
+
+                if not limits:
+                    print("  No rate limits configured\n")
+                    return
+
+                print(f"  {'Rule Name':<30} {'Limit':<10} {'Used':<10} {'Remaining':<10} {'Resets':<20}")
+                print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10} {'-'*20}")
+
+                for limit in limits:
+                    print(f"  {limit['rule_name']:<30} "
+                          f"{limit['limit']:<10} "
+                          f"{limit['used']:<10} "
+                          f"{limit['remaining']:<10} "
+                          f"{limit['resets_at'][:19]:<20}")
+
+                print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def list_rate_limits(is_active: Optional[bool] = None):
+    """List all rate limit rules."""
+    print("\n" + "="*70)
+    print("  RATE LIMIT RULES")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            params = {}
+            if is_active is not None:
+                params["is_active"] = str(is_active).lower()
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/admin/rate-limits",
+                params=params
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                rules = result.get("rules", [])
+
+                if not rules:
+                    print("  No rate limit rules configured\n")
+                    return
+
+                print(f"  Total rules: {result['total']}\n")
+
+                print(f"  {'Rule Name':<25} {'Pattern':<25} {'Scope':<8} {'Limit/Window':<15} {'Active':<8}")
+                print(f"  {'-'*25} {'-'*25} {'-'*8} {'-'*15} {'-'*8}")
+
+                for rule in rules:
+                    limit_str = f"{rule['limit_per_window']}/{rule['window_seconds']}s"
+                    active_str = "✓" if rule['is_active'] else "✗"
+
+                    print(f"  {rule['rule_name']:<25} "
+                          f"{rule['resource_pattern']:<25} "
+                          f"{rule['scope']:<8} "
+                          f"{limit_str:<15} "
+                          f"{active_str:<8}")
+
+                print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def update_rate_limit(rule_name: str, limit: int, window: int):
+    """Update an existing rate limit rule."""
+    print("\n" + "="*70)
+    print(f"  UPDATE RATE LIMIT: {rule_name}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {
+                "limit_per_window": limit,
+                "window_seconds": window
+            }
+
+            print(f"  Rule:   {rule_name}")
+            print(f"  Limit:  {limit} requests")
+            print(f"  Window: {window} seconds")
+            print()
+
+            response = await client.put(
+                f"{CLOUD_URL}/api/v1/admin/rate-limits/{rule_name}",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ {result['message']}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def create_rate_limit(
+    rule_name: str,
+    pattern: str,
+    scope: str,
+    limit: int,
+    window: int
+):
+    """Create a new rate limit rule."""
+    print("\n" + "="*70)
+    print("  CREATE RATE LIMIT RULE")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {
+                "rule_name": rule_name,
+                "resource_pattern": pattern,
+                "scope": scope,
+                "limit_per_window": limit,
+                "window_seconds": window,
+                "is_active": True
+            }
+
+            print(f"  Rule Name: {rule_name}")
+            print(f"  Pattern:   {pattern}")
+            print(f"  Scope:     {scope}")
+            print(f"  Limit:     {limit} requests / {window} seconds")
+            print()
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/admin/rate-limits",
+                json=payload
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ {result['message']}")
+                print()
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -1460,6 +1644,12 @@ async def main():
         print("    python cloud_admin.py approval-status <approval-id>")
         print("    python cloud_admin.py approve-command <approval-id> <approver-id> [comment]")
         print("    python cloud_admin.py reject-command <approval-id> <approver-id> [comment]")
+        print()
+        print("  Rate Limiting:")
+        print("    python cloud_admin.py rate-limit-status [user-id-or-ip]")
+        print("    python cloud_admin.py list-rate-limits [active-only]")
+        print("    python cloud_admin.py update-rate-limit <rule-name> <limit> <window-seconds>")
+        print("    python cloud_admin.py create-rate-limit <rule-name> <pattern> <scope> <limit> <window-seconds>")
         print()
         return
 
@@ -1690,6 +1880,34 @@ async def main():
         approver_id = sys.argv[3]
         comment = sys.argv[4] if len(sys.argv) > 4 else None
         await reject_command(approval_id, approver_id, comment)
+
+    elif command == "rate-limit-status":
+        identifier = sys.argv[2] if len(sys.argv) > 2 else None
+        await get_rate_limit_status(identifier)
+
+    elif command == "list-rate-limits":
+        active_only = sys.argv[2].lower() == "true" if len(sys.argv) > 2 else None
+        await list_rate_limits(active_only)
+
+    elif command == "update-rate-limit":
+        if len(sys.argv) < 5:
+            print("Error: rule-name, limit, and window required")
+            return
+        rule_name = sys.argv[2]
+        limit = int(sys.argv[3])
+        window = int(sys.argv[4])
+        await update_rate_limit(rule_name, limit, window)
+
+    elif command == "create-rate-limit":
+        if len(sys.argv) < 7:
+            print("Error: rule-name, pattern, scope, limit, and window required")
+            return
+        rule_name = sys.argv[2]
+        pattern = sys.argv[3]
+        scope = sys.argv[4]
+        limit = int(sys.argv[5])
+        window = int(sys.argv[6])
+        await create_rate_limit(rule_name, pattern, scope, limit, window)
 
     else:
         print(f"Unknown command: {command}")
