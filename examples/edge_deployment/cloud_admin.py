@@ -57,6 +57,31 @@ Template Examples:
 
     # Apply template as broadcast
     python cloud_admin.py apply-template-broadcast security-lockdown '{"merchant_id": "merchant-123"}'
+
+Command Versioning:
+    python cloud_admin.py list-command-versions [command-type] [--active-only]
+    python cloud_admin.py get-command-version <command-type> <version>
+    python cloud_admin.py validate-command <command-type> <version> <data-json>
+    python cloud_admin.py command-changelog <command-type> [from-version] [to-version]
+
+Webhook Management:
+    python cloud_admin.py list-webhooks [--active-only]
+    python cloud_admin.py get-webhook <webhook-id>
+    python cloud_admin.py create-webhook <webhook-json>
+    python cloud_admin.py update-webhook <webhook-id> <updates-json>
+    python cloud_admin.py delete-webhook <webhook-id>
+    python cloud_admin.py webhook-deliveries <webhook-id> [status] [limit]
+    python cloud_admin.py test-webhook <url> <event-type> <event-data-json> [secret]
+
+Webhook Examples:
+    # Create webhook
+    python cloud_admin.py create-webhook '{"webhook_id": "my-webhook", "name": "Device Events", "url": "https://example.com/webhook", "events": ["device.online", "device.offline"], "secret": "my-secret"}'
+
+    # List webhooks
+    python cloud_admin.py list-webhooks --active-only
+
+    # Get delivery history
+    python cloud_admin.py webhook-deliveries my-webhook failed 50
 """
 
 import asyncio
@@ -1589,6 +1614,466 @@ async def create_rate_limit(
             print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Command Versioning Commands
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def list_command_versions(command_type: Optional[str] = None, active_only: bool = False):
+    """List all command versions."""
+    print("\n" + "="*70)
+    print("  COMMAND VERSIONS")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {}
+            if command_type:
+                params["command_type"] = command_type
+            if active_only:
+                params["is_active"] = "true"
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/commands/versions",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                versions = data.get("versions", [])
+
+                if not versions:
+                    print("  No versions found\n")
+                    return
+
+                print(f"  Total versions: {data['total']}\n")
+
+                for version in versions:
+                    status = "✓ Active" if version.get("is_active") else "✗ Inactive"
+                    deprecated = " [DEPRECATED]" if version.get("is_deprecated") else ""
+                    print(f"  {version.get('command_type')} v{version.get('version')} {status}{deprecated}")
+                    if version.get("deprecated_reason"):
+                        print(f"    Reason: {version.get('deprecated_reason')}")
+                    print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_command_version(command_type: str, version: str):
+    """Get specific command version details."""
+    print("\n" + "="*70)
+    print(f"  COMMAND VERSION: {command_type} v{version}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/commands/{command_type}/versions"
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                versions = data.get("versions", [])
+
+                # Find the specific version
+                target_version = None
+                for v in versions:
+                    if v.get("version") == version:
+                        target_version = v
+                        break
+
+                if not target_version:
+                    print(f"  ✗ Version {version} not found for {command_type}\n")
+                    return
+
+                print(f"  Command Type:  {target_version.get('command_type')}")
+                print(f"  Version:       {target_version.get('version')}")
+                print(f"  Active:        {'Yes' if target_version.get('is_active') else 'No'}")
+                print(f"  Deprecated:    {'Yes' if target_version.get('is_deprecated') else 'No'}")
+                if target_version.get('deprecated_reason'):
+                    print(f"  Reason:        {target_version.get('deprecated_reason')}")
+                if target_version.get('changelog'):
+                    print(f"  Changelog:     {target_version.get('changelog')}")
+                print(f"\n  Schema Definition:")
+                print(f"  {json.dumps(target_version.get('schema_definition', {}), indent=2)}\n")
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def validate_command_data(command_type: str, version: str, data_json: str):
+    """Validate command data against schema."""
+    print("\n" + "="*70)
+    print(f"  VALIDATE COMMAND: {command_type} v{version}")
+    print("="*70 + "\n")
+
+    try:
+        data = json.loads(data_json)
+    except json.JSONDecodeError as e:
+        print(f"  ✗ Invalid JSON: {e}\n")
+        return
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/commands/{command_type}/validate",
+                json={"version": version, "data": data}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+
+                if result.get("valid"):
+                    print("  ✓ Command data is valid!\n")
+                else:
+                    print("  ✗ Command data is invalid\n")
+                    print("  Errors:")
+                    for error in result.get("errors", []):
+                        print(f"    - {error}")
+                    print()
+
+                if result.get("warnings"):
+                    print("  Warnings:")
+                    for warning in result.get("warnings", []):
+                        print(f"    - {warning}")
+                    print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_command_changelog(command_type: str, from_version: Optional[str] = None, to_version: Optional[str] = None):
+    """Get command changelog."""
+    print("\n" + "="*70)
+    print(f"  CHANGELOG: {command_type}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {}
+            if from_version:
+                params["from_version"] = from_version
+            if to_version:
+                params["to_version"] = to_version
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/commands/{command_type}/changelog",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                changelog = data.get("changelog", [])
+
+                if not changelog:
+                    print("  No changelog entries found\n")
+                    return
+
+                print(f"  Total entries: {data['total_entries']}\n")
+
+                for entry in changelog:
+                    from_v = entry.get("from_version") or "initial"
+                    to_v = entry.get("to_version")
+                    change_type = entry.get("change_type", "").upper()
+
+                    print(f"  {from_v} → {to_v} [{change_type}]")
+                    if entry.get("changes"):
+                        changes = entry.get("changes")
+                        if isinstance(changes, str):
+                            changes = json.loads(changes)
+                        print(f"    Changes: {json.dumps(changes, indent=6)}")
+                    if entry.get("migration_guide"):
+                        print(f"    Migration Guide: {entry.get('migration_guide')}")
+                    print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Webhook Management Commands
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def list_webhooks(active_only: bool = False):
+    """List all webhook registrations."""
+    print("\n" + "="*70)
+    print("  WEBHOOKS")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {}
+            if active_only:
+                params["is_active"] = "true"
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/webhooks",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                webhooks = data.get("webhooks", [])
+
+                if not webhooks:
+                    print("  No webhooks registered\n")
+                    return
+
+                print(f"  Total webhooks: {data['total']}\n")
+
+                for webhook in webhooks:
+                    status = "✓ Active" if webhook.get("is_active") else "✗ Inactive"
+                    print(f"  {webhook.get('webhook_id')} - {webhook.get('name')} {status}")
+                    print(f"    URL:    {webhook.get('url')}")
+                    print(f"    Events: {', '.join(webhook.get('events', []))}")
+                    print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_webhook(webhook_id: str):
+    """Get webhook details."""
+    print("\n" + "="*70)
+    print(f"  WEBHOOK: {webhook_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/webhooks/{webhook_id}"
+            )
+
+            if response.status_code == 200:
+                webhook = response.json()
+
+                print(f"  Webhook ID:    {webhook.get('webhook_id')}")
+                print(f"  Name:          {webhook.get('name')}")
+                print(f"  URL:           {webhook.get('url')}")
+                print(f"  Events:        {', '.join(webhook.get('events', []))}")
+                print(f"  Active:        {'Yes' if webhook.get('is_active') else 'No'}")
+                print(f"  Secret:        {'Configured' if webhook.get('secret') else 'None'}")
+                if webhook.get('headers'):
+                    print(f"  Custom Headers: {json.dumps(webhook.get('headers'), indent=2)}")
+                if webhook.get('retry_policy'):
+                    print(f"  Retry Policy:  {json.dumps(webhook.get('retry_policy'), indent=2)}")
+                print()
+
+            elif response.status_code == 404:
+                print(f"  ✗ Webhook not found: {webhook_id}\n")
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def create_webhook(webhook_json: str):
+    """Create a new webhook."""
+    print("\n" + "="*70)
+    print("  CREATE WEBHOOK")
+    print("="*70 + "\n")
+
+    try:
+        webhook_data = json.loads(webhook_json)
+    except json.JSONDecodeError as e:
+        print(f"  ✗ Invalid JSON: {e}\n")
+        return
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/webhooks",
+                json=webhook_data
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Webhook created successfully!")
+                print(f"  Webhook ID: {result.get('webhook_id')}")
+                print(f"  Status:     {result.get('status')}")
+                print(f"  Events:     {', '.join(result.get('events', []))}\n")
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def update_webhook(webhook_id: str, updates_json: str):
+    """Update webhook."""
+    print("\n" + "="*70)
+    print(f"  UPDATE WEBHOOK: {webhook_id}")
+    print("="*70 + "\n")
+
+    try:
+        updates = json.loads(updates_json)
+    except json.JSONDecodeError as e:
+        print(f"  ✗ Invalid JSON: {e}\n")
+        return
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.put(
+                f"{CLOUD_URL}/api/v1/webhooks/{webhook_id}",
+                json=updates
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Webhook updated successfully!")
+                print(f"  Webhook ID: {result.get('webhook_id')}")
+                print(f"  Status:     {result.get('status')}\n")
+
+            elif response.status_code == 404:
+                print(f"  ✗ Webhook not found: {webhook_id}\n")
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def delete_webhook(webhook_id: str):
+    """Delete webhook."""
+    print("\n" + "="*70)
+    print(f"  DELETE WEBHOOK: {webhook_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.delete(
+                f"{CLOUD_URL}/api/v1/webhooks/{webhook_id}"
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Webhook deleted successfully!")
+                print(f"  Webhook ID: {result.get('webhook_id')}\n")
+
+            elif response.status_code == 404:
+                print(f"  ✗ Webhook not found: {webhook_id}\n")
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def get_webhook_deliveries(webhook_id: str, status: Optional[str] = None, limit: int = 100):
+    """Get webhook delivery history."""
+    print("\n" + "="*70)
+    print(f"  WEBHOOK DELIVERIES: {webhook_id}")
+    print("="*70 + "\n")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            params = {"limit": limit}
+            if status:
+                params["status"] = status
+
+            response = await client.get(
+                f"{CLOUD_URL}/api/v1/webhooks/{webhook_id}/deliveries",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                deliveries = data.get("deliveries", [])
+
+                if not deliveries:
+                    print("  No deliveries found\n")
+                    return
+
+                print(f"  Total deliveries: {data['total']}\n")
+
+                for delivery in deliveries:
+                    status_icon = "✓" if delivery.get("status") == "delivered" else "✗"
+                    print(f"  {status_icon} {delivery.get('event_type')} - {delivery.get('status')}")
+                    print(f"    ID:         {delivery.get('id')}")
+                    print(f"    Created:    {delivery.get('created_at')}")
+                    if delivery.get('http_status'):
+                        print(f"    HTTP:       {delivery.get('http_status')}")
+                    if delivery.get('error_message'):
+                        print(f"    Error:      {delivery.get('error_message')}")
+                    print(f"    Attempts:   {delivery.get('attempt_count')}")
+                    print()
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
+async def test_webhook(url: str, event_type: str, event_data_json: str, secret: Optional[str] = None):
+    """Test webhook delivery."""
+    print("\n" + "="*70)
+    print(f"  TEST WEBHOOK: {url}")
+    print("="*70 + "\n")
+
+    try:
+        event_data = json.loads(event_data_json)
+    except json.JSONDecodeError as e:
+        print(f"  ✗ Invalid JSON: {e}\n")
+        return
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            test_data = {
+                "url": url,
+                "event_type": event_type,
+                "event_data": event_data
+            }
+            if secret:
+                test_data["secret"] = secret
+
+            response = await client.post(
+                f"{CLOUD_URL}/api/v1/webhooks/test",
+                json=test_data
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                print(f"  ✓ Webhook test successful!")
+                print(f"  Status:     {result.get('status')}")
+                print(f"  URL:        {result.get('url')}")
+                print(f"  Event Type: {result.get('event_type')}\n")
+
+            else:
+                print(f"  ✗ Error: HTTP {response.status_code}")
+                print(f"  {response.text}\n")
+
+        except httpx.ConnectError:
+            print(f"  ✗ Cannot connect to {CLOUD_URL}\n")
+
+
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -1908,6 +2393,91 @@ async def main():
         limit = int(sys.argv[5])
         window = int(sys.argv[6])
         await create_rate_limit(rule_name, pattern, scope, limit, window)
+
+    # Command Versioning
+    elif command == "list-command-versions":
+        command_type = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
+        active_only = "--active-only" in sys.argv
+        await list_command_versions(command_type, active_only)
+
+    elif command == "get-command-version":
+        if len(sys.argv) < 4:
+            print("Error: command-type and version required")
+            return
+        command_type = sys.argv[2]
+        version = sys.argv[3]
+        await get_command_version(command_type, version)
+
+    elif command == "validate-command":
+        if len(sys.argv) < 5:
+            print("Error: command-type, version, and data-json required")
+            return
+        command_type = sys.argv[2]
+        version = sys.argv[3]
+        data_json = sys.argv[4]
+        await validate_command_data(command_type, version, data_json)
+
+    elif command == "command-changelog":
+        if len(sys.argv) < 3:
+            print("Error: command-type required")
+            return
+        command_type = sys.argv[2]
+        from_version = sys.argv[3] if len(sys.argv) > 3 else None
+        to_version = sys.argv[4] if len(sys.argv) > 4 else None
+        await get_command_changelog(command_type, from_version, to_version)
+
+    # Webhook Management
+    elif command == "list-webhooks":
+        active_only = "--active-only" in sys.argv
+        await list_webhooks(active_only)
+
+    elif command == "get-webhook":
+        if len(sys.argv) < 3:
+            print("Error: webhook-id required")
+            return
+        webhook_id = sys.argv[2]
+        await get_webhook(webhook_id)
+
+    elif command == "create-webhook":
+        if len(sys.argv) < 3:
+            print("Error: webhook-json required")
+            return
+        webhook_json = sys.argv[2]
+        await create_webhook(webhook_json)
+
+    elif command == "update-webhook":
+        if len(sys.argv) < 4:
+            print("Error: webhook-id and updates-json required")
+            return
+        webhook_id = sys.argv[2]
+        updates_json = sys.argv[3]
+        await update_webhook(webhook_id, updates_json)
+
+    elif command == "delete-webhook":
+        if len(sys.argv) < 3:
+            print("Error: webhook-id required")
+            return
+        webhook_id = sys.argv[2]
+        await delete_webhook(webhook_id)
+
+    elif command == "webhook-deliveries":
+        if len(sys.argv) < 3:
+            print("Error: webhook-id required")
+            return
+        webhook_id = sys.argv[2]
+        status = sys.argv[3] if len(sys.argv) > 3 else None
+        limit = int(sys.argv[4]) if len(sys.argv) > 4 else 100
+        await get_webhook_deliveries(webhook_id, status, limit)
+
+    elif command == "test-webhook":
+        if len(sys.argv) < 5:
+            print("Error: url, event-type, and event-data-json required")
+            return
+        url = sys.argv[2]
+        event_type = sys.argv[3]
+        event_data_json = sys.argv[4]
+        secret = sys.argv[5] if len(sys.argv) > 5 else None
+        await test_webhook(url, event_type, event_data_json, secret)
 
     else:
         print(f"Unknown command: {command}")
