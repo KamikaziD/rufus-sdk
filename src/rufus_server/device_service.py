@@ -22,9 +22,10 @@ class DeviceService:
     Service layer for device management operations.
     """
 
-    def __init__(self, persistence, version_service=None):
+    def __init__(self, persistence, version_service=None, webhook_service=None):
         self.persistence = persistence
         self.version_service = version_service  # Optional for backward compat
+        self.webhook_service = webhook_service  # Optional for webhook notifications
 
     # ─────────────────────────────────────────────────────────────────────────
     # Device Registration
@@ -75,6 +76,25 @@ class DeviceService:
             )
 
         logger.info(f"Registered device {device_id} for merchant {merchant_id}")
+
+        # Dispatch webhook event
+        if self.webhook_service:
+            try:
+                from rufus_server.webhook_service import WebhookEvent
+                await self.webhook_service.dispatch_event(
+                    WebhookEvent.DEVICE_REGISTERED,
+                    {
+                        "device_id": device_id,
+                        "device_type": device_type,
+                        "device_name": device_name,
+                        "merchant_id": merchant_id,
+                        "firmware_version": firmware_version,
+                        "sdk_version": sdk_version,
+                        "location": location
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch webhook for device registration: {e}")
 
         return {
             "device_id": device_id,
@@ -437,6 +457,25 @@ class DeviceService:
         retry_info = f" (with {max_retries} retries)" if max_retries > 0 else ""
         version_info = f"@{command_version}" if command_version else ""
         logger.info(f"Queued command {command_type}{version_info} for device {device_id}{retry_info}")
+
+        # Dispatch webhook event
+        if self.webhook_service:
+            try:
+                from rufus_server.webhook_service import WebhookEvent
+                await self.webhook_service.dispatch_event(
+                    WebhookEvent.COMMAND_CREATED,
+                    {
+                        "command_id": command_id,
+                        "device_id": device_id,
+                        "command_type": command_type,
+                        "command_version": command_version,
+                        "expires_at": expires_at.isoformat(),
+                        "max_retries": max_retries
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch webhook for command creation: {e}")
+
         return command_id
 
     async def list_commands(

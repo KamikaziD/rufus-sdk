@@ -92,6 +92,7 @@ device_service: Optional[DeviceService] = None
 policy_evaluator: Optional[PolicyEvaluator] = None
 device_assignments: Dict[str, DeviceAssignment] = {}  # In-memory for now
 version_service = None  # Command version service
+webhook_service = None  # Webhook notification service
 
 
 # --- User Context ---
@@ -178,7 +179,7 @@ async def add_rate_limit_headers(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
-    global rate_limit_service, version_service
+    global rate_limit_service, version_service, webhook_service
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -230,9 +231,13 @@ async def startup_event():
     from rufus_server.version_service import VersionService
     version_service = VersionService(persistence_provider)
 
-    # Initialize Device Service (with version service)
+    # Initialize Webhook Service
+    from rufus_server.webhook_service import WebhookService
+    webhook_service = WebhookService(persistence_provider)
+
+    # Initialize Device Service (with version and webhook services)
     global device_service
-    device_service = DeviceService(persistence_provider, version_service)
+    device_service = DeviceService(persistence_provider, version_service, webhook_service)
 
     # Initialize Policy Engine
     global policy_evaluator
@@ -1365,6 +1370,210 @@ async def deprecate_command_version(
         "status": "deprecated",
         "reason": reason
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Webhook Notifications
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/v1/webhooks")
+async def create_webhook(
+    webhook_data: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Register a new webhook.
+
+    Body: {
+        "webhook_id": "my-webhook-1",  # Optional, auto-generated if not provided
+        "name": "Device Status Notifications",
+        "url": "https://example.com/webhooks/device-status",
+        "events": ["device.online", "device.offline"],
+        "secret": "your-secret-key",  # Optional, for HMAC signature
+        "headers": {"Authorization": "Bearer token"},  # Optional custom headers
+        "retry_policy": {"max_retries": 3, "backoff_seconds": 60}
+    }
+    """
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    from rufus_server.webhook_service import WebhookRegistration
+
+    try:
+        registration = WebhookRegistration(**webhook_data)
+        webhook_id = await webhook_service.register_webhook(registration)
+
+        return {
+            "webhook_id": webhook_id,
+            "status": "registered",
+            "events": [e.value for e in registration.events]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/webhooks")
+async def list_webhooks(
+    is_active: Optional[bool] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List all webhook registrations."""
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    webhooks = await webhook_service.list_webhooks(is_active=is_active)
+
+    return {
+        "webhooks": webhooks,
+        "total": len(webhooks)
+    }
+
+
+@app.get("/api/v1/webhooks/{webhook_id}")
+async def get_webhook(
+    webhook_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get specific webhook details."""
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    webhook = await webhook_service.get_webhook(webhook_id)
+
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    return webhook.dict()
+
+
+@app.put("/api/v1/webhooks/{webhook_id}")
+async def update_webhook(
+    webhook_id: str,
+    updates: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Update webhook registration.
+
+    Allowed updates: name, url, events, secret, headers, retry_policy, is_active
+    """
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    success = await webhook_service.update_webhook(webhook_id, updates)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Webhook not found or no valid updates")
+
+    return {
+        "webhook_id": webhook_id,
+        "status": "updated"
+    }
+
+
+@app.delete("/api/v1/webhooks/{webhook_id}")
+async def delete_webhook(
+    webhook_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Delete webhook registration."""
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    # TODO: Add admin check
+
+    success = await webhook_service.delete_webhook(webhook_id)
+
+    return {
+        "webhook_id": webhook_id,
+        "status": "deleted"
+    }
+
+
+@app.get("/api/v1/webhooks/{webhook_id}/deliveries")
+async def get_webhook_deliveries(
+    webhook_id: str,
+    status: Optional[str] = None,
+    limit: int = 100,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get webhook delivery history."""
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    from rufus_server.webhook_service import WebhookStatus
+
+    webhook_status = None
+    if status:
+        try:
+            webhook_status = WebhookStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    deliveries = await webhook_service.get_delivery_history(
+        webhook_id=webhook_id,
+        status=webhook_status,
+        limit=limit
+    )
+
+    return {
+        "webhook_id": webhook_id,
+        "deliveries": deliveries,
+        "total": len(deliveries)
+    }
+
+
+@app.post("/api/v1/webhooks/test")
+async def test_webhook(
+    test_data: Dict[str, Any],
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Test webhook delivery without saving to database.
+
+    Body: {
+        "url": "https://example.com/webhook",
+        "event_type": "device.online",
+        "event_data": {"device_id": "test-123"},
+        "secret": "optional-secret"
+    }
+    """
+    if webhook_service is None:
+        raise HTTPException(status_code=503, detail="Webhook service not initialized")
+
+    from rufus_server.webhook_service import WebhookEvent
+
+    url = test_data.get("url")
+    event_type_str = test_data.get("event_type", "device.online")
+    event_data = test_data.get("event_data", {})
+    secret = test_data.get("secret")
+
+    if not url:
+        raise HTTPException(status_code=400, detail="URL required")
+
+    try:
+        event_type = WebhookEvent(event_type_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid event type: {event_type_str}")
+
+    try:
+        # Send test webhook
+        await webhook_service._deliver_webhook(
+            delivery_id="test",
+            webhook_id="test",
+            url=url,
+            event_type=event_type,
+            event_data=event_data,
+            secret=secret
+        )
+
+        return {
+            "status": "sent",
+            "url": url,
+            "event_type": event_type.value
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Webhook test failed: {str(e)}")
 
 
 @app.get("/api/v1/rollout/status")
