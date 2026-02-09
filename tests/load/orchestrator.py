@@ -272,8 +272,16 @@ class LoadTestOrchestrator:
                         data = response.json()
                         # Update device API key to match what was returned
                         device.config.api_key = data.get("api_key", device.config.api_key)
-                        # Update HTTP client headers with new API key
-                        device._http_client.headers["X-API-Key"] = device.config.api_key
+                        # Recreate HTTP client with new API key (httpx headers are immutable)
+                        await device._http_client.aclose()
+                        device._http_client = httpx.AsyncClient(
+                            timeout=30.0,
+                            headers={
+                                "X-API-Key": device.config.api_key,
+                                "X-Device-ID": device.config.device_id,
+                                "Content-Type": "application/json",
+                            }
+                        )
                         logger.debug(f"Registered device {device.config.device_id}")
                         return True
                     elif response.status_code == 400 and "already registered" in response.text:
