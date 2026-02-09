@@ -6,9 +6,13 @@ Handles:
 - Batch uploading when connectivity is restored
 - Idempotency-based deduplication
 - Retry logic with exponential backoff
+- HMAC authentication for payload integrity
 """
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -218,6 +222,25 @@ class SyncManager:
             logger.error(f"Failed to get pending transactions: {e}")
             return []
 
+    def _calculate_hmac(self, data: str) -> str:
+        """
+        Calculate HMAC-SHA256 for payload integrity.
+
+        Uses device API key as the secret to ensure only authorized
+        devices can submit valid sync payloads.
+
+        Args:
+            data: String data to sign (JSON representation of transaction)
+
+        Returns:
+            Hex-encoded HMAC signature
+        """
+        return hmac.new(
+            self.api_key.encode('utf-8'),
+            data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
     async def _sync_batch(self, transactions: List[SAFTransaction]) -> Dict[str, Any]:
         """Sync a batch of transactions."""
         result = {
@@ -234,17 +257,25 @@ class SyncManager:
             result["failed"] = len(transactions)
             return result
 
-        # Prepare payload
+        # Prepare transactions with HMAC signatures
+        signed_transactions = []
+        for t in transactions:
+            txn_dict = {
+                "transaction_id": t.transaction_id,
+                "encrypted_blob": t.encrypted_payload.hex() if t.encrypted_payload else "",
+                "encryption_key_id": t.encryption_key_id or "default",
+            }
+
+            # Calculate HMAC over transaction data
+            # Format: transaction_id|encrypted_blob|encryption_key_id
+            hmac_input = f"{txn_dict['transaction_id']}|{txn_dict['encrypted_blob']}|{txn_dict['encryption_key_id']}"
+            txn_dict["hmac"] = self._calculate_hmac(hmac_input)
+
+            signed_transactions.append(txn_dict)
+
+        # Prepare full payload
         payload = {
-            "transactions": [
-                {
-                    "transaction_id": t.transaction_id,
-                    "encrypted_blob": t.encrypted_payload.hex() if t.encrypted_payload else "",
-                    "encryption_key_id": t.encryption_key_id or "default",
-                    "hmac": "",  # TODO: Calculate HMAC
-                }
-                for t in transactions
-            ],
+            "transactions": signed_transactions,
             "device_sequence": 0,  # TODO: Track sequence
             "device_timestamp": datetime.utcnow().isoformat(),
         }

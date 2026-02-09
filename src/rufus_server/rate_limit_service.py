@@ -193,8 +193,9 @@ class RateLimitService:
 
         query += " ORDER BY rule_name"
 
-        rows = await self.persistence.conn.fetch(query, *params)
-        return [self._row_to_rule(row) for row in rows]
+        async with self.persistence.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            return [self._row_to_rule(row) for row in rows]
 
     async def get_rule(self, rule_name: str) -> Optional[RateLimitRule]:
         """
@@ -207,11 +208,13 @@ class RateLimitService:
             RateLimitRule or None if not found
         """
         query = "SELECT * FROM rate_limit_rules WHERE rule_name = $1"
-        row = await self.persistence.conn.fetchrow(query, rule_name)
 
-        if row:
-            return self._row_to_rule(row)
-        return None
+        async with self.persistence.pool.acquire() as conn:
+            row = await conn.fetchrow(query, rule_name)
+
+            if row:
+                return self._row_to_rule(row)
+            return None
 
     async def update_rule(
         self,
@@ -264,7 +267,8 @@ class RateLimitService:
             WHERE rule_name = ${param_idx}
         """
 
-        result = await self.persistence.conn.execute(query, *params)
+        async with self.persistence.pool.acquire() as conn:
+            result = await conn.execute(query, *params)
 
         # Invalidate cache
         self._cache_expiry = None
@@ -300,15 +304,16 @@ class RateLimitService:
                 (rule_name, resource_pattern, scope, limit_per_window, window_seconds, is_active)
                 VALUES ($1, $2, $3, $4, $5, $6)
             """
-            await self.persistence.conn.execute(
-                query,
-                rule_name,
-                resource_pattern,
-                scope,
-                limit_per_window,
-                window_seconds,
-                is_active
-            )
+            async with self.persistence.pool.acquire() as conn:
+                await conn.execute(
+                    query,
+                    rule_name,
+                    resource_pattern,
+                    scope,
+                    limit_per_window,
+                    window_seconds,
+                    is_active
+                )
 
             # Invalidate cache
             self._cache_expiry = None
@@ -385,7 +390,9 @@ class RateLimitService:
             DELETE FROM rate_limit_tracking
             WHERE window_start < NOW() - INTERVAL '1 hour'
         """
-        result = await self.persistence.conn.execute(query)
+
+        async with self.persistence.pool.acquire() as conn:
+            result = await conn.execute(query)
 
         # Extract count from result like "DELETE 5"
         if result.startswith("DELETE "):
@@ -449,12 +456,13 @@ class RateLimitService:
                     request_count = rate_limit_tracking.request_count + 1,
                     last_request = NOW()
             """
-            await self.persistence.conn.execute(
-                query,
-                identifier,
-                rule_name,
-                window_start
-            )
+            async with self.persistence.pool.acquire() as conn:
+                await conn.execute(
+                    query,
+                    identifier,
+                    rule_name,
+                    window_start
+                )
         except Exception:
             pass  # Fail silently, in-memory tracking is primary
 

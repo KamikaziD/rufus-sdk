@@ -124,7 +124,7 @@ async def resolve_conflicts(self, batch_response: dict) -> List[dict]:
 - **LWW (Last-Write-Wins)**: For non-financial state
 
 **What's Missing**:
-- HMAC on sync payloads (security hardening, 2-4 hours to implement)
+- ~~HMAC on sync payloads (security hardening, 2-4 hours to implement)~~ ✅ **COMPLETE** (2026-02-09)
 - Device sequence tracking (gap detection, 4-8 hours)
 
 **Production Use**: Ready for fintech POS/ATM deployments with floor limit mechanism.
@@ -258,7 +258,7 @@ SQLite Workflows:    ~9,000 ops/sec (in-memory)
 
 | Gap | Impact | Effort | Workaround |
 |-----|--------|--------|------------|
-| HMAC on sync payloads | Security risk (payload tampering) | 2-4 hours | Use TLS + device API keys |
+| ~~HMAC on sync payloads~~ | ~~Security risk (payload tampering)~~ | ✅ **COMPLETE** | N/A - Implemented |
 | Device sequence tracking | Gap detection for re-sync | 4-8 hours | Manual reconciliation |
 | Load testing at scale | Unknown performance at 1000+ devices | 3-5 days | Start with small fleet |
 
@@ -308,7 +308,7 @@ docker compose up -d
 - Saga compensation for failed transactions
 
 **Recommended Before Launch**:
-- Add HMAC to sync payloads (2-4 hours)
+- ~~Add HMAC to sync payloads (2-4 hours)~~ ✅ **COMPLETE**
 - Load test with 100 devices (1 day)
 - PCI-DSS assessment (external)
 
@@ -361,7 +361,7 @@ docker compose up -d
 
 - [x] Device authentication (SHA256 hashed API keys)
 - [x] TLS for all cloud communication
-- [ ] HMAC on sync payloads (2-4 hours to implement)
+- [x] **HMAC on sync payloads** (implemented 2026-02-09)
 - [x] Encrypted storage for sensitive data (P2PE fields)
 - [x] Ed25519 signature verification (PEX deployment - design spec)
 - [x] No inbound ports (devices only make outbound requests)
@@ -509,7 +509,7 @@ docker compose up -d
 1. **Choose deployment scenario** (POS, ATM, wearables)
 2. **Set up test environment** (10-100 devices)
 3. **Run functional tests** (offline flow, saga compensation)
-4. **Add HMAC to sync payloads** (2-4 hours)
+4. ~~**Add HMAC to sync payloads** (2-4 hours)~~ ✅ **COMPLETE**
 5. **Load test** (scale up gradually)
 6. **Production pilot** (single store/location)
 7. **Full rollout** (with monitoring and support plan)

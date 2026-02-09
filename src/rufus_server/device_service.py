@@ -4,11 +4,12 @@ Device management service for Rufus Edge Cloud Control Plane.
 Handles:
 - Device registration and authentication
 - Config management with ETag caching
-- Transaction sync (Store-and-Forward)
+- Transaction sync (Store-and-Forward) with HMAC verification
 - Device heartbeat and health monitoring
 """
 
 import hashlib
+import hmac as hmac_lib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -224,13 +225,44 @@ class DeviceService:
     # Transaction Sync (SAF)
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _verify_hmac(self, api_key: str, data: str, expected_hmac: str) -> bool:
+        """
+        Verify HMAC signature for transaction payload.
+
+        Args:
+            api_key: Device API key (secret)
+            data: String data that was signed
+            expected_hmac: HMAC signature from device
+
+        Returns:
+            True if HMAC is valid, False otherwise
+        """
+        try:
+            computed_hmac = hmac_lib.new(
+                api_key.encode('utf-8'),
+                data.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+
+            # Use constant-time comparison to prevent timing attacks
+            return hmac_lib.compare_digest(computed_hmac, expected_hmac)
+        except Exception as e:
+            logger.error(f"HMAC verification error: {e}")
+            return False
+
     async def sync_transactions(
         self,
         device_id: str,
         transactions: List[Dict[str, Any]],
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Process synced transactions from edge device.
+        Process synced transactions from edge device with HMAC verification.
+
+        Args:
+            device_id: Device identifier
+            transactions: List of transaction dicts with HMAC signatures
+            api_key: Device API key for HMAC verification (required)
 
         Returns:
             Dict with accepted, rejected lists
@@ -238,8 +270,57 @@ class DeviceService:
         accepted = []
         rejected = []
 
+        # Get device to verify API key (if not provided)
+        if not api_key:
+            device = await self._get_device(device_id)
+            if not device:
+                return {
+                    "accepted": [],
+                    "rejected": [{"transaction_id": "unknown", "reason": "Device not found"}],
+                    "server_sequence": 0,
+                }
+            # We don't have the raw API key, only the hash - HMAC verification requires raw key
+            # This means api_key MUST be provided by the endpoint handler
+            logger.error(f"API key not provided for HMAC verification (device {device_id})")
+            return {
+                "accepted": [],
+                "rejected": [{"transaction_id": "unknown", "reason": "HMAC verification not possible"}],
+                "server_sequence": 0,
+            }
+
         async with self.persistence.pool.acquire() as conn:
             for txn in transactions:
+                # Verify HMAC if present
+                if "hmac" in txn and txn["hmac"]:
+                    # Reconstruct the signed data (must match edge device format)
+                    hmac_input = (
+                        f"{txn.get('transaction_id', '')}|"
+                        f"{txn.get('encrypted_blob', '')}|"
+                        f"{txn.get('encryption_key_id', 'default')}"
+                    )
+
+                    if not self._verify_hmac(api_key, hmac_input, txn["hmac"]):
+                        logger.warning(
+                            f"HMAC verification failed for transaction {txn.get('transaction_id')} "
+                            f"from device {device_id}"
+                        )
+                        rejected.append({
+                            "transaction_id": txn.get("transaction_id"),
+                            "status": "REJECTED",
+                            "reason": "HMAC verification failed",
+                        })
+                        continue
+                else:
+                    # HMAC required but not present
+                    logger.warning(
+                        f"Transaction {txn.get('transaction_id')} missing HMAC signature"
+                    )
+                    rejected.append({
+                        "transaction_id": txn.get("transaction_id"),
+                        "status": "REJECTED",
+                        "reason": "HMAC signature required",
+                    })
+                    continue
                 try:
                     # Check idempotency
                     existing = await self._get_transaction_by_idempotency(

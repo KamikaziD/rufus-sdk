@@ -591,7 +591,11 @@ async def sync_device_transactions(
     request_data: SyncRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """Receive offline transactions from edge device (Store-and-Forward)."""
+    """
+    Receive offline transactions from edge device (Store-and-Forward).
+
+    HMAC verification is performed on each transaction to ensure payload integrity.
+    """
     if device_service is None:
         raise HTTPException(status_code=503, detail="Device service not initialized")
 
@@ -599,13 +603,15 @@ async def sync_device_transactions(
     if not await device_service.authenticate_device(device_id, x_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Convert request transactions to dict format
+    # Convert request transactions to dict format (include HMAC for verification)
     transactions = [
         {
             "transaction_id": t.transaction_id,
             "idempotency_key": f"{device_id}:{t.transaction_id}",
             "encrypted_payload": t.encrypted_blob,
+            "encrypted_blob": t.encrypted_blob,  # Needed for HMAC verification
             "encryption_key_id": t.encryption_key_id,
+            "hmac": t.hmac,  # HMAC signature from device
         }
         for t in request_data.transactions
     ]
@@ -613,6 +619,7 @@ async def sync_device_transactions(
     result = await device_service.sync_transactions(
         device_id=device_id,
         transactions=transactions,
+        api_key=x_api_key,  # Pass API key for HMAC verification
     )
 
     # Convert to response format
