@@ -165,6 +165,14 @@ class LoadTestOrchestrator:
         logger.info(f"Initializing {num_devices} devices...")
         await asyncio.gather(*[device.initialize() for device in self._devices])
 
+        # Clean up any existing load test devices
+        logger.info(f"Cleaning up existing load test devices...")
+        await self._cleanup_devices()
+
+        # Register devices with control plane
+        logger.info(f"Registering {num_devices} devices with control plane...")
+        await self._register_devices()
+
         # Start timer
         start_time = time.time()
 
@@ -230,6 +238,113 @@ class LoadTestOrchestrator:
                 results.commands_received += metrics.commands_received
                 results.total_requests += metrics.total_requests
                 results.total_errors += metrics.total_errors
+
+    async def _register_devices(self):
+        """Register all devices with the control plane."""
+        import httpx
+        import os
+
+        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+
+        async def register_single_device(device):
+            """Register a single device."""
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{self.cloud_url}/api/v1/devices/register",
+                        headers={
+                            "X-Registration-Key": registration_key,
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "device_id": device.config.device_id,
+                            "device_type": device.config.device_type,
+                            "device_name": f"Load Test Device {device.config.device_id}",
+                            "merchant_id": device.config.merchant_id,
+                            "location": "load-test-environment",
+                            "capabilities": ["payment_processing", "offline_mode"],
+                            "firmware_version": "1.0.0-loadtest",
+                            "sdk_version": "1.0.0"
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        # Update device API key to match what was returned
+                        device.config.api_key = data.get("api_key", device.config.api_key)
+                        # Update HTTP client headers with new API key
+                        device._http_client.headers["X-API-Key"] = device.config.api_key
+                        logger.debug(f"Registered device {device.config.device_id}")
+                        return True
+                    elif response.status_code == 400 and "already registered" in response.text:
+                        # Device already registered - this is OK for re-runs
+                        logger.debug(f"Device {device.config.device_id} already registered")
+                        return True
+                    else:
+                        logger.error(
+                            f"Failed to register device {device.config.device_id}: "
+                            f"HTTP {response.status_code} - {response.text}"
+                        )
+                        return False
+
+            except Exception as e:
+                logger.error(f"Error registering device {device.config.device_id}: {e}")
+                return False
+
+        # Register all devices in parallel
+        results = await asyncio.gather(*[
+            register_single_device(device) for device in self._devices
+        ])
+
+        successful = sum(1 for r in results if r)
+        logger.info(f"Registered {successful}/{len(self._devices)} devices successfully")
+
+        if successful < len(self._devices):
+            logger.warning(f"{len(self._devices) - successful} devices failed to register")
+
+    async def _cleanup_devices(self):
+        """Clean up existing load test devices."""
+        import httpx
+        import os
+
+        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+
+        async def delete_single_device(device):
+            """Delete a single device if it exists."""
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.delete(
+                        f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                        headers={
+                            "X-Registration-Key": registration_key
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        logger.debug(f"Deleted existing device {device.config.device_id}")
+                        return True
+                    elif response.status_code == 404:
+                        # Device doesn't exist - that's fine
+                        logger.debug(f"Device {device.config.device_id} not found (already clean)")
+                        return True
+                    else:
+                        logger.warning(
+                            f"Failed to delete device {device.config.device_id}: "
+                            f"HTTP {response.status_code}"
+                        )
+                        return False
+
+            except Exception as e:
+                logger.debug(f"Error deleting device {device.config.device_id}: {e}")
+                return False
+
+        # Delete all devices in parallel
+        results = await asyncio.gather(*[
+            delete_single_device(device) for device in self._devices
+        ])
+
+        cleaned = sum(1 for r in results if r)
+        logger.info(f"Cleaned up {cleaned}/{len(self._devices)} devices")
 
     async def _report_progress(self, callback: callable, duration_seconds: int):
         """Report progress periodically."""

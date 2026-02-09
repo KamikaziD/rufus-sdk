@@ -163,6 +163,20 @@ class DeviceService:
 
             return devices
 
+    async def delete_device(self, device_id: str) -> None:
+        """Delete a device from the registry."""
+        device = await self._get_device(device_id)
+        if not device:
+            raise ValueError(f"Device {device_id} not found")
+
+        async with self.persistence.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM edge_devices WHERE device_id = $1",
+                device_id
+            )
+
+        logger.info(f"Deleted device {device_id}")
+
     # ─────────────────────────────────────────────────────────────────────────
     # Config Management
     # ─────────────────────────────────────────────────────────────────────────

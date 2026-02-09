@@ -506,6 +506,29 @@ async def get_device(
     return device
 
 
+@app.delete("/api/v1/devices/{device_id}")
+async def delete_device(
+    device_id: str,
+    x_registration_key: str = Header(..., alias="X-Registration-Key")
+):
+    """Delete a device (requires registration key for security)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    # Validate registration key
+    expected_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+    if x_registration_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid registration key")
+
+    try:
+        await device_service.delete_device(device_id)
+        return {"status": "deleted", "device_id": device_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deletion failed: {e}")
+
+
 @app.get("/api/v1/devices/{device_id}/config")
 async def get_device_config(
     device_id: str,
