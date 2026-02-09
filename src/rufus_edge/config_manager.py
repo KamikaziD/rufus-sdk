@@ -396,14 +396,21 @@ class ConfigManager:
         self,
         model_name: str,
         destination_path: str,
+        current_model_path: Optional[str] = None,
+        use_delta: bool = True,
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> bool:
         """
-        Download a model file from cloud.
+        Download a model file from cloud with delta update support.
+
+        If a current model exists and delta URL is provided in config,
+        attempts delta update first with automatic fallback to full download.
 
         Args:
             model_name: Name of the model in config
             destination_path: Local path to save the model
+            current_model_path: Optional path to current model (for delta updates)
+            use_delta: Whether to attempt delta updates (default: True)
             progress_callback: Optional callback(bytes_downloaded, total_bytes)
 
         Returns:
@@ -415,6 +422,7 @@ class ConfigManager:
             return False
 
         url = model_config.get("url")
+        delta_url = model_config.get("delta_url")  # Optional delta patch URL
         expected_hash = model_config.get("hash")
 
         if not url:
@@ -432,6 +440,41 @@ class ConfigManager:
             # Ensure directory exists
             Path(destination_path).parent.mkdir(parents=True, exist_ok=True)
 
+            # Try delta update if available
+            if (use_delta and delta_url and current_model_path
+                and os.path.exists(current_model_path)):
+
+                from rufus_edge.delta_updates import DeltaUpdateManager
+
+                delta_manager = DeltaUpdateManager(http_client=self._http_client)
+                success, stats = await delta_manager.download_and_apply_delta(
+                    delta_url=delta_url,
+                    current_model_path=current_model_path,
+                    destination_path=destination_path,
+                    expected_hash=expected_hash,
+                    full_download_url=url,  # Fallback
+                    progress_callback=progress_callback
+                )
+
+                if success:
+                    if stats["used_delta"]:
+                        logger.info(
+                            f"Model {model_name} updated via delta: "
+                            f"saved {stats['bandwidth_saved']} bytes"
+                        )
+                    else:
+                        logger.info(
+                            f"Model {model_name} downloaded (delta fallback: "
+                            f"{stats.get('fallback_reason', 'unknown')})"
+                        )
+                    return True
+
+                # Delta manager handles fallback automatically
+                # If we get here, both delta and fallback failed
+                logger.error(f"Model download failed for {model_name}")
+                return False
+
+            # Standard full download
             logger.info(f"Downloading model {model_name} from {url}")
 
             # Stream download for large files

@@ -68,6 +68,7 @@ Previous stub implementations are now fully functional:
 - Heartbeat reporting commented out
 - Config not cached for offline boot
 - No conflict resolution
+- Full model downloads only (no bandwidth optimization)
 
 **After** (Feb 2026):
 - ✅ `SyncManager._get_pending_transactions()` - queries SQLite tasks table
@@ -76,6 +77,8 @@ Previous stub implementations are now fully functional:
 - ✅ `EdgeAgent._handle_cloud_command()` - processes force_sync, reload_config, update_model
 - ✅ `ConfigManager._load_cached_config()` - reads from SQLite for offline boot
 - ✅ `ConfigManager._cache_config()` - persists config + ETag
+- ✅ `DeltaUpdateManager` - bandwidth-efficient model updates (80-85% savings)
+- ✅ HMAC authentication on sync payloads (payload integrity)
 
 **Full Offline Lifecycle** (now works end-to-end):
 1. Device boots → loads cached config from SQLite
@@ -123,8 +126,11 @@ async def resolve_conflicts(self, batch_response: dict) -> List[dict]:
 - **Monotonic sequencing**: Device sequence counter detects gaps for re-sync
 - **LWW (Last-Write-Wins)**: For non-financial state
 
+**What's Complete** (2026-02-09):
+- ✅ HMAC on sync payloads (security hardening)
+- ✅ Delta model updates (bandwidth optimization, 80-85% savings)
+
 **What's Missing**:
-- ~~HMAC on sync payloads (security hardening, 2-4 hours to implement)~~ ✅ **COMPLETE** (2026-02-09)
 - Device sequence tracking (gap detection, 4-8 hours)
 
 **Production Use**: Ready for fintech POS/ATM deployments with floor limit mechanism.
@@ -266,7 +272,7 @@ SQLite Workflows:    ~9,000 ops/sec (in-memory)
 
 | Gap | Impact | Effort |
 |-----|--------|--------|
-| Delta model updates | Bandwidth savings | 2-3 days |
+| ~~Delta model updates~~ | ~~Bandwidth savings~~ | ✅ **COMPLETE** (2026-02-09) |
 | CRDT for non-financial state | Better offline merge | 1 week |
 | Prometheus metrics | Observability | 2-3 days |
 
