@@ -296,7 +296,7 @@ class LoadTestOrchestrator:
                         return False
 
             except Exception as e:
-                logger.error(f"Error registering device {device.config.device_id}: {e}")
+                logger.error(f"Error registering device {device.config.device_id}: {e}", exc_info=True)
                 return False
 
         # Register all devices in parallel
@@ -343,7 +343,7 @@ class LoadTestOrchestrator:
                         return False
 
             except Exception as e:
-                logger.debug(f"Error deleting device {device.config.device_id}: {e}")
+                logger.debug(f"Error deleting device {device.config.device_id}: {e}", exc_info=True)
                 return False
 
         # Delete all devices in parallel
