@@ -155,7 +155,7 @@ class SimulatedEdgeDevice:
 
             # Report metrics
             if self.metrics_callback:
-                self.metrics_callback(self.config.device_id, self.metrics)
+                await self.metrics_callback(self.config.device_id, self.metrics)
 
             # Wait for next heartbeat (with small jitter)
             jitter = random.uniform(-2, 2)
@@ -341,7 +341,7 @@ class SimulatedEdgeDevice:
 
             # Report metrics
             if self.metrics_callback:
-                self.metrics_callback(self.config.device_id, self.metrics)
+                await self.metrics_callback(self.config.device_id, self.metrics)
 
             # Wait for next poll (with jitter)
             jitter = random.uniform(-5, 5)
