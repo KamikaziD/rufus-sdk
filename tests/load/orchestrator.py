@@ -244,7 +244,7 @@ class LoadTestOrchestrator:
         import httpx
         import os
 
-        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
         async def register_single_device(device):
             """Register a single device."""
@@ -307,7 +307,7 @@ class LoadTestOrchestrator:
         import httpx
         import os
 
-        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
         async def delete_single_device(device):
             """Delete a single device if it exists."""
