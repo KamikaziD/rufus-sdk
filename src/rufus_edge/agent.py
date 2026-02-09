@@ -347,13 +347,17 @@ class RufusEdgeAgent:
                 "floor_limit": floor_limit,
             }
 
-    def get_health(self) -> DeviceHealth:
+    async def get_health(self) -> DeviceHealth:
         """Get current device health status."""
+        pending = 0
+        if self.sync_manager:
+            pending = await self.sync_manager.get_pending_count()
+
         return DeviceHealth(
             device_id=self.device_id,
             status=DeviceStatus.ONLINE if self._is_online else DeviceStatus.OFFLINE,
             is_online=self._is_online,
-            pending_sync=0,  # TODO: Get from sync manager
+            pending_sync=pending,
             last_sync_at=self.sync_manager._last_sync_at if self.sync_manager else None,
             last_config_pull_at=self.config_manager._last_poll_at if self.config_manager else None,
         )
@@ -393,13 +397,69 @@ class RufusEdgeAgent:
                 logger.error(f"Sync loop error: {e}")
 
     async def _heartbeat_loop(self):
-        """Background heartbeat loop."""
+        """Background heartbeat loop - reports device health to cloud."""
         while True:
             try:
                 await asyncio.sleep(self.heartbeat_interval)
-                # TODO: Send heartbeat to cloud
-                # await self._send_heartbeat()
+                await self._send_heartbeat()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Heartbeat loop error: {e}")
+
+    async def _send_heartbeat(self):
+        """Send heartbeat with device metrics to cloud control plane."""
+        if not self.sync_manager or not self.sync_manager._http_client:
+            return
+
+        pending_count = await self.sync_manager.get_pending_count() if self.sync_manager else 0
+
+        payload = {
+            "status": "online" if self._is_online else "offline",
+            "metrics": {
+                "pending_sync_count": pending_count,
+                "last_sync_at": (
+                    self.sync_manager._last_sync_at.isoformat()
+                    if self.sync_manager and self.sync_manager._last_sync_at
+                    else None
+                ),
+                "config_version": (
+                    self.config_manager.config.version
+                    if self.config_manager and self.config_manager.config
+                    else None
+                ),
+            },
+        }
+
+        try:
+            response = await self.sync_manager._http_client.post(
+                f"{self.cloud_url}/api/v1/devices/{self.device_id}/heartbeat",
+                json=payload,
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Process any pending commands from cloud
+                commands = data.get("commands", [])
+                for cmd in commands:
+                    await self._handle_cloud_command(cmd)
+        except Exception as e:
+            logger.debug(f"Heartbeat send failed (device may be offline): {e}")
+
+    async def _handle_cloud_command(self, command: Dict[str, Any]):
+        """Handle a command received from cloud via heartbeat response."""
+        cmd_type = command.get("command_type", "")
+        logger.info(f"Received cloud command: {cmd_type}")
+
+        if cmd_type == "force_sync":
+            if self.sync_manager:
+                await self.sync_manager.sync_all_pending()
+        elif cmd_type == "reload_config":
+            if self.config_manager:
+                await self.config_manager.pull_config()
+        elif cmd_type == "update_model":
+            model_name = command.get("command_data", {}).get("model_name")
+            if model_name and self.config_manager:
+                logger.info(f"Cloud requested model update: {model_name}")
+        else:
+            logger.warning(f"Unknown cloud command: {cmd_type}")

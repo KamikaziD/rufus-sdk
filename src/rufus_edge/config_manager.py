@@ -223,33 +223,68 @@ class ConfigManager:
             return False
 
     async def _load_cached_config(self):
-        """Load cached config from local storage."""
+        """Load cached config from local storage via SQLite tasks table."""
         if not self.persistence:
             return
 
         try:
-            # TODO: Implement config caching in persistence
-            # cached = await self.persistence.get_cached_config(self.device_id)
-            # if cached:
-            #     self._current_config = DeviceConfig(**cached["config"])
-            #     self._current_etag = cached.get("etag")
-            pass
+            async with self.persistence.conn.execute(
+                """
+                SELECT task_data FROM tasks
+                WHERE step_name = 'CONFIG_CACHE'
+                  AND execution_id = ?
+                  AND status = 'COMPLETED'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (self.device_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row:
+                cached = self.persistence._deserialize_json(row[0])
+                if cached and "config" in cached:
+                    self._current_config = DeviceConfig(**cached["config"])
+                    self._current_etag = cached.get("etag")
+                    logger.info("Loaded cached config from local storage")
         except Exception as e:
             logger.warning(f"Failed to load cached config: {e}")
 
     async def _cache_config(self):
-        """Cache current config to local storage."""
+        """Cache current config to local storage via SQLite tasks table."""
         if not self.persistence or not self._current_config:
             return
 
         try:
-            # TODO: Implement config caching in persistence
-            # await self.persistence.cache_config(
-            #     device_id=self.device_id,
-            #     config=self._current_config.model_dump(),
-            #     etag=self._current_etag
-            # )
-            pass
+            cache_data = self.persistence._serialize_json({
+                "config": self._current_config.model_dump(mode="json"),
+                "etag": self._current_etag,
+                "cached_at": datetime.utcnow().isoformat(),
+            })
+
+            # Upsert: delete old cache, insert new
+            await self.persistence.conn.execute(
+                """
+                DELETE FROM tasks
+                WHERE step_name = 'CONFIG_CACHE' AND execution_id = ?
+                """,
+                (self.device_id,)
+            )
+            await self.persistence.conn.execute(
+                """
+                INSERT INTO tasks (
+                    task_id, execution_id, step_name, step_index,
+                    status, task_data
+                ) VALUES (?, ?, 'CONFIG_CACHE', 0, 'COMPLETED', ?)
+                """,
+                (
+                    self.persistence._generate_uuid(),
+                    self.device_id,
+                    cache_data,
+                )
+            )
+            await self.persistence.conn.commit()
+            logger.debug("Cached config to local storage")
         except Exception as e:
             logger.warning(f"Failed to cache config: {e}")
 

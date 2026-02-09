@@ -99,8 +99,18 @@ class SyncManager:
 
     async def get_pending_count(self) -> int:
         """Get count of transactions pending sync."""
-        # TODO: Implement via persistence provider
-        return 0
+        try:
+            async with self.persistence.conn.execute(
+                """
+                SELECT COUNT(*) FROM tasks
+                WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
+                """
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Failed to get pending count: {e}")
+            return 0
 
     async def sync_all_pending(self) -> SyncReport:
         """
@@ -145,6 +155,10 @@ class SyncManager:
                 report.failed_ids.extend(batch_result["failed_ids"])
                 report.errors.extend(batch_result["errors"])
 
+            # Mark synced transactions in local DB
+            if report.synced_ids:
+                await self.mark_synced(report.synced_ids)
+
             # Determine final status
             if report.failed_count == 0:
                 report.status = SyncStatus.COMPLETED
@@ -174,10 +188,35 @@ class SyncManager:
             self._sync_in_progress = False
 
     async def _get_pending_transactions(self) -> List[SAFTransaction]:
-        """Get all transactions pending sync."""
-        # TODO: Query persistence for pending SAF transactions
-        # For now, return empty list
-        return []
+        """Get all transactions pending sync from the local task queue."""
+        try:
+            async with self.persistence.conn.execute(
+                """
+                SELECT task_id, task_data FROM tasks
+                WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (self.batch_size * 10,)  # Fetch up to 10 batches
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            transactions = []
+            for row in rows:
+                task_data = self.persistence._deserialize_json(row[1])
+                if task_data and "transaction" in task_data:
+                    txn_dict = task_data["transaction"]
+                    txn_dict["_task_id"] = row[0]  # Track task ID for marking synced
+                    try:
+                        transactions.append(SAFTransaction(**txn_dict))
+                    except Exception as e:
+                        logger.warning(f"Skipping malformed SAF transaction: {e}")
+
+            return transactions
+
+        except Exception as e:
+            logger.error(f"Failed to get pending transactions: {e}")
+            return []
 
     async def _sync_batch(self, transactions: List[SAFTransaction]) -> Dict[str, Any]:
         """Sync a batch of transactions."""
@@ -265,8 +304,85 @@ class SyncManager:
     async def mark_synced(self, transaction_ids: List[str]):
         """Mark transactions as synced in local database."""
         for tid in transaction_ids:
-            # TODO: Update status in persistence
-            logger.debug(f"Marked transaction {tid} as synced")
+            try:
+                # Find the task record by matching the transaction_id in task_data
+                async with self.persistence.conn.execute(
+                    """
+                    SELECT task_id, task_data FROM tasks
+                    WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
+                    """
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+                for row in rows:
+                    task_data = self.persistence._deserialize_json(row[1])
+                    if (task_data
+                            and "transaction" in task_data
+                            and task_data["transaction"].get("transaction_id") == tid):
+                        await self.persistence.update_task_status(
+                            task_id=row[0],
+                            status="COMPLETED",
+                            result={"synced": True, "synced_at": datetime.utcnow().isoformat()}
+                        )
+                        logger.debug(f"Marked transaction {tid} as synced")
+                        break
+            except Exception as e:
+                logger.error(f"Failed to mark transaction {tid} as synced: {e}")
+
+    async def resolve_conflicts(self, server_response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Resolve conflicts between edge and cloud state.
+
+        Rufus uses a Last-Writer-Wins (LWW) strategy with idempotency-key
+        precedence for financial transactions:
+
+        1. Idempotency-first: If cloud already has a transaction with
+           the same idempotency_key, the cloud version wins (it was
+           processed first and may have settled).
+        2. Edge-authoritative for offline approvals: Offline-approved
+           transactions are treated as tentative commitments. The cloud
+           can accept or reject them during sync, but the edge decision
+           stands until the cloud explicitly overrides.
+        3. Monotonic sequencing: Device maintains a monotonic sequence
+           counter. Cloud uses this to detect gaps (missed transactions)
+           and request re-sync for specific ranges.
+
+        Args:
+            server_response: Response from cloud sync endpoint
+
+        Returns:
+            Dict with conflict resolution results
+        """
+        resolution = {
+            "accepted": [],
+            "rejected": [],
+            "conflicts": [],
+        }
+
+        for item in server_response.get("accepted", []):
+            if item.get("status") == "DUPLICATE":
+                # Cloud already has this - edge defers to cloud version
+                resolution["conflicts"].append({
+                    "transaction_id": item["transaction_id"],
+                    "resolution": "cloud_wins",
+                    "reason": "duplicate_idempotency_key",
+                })
+            else:
+                resolution["accepted"].append(item["transaction_id"])
+
+        for item in server_response.get("rejected", []):
+            reason = item.get("reason", "unknown")
+            resolution["rejected"].append({
+                "transaction_id": item["transaction_id"],
+                "reason": reason,
+            })
+            # Rejected offline approvals need local status update
+            # so the device doesn't re-sync them
+            logger.warning(
+                f"Transaction {item['transaction_id']} rejected by cloud: {reason}"
+            )
+
+        return resolution
 
     async def check_connectivity(self) -> bool:
         """Check if cloud control plane is reachable."""
