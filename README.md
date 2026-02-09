@@ -1,58 +1,320 @@
-# Rufus - Python-Native Workflow Orchestration Engine
+# Rufus - Workflow Orchestration Without The Complexity
 
-**Rufus** is a production-ready, SDK-first workflow engine for building and orchestrating complex business processes and AI pipelines. Unlike heavyweight systems like Temporal or Airflow, Rufus embeds directly into your Python applications while maintaining the flexibility to scale to distributed execution when needed.
+Stop fighting with Temporal's infrastructure. Stop limiting yourself to Airflow's batch-only world.
 
-```python
-# Define workflows in YAML
-workflow_type: "OrderProcessing"
-steps:
-  - name: "Process_Payment"
-    type: "STANDARD"
-    function: "payments.charge"
-    compensate_function: "payments.refund"  # Saga pattern
-    automate_next: true
+**Rufus is a Python-native workflow engine that embeds directly into your applications.**
 
-# Execute with embedded SDK
-workflow = builder.create_workflow("OrderProcessing", initial_data)
-result = await workflow.next_step()
+No external servers. No complex deployments. Just add workflows to your existing Python codebase.
+
+---
+
+## The Problem
+
+Building reliable, long-running processes is hard:
+
+- **Payment flows** that must compensate on failure
+- **AI pipelines** that need human review steps
+- **Approval workflows** that pause for input
+- **Multi-service orchestration** across microservices
+- **Edge devices** that work offline and sync when connected
+
+Traditional solutions make this harder:
+
+| Solution | Problem |
+|----------|---------|
+| **Temporal** | Complex infrastructure (3+ services), 2-4 hour setup, high operational overhead |
+| **Airflow** | Designed for batch ETL, not real-time workflows with human interaction |
+| **AWS Step Functions** | Vendor lock-in, expensive at scale, limited to AWS ecosystem |
+| **Custom Solutions** | Reinventing orchestration, state management, and error handling |
+
+---
+
+## The Rufus Solution
+
+✅ **Zero-Setup** - SQLite-backed workflows in your existing Python app
+✅ **30-Second Start** - From zero to running workflow in half a minute
+✅ **Scale When Needed** - Swap SQLite → PostgreSQL, sync → distributed execution
+✅ **Developer-Friendly** - YAML workflows + Python functions
+✅ **Production-Ready** - Saga compensation, parallel execution, zombie recovery built-in
+
+**Setup Time Comparison:**
+
+```
+Temporal:  2-4 hours  (Docker Compose, 3+ services, database setup)
+Airflow:   1-2 hours  (PostgreSQL, webserver, scheduler, executor)
+Rufus:     30 seconds (pip install, that's it)
 ```
 
----
+**Network Overhead Comparison:**
 
-## 🎯 Why Rufus?
-
-### The Problem with Existing Solutions
-
-**Temporal/Cadence**: Heavyweight infrastructure, complex deployment, high operational overhead
-**Airflow**: Designed for batch jobs, not real-time workflows
-**AWS Step Functions**: Vendor lock-in, expensive, limited flexibility
-**Custom Solutions**: Reinventing the wheel, maintaining orchestration logic
-
-### The Rufus Approach
-
-✅ **Embedded SDK** - Run workflows in-process, no external server required
-✅ **YAML + Python** - Declarative workflows, imperative logic
-✅ **Pluggable Architecture** - Swap persistence, execution, observability providers
-✅ **Production-Ready** - Saga pattern, human-in-the-loop, sub-workflows, parallel execution
-✅ **Developer-Friendly** - Type-safe, validated, testable, with CLI tooling
+| Architecture | Network Calls/Step | Explanation |
+|--------------|-------------------|-------------|
+| **Temporal/Cadence** | **4 per step** | Worker → Orchestrator (2x) + Orchestrator → DB (2x) |
+| **Rufus + PostgreSQL** | **2 per step** | Worker → DB (load + save), no orchestrator hop |
+| **Rufus + SQLite** | **0 network** | All local I/O, perfect for development/edge |
 
 ---
 
-## 🚀 Quick Start (30 seconds)
+## Use Cases: What Can You Build?
+
+### 1. Financial Services - Payment Flows with Offline Support
+
+**The Challenge**: Point-of-sale terminals must process payments even when offline, then sync transactions when connectivity returns. Failed payments must automatically refund.
+
+**The Rufus Solution**:
+- **Store-and-Forward (SAF)** queues transactions when offline
+- **Saga pattern** automatically reverses failed payments
+- **SQLite backend** perfect for edge devices
+
+```yaml
+# Payment workflow with automatic compensation
+steps:
+  - name: "Reserve_Inventory"
+    type: "STANDARD"
+    function: "inventory.reserve"
+    compensate_function: "inventory.release"  # Auto-rollback on failure
+    automate_next: true
+
+  - name: "Charge_Payment"
+    type: "STANDARD"
+    function: "payments.charge"
+    compensate_function: "payments.refund"  # Auto-refund on failure
+    automate_next: true
+```
+
+**Real Example**: See [`examples/payment_terminal/`](examples/payment_terminal/) for a complete POS terminal implementation with offline support.
+
+---
+
+### 2. Business Automation - Loan Applications with Parallel Risk Checks
+
+**The Challenge**: Loan applications require multiple slow external checks (credit bureau, fraud detection, KYC) that should run in parallel, not sequentially.
+
+**The Rufus Solution**:
+- **PARALLEL steps** run credit check + fraud detection simultaneously
+- **DECISION steps** route to fast-track or detailed underwriting
+- **Human-in-the-loop** pauses workflow for manual approval
+
+```yaml
+# Parallel risk assessment
+- name: "Risk_Assessment"
+  type: "PARALLEL"
+  tasks:
+    - name: "Credit_Check"
+      function: "credit.check_bureau"
+    - name: "Fraud_Detection"
+      function: "fraud.run_ml_model"
+  merge_strategy: "SHALLOW"
+  automate_next: true
+
+# Conditional routing
+- name: "Route_Application"
+  type: "DECISION"
+  function: "underwriting.route"
+  routes:
+    - condition: "state.credit_score > 700 and state.fraud_risk < 0.1"
+      target: "Fast_Track_Approval"
+    - condition: "state.credit_score <= 700"
+      target: "Manual_Underwriting"
+```
+
+**Real Example**: See [`examples/loan_application/`](examples/loan_application/) for a complete loan processing workflow.
+
+---
+
+### 3. AI/ML Pipelines - Multi-Stage AI with Human Oversight
+
+**The Challenge**: AI pipelines need multiple processing stages (data prep, inference, validation) with human review when confidence is low.
+
+**The Rufus Solution**:
+- **ASYNC steps** for long-running ML inference
+- **WorkflowPauseDirective** pauses for human review
+- **Sub-workflows** launch parallel AI agents
+
+```python
+# AI step with human-in-the-loop
+def ml_inference(state: AIState, context: StepContext):
+    prediction = model.predict(state.input_data)
+    state.prediction = prediction
+
+    # Pause for human review if confidence is low
+    if prediction['confidence'] < 0.8:
+        raise WorkflowPauseDirective(
+            result={"needs_review": True, "prediction": prediction}
+        )
+
+    return {"prediction": prediction}
+```
+
+**Real Example**: See [`examples/industrial_iot/`](examples/industrial_iot/) for an AI-powered quality control workflow.
+
+---
+
+### 4. Healthcare & IoT - Wearable Devices with Vital Monitoring
+
+**The Challenge**: Wearable health devices collect vitals continuously, need to detect anomalies, escalate critical readings, and manage constrained resources (limited RAM, battery, storage).
+
+**The Rufus Solution**:
+- **LOOP steps** process continuous sensor data streams
+- **DECISION steps** detect anomalies and escalate
+- **FIRE_AND_FORGET** triggers parallel alert workflows without blocking
+- **Inference providers** with `unload_model()` - swap AI models without OOM crashes
+- **Resource semaphores** ensure critical health monitoring gets priority over logging
+
+```yaml
+# Continuous vital monitoring with resource management
+- name: "Process_Vital_Stream"
+  type: "LOOP"
+  mode: "ITERATE"
+  iterate_over: "state.vital_readings"
+  loop_body:
+    - name: "Analyze_Reading"
+      type: "STANDARD"
+      function: "health.analyze_vital"
+    - name: "Check_Anomaly"
+      type: "DECISION"
+      function: "health.check_threshold"
+      routes:
+        - condition: "state.heart_rate > 120 or state.heart_rate < 50"
+          target: "Trigger_Alert"
+        - condition: "state.heart_rate >= 50 and state.heart_rate <= 120"
+          target: "Continue_Monitoring"
+```
+
+**Resource Management** (Design Spec):
+```python
+# Unload old model before loading new one (prevent OOM)
+await inference_provider.unload_model("ecg_model_v1")
+await inference_provider.load_model(
+    "models/ecg_model_v2.onnx",
+    "ecg_model_v2"
+)
+
+# Priority-based resource locking
+async with Rufus.lock("RAM_512MB", priority=CRITICAL):
+    # Vital monitoring gets guaranteed RAM
+    anomaly = await detect_cardiac_event(ecg_data)
+```
+
+**Real Example**: See [`examples/healthcare_wearable/`](examples/healthcare_wearable/) for a complete vital monitoring system.
+
+---
+
+### 5. Edge Computing - Device Fleet Management
+
+**The Challenge**: Managing thousands of edge devices (ATMs, kiosks, IoT gateways) across unreliable networks with different hardware specs, while preventing OOM crashes and SD card wear.
+
+**The Rufus Solution**:
+- **ETag-based config push** updates workflows without full redeployment
+- **PEX deployment** - atomic binary swapping with Ed25519 signature verification
+- **Resource semaphores** - prevent OOM crashes with priority-based RAM/VRAM locking
+- **Storage-Forward** - circular RAM buffers minimize SD card writes (flash wear protection)
+- **Command versioning** ensures devices run correct workflow versions
+- **Webhook retry** handles intermittent connectivity
+- **Safe-mode fallback** - automatic rollback if new deployment fails health check
+
+```yaml
+# Fleet management workflow with resource protection
+- name: "Push_Config_Update"
+  type: "STANDARD"
+  function: "fleet.push_config"
+  automate_next: true
+
+- name: "Monitor_Rollout"
+  type: "LOOP"
+  mode: "CONDITION"
+  condition: "state.updated_devices < state.total_devices"
+  loop_body:
+    - name: "Check_Device_Status"
+      type: "HTTP"
+      http_config:
+        url: "https://device-{{state.device_id}}.local/status"
+        method: "GET"
+```
+
+**Advanced Resilience** (Design Spec):
+```python
+# Resource semaphores prevent OOM crashes
+async with Rufus.lock("VRAM_2GB", priority=HIGH):
+    # High-priority vision model gets guaranteed VRAM
+    # Low-priority logging tasks wait
+    result = await nvidia_step.infer(frame)
+```
+
+**Real Example**: See [`examples/edge_deployment/`](examples/edge_deployment/) for a complete fleet management system with command queuing, heartbeats, and audit logging.
+
+**Architecture Note**: Edge devices use SQLite WAL mode + Store-and-Forward to survive multi-day network outages. See "Rufus Edge Control Plane" section below for cloud capabilities.
+
+---
+
+### 6. Polyglot Integration - Orchestrating Go/Rust/Node.js Services
+
+**The Challenge**: Modern architectures use best-of-breed languages (Go for concurrency, Rust for ML, Node.js for real-time), but orchestrating them is complex.
+
+**The Rufus Solution**:
+- **HTTP steps** call any service that speaks HTTP/REST
+- **Jinja2 templating** builds dynamic requests
+- **Python orchestration** ties it all together
+
+```yaml
+# Multi-language data pipeline
+workflow_type: "PolyglotPipeline"
+steps:
+  # Python: Validation
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "steps.validate"
+    automate_next: true
+
+  # Go: High-performance processing
+  - name: "Process_Data_Go"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://go-processor:8080/process"
+      body: "{{state.validated_data}}"
+    automate_next: true
+
+  # Rust: ML inference
+  - name: "ML_Inference_Rust"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://rust-ml:8080/predict"
+      body:
+        features: "{{state.processed_data.features}}"
+    automate_next: true
+
+  # Node.js: Notifications
+  - name: "Notify_User_Node"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "http://notification:3000/send"
+      body:
+        user: "{{state.user_id}}"
+        result: "{{state.ml_prediction}}"
+```
+
+**Documentation**: See [USAGE_GUIDE.md - Polyglot Workflows](USAGE_GUIDE.md#polyglot-workflows-http-steps) for complete polyglot documentation.
+
+---
+
+## Quick Start (30 Seconds)
 
 ### Installation
 
 ```bash
-pip install -r requirements.txt  # Includes SQLite support by default
+pip install -r requirements.txt  # SQLite support included by default
 ```
 
 ### Run Your First Workflow
 
 ```bash
-# Validate a workflow
+# Validate a workflow definition
 rufus validate examples/quickstart/greeting_workflow.yaml
 
-# Run it locally (in-memory)
+# Run it locally (in-memory, zero setup)
 rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
 
 # Output:
@@ -61,7 +323,7 @@ rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
 # Result: {"greeting": "Hello, World!"}
 ```
 
-### Try the SQLite Task Manager Example
+### Try the SQLite Task Manager Demo
 
 Zero setup, no database server needed:
 
@@ -69,138 +331,413 @@ Zero setup, no database server needed:
 python examples/sqlite_task_manager/simple_demo.py
 ```
 
-This demonstrates:
-- In-memory SQLite database (`:memory:`)
-- Human-in-the-loop approval workflow
-- Workflow pause/resume with user input
-- Complete workflow lifecycle
+**What Just Happened?**
+
+✅ Created embedded SQLite database (no server needed)
+✅ Ran multi-step workflow with state persistence
+✅ Demonstrated workflow lifecycle (create → execute → complete)
+✅ Logged execution events and metrics
+
+**All in-memory**, no external dependencies, **under 1 second**.
 
 ---
 
-## 📦 What's Inside
+## Why Rufus? The Full Comparison
 
-Rufus consists of three main components:
+### Setup Time
 
-### 1. Core SDK (`src/rufus/`)
+| Solution | Time to First Workflow | Required Services |
+|----------|----------------------|-------------------|
+| **Temporal** | 2-4 hours | PostgreSQL, Frontend, Server, Worker (4+ services) |
+| **Airflow** | 1-2 hours | PostgreSQL, Webserver, Scheduler, Executor (4+ services) |
+| **AWS Step Functions** | 30 min - 1 hour | AWS account setup, IAM roles, CloudWatch |
+| **Rufus** | **30 seconds** | None (SQLite embedded) |
 
-The embedded workflow engine library for Python applications.
+### Performance Model
 
-**Key Features**:
-- **Workflow orchestration** with state management
-- **8+ step types**: STANDARD, ASYNC, PARALLEL, DECISION, LOOP, HTTP, FIRE_AND_FORGET, CRON_SCHEDULER
-- **Control flow**: Automated chaining, conditional branching, sub-workflows, human-in-the-loop
-- **Saga pattern**: Automatic compensation and rollback
-- **Provider interfaces**: Pluggable persistence, execution, observability
-- **Type-safe**: Pydantic models for validation
+```
+┌─────────────────────────────────────────────────────┐
+│ TEMPORAL ARCHITECTURE (4 network calls/step)       │
+└─────────────────────────────────────────────────────┘
+Worker → Orchestrator (load state)  ──┐
+                                       ├─ 2 network calls
+Orchestrator → Database (load state) ──┘
 
-**Example**:
+Orchestrator → Database (save state) ──┐
+                                       ├─ 2 network calls
+Orchestrator → Worker (dispatch)     ──┘
+
+Total: 4 network calls per step
+```
+
+```
+┌─────────────────────────────────────────────────────┐
+│ RUFUS ARCHITECTURE (0-2 network calls/step)        │
+└─────────────────────────────────────────────────────┘
+Worker → Database (load state)  ──┐
+                                  ├─ 2 network calls (PostgreSQL)
+Worker → Database (save state)  ──┘
+
+Worker → SQLite (local I/O)     ──  0 network calls (embedded)
+
+Total: 0-2 network calls per step (no orchestrator hop)
+```
+
+**Key Advantage**: Workflows execute **in-process**, eliminating central orchestrator bottleneck.
+
+### Infrastructure Requirements
+
+| Solution | Dev Environment | Production Environment |
+|----------|----------------|------------------------|
+| **Temporal** | Docker Compose (4+ containers) | Kubernetes cluster, PostgreSQL HA, load balancers |
+| **Airflow** | Docker Compose (4+ containers) | Kubernetes cluster, PostgreSQL HA, Redis (CeleryExecutor) |
+| **Rufus** | `pip install` (zero containers) | Your app + PostgreSQL (optional) |
+
+---
+
+## Rufus Edge Control Plane
+
+**The complete fintech edge solution**: Python workflows on edge devices + cloud control plane for fleet management.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              RUFUS EDGE CONTROL PLANE (Cloud)               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  FastAPI Server (rufus_server/)                      │   │
+│  │  ├─ Device Registry & Management                     │   │
+│  │  ├─ Policy Engine (Config Rollouts)                  │   │
+│  │  ├─ Command System (9 advanced features)             │   │
+│  │  ├─ Webhook Notifications                            │   │
+│  │  └─ Rate Limiting & Authorization                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                           │                                  │
+│                    ETag Polling / HTTPS                      │
+│                           │                                  │
+└───────────────────────────┼──────────────────────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+    ┌───▼────┐         ┌────▼────┐        ┌────▼────┐
+    │POS     │         │ ATM     │        │ Kiosk   │
+    │Terminal│         │ Device  │        │ Gateway │
+    └────────┘         └─────────┘        └─────────┘
+     SQLite             SQLite             SQLite
+     Offline-First      Store-Forward      Edge AI
+```
+
+### What You Can Build
+
+#### 1. **Device Fleet Management**
+Manage thousands of heterogeneous edge devices from a single cloud control plane:
+
+- **Device Registry**: Register, authenticate, and track device inventory
+- **Health Monitoring**: Real-time heartbeats, CPU/RAM/disk metrics
+- **Config Rollouts**: Push workflow updates with gradual rollout policies
+- **Command System**: Send commands to devices (restart, update, backup, etc.)
+
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+# Register a new POS terminal
+response = await control_plane.register_device({
+    "device_id": "pos-store-42-terminal-3",
+    "hardware_profile": "apple_silicon_m4",
+    "location": {"store_id": "42", "region": "us-west-2"},
+    "capabilities": ["neural_engine", "nfc", "receipt_printer"]
+})
 
-# Initialize with SQLite (or PostgreSQL, Redis, In-Memory)
-persistence = SQLitePersistenceProvider(db_path=":memory:")
-await persistence.initialize()
+# Push config update with gradual rollout
+policy = {
+    "artifact": "fraud_detection_v2.pex",
+    "rollout_strategy": "CANARY",
+    "rollout_config": {
+        "initial_percentage": 5,  # 5% of fleet first
+        "increment_percentage": 10,
+        "wait_minutes": 30
+    },
+    "target_devices": {
+        "hardware_profile": "apple_silicon_m4"
+    }
+}
+```
 
-builder = WorkflowBuilder(
-    registry_path="workflow_registry.yaml",
-    persistence_provider=persistence,
-    execution_provider=SyncExecutionProvider()
+#### 2. **Command System** (9 Advanced Features)
+
+**Implemented in `rufus_server/`**:
+
+| Feature | Module | Description |
+|---------|--------|-------------|
+| **Command Versioning** | `version_service.py` | Schema evolution, changelog tracking, deprecation |
+| **Webhook Notifications** | `webhook_service.py` | Real-time event delivery with retry |
+| **Rate Limiting** | `rate_limit_service.py` | Token bucket throttling per device/command |
+| **Authorization** | `authorization_service.py` | RBAC policies, permission enforcement |
+| **Audit Logging** | `audit_service.py` | Immutable compliance trail |
+| **Scheduled Commands** | `schedule_service.py` | Cron-based recurring commands |
+| **Batch Commands** | `batch_service.py` | Bulk execution across device groups |
+| **Broadcast Commands** | `broadcast_service.py` | Send to device groups (by region, type, version) |
+| **Command Templates** | `template_service.py` | Reusable command patterns with variables |
+
+**Example - Scheduled Maintenance**:
+```python
+# Schedule nightly backup across all devices
+await control_plane.schedule_command({
+    "command_type": "backup_database",
+    "cron_expression": "0 2 * * *",  # 2 AM daily
+    "target_devices": {"status": "ONLINE"},
+    "timezone": "America/Los_Angeles"
+})
+```
+
+#### 3. **Store-and-Forward for Offline Transactions**
+
+Edge devices operate offline and sync when connectivity returns:
+
+```python
+# On edge device (offline)
+transaction = await edge_agent.execute_workflow(
+    "PaymentAuthorization",
+    {
+        "amount": 125.50,
+        "card_token": "tok_xxx",
+        "merchant_id": "store_42"
+    }
 )
 
-# Create and execute workflow
-workflow = builder.create_workflow("OrderProcessing", initial_data={"order_id": "123"})
-while workflow.status == "ACTIVE":
-    result = await workflow.next_step(user_input={})
+# Transaction stored in SQLite (WAL mode)
+# When online: automatic sync to cloud
+# Cloud processes: settlement, reconciliation, reporting
 ```
 
-### 2. CLI Tool (`src/rufus_cli/`)
+**Resilience Features**:
+- **Circular RAM buffer** (flush at 80% to minimize SD card writes)
+- **ZSTD compression** before SQLite writes
+- **Monotonic sequence IDs** + boot UUIDs for ordering (never trust system clock)
+- **Exponential backoff** retry on network failures
 
-Comprehensive command-line interface with 21 commands across 4 categories.
+#### 4. **PEX Deployment Pipeline**
 
-**Features**:
-- **Validation**: JSON Schema-based with IDE autocomplete support
-- **Workflow management**: List, start, resume, retry, cancel workflows
-- **Database operations**: Initialize, migrate, validate schema
-- **Monitoring**: View logs, metrics, execution traces
-- **Configuration**: Persistent settings in `~/.rufus/config.yaml`
-
-**Command Categories**:
+Atomic, zero-downtime updates for edge devices:
 
 ```bash
-# Configuration (6 commands)
-rufus config show               # Show current configuration
-rufus config set-persistence    # Set database (SQLite/PostgreSQL)
-rufus config set-execution      # Set executor (sync/thread_pool/celery)
+# Build PEX bundle (Python executable with all dependencies)
+pex -r requirements.txt -o fraud_detection_v2.pex
 
-# Workflow Management (8 commands)
-rufus list --status ACTIVE      # List workflows
-rufus start OrderProcessing -d '{"customer_id": "123"}'
-rufus show <workflow-id> --state --logs
-rufus resume <workflow-id> --input '{"approved": true}'
-rufus retry <workflow-id> --from-step Process_Payment
-rufus logs <workflow-id> --level ERROR
-rufus metrics --summary
-rufus cancel <workflow-id>
+# Sign with Ed25519 private key
+rufus-sign --key private.pem fraud_detection_v2.pex
 
-# Database Management (5 commands)
-rufus db init                   # Initialize schema
-rufus db migrate                # Apply migrations
-rufus db status                 # Check migration status
-rufus db stats                  # Database statistics
-rufus db validate               # Validate schema integrity
-
-# Validation & Testing (2 commands)
-rufus validate workflow.yaml --strict  # Enhanced validation
-rufus run workflow.yaml -d '{}'        # Local testing
+# Push to control plane
+rufus-deploy --artifact fraud_detection_v2.pex \
+             --policy canary_rollout.yaml \
+             --signature fraud_detection_v2.sig
 ```
 
-**Enhanced Validation**:
-```bash
-$ rufus validate order_workflow.yaml --strict
-✓ Successfully validated order_workflow.yaml
+**What Happens on Device**:
+1. Control plane pushes signed PEX to `/opt/rufus/staging`
+2. Device verifies Ed25519 signature
+3. Device performs atomic `symlink` swap
+4. Device calls `sys.exit(0)` (systemd restarts instantly)
+5. New PEX loaded, sends "Healthy" signal within 60s
+6. **Rollback**: If health check fails, symlink reverts to previous version
 
-# Catches errors before runtime:
-# - Missing dependencies
-# - Invalid function imports
-# - Schema violations
-# - Type mismatches
+#### 5. **Resource Management** (Design Spec)
+
+**OOM Protection** via Global Lock Registry:
+
+```python
+# Prevent vision model from OOMing device
+async with Rufus.lock("VRAM_2GB", priority=HIGH):
+    result = await inference_provider.run_inference(
+        "vision_model_v2",
+        {"image": camera_frame}
+    )
+
+# Lower priority task waits for VRAM to free up
+async with Rufus.lock("VRAM_512MB", priority=LOW):
+    await log_analytics(metadata)
 ```
 
-See [docs/CLI_USAGE_GUIDE.md](docs/CLI_USAGE_GUIDE.md) for complete CLI documentation.
+**Hardware-Specific Memory Strategies**:
 
-### 3. Server (Optional) (`src/rufus_server/`)
+| Hardware | Strategy | Implementation |
+|----------|----------|----------------|
+| **NVIDIA Jetson** | Pinned Memory | Pre-allocate VRAM to avoid fragmentation |
+| **Apple Silicon** | Unified Memory | Zero-copy pointer swaps (CPU ↔ GPU) |
+| **Generic x86/ARM** | INT8 Quantization | Automatic model compression |
 
-FastAPI REST API wrapper for workflows when you need HTTP access.
+#### 6. **Saga Pattern for Hardware**
 
-**Features**:
-- RESTful API for workflow operations
-- OpenAPI/Swagger documentation
-- Authentication/authorization hooks
-- Health checks and metrics endpoints
+Hardware can jam, lose power, or fail mid-action. Saga pattern handles rollback:
 
-**Start Server**:
-```bash
-uvicorn rufus_server.main:app --reload
+```yaml
+# Dispense cash workflow with compensation
+steps:
+  - name: "Authorize_Withdrawal"
+    function: "atm.authorize"
+    compensate_function: "atm.cancel_authorization"
+
+  - name: "Dispense_Cash"
+    function: "atm.dispense"
+    compensate_function: "atm.reverse_dispense"  # Mark as failed
+
+  - name: "Update_Balance"
+    function: "atm.update_balance"
+    compensate_function: "atm.restore_balance"
 ```
 
-**API Endpoints**:
+**Power Loss Recovery**:
+- SQLite WAL mode: every step transition logged
+- Device reboots, reads WAL journal
+- Knows exact step where it stopped
+- Chooses: retry OR unwind (compensate)
+
+### Production Deployment
+
+**Control Plane** (Cloud):
 ```bash
-POST   /workflows              # Create workflow
-GET    /workflows/{id}         # Get workflow details
-POST   /workflows/{id}/next    # Execute next step
-GET    /workflows              # List workflows
-DELETE /workflows/{id}         # Cancel workflow
+# Deploy FastAPI server
+docker compose up -d
+
+# Or Kubernetes
+kubectl apply -f k8s/rufus-control-plane.yaml
+```
+
+**Edge Devices**:
+```bash
+# Install via systemd (Linux)
+sudo systemctl enable rufus-edge
+sudo systemctl start rufus-edge
+
+# Or launchd (macOS)
+launchctl load ~/Library/LaunchAgents/com.rufus.edge.plist
+```
+
+**Monitoring**:
+- **Heartbeats**: Device health every 60s
+- **Metrics**: CPU, RAM, disk, workflow counts
+- **Alerts**: Offline devices, failed deployments, OOM events
+
+### Documentation
+
+Complete edge deployment documentation:
+- [Edge Deployment Guide](examples/edge_deployment/README.md)
+- [Command System](examples/edge_deployment/COMMAND_SYSTEM.md)
+- [Advanced Features (Tier 4)](examples/edge_deployment/ADVANCED_FEATURES.md)
+- [Heartbeat System](examples/edge_deployment/HEARTBEAT_SYSTEM.md)
+
+---
+
+## Core Features
+
+### Step Types - 8 Built-In Execution Patterns
+
+✅ **STANDARD** - Synchronous execution for business logic
+✅ **ASYNC** - Distributed async execution (Celery/threads)
+✅ **PARALLEL** - Concurrent execution with configurable merge strategies
+✅ **DECISION** - Conditional branching with declarative routes
+✅ **LOOP** - Iterate over collections or conditions
+✅ **HTTP** - Call external services (polyglot support)
+✅ **FIRE_AND_FORGET** - Non-blocking sub-workflow launch
+✅ **CRON_SCHEDULER** - Scheduled recurring workflows
+
+[→ Complete step type reference](YAML_GUIDE.md)
+
+### Control Flow Mechanisms
+
+✅ **Automated Step Chaining** - `automate_next: true` runs next step automatically
+✅ **Conditional Branching** - `WorkflowJumpDirective` for dynamic routing
+✅ **Human-in-the-Loop** - `WorkflowPauseDirective` pauses for manual input
+✅ **Sub-Workflows** - `StartSubWorkflowDirective` launches child workflows
+✅ **Saga Pattern** - Automatic compensation and rollback on failure
+
+[→ Control flow patterns](USAGE_GUIDE.md)
+
+### Production Reliability
+
+✅ **Zombie Recovery** - Heartbeat-based detection of crashed workers
+✅ **Workflow Versioning** - Definition snapshots protect running workflows
+✅ **Rate Limiting** - Protect backends from traffic spikes
+✅ **Webhook Retry** - Exponential backoff for failed notifications
+✅ **Command Queuing** - Ordered execution with conflict detection
+
+[→ Reliability features](CLAUDE.md#production-reliability-features-tier-2)
+
+### Database Support
+
+✅ **SQLite** - Embedded database for development/testing/edge (zero setup)
+✅ **PostgreSQL** - Production-ready with JSONB, connection pooling, LISTEN/NOTIFY
+✅ **Redis** - Redis-backed state storage
+✅ **In-Memory** - Fast in-memory storage for testing
+
+**Unified Migration System** - Same schema for all databases, zero drift
+
+[→ Database guide](CLAUDE.md#database-support)
+
+### Performance Optimizations
+
+✅ **uvloop** - 2-4x faster async I/O operations
+✅ **orjson** - 3-5x faster JSON serialization
+✅ **Connection Pooling** - Optimized PostgreSQL pool (10-50 connections)
+✅ **Import Caching** - 162x speedup for repeated function imports
+
+**Expected Gains**: +50-100% throughput, -30-40% latency, -80% serialization time
+
+[→ Performance benchmarks](CLAUDE.md#performance-optimizations-phase-1)
+
+### Developer Experience
+
+✅ **CLI Tool** - 21 commands for workflow management, validation, monitoring
+✅ **JSON Schema Validation** - IDE autocomplete for YAML workflows
+✅ **Type Safety** - Pydantic models for state validation
+✅ **Test Harness** - In-memory testing utilities
+✅ **Beautiful Output** - Rich terminal formatting
+
+[→ CLI guide](docs/CLI_USAGE_GUIDE.md)
+
+---
+
+## Examples Directory
+
+### Beginner Examples - Zero Setup Required
+
+| Example | Description | Run Command | Key Features |
+|---------|-------------|-------------|--------------|
+| **SQLite Task Manager** | In-memory workflow demo | `python examples/sqlite_task_manager/simple_demo.py` | SQLite, state persistence, logging |
+| **Quickstart** | Hello World workflow | `rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'` | YAML validation, basic execution |
+
+### Intermediate Examples - Business Logic
+
+| Example | Description | Key Features |
+|---------|-------------|--------------|
+| **Loan Application** | Loan processing with risk assessment | Parallel execution, decision steps, sub-workflows, human-in-the-loop, saga compensation |
+| **Payment Terminal** | POS terminal with offline support | Store-and-forward, saga pattern, SQLite edge storage |
+| **Healthcare Wearable** | Vital monitoring system | Loop steps, anomaly detection, real-time alerts |
+
+### Advanced Examples - Production Patterns
+
+| Example | Description | Key Features |
+|---------|-------------|--------------|
+| **Edge Deployment** | Device fleet management | ETag config push, command versioning, webhook retry, rate limiting, audit logging |
+| **Industrial IoT** | AI-powered quality control | Multi-stage AI pipeline, human oversight, sensor integration |
+
+**Run any example**:
+```bash
+# Navigate to example directory
+cd examples/loan_application/
+
+# See example-specific README
+cat README.md
+
+# Run the example
+python main.py
 ```
 
 ---
 
-## 🏗️ Architecture
+## Architecture Overview
 
 ### Provider-Based Design
 
-Rufus uses Python Protocol interfaces to decouple core logic from external dependencies:
+Rufus uses **Python Protocol interfaces** to decouple core logic from external dependencies:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -224,621 +761,102 @@ Rufus uses Python Protocol interfaces to decouple core logic from external depen
   └───────┘    └───────┘     └─────┘
 ```
 
+**Key Abstraction**: All external systems accessed via Protocol interfaces, enabling:
+- Swap SQLite ↔ PostgreSQL without code changes
+- Swap sync ↔ distributed execution without code changes
+- Add custom observability (Prometheus, DataDog) without forking
+
+[→ Architecture deep-dive](TECHNICAL_DOCUMENTATION.md)
+
 ### Built-In Implementations
 
 **Persistence Providers**:
-- `PostgresPersistenceProvider` - Production-ready with JSONB, connection pooling
-- `SQLitePersistenceProvider` - Embedded database for development/testing
-- `RedisPersistenceProvider` - Redis-backed state storage
-- `InMemoryPersistence` - Fast in-memory storage for testing
+- `PostgresPersistenceProvider` - Production (JSONB, connection pooling)
+- `SQLitePersistenceProvider` - Development/Edge (embedded, WAL mode)
+- `RedisPersistenceProvider` - Redis-backed storage
+- `InMemoryPersistence` - Testing (fast, ephemeral)
 
 **Execution Providers**:
-- `SyncExecutionProvider` - Single-process synchronous execution
-- `CeleryExecutor` - Distributed async execution via Celery workers
-- `ThreadPoolExecutionProvider` - Thread-based parallel execution
+- `SyncExecutionProvider` - Single-process synchronous
+- `CeleryExecutor` - Distributed async via Celery workers
+- `ThreadPoolExecutionProvider` - Thread-based parallel
 - `PostgresExecutor` - PostgreSQL-backed task queue
 
 **Observability Providers**:
 - `LoggingObserver` - Console-based event logging
 - `NoOpObserver` - Silent mode for testing
-- (Extensible for metrics systems like Prometheus, DataDog)
+- (Extensible for Prometheus, DataDog, etc.)
 
-**Template Engines**:
-- `Jinja2TemplateEngine` - Dynamic content rendering
-
-**Expression Evaluators**:
-- `SimpleExpressionEvaluator` - Python expression evaluation for conditions
+[→ Provider reference](TECHNICAL_DOCUMENTATION.md#provider-interfaces)
 
 ---
 
-## ⚡ Performance & Optimizations
+## Documentation
 
-### Performance Model
+### Getting Started (Read These First)
 
-Rufus uses an **embedded SDK architecture** that eliminates central orchestrator overhead:
+- **[README.md](README.md)** ← You are here - Use cases and quick start
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Core concepts and patterns
+- **[examples/](examples/)** - Working examples across 6 sectors
 
-| Architecture | Orchestrator Hop | Persistence Hop | Network Calls/Step |
-|--------------|------------------|-----------------|-------------------|
-| **Temporal/Cadence** | Yes (2x network) | Yes (2x) | **4 per step** |
-| **Rufus + PostgreSQL** | ❌ No | Yes (2x) | **2 per step** |
-| **Rufus + SQLite** | ❌ No | Local I/O only | **0 network** |
-| **Rufus + In-Memory** | ❌ No | ❌ No | **0** |
+### Reference Documentation
 
-**Key Advantage**: Workflows execute **in-process**, avoiding the Worker → Orchestrator → Worker round-trip that centralized systems require. With PostgreSQL, you still have database I/O (load state, save state), but you eliminate the orchestrator bottleneck.
+- **[YAML_GUIDE.md](YAML_GUIDE.md)** - Complete YAML workflow syntax
+- **[API_REFERENCE.md](API_REFERENCE.md)** - SDK API documentation
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** - CLI command reference
+- **[docs/FEATURES_AND_CAPABILITIES.md](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature catalog
 
-### Built-In Optimizations
+### Advanced Topics
 
-1. **uvloop Event Loop** (2-4x faster async I/O)
-   - Automatically enabled by default
-   - Drop-in replacement for stdlib `asyncio`
+- **[CLAUDE.md](CLAUDE.md)** - Developer guide with critical warnings (executor portability, dynamic injection)
+- **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep-dive
+- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migration from Temporal/Airflow
 
-2. **orjson Serialization** (3-5x faster JSON)
-   - High-performance Rust-based JSON library
-   - Used for all state persistence
+### All Documentation
 
-3. **Optimized PostgreSQL Connection Pool**
-   - Default: 10-50 connections (tuned for high concurrency)
-   - Configurable via environment variables
-
-4. **Import Caching** (162x speedup)
-   - Automatic caching of imported step functions
-   - Reduces overhead by 5-10ms per step
-
-### Benchmark Results
-
-```
-JSON Serialization: 2,453,971 ops/sec (orjson)
-Import Caching: 162x speedup for cached imports
-Async Latency: 5.5µs p50, 12.7µs p99 (uvloop)
-SQLite Workflows: ~9,000 ops/sec (in-memory)
-```
-
-### Expected Production Gains
-
-- **+50-100% throughput** for I/O-bound workflows
-- **-30-40% latency** for async operations
-- **-80% serialization time** for state persistence
-- **-50% network overhead** vs. centralized orchestrators
-
-All optimizations are backwards compatible and can be disabled via environment variables.
+- **[docs/README.md](docs/README.md)** - Complete documentation index
 
 ---
 
-## 🎨 Workflow Features
+## CLI Quick Reference
 
-### Step Types
-
-**STANDARD** - Synchronous execution
-```yaml
-- name: "Process_Order"
-  type: "STANDARD"
-  function: "orders.process"
-  automate_next: true
-```
-
-**ASYNC** - Distributed async execution (Celery/threads)
-```yaml
-- name: "Send_Email"
-  type: "ASYNC"
-  function: "notifications.send_email"
-```
-
-**PARALLEL** - Concurrent execution with merge strategies
-```yaml
-- name: "Risk_Assessment"
-  type: "PARALLEL"
-  tasks:
-    - name: "Credit_Check"
-      function: "credit.check"
-    - name: "Fraud_Detection"
-      function: "fraud.detect"
-  merge_strategy: "SHALLOW"
-  merge_conflict_behavior: "PREFER_NEW"
-```
-
-**DECISION** - Conditional branching
-```yaml
-- name: "Check_Amount"
-  type: "DECISION"
-  function: "checks.amount"
-  routes:
-    - condition: "state.amount > 10000"
-      target: "High_Value_Review"
-    - condition: "state.amount <= 10000"
-      target: "Standard_Processing"
-```
-
-**LOOP** - Iterate over collections or conditions
-```yaml
-- name: "Process_Items"
-  type: "LOOP"
-  mode: "ITERATE"
-  iterate_over: "state.items"
-  loop_body:
-    - name: "Update_Inventory"
-      function: "inventory.update"
-```
-
-**HTTP** - HTTP API calls
-```yaml
-- name: "Call_External_API"
-  type: "HTTP"
-  http_config:
-    url: "https://api.example.com/process"
-    method: "POST"
-    headers:
-      Authorization: "Bearer {{state.api_token}}"
-```
-
-**FIRE_AND_FORGET** - Non-blocking sub-workflow launch
-```yaml
-- name: "Trigger_Analytics"
-  type: "FIRE_AND_FORGET"
-  target_workflow_type: "AnalyticsPipeline"
-  initial_data_template:
-    user_id: "{{state.user_id}}"
-```
-
-**CRON_SCHEDULER** - Scheduled recurring workflows
-```yaml
-- name: "Schedule_Weekly_Report"
-  type: "CRON_SCHEDULER"
-  cron_expression: "0 9 * * MON"
-  target_workflow_type: "WeeklyReport"
-```
-
-### Control Flow Mechanisms
-
-**Automated Step Chaining**:
-```yaml
-automate_next: true  # Automatically proceeds to next step
-```
-
-**Conditional Branching**:
-```python
-raise WorkflowJumpDirective(target_step_name="Approval_Step")
-```
-
-**Human-in-the-Loop**:
-```python
-raise WorkflowPauseDirective(result={"awaiting_approval": True})
-```
-
-**Sub-Workflows**:
-```python
-raise StartSubWorkflowDirective(
-    workflow_type="KYC",
-    initial_data={"user_id": state.user_id}
-)
-```
-
-### Saga Pattern (Distributed Transactions)
-
-Automatic rollback for distributed transactions:
-
-```yaml
-steps:
-  - name: "Reserve_Inventory"
-    function: "inventory.reserve"
-    compensate_function: "inventory.release"  # Called on failure
-
-  - name: "Charge_Payment"
-    function: "payments.charge"
-    compensate_function: "payments.refund"  # Called on failure
-```
-
-Enable saga mode:
-```python
-workflow.enable_saga_mode()
-```
-
-On failure, compensation functions execute in reverse order automatically.
-
----
-
-## 🌐 Polyglot Support (Multi-Language Workflows)
-
-Rufus supports **polyglot architectures** through HTTP Steps, enabling Python-orchestrated workflows to integrate with services written in any language.
-
-### The Polyglot Approach
-
-```
-┌─────────────────────────────────────────┐
-│     Rufus Workflow Engine (Python)      │
-│         Orchestration Layer             │
-└───────────┬─────────────────────────────┘
-            │ HTTP/REST
-            ▼
-┌─────────────────────────────────────────┐
-│     External Services (Any Language)    │
-│  ├─ Go microservices                    │
-│  ├─ Rust ML inference                   │
-│  ├─ Node.js notification services       │
-│  ├─ Java enterprise APIs                │
-│  └─ Any HTTP-speaking service           │
-└─────────────────────────────────────────┘
-```
-
-### HTTP Steps for Cross-Language Integration
-
-Call any HTTP service directly from your workflow:
-
-```yaml
-- name: "Call_Go_Service"
-  type: "HTTP"
-  http_config:
-    method: "POST"
-    url: "http://go-service:8080/api/process"
-    headers:
-      Content-Type: "application/json"
-      Authorization: "Bearer {{state.auth_token}}"
-    body:
-      user_id: "{{state.user_id}}"
-      payload: "{{state.data}}"
-    timeout: 30
-  automate_next: true
-```
-
-### Multi-Language Pipeline Example
-
-```yaml
-workflow_type: "PolyglotDataPipeline"
-steps:
-  # Python: Data validation
-  - name: "Validate_Input"
-    type: "STANDARD"
-    function: "steps.validate_input"
-    automate_next: true
-
-  # Go Service: High-performance data processing
-  - name: "Process_Data_Go"
-    type: "HTTP"
-    http_config:
-      method: "POST"
-      url: "http://go-processor:8080/process"
-      body: "{{state.validated_data}}"
-    automate_next: true
-
-  # Rust Service: ML inference
-  - name: "ML_Inference_Rust"
-    type: "HTTP"
-    http_config:
-      method: "POST"
-      url: "http://rust-ml:8080/predict"
-      body:
-        features: "{{state.processed_data.features}}"
-    automate_next: true
-
-  # Node.js: Send notification
-  - name: "Notify_User_Node"
-    type: "HTTP"
-    http_config:
-      method: "POST"
-      url: "http://notification-service:3000/send"
-      body:
-        recipient: "{{state.user_email}}"
-        message: "Processing complete: {{state.ml_prediction}}"
-```
-
-### HTTP Step Features
-
-| Feature | Description |
-|---------|-------------|
-| **Jinja2 Templating** | Dynamic URL, headers, and body with `{{variable}}` syntax |
-| **All HTTP Methods** | GET, POST, PUT, DELETE, PATCH supported |
-| **Response Handling** | Automatic JSON parsing, status code capture |
-| **Merge Strategies** | SHALLOW or DEEP merge of response into workflow state |
-| **Timeout Config** | Per-step timeout settings |
-| **Error Handling** | Configurable retry policies |
-
-### When to Use Polyglot Workflows
-
-**Ideal For:**
-- Integrating existing microservices in different languages
-- Leveraging language-specific performance (Go for concurrency, Rust for ML)
-- Third-party API integrations
-- Legacy system integration
-- Multi-team architectures with different tech stacks
-
-**Best Practices:**
-- Use HTTP steps for external service calls
-- Keep orchestration logic in Python
-- Implement idempotency in external services
-- Use service discovery for dynamic endpoints
-- Configure appropriate timeouts per service
-
-See [USAGE_GUIDE.md](USAGE_GUIDE.md#polyglot-workflows-http-steps) for detailed polyglot documentation.
-
----
-
-## 💾 Database Support
-
-### Multi-Database Architecture
-
-Rufus uses a **unified schema definition** system to support multiple databases without schema divergence.
-
-**Supported Databases**:
-
-**PostgreSQL** (Production):
-- Full feature support
-- LISTEN/NOTIFY for real-time updates
-- Advanced indexing (GIN, partial indexes)
-- Triggers and stored procedures
-- Connection pooling
-- Recommended for >100 concurrent workflows
-
-**SQLite** (Development/Testing):
-- Embedded database (no server needed)
-- Fast in-memory mode (`:memory:`)
-- Single-file portability
-- WAL mode for better concurrency
-- Zero setup friction
-- Recommended for <50 concurrent workflows
-
-### Schema Management
-
-**Unified Migration System** - All database initialization uses migrations as the single source of truth:
-
-```
-migrations/*.sql (migration files)
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-rufus db init  auto_init=True
-(CLI command)  (SQLite only)
-    │             │
-    └─────┬───────┘
-          ▼
-  MigrationManager
-  (applies migrations)
-```
-
-**Initialize Database**:
+**Configuration**:
 ```bash
-# Option 1: CLI command (PostgreSQL or SQLite)
-rufus db init
-
-# Option 2: Auto-init (SQLite only, enabled by default)
-# Database schema automatically created on first use
-persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
-await persistence.initialize()  # Schema created if missing
+rufus config show              # Show current configuration
+rufus config set-persistence   # Set database (SQLite/PostgreSQL)
+rufus config set-execution     # Set executor (sync/thread_pool/celery)
 ```
 
-**Migration Management**:
+**Workflow Management**:
 ```bash
-# Check migration status
-rufus db status
-
-# Apply pending migrations
-rufus db migrate
-
-# Dry-run (preview migrations)
-rufus db migrate --dry-run
-
-# View database statistics
-rufus db stats
-
-# Validate schema integrity
-rufus db validate
+rufus list --status ACTIVE                    # List workflows
+rufus start OrderProcessing -d '{"id": 123}'  # Start workflow
+rufus show <workflow-id> --state --logs       # View details
+rufus resume <workflow-id> --input '{...}'    # Resume paused workflow
+rufus retry <workflow-id> --from-step Step    # Retry failed workflow
+rufus cancel <workflow-id>                    # Cancel workflow
 ```
 
-**Key Features**:
-- ✅ **No schema drift** - Both CLI and auto-init use identical migrations
-- ✅ **Version tracking** - `schema_migrations` table tracks applied migrations
-- ✅ **Zero-setup SQLite** - Auto-init creates schema on first use
-- ✅ **Production-ready** - Same migrations for dev (SQLite) and prod (PostgreSQL)
-
-### Usage Examples
-
-**PostgreSQL (Production)**:
-```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-
-persistence = PostgresPersistenceProvider(
-    db_url="postgresql://user:pass@localhost/rufus",
-    pool_min_size=10,
-    pool_max_size=50
-)
+**Database Management**:
+```bash
+rufus db init      # Initialize schema
+rufus db migrate   # Apply migrations
+rufus db status    # Check migration status
+rufus db stats     # Database statistics
 ```
 
-**SQLite (Development)**:
-```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-
-# In-memory (testing) - schema auto-created
-persistence = SQLitePersistenceProvider(db_path=":memory:", auto_init=True)
-
-# File-based (development) - schema auto-created if missing
-persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
-
-# Disable auto-init (use rufus db init instead)
-persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=False)
+**Validation & Testing**:
+```bash
+rufus validate workflow.yaml --strict  # Validate YAML + function imports
+rufus run workflow.yaml -d '{}'        # Local testing (in-memory)
 ```
 
-**In-Memory (Testing)**:
-```python
-from rufus.implementations.persistence.memory import InMemoryPersistence
-
-persistence = InMemoryPersistence()
-```
+[→ Complete CLI guide](docs/CLI_USAGE_GUIDE.md)
 
 ---
 
-## 🔍 YAML Validation & IDE Support
-
-### Enhanced Validation
-
-Rufus includes JSON Schema-based validation with IDE autocomplete support:
-
-**Basic Validation**:
-```bash
-$ rufus validate order_workflow.yaml
-✓ Successfully validated order_workflow.yaml
-```
-
-**Strict Validation** (checks function imports):
-```bash
-$ rufus validate order_workflow.yaml --strict
-✗ Validation failed
-
-3 Error(s):
-  1. Step 'Process_Payment': dependency 'Validate_Order' does not exist
-  2. Step_A: Cannot import function module 'nonexistent.module'
-  3. State model 'OrderState' not found in module 'state_models'
-```
-
-**JSON Output** (CI/CD integration):
-```bash
-$ rufus validate workflow.yaml --json
-{
-  "valid": true,
-  "file": "workflow.yaml",
-  "errors": [],
-  "warnings": []
-}
-```
-
-### IDE Autocomplete
-
-Add to your workflow YAML files:
-
-```yaml
-# yaml-language-server: $schema=../../schema/workflow_schema.json
-workflow_type: "MyWorkflow"
-steps:
-  - name: "My_Step"
-    type: "STANDARD"  # Autocomplete suggests all step types
-    function: "module.function"
-```
-
-**Supported IDEs**:
-- VS Code (with YAML extension)
-- IntelliJ IDEA / PyCharm
-- Sublime Text (with LSP-yaml)
-
-**Features**:
-- ✅ Autocomplete for step types, merge strategies, etc.
-- ✅ Validation warnings for missing fields
-- ✅ Hover documentation for all fields
-- ✅ Error highlighting for invalid values
-- ✅ Real-time syntax checking
-
-See [schema/README.md](schema/README.md) for complete IDE setup guide.
-
----
-
-## ⚠️ Production Best Practices
-
-### Critical: Executor Portability
-
-**THE PROBLEM**: Step functions must be **stateless and process-isolated** to work across all execution providers.
-
-Code that works with `SyncExecutionProvider` (single process) often breaks with `CeleryExecutor` (distributed processes) due to shared state.
-
-**❌ BREAKS in Distributed Execution**:
-```python
-# Global state lost between steps
-global_cache = {}
-
-def step_a(state, context):
-    global_cache['data'] = expensive_computation()
-    return {}
-
-def step_b(state, context):
-    data = global_cache['data']  # KeyError in Celery!
-    return {"result": process(data)}
-```
-
-**✅ WORKS Everywhere**:
-```python
-# Store in workflow state - persisted to database
-def step_a(state, context):
-    data = expensive_computation()
-    state.cached_data = data  # Persisted
-    return {"cached_data": data}
-
-def step_b(state, context):
-    data = state.cached_data  # Loaded from DB
-    return {"result": process(data)}
-```
-
-**5 Golden Rules**:
-1. **Store everything in workflow state** - `state.field = value`
-2. **Return data from steps** - Return dict merges into state
-3. **No global variables** - Each step is isolated
-4. **No module-level state** - Don't rely on `_module_var`
-5. **Create resources per step** - DB connections, API clients created fresh each time
-
-**Test for Portability**:
-```python
-@pytest.mark.parametrize("executor", [
-    SyncExecutionProvider(),
-    ThreadPoolExecutionProvider()
-])
-def test_workflow_portable(executor):
-    builder = WorkflowBuilder(execution_provider=executor)
-    workflow = builder.create_workflow("MyWorkflow", initial_data={})
-    # Should work with both executors
-```
-
-See [CLAUDE.md](CLAUDE.md) for detailed warnings and examples.
-
-### Caution: Dynamic Injection
-
-**WARNING**: Dynamic step injection makes workflows **non-deterministic** and hard to debug.
-
-**Recommended Alternatives**:
-- Use **DECISION steps** with explicit routes (visible in YAML)
-- Use **conditional logic** within step functions
-- Use **multiple workflow versions** (OrderProcessing_v1, OrderProcessing_v2)
-
-Only use dynamic injection for rare cases like plugin systems, multi-tenant workflows, or A/B testing.
-
-See [USAGE_GUIDE.md](USAGE_GUIDE.md) for detailed best practices.
-
----
-
-## 📚 Examples
-
-### SQLite Task Manager (`examples/sqlite_task_manager/`)
-
-Zero-setup workflow example using embedded SQLite:
-- In-memory database (no PostgreSQL required)
-- Human-in-the-loop approval workflow
-- Task creation, assignment, and completion
-- Workflow pause/resume with user input
-
-**Run**: `python examples/sqlite_task_manager/simple_demo.py`
-
-### Loan Application (`examples/loan_application/`)
-
-Production-ready loan processing workflow with:
-- Parallel risk assessment (credit check + fraud detection)
-- Conditional branching (fast-track vs detailed review)
-- Dynamic step injection (simplified vs full underwriting)
-- Human-in-the-loop approval
-- Saga compensation patterns
-- Sub-workflow integration (KYC verification)
-
-### FastAPI Integration (`examples/fastapi_api/`)
-
-Complete REST API for order processing:
-- FastAPI server with workflow endpoints
-- Order processing with inventory management
-- Payment processing with compensation
-- Saga pattern for distributed transactions
-
-### Flask Integration (`examples/flask_api/`)
-
-Flask-based API wrapper for workflows:
-- Blueprint-based organization
-- RESTful workflow operations
-- JSON serialization
-- Error handling
-
----
-
-## 🧪 Testing
+## Testing
 
 ### Running Tests
 
@@ -846,14 +864,11 @@ Flask-based API wrapper for workflows:
 # Run all tests with coverage
 pytest
 
-# Run specific test module
+# Run specific module
 pytest tests/sdk/test_workflow.py
 
 # Run with verbose output
 pytest -v
-
-# Run single test
-pytest tests/sdk/test_workflow.py::test_workflow_initialization
 ```
 
 ### Test Harness
@@ -873,138 +888,90 @@ workflow = harness.start_workflow(
 # Execute next step
 result = harness.next_step(workflow.id, user_input={"param": "value"})
 
-# Check state
+# Verify state
 assert workflow.state.status == "completed"
 ```
 
-### Testing Best Practices
-
-- Use in-memory persistence for unit tests
-- Set `TESTING=true` to run parallel tasks synchronously
-- Mock external services in step functions
-- Use `pytest` fixtures for common setup
-- Test with multiple executors to ensure portability
+[→ Testing patterns](USAGE_GUIDE.md#testing)
 
 ---
 
-## 📖 Documentation
-
-### Getting Started
-
-- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
-- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Core concepts and common patterns
-- **[examples/](examples/)** - Working examples (SQLite task manager, loan application, API integrations)
-
-### Reference Documentation
-
-- **[YAML_GUIDE.md](YAML_GUIDE.md)** - Complete YAML workflow syntax reference
-- **[API_REFERENCE.md](API_REFERENCE.md)** - SDK API documentation
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** - CLI command reference
-- **[docs/FEATURES_AND_CAPABILITIES.md](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature catalog
-- **[docs/OUTSTANDING_FEATURES.md](docs/OUTSTANDING_FEATURES.md)** - Roadmap and planned features
-
-### Advanced Topics
-
-- **[CLAUDE.md](CLAUDE.md)** - Complete developer guide with advanced features and critical warnings
-- **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep-dive
-- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migration from legacy systems
-
-### All Documentation
-
-- **[docs/README.md](docs/README.md)** - Complete documentation index and navigation guide
-
----
-
-## 🚦 Project Status
+## Project Status
 
 **Current Version**: Pre-release (v0.9.0)
 
-### ✅ Recent Completions
+### ✅ Completed Features
 
-**Tier 1 Architecture Improvements** (2026-01-24):
+**Tier 4 - Advanced Edge Features** (2026-02-06):
+- ✅ Command versioning with schema validation (version_service.py)
+- ✅ Webhook notifications with retry (webhook_service.py)
+- ✅ Rate limiting and throttling (rate_limit_service.py)
+- ✅ Command authorization and policies (authorization_service.py)
+- ✅ Comprehensive audit logging (audit_service.py)
+- ✅ Scheduled commands (schedule_service.py)
+- ✅ Batch command execution (batch_service.py)
+- ✅ Broadcast commands to device groups (broadcast_service.py)
+- ✅ Command templates (template_service.py)
+
+**Tier 3 - Cloud Control Plane** (2026-02-05):
+- ✅ Device registry and management (device_service.py)
+- ✅ Policy engine for config rollouts (policy_engine.py)
+- ✅ FastAPI REST API server (rufus_server/main.py)
+- ✅ Workflow management APIs
+- ✅ ETag-based config push support
+
+**Tier 2 - Production Reliability** (2026-02-06):
+- ✅ Zombie workflow recovery with heartbeat detection
+- ✅ Workflow versioning with definition snapshots
+- ✅ Integration and load testing suite
+
+**Tier 1 - Developer Experience** (2026-01-24):
 - ✅ JSON Schema-based YAML validation with IDE autocomplete
-- ✅ Enhanced `rufus validate` with `--strict` mode
-- ✅ Accurate performance model documentation
-- ✅ Executor portability warnings (prevents production failures)
-- ✅ Dynamic injection caution warnings
-- ✅ Comprehensive CLI with 21 commands
+- ✅ Enhanced CLI with 21 commands
+- ✅ Performance optimizations (uvloop, orjson, connection pooling)
+- ✅ SQLite persistence provider
+- ✅ Comprehensive documentation
 
-**Phase 1 Performance Optimizations**:
-- ✅ uvloop integration (2-4x async I/O speedup)
-- ✅ orjson serialization (3-5x faster JSON)
-- ✅ Optimized PostgreSQL connection pooling
-- ✅ Import caching (162x speedup)
-- ✅ Comprehensive benchmarking suite
+### 🔜 Future Enhancements (Tier 5)
 
-**SQLite Persistence Implementation**:
-- ✅ Full PersistenceProvider interface (20 methods)
-- ✅ In-memory and file-based modes
-- ✅ WAL mode for improved concurrency
-- ✅ 14 unit tests + 6 integration tests
-- ✅ Performance benchmarks (~9K ops/sec)
-- ✅ Complete documentation and examples
+**Advanced Edge Resilience** (Design Spec):
+- Global Lock Registry for OOM prevention (priority-based RAM/VRAM locking)
+- Circular RAM buffers for storage-forward (minimize SD card writes)
+- PEX deployment pipeline with atomic swapping
+- Safe-mode fallback and automatic rollback
+- Hardware-specific memory strategies (NVIDIA/Apple Silicon/Generic)
 
-**CLI Enhancement**:
-- ✅ 21 commands across 4 categories
-- ✅ Configuration management
-- ✅ Workflow lifecycle operations
-- ✅ Database management
-- ✅ Monitoring and logging
-- ✅ Beautiful terminal output with Rich library
+**Enhanced Observability**:
+- Prometheus metrics integration
+- DataDog APM integration
+- Distributed tracing (OpenTelemetry)
+- Real-time dashboard for fleet monitoring
 
-### 🔜 Upcoming (Tier 2)
+**Enterprise Extensions**:
+- GraphQL API alternative to REST
+- Multi-cloud deployment support (AWS/Azure/GCP)
+- AI-powered anomaly detection for devices
+- Advanced analytics and reporting
 
-**Zombie Workflow Recovery**:
-- Heartbeat-based detection of crashed workers
-- Auto-recovery of stale RUNNING workflows
-- CLI: `rufus db scan-zombies`
+**Note**: The advanced resilience features (resource semaphores, PEX deployment, circular buffers) are part of the fintech edge architecture design. Current implementation includes the foundation (InferenceProvider with `unload_model()`, SQLite WAL mode, Store-and-Forward). Full resource semaphore system is in development.
 
-**Workflow Versioning Strategy**:
-- Snapshot workflow definitions in database
-- Protect running workflows from definition changes
-- Support explicit versioning (OrderProcessing_v1, _v2)
-
-See [ARCHITECTURE_REVIEW_RESPONSE.md](ARCHITECTURE_REVIEW_RESPONSE.md) for Tier 2 design details.
-
-### 📝 Note
-
-This project was recently refactored from "Confucius" to "Rufus" with focus on:
-- Extracting core SDK from monolithic application
-- Unified `Workflow` class architecture
-- Improved provider interfaces and dependency injection
-- Better separation: Core SDK vs Server vs CLI
-- Enhanced sub-workflow status propagation
-
-Some legacy `confucius/` code still exists in the repo for reference.
+See [examples/edge_deployment/ADVANCED_FEATURES.md](examples/edge_deployment/ADVANCED_FEATURES.md) for complete Tier 4/5 documentation.
 
 ---
 
-## 🎯 Use Cases
-
-- **Business Process Automation** - Order processing, approval workflows, onboarding
-- **AI/ML Pipelines** - Multi-stage AI agent orchestration with human review
-- **Distributed Transactions** - Saga pattern for microservices coordination
-- **Human-AI Collaboration** - Workflows combining automated steps with human review
-- **Event-Driven Systems** - Complex event processing with state management
-- **ETL Pipelines** - Data processing with error handling and retries
-- **Scheduled Jobs** - Cron-based recurring workflows
-- **Microservices Orchestration** - Coordinate multiple services with compensation
-
----
-
-## 🔑 Design Principles
+## Design Principles
 
 1. **SDK-First** - Embed workflows directly in Python apps (no mandatory external server)
 2. **Separation of Concerns** - Workflow definition (YAML) separate from implementation (Python)
 3. **Provider Abstraction** - Swap persistence/execution/observability without code changes
 4. **Type Safety** - Pydantic models for validation and IDE autocomplete
 5. **Developer Experience** - Declarative YAML + Pythonic step functions + comprehensive CLI
-6. **Production-Ready** - Performance optimizations, error handling, observability, testing
-7. **Scalability** - Start embedded, scale to distributed when needed
+6. **Production-Ready** - Performance optimizations, error handling, observability, zombie recovery
+7. **Scalability** - Start embedded (SQLite), scale to distributed (PostgreSQL + Celery) when needed
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our contribution guidelines (coming soon).
 
@@ -1012,31 +979,39 @@ We welcome contributions! Please see our contribution guidelines (coming soon).
 - Additional persistence providers (MongoDB, DynamoDB)
 - Additional execution providers (Kubernetes jobs, AWS Lambda)
 - Observability integrations (Prometheus, DataDog, New Relic)
-- Additional step types
-- Example workflows for specific industries
+- Additional step types (gRPC, GraphQL, WebSocket)
+- Example workflows for specific industries (fintech, healthcare, logistics)
 - Documentation improvements
 
 ---
 
-## 📄 License
+## License
 
 [Add license information]
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Rufus builds on lessons learned from:
-- Temporal.io (workflow durability)
-- Airflow (DAG orchestration)
-- AWS Step Functions (state machines)
-- Saga pattern (distributed transactions)
+- **Temporal.io** - Workflow durability and state management
+- **Airflow** - DAG orchestration and task scheduling
+- **AWS Step Functions** - State machine patterns
+- **Saga pattern** - Distributed transaction compensation
 
-While taking a different approach optimized for Python-native applications.
+While taking a different approach optimized for **embedded Python applications**.
 
 ---
 
 **Rufus** - Sophisticated workflow orchestration without the complexity.
-Perfect for Python developers who need production-ready workflow management embedded directly into their applications.
 
-**Get Started**: `pip install -r requirements.txt` → `rufus validate workflow.yaml` → `rufus run workflow.yaml`
+**Perfect for**: Python developers who need production-ready workflow management embedded directly into their applications.
+
+**Get Started**:
+```bash
+pip install -r requirements.txt
+rufus validate workflow.yaml
+rufus run workflow.yaml -d '{}'
+```
+
+**Questions?** See [docs/README.md](docs/README.md) for complete documentation.
