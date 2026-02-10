@@ -20,6 +20,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: rufus-postgres
+    command: postgres -c max_connections=1000 -c shared_buffers=512MB -c max_wal_size=2GB
     environment:
       POSTGRES_USER: rufus
       POSTGRES_PASSWORD: rufus_secret_2024
@@ -49,6 +50,13 @@ services:
       # Database
       DATABASE_URL: postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_cloud
       WORKFLOW_STORAGE: postgres
+
+      # PostgreSQL Connection Pool (optimized for high-load testing)
+      POSTGRES_POOL_MIN_SIZE: 50
+      POSTGRES_POOL_MAX_SIZE: 500
+      POSTGRES_POOL_COMMAND_TIMEOUT: 60
+      POSTGRES_POOL_MAX_QUERIES: 500000
+      POSTGRES_POOL_MAX_INACTIVE_LIFETIME: 600
 
       # Server settings
       RUFUS_REGISTRATION_KEY: demo-registration-key-2024

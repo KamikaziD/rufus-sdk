@@ -13,12 +13,17 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Load .env file if it exists
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from tests.load.orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults
 
@@ -108,7 +113,12 @@ async def run_single_scenario(
     duration: int,
     output_file: str
 ) -> LoadTestResults:
-    """Run a single test scenario."""
+    """
+    Run a single test scenario.
+
+    This creates devices, registers them, runs the scenario, and cleans up.
+    For running multiple scenarios, use run_all_scenarios() instead to share devices.
+    """
     logger.info(f"Initializing load test orchestrator for {cloud_url}")
 
     orchestrator = LoadTestOrchestrator(
@@ -116,50 +126,26 @@ async def run_single_scenario(
         base_api_key="load_test_api_key"
     )
 
-    # Run scenario
-    if scenario == "heartbeat":
-        results = await ScenarioRunner.run_heartbeat_test(
-            orchestrator,
-            num_devices=num_devices,
-            duration_seconds=duration
-        )
-    elif scenario == "saf_sync":
-        results = await ScenarioRunner.run_saf_sync_test(
-            orchestrator,
-            num_devices=num_devices
-        )
-    elif scenario == "config_poll":
-        results = await ScenarioRunner.run_config_poll_test(
-            orchestrator,
-            num_devices=num_devices,
-            duration_seconds=duration
-        )
-    elif scenario == "model_update":
-        results = await ScenarioRunner.run_model_update_test(
-            orchestrator,
-            num_devices=num_devices
-        )
-    elif scenario == "cloud_commands":
-        results = await ScenarioRunner.run_cloud_commands_test(
-            orchestrator,
-            num_devices=num_devices,
-            duration_seconds=duration
-        )
-    elif scenario == "workflow_execution":
-        results = await ScenarioRunner.run_workflow_test(
-            orchestrator,
-            num_devices=num_devices,
-            duration_seconds=duration
-        )
-    else:
-        logger.error(f"Unknown scenario: {scenario}")
-        sys.exit(1)
+    try:
+        # Setup devices for this scenario
+        await orchestrator.setup_devices(num_devices, cleanup_first=True)
 
-    # Export results
-    if output_file:
-        orchestrator.export_results(results, output_file)
+        # Run scenario with existing devices
+        results = await orchestrator.run_scenario(
+            scenario=scenario,
+            duration_seconds=duration,
+            skip_device_setup=True  # Already set up
+        )
 
-    return results
+        # Export results
+        if output_file:
+            orchestrator.export_results(results, output_file)
+
+        return results
+
+    finally:
+        # Cleanup devices
+        await orchestrator.teardown_devices()
 
 
 async def run_all_scenarios(
@@ -167,7 +153,12 @@ async def run_all_scenarios(
     num_devices: int,
     output_dir: str
 ):
-    """Run all test scenarios."""
+    """
+    Run all test scenarios with shared devices.
+
+    Devices are registered once at the start, used across all scenarios,
+    and cleaned up once at the end. This avoids 401 errors and is more efficient.
+    """
     scenarios = [
         ("heartbeat", 600),
         ("saf_sync", 300),
@@ -177,45 +168,77 @@ async def run_all_scenarios(
         ("workflow_execution", 300),
     ]
 
-    all_results = []
+    # Create single orchestrator for all scenarios
+    logger.info("="*80)
+    logger.info("LOAD TEST - ALL SCENARIOS")
+    logger.info(f"Devices: {num_devices}")
+    logger.info(f"Scenarios: {len(scenarios)}")
+    logger.info("="*80)
 
-    for scenario, duration in scenarios:
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Running scenario: {scenario}")
-        logger.info(f"{'='*80}\n")
+    orchestrator = LoadTestOrchestrator(
+        cloud_url=cloud_url,
+        base_api_key="load_test_api_key"
+    )
 
-        output_file = f"{output_dir}/{scenario}_results.json" if output_dir else None
+    try:
+        # Setup devices once (register with control plane)
+        logger.info("\n" + "="*80)
+        logger.info("DEVICE SETUP - Registering devices for all scenarios")
+        logger.info("="*80)
+        await orchestrator.setup_devices(num_devices, cleanup_first=True)
 
-        results = await run_single_scenario(
-            cloud_url=cloud_url,
-            scenario=scenario,
-            num_devices=num_devices,
-            duration=duration,
-            output_file=output_file
-        )
+        all_results = []
 
-        print_results(results)
-        all_results.append(results)
+        # Run each scenario with the same devices
+        for scenario, duration in scenarios:
+            logger.info(f"\n{'='*80}")
+            logger.info(f"Running scenario: {scenario.upper()}")
+            logger.info(f"{'='*80}\n")
 
-        # Brief pause between scenarios
-        await asyncio.sleep(5)
+            output_file = f"{output_dir}/{scenario}_results.json" if output_dir else None
 
-    # Print summary
-    print("\n" + "=" * 80)
-    print("ALL SCENARIOS SUMMARY")
-    print("=" * 80)
+            # Run scenario (skip device setup since we already did it)
+            results = await orchestrator.run_scenario(
+                scenario=scenario,
+                duration_seconds=duration,
+                skip_device_setup=True  # Use existing devices
+            )
 
-    for results in all_results:
-        pass_fail = "✅ PASS" if results.error_rate < 1.0 else "❌ FAIL"
-        print(
-            f"{results.scenario:20s} | "
-            f"{results.num_devices:4d} devices | "
-            f"{results.total_requests:7,} req | "
-            f"{results.error_rate:5.2f}% err | "
-            f"{pass_fail}"
-        )
+            # Export results
+            if output_file:
+                orchestrator.export_results(results, output_file)
 
-    print("=" * 80)
+            print_results(results)
+            all_results.append(results)
+
+            # Brief pause between scenarios
+            logger.info("Pausing 5 seconds before next scenario...\n")
+            await asyncio.sleep(5)
+
+        # Print summary
+        print("\n" + "=" * 80)
+        print("ALL SCENARIOS SUMMARY")
+        print("=" * 80)
+
+        for results in all_results:
+            pass_fail = "✅ PASS" if results.error_rate < 1.0 else "❌ FAIL"
+            print(
+                f"{results.scenario:20s} | "
+                f"{results.num_devices:4d} devices | "
+                f"{results.total_requests:7,} req | "
+                f"{results.error_rate:5.2f}% err | "
+                f"{pass_fail}"
+            )
+
+        print("=" * 80)
+
+    finally:
+        # Cleanup devices once at the end
+        logger.info("\n" + "="*80)
+        logger.info("DEVICE TEARDOWN - Cleaning up all devices")
+        logger.info("="*80)
+        await orchestrator.teardown_devices()
+        logger.info("Load test complete!")
 
 
 def main():
@@ -249,8 +272,8 @@ Scenarios:
 
     parser.add_argument(
         "--cloud-url",
-        default="http://localhost:8000",
-        help="Cloud control plane URL (default: http://localhost:8000)"
+        default=os.getenv("CLOUD_URL", "http://localhost:8000"),
+        help="Cloud control plane URL (default: CLOUD_URL env var or http://localhost:8000)"
     )
 
     parser.add_argument(

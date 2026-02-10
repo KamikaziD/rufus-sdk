@@ -570,10 +570,15 @@ async def get_device_config(
     if isinstance(config_data, str):
         config_data = json.loads(config_data)
 
+    # Serialize datetime to ISO format
+    created_at = config.get("created_at")
+    if created_at and hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+
     return JSONResponse(
         content={
             "version": config.get("config_version"),
-            "updated_at": config.get("created_at"),
+            "updated_at": created_at,
             **config_data,
         },
         headers={"ETag": current_etag}

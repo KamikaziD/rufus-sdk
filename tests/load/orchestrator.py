@@ -109,41 +109,20 @@ class LoadTestOrchestrator:
         self._metrics_lock = asyncio.Lock()
         self._aggregated_metrics: Dict[str, DeviceMetrics] = {}
 
-    async def run_scenario(
-        self,
-        scenario: str,
-        num_devices: int,
-        duration_seconds: int = 600,
-        progress_callback: Optional[callable] = None
-    ) -> LoadTestResults:
+    async def setup_devices(self, num_devices: int, cleanup_first: bool = True):
         """
-        Run a load test scenario.
+        Setup devices for load testing (shared across scenarios).
 
         Args:
-            scenario: Scenario name (heartbeat, saf_sync, config_poll, etc.)
-            num_devices: Number of devices to simulate
-            duration_seconds: How long to run (seconds)
-            progress_callback: Optional callback for progress updates
-
-        Returns:
-            LoadTestResults with aggregated metrics
+            num_devices: Number of devices to create
+            cleanup_first: Whether to cleanup existing devices before setup
         """
-        logger.info(
-            f"Starting load test: scenario={scenario}, "
-            f"devices={num_devices}, duration={duration_seconds}s"
-        )
+        logger.info(f"Setting up {num_devices} devices for load testing...")
 
-        # Create results object
-        results = LoadTestResults(
-            scenario=scenario,
-            num_devices=num_devices,
-            duration_seconds=0  # Will be updated
-        )
-
-        # Create devices
+        # Create devices with consistent IDs (no scenario in name)
         self._devices = []
         for i in range(num_devices):
-            device_id = f"load-test-{scenario}-{i:05d}"
+            device_id = f"load-test-{i:05d}"  # Same ID across all scenarios
             api_key = f"{self.base_api_key}_{i}"
 
             config = DeviceConfig(
@@ -162,16 +141,73 @@ class LoadTestOrchestrator:
             self._devices.append(device)
 
         # Initialize all devices
-        logger.info(f"Initializing {num_devices} devices...")
+        logger.info(f"Initializing {num_devices} HTTP clients...")
         await asyncio.gather(*[device.initialize() for device in self._devices])
 
-        # Clean up any existing load test devices
-        logger.info(f"Cleaning up existing load test devices...")
+        # Clean up any existing load test devices (if requested)
+        if cleanup_first:
+            logger.info(f"Cleaning up existing load test devices...")
+            await self._cleanup_devices()
+
+        # Register devices with control plane (idempotent)
+        logger.info(f"Registering {num_devices} devices with control plane...")
+        await self._register_devices(idempotent=True)
+
+        logger.info(f"Device setup complete: {num_devices} devices ready")
+
+    async def teardown_devices(self):
+        """Teardown devices after all scenarios complete."""
+        logger.info("Tearing down devices...")
+
+        # Close HTTP clients
+        if self._devices:
+            await asyncio.gather(*[device.close() for device in self._devices])
+
+        # Cleanup from server
+        logger.info("Cleaning up devices from server...")
         await self._cleanup_devices()
 
-        # Register devices with control plane
-        logger.info(f"Registering {num_devices} devices with control plane...")
-        await self._register_devices()
+        logger.info("Device teardown complete")
+
+    async def run_scenario(
+        self,
+        scenario: str,
+        duration_seconds: int = 600,
+        progress_callback: Optional[callable] = None,
+        skip_device_setup: bool = False
+    ) -> LoadTestResults:
+        """
+        Run a load test scenario.
+
+        Args:
+            scenario: Scenario name (heartbeat, saf_sync, config_poll, etc.)
+            duration_seconds: How long to run (seconds)
+            progress_callback: Optional callback for progress updates
+            skip_device_setup: If True, use existing devices (for multi-scenario tests)
+
+        Returns:
+            LoadTestResults with aggregated metrics
+        """
+        num_devices = len(self._devices) if self._devices else 0
+
+        logger.info(
+            f"Starting load test: scenario={scenario}, "
+            f"devices={num_devices}, duration={duration_seconds}s"
+        )
+
+        # Create results object
+        results = LoadTestResults(
+            scenario=scenario,
+            num_devices=num_devices,
+            duration_seconds=0  # Will be updated
+        )
+
+        # Setup devices if not skipped (for single-scenario tests)
+        if not skip_device_setup and not self._devices:
+            raise ValueError("No devices available. Call setup_devices() first or set skip_device_setup=False")
+        elif not skip_device_setup:
+            # Single scenario mode - setup and cleanup
+            await self.setup_devices(num_devices, cleanup_first=True)
 
         # Start timer
         start_time = time.time()
@@ -202,9 +238,10 @@ class LoadTestOrchestrator:
         # Aggregate metrics
         await self._aggregate_metrics(results)
 
-        # Close all devices
-        logger.info("Closing devices...")
-        await asyncio.gather(*[device.close() for device in self._devices])
+        # Cleanup devices if not skipped (single scenario mode)
+        if not skip_device_setup:
+            logger.info("Closing devices...")
+            await asyncio.gather(*[device.close() for device in self._devices])
 
         # Calculate summary
         results.calculate_summary()
@@ -239,17 +276,53 @@ class LoadTestOrchestrator:
                 results.total_requests += metrics.total_requests
                 results.total_errors += metrics.total_errors
 
-    async def _register_devices(self):
-        """Register all devices with the control plane."""
+    async def _register_devices(self, idempotent: bool = True):
+        """
+        Register all devices with the control plane.
+
+        Args:
+            idempotent: If True, check if device exists before registering
+        """
         import httpx
         import os
 
         registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
         async def register_single_device(device):
-            """Register a single device."""
+            """Register a single device (idempotent)."""
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Check if device already exists (idempotent mode)
+                    if idempotent:
+                        check_response = await client.get(
+                            f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                            headers={
+                                "X-Registration-Key": registration_key
+                            }
+                        )
+
+                        if check_response.status_code == 200:
+                            # Device already exists - get API key from response
+                            data = check_response.json()
+                            existing_api_key = data.get("api_key")
+
+                            if existing_api_key:
+                                # Update device API key
+                                device.config.api_key = existing_api_key
+                                # Recreate HTTP client with existing API key
+                                await device._http_client.aclose()
+                                device._http_client = httpx.AsyncClient(
+                                    timeout=60.0,
+                                    headers={
+                                        "X-API-Key": device.config.api_key,
+                                        "X-Device-ID": device.config.device_id,
+                                        "Content-Type": "application/json",
+                                    }
+                                )
+                                logger.debug(f"Device {device.config.device_id} already registered (using existing)")
+                                return True
+
+                    # Register new device
                     response = await client.post(
                         f"{self.cloud_url}/api/v1/devices/register",
                         headers={
@@ -275,7 +348,7 @@ class LoadTestOrchestrator:
                         # Recreate HTTP client with new API key (httpx headers are immutable)
                         await device._http_client.aclose()
                         device._http_client = httpx.AsyncClient(
-                            timeout=30.0,
+                            timeout=60.0,  # Increased for load testing
                             headers={
                                 "X-API-Key": device.config.api_key,
                                 "X-Device-ID": device.config.device_id,
@@ -285,8 +358,8 @@ class LoadTestOrchestrator:
                         logger.debug(f"Registered device {device.config.device_id}")
                         return True
                     elif response.status_code == 400 and "already registered" in response.text:
-                        # Device already registered - this is OK for re-runs
-                        logger.debug(f"Device {device.config.device_id} already registered")
+                        # Device already registered (backup check)
+                        logger.debug(f"Device {device.config.device_id} already registered (via 400)")
                         return True
                     else:
                         logger.error(

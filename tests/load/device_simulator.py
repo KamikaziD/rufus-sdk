@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import os
 import random
 import time
 from datetime import datetime
@@ -17,6 +18,13 @@ import httpx
 import psutil
 
 logger = logging.getLogger(__name__)
+
+
+# Retry configuration (can be overridden by environment variables)
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+INITIAL_BACKOFF = float(os.getenv("INITIAL_BACKOFF", "1.0"))  # seconds
+MAX_BACKOFF = float(os.getenv("MAX_BACKOFF", "10.0"))  # seconds
+BACKOFF_MULTIPLIER = float(os.getenv("BACKOFF_MULTIPLIER", "2.0"))
 
 
 @dataclass
@@ -83,7 +91,7 @@ class SimulatedEdgeDevice:
     async def initialize(self):
         """Initialize HTTP client."""
         self._http_client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=60.0,  # Increased for load testing
             headers={
                 "X-API-Key": self.config.api_key,
                 "X-Device-ID": self.config.device_id,
@@ -96,6 +104,98 @@ class SimulatedEdgeDevice:
         """Close HTTP client."""
         if self._http_client:
             await self._http_client.aclose()
+
+    async def _retry_with_backoff(
+        self,
+        operation_name: str,
+        coro_func,
+        *args,
+        **kwargs
+    ):
+        """
+        Execute operation with exponential backoff retry.
+
+        Args:
+            operation_name: Name of operation for logging
+            coro_func: Coroutine function to execute
+            *args, **kwargs: Arguments to pass to coro_func
+
+        Returns:
+            Result from coro_func
+
+        Raises:
+            Last exception if all retries exhausted
+        """
+        backoff = INITIAL_BACKOFF
+        last_exception = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                return await coro_func(*args, **kwargs)
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
+                last_exception = e
+                self.metrics.total_errors += 1
+
+                if attempt < MAX_RETRIES - 1:
+                    # Add jitter to prevent thundering herd
+                    jitter = random.uniform(0, backoff * 0.1)
+                    sleep_time = min(backoff + jitter, MAX_BACKOFF)
+
+                    logger.warning(
+                        f"Device {self.config.device_id} {operation_name} failed "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}): {e}. "
+                        f"Retrying in {sleep_time:.2f}s..."
+                    )
+
+                    await asyncio.sleep(sleep_time)
+                    backoff *= BACKOFF_MULTIPLIER
+                else:
+                    logger.error(
+                        f"Device {self.config.device_id} {operation_name} failed "
+                        f"after {MAX_RETRIES} attempts: {e}"
+                    )
+            except httpx.HTTPStatusError as e:
+                # Don't retry 4xx errors (client errors)
+                if 400 <= e.response.status_code < 500:
+                    logger.error(
+                        f"Device {self.config.device_id} {operation_name} failed "
+                        f"with client error {e.response.status_code}: {e}"
+                    )
+                    self.metrics.total_errors += 1
+                    raise
+                # Retry 5xx errors (server errors)
+                last_exception = e
+                self.metrics.total_errors += 1
+
+                if attempt < MAX_RETRIES - 1:
+                    jitter = random.uniform(0, backoff * 0.1)
+                    sleep_time = min(backoff + jitter, MAX_BACKOFF)
+
+                    logger.warning(
+                        f"Device {self.config.device_id} {operation_name} failed "
+                        f"with server error {e.response.status_code} "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}). "
+                        f"Retrying in {sleep_time:.2f}s..."
+                    )
+
+                    await asyncio.sleep(sleep_time)
+                    backoff *= BACKOFF_MULTIPLIER
+                else:
+                    logger.error(
+                        f"Device {self.config.device_id} {operation_name} failed "
+                        f"after {MAX_RETRIES} attempts with status {e.response.status_code}"
+                    )
+            except Exception as e:
+                # Unexpected errors - log and re-raise
+                logger.error(
+                    f"Device {self.config.device_id} {operation_name} failed "
+                    f"with unexpected error: {e}"
+                )
+                self.metrics.total_errors += 1
+                raise
+
+        # All retries exhausted
+        raise last_exception
 
     async def run_scenario(self, scenario: str, duration_seconds: int = 600):
         """
@@ -169,20 +269,25 @@ class SimulatedEdgeDevice:
             memory_percent = random.uniform(30, 70)
             disk_percent = random.uniform(20, 80)
 
-            response = await self._http_client.post(
-                f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/heartbeat",
-                json={
-                    "device_status": "online",
-                    "metrics": {
-                        "cpu_percent": cpu_percent,
-                        "memory_percent": memory_percent,
-                        "disk_percent": disk_percent,
-                        "pending_sync_count": len(self._pending_transactions),
-                        "uptime_seconds": random.randint(3600, 86400),
+            # Retry heartbeat with exponential backoff
+            async def send_heartbeat():
+                response = await self._http_client.post(
+                    f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/heartbeat",
+                    json={
+                        "device_status": "online",
+                        "metrics": {
+                            "cpu_percent": cpu_percent,
+                            "memory_percent": memory_percent,
+                            "disk_percent": disk_percent,
+                            "pending_sync_count": len(self._pending_transactions),
+                            "uptime_seconds": random.randint(3600, 86400),
+                        }
                     }
-                }
-            )
+                )
+                response.raise_for_status()
+                return response
 
+            response = await self._retry_with_backoff("heartbeat", send_heartbeat)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:
@@ -286,17 +391,22 @@ class SimulatedEdgeDevice:
         ).hexdigest()
 
     async def _sync_batch(self, transactions: List[Dict[str, Any]]) -> bool:
-        """Sync a batch of transactions to cloud."""
+        """Sync a batch of transactions to cloud with retry logic."""
         try:
-            response = await self._http_client.post(
-                f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/sync",
-                json={
-                    "transactions": transactions,
-                    "device_sequence": 0,  # TODO: Track sequence
-                    "device_timestamp": datetime.utcnow().isoformat(),
-                }
-            )
+            # Retry sync with exponential backoff
+            async def send_sync():
+                response = await self._http_client.post(
+                    f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/sync",
+                    json={
+                        "transactions": transactions,
+                        "device_sequence": 0,  # TODO: Track sequence
+                        "device_timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
+                response.raise_for_status()
+                return response
 
+            response = await self._retry_with_backoff("SAF sync", send_sync)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:
@@ -316,7 +426,7 @@ class SimulatedEdgeDevice:
                 return False
 
         except Exception as e:
-            logger.error(f"Sync error for {self.config.device_id}: {e}")
+            logger.error(f"Sync error for {self.config.device_id}: {e}", exc_info=True)
             self.metrics.total_errors += 1
             return False
 
@@ -348,17 +458,24 @@ class SimulatedEdgeDevice:
             await asyncio.sleep(self.config.config_poll_interval + jitter)
 
     async def _poll_config(self) -> bool:
-        """Poll for config updates."""
+        """Poll for config updates with retry logic."""
         try:
             headers = {}
             if self._current_config_etag:
                 headers["If-None-Match"] = self._current_config_etag
 
-            response = await self._http_client.get(
-                f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/config",
-                headers=headers
-            )
+            # Retry config poll with exponential backoff
+            async def poll_config():
+                response = await self._http_client.get(
+                    f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/config",
+                    headers=headers
+                )
+                # Don't raise for 304 (Not Modified) - that's expected
+                if response.status_code not in [200, 304]:
+                    response.raise_for_status()
+                return response
 
+            response = await self._retry_with_backoff("config poll", poll_config)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:

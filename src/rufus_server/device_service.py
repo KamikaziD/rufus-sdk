@@ -336,9 +336,10 @@ class DeviceService:
                     })
                     continue
                 try:
-                    # Check idempotency
+                    # Check idempotency (use existing connection)
                     existing = await self._get_transaction_by_idempotency(
-                        txn.get("idempotency_key")
+                        txn.get("idempotency_key"),
+                        conn=conn
                     )
                     if existing:
                         accepted.append({
@@ -348,14 +349,16 @@ class DeviceService:
                         })
                         continue
 
-                    # Insert transaction
-                    await conn.execute(
+                    # Insert transaction (idempotent - ignore duplicates from race conditions)
+                    result = await conn.fetchrow(
                         """
                         INSERT INTO saf_transactions (
                             transaction_id, idempotency_key, device_id, merchant_id,
                             amount_cents, currency, card_token, card_last_four,
                             encrypted_payload, encryption_key_id, status, synced_at
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'synced', $11)
+                        ON CONFLICT (idempotency_key) DO NOTHING
+                        RETURNING transaction_id
                         """,
                         txn["transaction_id"],
                         txn["idempotency_key"],
@@ -367,13 +370,23 @@ class DeviceService:
                         txn.get("card_last_four", ""),
                         txn.get("encrypted_payload"),
                         txn.get("encryption_key_id"),
-                        datetime.utcnow()                    )
+                        datetime.utcnow()
+                    )
 
-                    accepted.append({
-                        "transaction_id": txn["transaction_id"],
-                        "status": "ACCEPTED",
-                        "server_id": txn["transaction_id"],
-                    })
+                    # Check if row was actually inserted (result is None if conflict occurred)
+                    if result:
+                        accepted.append({
+                            "transaction_id": txn["transaction_id"],
+                            "status": "ACCEPTED",
+                            "server_id": txn["transaction_id"],
+                        })
+                    else:
+                        # Race condition - transaction was inserted by another request
+                        accepted.append({
+                            "transaction_id": txn["transaction_id"],
+                            "status": "DUPLICATE",
+                            "server_id": txn["transaction_id"],
+                        })
 
                 except Exception as e:
                     logger.error(f"Failed to sync transaction {txn.get('transaction_id')}: {e}")
@@ -386,7 +399,7 @@ class DeviceService:
             # Update device last_sync_at
             await conn.execute(
                 "UPDATE edge_devices SET last_sync_at = $1 WHERE device_id = $2",
-                datetime.utcnow().isoformat(), device_id
+                datetime.utcnow(), device_id  # Pass datetime object, not string
             )
 
         return {
@@ -395,11 +408,23 @@ class DeviceService:
             "server_sequence": 0,  # TODO: Implement sequencing
         }
 
-    async def _get_transaction_by_idempotency(self, key: str) -> Optional[Dict[str, Any]]:
-        """Get transaction by idempotency key."""
+    async def _get_transaction_by_idempotency(
+        self,
+        key: str,
+        conn=None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get transaction by idempotency key.
+
+        Args:
+            key: Idempotency key to look up
+            conn: Optional existing connection to reuse (avoids nested acquisition)
+        """
         if not key:
             return None
-        async with self.persistence.pool.acquire() as conn:
+
+        # If connection provided, use it; otherwise acquire new one
+        if conn:
             row = await conn.fetchrow(
                 "SELECT * FROM saf_transactions WHERE idempotency_key = $1",
                 key
@@ -407,6 +432,15 @@ class DeviceService:
             if row:
                 return dict(row)
             return None
+        else:
+            async with self.persistence.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM saf_transactions WHERE idempotency_key = $1",
+                    key
+                )
+                if row:
+                    return dict(row)
+                return None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Heartbeat & Health
