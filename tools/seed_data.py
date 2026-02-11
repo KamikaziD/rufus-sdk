@@ -65,6 +65,8 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             "current_step": 3,
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
+            "steps_config": [],  # Empty steps for demo workflows
+            "parent_execution_id": None,  # Top-level workflows
             "created_at": (datetime.now() - timedelta(days=2)).isoformat(),
             "updated_at": (datetime.now() - timedelta(days=1)).isoformat(),
             "owner_id": "demo-user",
@@ -94,6 +96,8 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             "current_step": 1,
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
+            "steps_config": [],  # Empty steps for demo workflows
+            "parent_execution_id": None,  # Top-level workflows
             "created_at": (datetime.now() - timedelta(hours=3)).isoformat(),
             "updated_at": datetime.now().isoformat(),
             "owner_id": "demo-user",
@@ -123,6 +127,8 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             "current_step": 2,
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
+            "steps_config": [],  # Empty steps for demo workflows
+            "parent_execution_id": None,  # Top-level workflows
             "created_at": (datetime.now() - timedelta(hours=1)).isoformat(),
             "updated_at": datetime.now().isoformat(),
             "owner_id": "demo-user",
@@ -152,6 +158,8 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             "current_step": 1,
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
+            "steps_config": [],  # Empty steps for demo workflows
+            "parent_execution_id": None,  # Top-level workflows
             "created_at": (datetime.now() - timedelta(hours=6)).isoformat(),
             "updated_at": (datetime.now() - timedelta(hours=4)).isoformat(),
             "owner_id": "demo-user",

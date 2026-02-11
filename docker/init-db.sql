@@ -524,7 +524,10 @@ CREATE TABLE IF NOT EXISTS rate_limit_tracking (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_limit_identifier ON rate_limit_tracking(identifier, resource, window_end);
-CREATE INDEX IF NOT EXISTS idx_rate_limit_cleanup ON rate_limit_tracking(window_end) WHERE window_end < NOW();
+-- Note: Removed partial index with NOW() predicate (not immutable)
+-- Use: CREATE INDEX IF NOT EXISTS idx_rate_limit_cleanup ON rate_limit_tracking(window_end);
+-- for cleanup queries without partial index
+CREATE INDEX IF NOT EXISTS idx_rate_limit_cleanup ON rate_limit_tracking(window_end);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Device Configurations Table
