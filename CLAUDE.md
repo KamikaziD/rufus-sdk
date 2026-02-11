@@ -854,6 +854,148 @@ persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
 ```
 
+### Migration Systems
+
+Rufus currently has **two migration systems** serving different purposes:
+
+#### System 1: Docker Init Script (`docker/init-db.sql`)
+
+**Purpose**: Initialize PostgreSQL database on first Docker container start
+
+**Characteristics:**
+- 850+ lines of SQL
+- Includes edge-specific tables (edge_devices, device_commands, webhooks)
+- Executed automatically by Docker entrypoint
+- No version tracking (runs once on container creation)
+
+**When to use:**
+- Fresh Docker deployments
+- Local development with Docker Compose
+- CI/CD environments using Docker
+
+**Pros:**
+- Zero manual steps for Docker users
+- Includes all Rufus Edge tables
+- Automatically runs on `docker compose up`
+
+**Cons:**
+- Separate from unified migration system
+- No incremental migration support
+- Schema changes require container rebuild
+
+#### System 2: Unified Migrations (`migrations/*.sql`)
+
+**Purpose**: Consistent, versioned schema across SQLite and PostgreSQL
+
+**Characteristics:**
+- Generated from `migrations/schema.yaml`
+- Version tracked via `schema_migrations` table
+- Supports incremental migrations
+- Works with both SQLite and PostgreSQL
+
+**When to use:**
+- Non-Docker deployments
+- SQLite databases (development/testing)
+- Production PostgreSQL (without Docker)
+- When you need migration history/rollback
+
+**Pros:**
+- Single source of truth (`schema.yaml`)
+- Version tracking and history
+- Database-agnostic (PostgreSQL + SQLite)
+- Incremental migration support
+
+**Cons:**
+- Requires manual execution (`rufus db migrate`)
+- SQLite `auto_init` only (PostgreSQL needs explicit migration)
+
+#### Migration System Comparison
+
+| Feature | Docker init-db.sql | Unified Migrations |
+|---------|-------------------|-------------------|
+| **Trigger** | Automatic (Docker entrypoint) | Manual (`rufus db migrate`) |
+| **Version Tracking** | ❌ No | ✅ Yes (`schema_migrations`) |
+| **Edge Tables** | ✅ Included | ⚠️ Core tables only |
+| **PostgreSQL** | ✅ Full support | ✅ Full support |
+| **SQLite** | ❌ N/A | ✅ Full support |
+| **Incremental** | ❌ All-or-nothing | ✅ Step-by-step |
+| **Rollback** | ❌ No | ⚠️ Limited |
+
+#### Schema Synchronization
+
+The two systems are **intentionally separate** but must stay synchronized:
+
+**Core Workflow Tables** (present in both):
+- `workflow_executions`
+- `workflow_audit_log`
+- `workflow_metrics`
+- `workflow_heartbeats` (reliability tier 2)
+- `schema_migrations`
+
+**Edge-Specific Tables** (only in `docker/init-db.sql`):
+- `edge_devices`
+- `device_commands`
+- `command_broadcasts`
+- `webhook_registrations`
+- And 15+ other edge/cloud tables
+
+**Synchronization Process:**
+
+When you modify the core workflow schema:
+
+1. **Update `migrations/schema.yaml`** (single source of truth)
+2. **Generate unified migrations:**
+   ```bash
+   python tools/compile_schema.py --all
+   ```
+3. **Update `docker/init-db.sql` manually:**
+   ```bash
+   # Add the same changes to docker/init-db.sql
+   # Ensure column types match PostgreSQL output
+   ```
+4. **Test both systems:**
+   ```bash
+   # Test Docker init
+   cd docker && docker compose down -v && docker compose up -d
+
+   # Test unified migration
+   python tools/migrate.py --db postgresql://... --up
+   ```
+5. **Commit both files** together
+
+#### Recommendations
+
+**For Development:**
+- Use SQLite with unified migrations (`rufus db init`)
+- Or use Docker Compose (automatic with `init-db.sql`)
+
+**For Production:**
+- **Option A (Docker):** Use Docker Compose, schema initialized automatically
+- **Option B (Kubernetes/ECS):** Use unified migrations with `rufus db migrate`
+- **Option C (Managed DB):** Run `docker/init-db.sql` manually once, then use unified migrations for updates
+
+**For Testing:**
+- Use SQLite with `auto_init=True` (automatic schema)
+- Or in-memory database (`:memory:`)
+
+#### Future Consolidation (Optional)
+
+To unify these systems in the future:
+
+1. **Generate `init-db.sql` from `schema.yaml`**:
+   - Extend `compile_schema.py` to include edge tables
+   - Auto-generate `docker/init-db.sql` from YAML
+
+2. **Use migration runner in Docker entrypoint**:
+   - Replace `init-db.sql` with `rufus db migrate --auto`
+   - Track migrations even in Docker deployments
+
+3. **Add edge tables to `schema.yaml`**:
+   - Include all edge-specific tables in unified definition
+   - Single command to regenerate all migration files
+
+**Decision:** Defer to Phase 2 (document dual system for now)
+
 ## SQLite Persistence Provider
 
 Rufus SDK includes full SQLite support for development, testing, and low-concurrency deployments. SQLite provides a lightweight, embedded database option that requires no external server.
