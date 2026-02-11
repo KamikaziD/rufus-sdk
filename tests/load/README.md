@@ -8,12 +8,58 @@ Load testing infrastructure for validating Rufus Edge control plane performance 
 
 ### Prerequisites
 
+**1. Install Dependencies:**
 ```bash
-# Install dependencies
 pip install httpx psutil
+```
 
-# Start cloud control plane
-# (See deployment instructions below)
+**2. Start Services:**
+```bash
+# Option A: Docker Compose (recommended)
+cd docker
+docker compose up -d
+
+# Option B: Local development (see Deployment Setup below)
+```
+
+**3. Database Seeding (Automatic):**
+
+Load tests automatically seed the database if `DATABASE_URL` is set:
+
+```bash
+# Set DATABASE_URL environment variable
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+
+# Load test will automatically check and seed if needed
+python tests/load/run_load_test.py --scenario heartbeat --devices 10
+```
+
+**Or seed manually:**
+```bash
+python tools/seed_data.py \
+  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --type all
+```
+
+**Database seeding provides:**
+- 4 demo workflows (completed, active, failed, waiting)
+- 5 edge devices (POS terminals, ATM, kiosk, mobile reader) - PostgreSQL only
+
+**4. Verify Setup:**
+```bash
+# Check services
+docker compose ps
+# Expected: postgres (healthy), rufus-cloud (healthy)
+
+# Check API
+curl http://localhost:8000/health
+# Expected: {"status": "healthy"}
+
+# Check seed data
+python tools/seed_data.py \
+  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --verify
+# Expected: Workflows: 4, Edge Devices: 5
 ```
 
 ### Run a Simple Test
