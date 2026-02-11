@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import sys
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -48,6 +49,64 @@ def progress_callback(progress: dict):
         f"Errors: {progress['total_errors']} | "
         f"Rate: {progress['requests_per_second']:.1f} req/s"
     )
+
+
+async def ensure_seed_data(db_url: str):
+    """
+    Ensure database has seed data before running load tests.
+
+    Runs seed_data.py to populate database with demo workflows and edge devices.
+    The script is idempotent (uses ON CONFLICT DO NOTHING), so running it multiple
+    times is safe and won't create duplicates.
+
+    Args:
+        db_url: Database connection URL (e.g., postgresql://user:pass@host/db)
+    """
+    logger.info("Ensuring seed data exists in database...")
+
+    # Check if seed_data.py exists
+    project_root = Path(__file__).parent.parent.parent
+    seed_script = project_root / "tools" / "seed_data.py"
+
+    if not seed_script.exists():
+        logger.warning(f"Seed script not found at {seed_script}, skipping seed check")
+        return
+
+    try:
+        # Run seed_data.py (idempotent - won't create duplicates)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(seed_script),
+                "--db-url", db_url,
+                "--type", "all"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True
+        )
+
+        # Log output for debugging
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    logger.debug(line)
+
+        logger.info(f"✓ Seed data verified (idempotent operation)")
+
+    except subprocess.TimeoutExpired:
+        logger.error("Seed data operation timed out after 60 seconds")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to seed database: {e}")
+        if e.stdout:
+            logger.error(f"Output: {e.stdout}")
+        if e.stderr:
+            logger.error(f"Error: {e.stderr}")
+        raise
+    except Exception as e:
+        logger.warning(f"Seed data check failed: {e}, continuing anyway...")
 
 
 def print_results(results: LoadTestResults):
@@ -256,9 +315,14 @@ Examples:
   # Run all scenarios with 100 devices (smoke test)
   python run_load_test.py --all --devices 100
 
-  # Run with custom cloud URL
+  # Run with custom cloud URL and database URL
   python run_load_test.py --scenario heartbeat --devices 100 \\
-      --cloud-url http://localhost:8000
+      --cloud-url http://localhost:8000 \\
+      --db-url "postgresql://rufus:password@localhost:5433/rufus_cloud"
+
+  # Seed data check (automatic if DATABASE_URL env var set)
+  export DATABASE_URL="postgresql://rufus:password@localhost:5433/rufus_cloud"
+  python run_load_test.py --scenario heartbeat --devices 100
 
 Scenarios:
   heartbeat          - Concurrent device heartbeats (30s interval)
@@ -274,6 +338,12 @@ Scenarios:
         "--cloud-url",
         default=os.getenv("CLOUD_URL", "http://localhost:8000"),
         help="Cloud control plane URL (default: CLOUD_URL env var or http://localhost:8000)"
+    )
+
+    parser.add_argument(
+        "--db-url",
+        default=os.getenv("DATABASE_URL"),
+        help="Database URL for seed data check (default: DATABASE_URL env var)"
     )
 
     parser.add_argument(
@@ -334,6 +404,14 @@ Scenarios:
     # Validate arguments
     if not args.all and not args.scenario:
         parser.error("Either --scenario or --all must be specified")
+
+    # Ensure seed data exists before running tests
+    if args.db_url:
+        try:
+            asyncio.run(ensure_seed_data(args.db_url))
+        except Exception as e:
+            logger.error(f"Failed to ensure seed data: {e}")
+            logger.warning("Continuing with load test, but results may be affected")
 
     # Run tests
     try:
