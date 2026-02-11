@@ -62,15 +62,22 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
                 "assignee": "demo-user",
                 "priority": "high"
             },
-            "current_step": 3,
+            "current_step": "3",
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
-            "created_at": (datetime.now() - timedelta(days=2)).isoformat(),
-            "updated_at": (datetime.now() - timedelta(days=1)).isoformat(),
+            "blocked_on_child_id": None,  # Not waiting on any child
+            "saga_mode": False,
+            "completed_steps_stack": [],
+            "data_region": "us-east-1",
+            "priority": 5,
+            "idempotency_key": None,
+            "metadata": {},
             "owner_id": "demo-user",
-            "data_region": "us-east-1"
+            "org_id": None,
+            "created_at": (datetime.now() - timedelta(days=2)).isoformat(),
+            "updated_at": (datetime.now() - timedelta(days=1)).isoformat()
         })
         workflows_seeded += 1
         if verbose:
@@ -93,15 +100,22 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
                 "priority": "medium",
                 "pr_url": "https://github.com/example/repo/pull/42"
             },
-            "current_step": 1,
+            "current_step": "1",
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
-            "created_at": (datetime.now() - timedelta(hours=3)).isoformat(),
-            "updated_at": datetime.now().isoformat(),
+            "blocked_on_child_id": None,  # Not waiting on any child
+            "saga_mode": False,
+            "completed_steps_stack": [],
+            "data_region": "us-east-1",
+            "priority": 5,
+            "idempotency_key": None,
+            "metadata": {},
             "owner_id": "demo-user",
-            "data_region": "us-east-1"
+            "org_id": None,
+            "created_at": (datetime.now() - timedelta(hours=3)).isoformat(),
+            "updated_at": datetime.now().isoformat()
         })
         workflows_seeded += 1
         if verbose:
@@ -124,15 +138,22 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
                 "priority": "critical",
                 "error": "Connection timeout"
             },
-            "current_step": 2,
+            "current_step": "2",
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
-            "created_at": (datetime.now() - timedelta(hours=1)).isoformat(),
-            "updated_at": datetime.now().isoformat(),
+            "blocked_on_child_id": None,  # Not waiting on any child
+            "saga_mode": False,
+            "completed_steps_stack": [],
+            "data_region": "us-east-1",
+            "priority": 5,
+            "idempotency_key": None,
+            "metadata": {},
             "owner_id": "demo-user",
-            "data_region": "us-east-1"
+            "org_id": None,
+            "created_at": (datetime.now() - timedelta(hours=1)).isoformat(),
+            "updated_at": datetime.now().isoformat()
         })
         workflows_seeded += 1
         if verbose:
@@ -155,15 +176,22 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
                 "category": "travel",
                 "requester": "john.doe"
             },
-            "current_step": 1,
+            "current_step": "1",
             "workflow_version": "1.0.0",
             "state_model_path": "rufus.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
-            "created_at": (datetime.now() - timedelta(hours=6)).isoformat(),
-            "updated_at": (datetime.now() - timedelta(hours=4)).isoformat(),
+            "blocked_on_child_id": None,  # Not waiting on any child
+            "saga_mode": False,
+            "completed_steps_stack": [],
+            "data_region": "us-east-1",
+            "priority": 5,
+            "idempotency_key": None,
+            "metadata": {},
             "owner_id": "demo-user",
-            "data_region": "us-east-1"
+            "org_id": None,
+            "created_at": (datetime.now() - timedelta(hours=6)).isoformat(),
+            "updated_at": (datetime.now() - timedelta(hours=4)).isoformat()
         })
         workflows_seeded += 1
         if verbose:
@@ -184,23 +212,32 @@ async def seed_edge_devices(persistence, verbose: bool = False):
     Rufus Edge functionality.
     """
     # Only works with PostgreSQL
-    if not hasattr(persistence, 'conn') or not hasattr(persistence.conn, 'execute'):
+    if not hasattr(persistence, 'pool'):
         print("⚠ Skipping edge devices (only supported for PostgreSQL)")
         return 0
 
     devices_seeded = 0
 
     try:
-        result = await persistence.conn.execute("""
-            INSERT INTO edge_devices (device_id, registration_key, status, last_heartbeat, device_info)
-            VALUES
-                ('device-001', 'rufus-registration-key', 'active', NOW(), '{"model": "POS Terminal v2", "location": "Store 001"}'),
-                ('device-002', 'rufus-registration-key', 'active', NOW(), '{"model": "POS Terminal v2", "location": "Store 002"}'),
-                ('device-003', 'rufus-registration-key', 'inactive', NOW() - INTERVAL '1 day', '{"model": "ATM v3", "location": "Branch 001"}'),
-                ('device-004', 'rufus-registration-key', 'active', NOW(), '{"model": "Kiosk v1", "location": "Mall 001"}'),
-                ('device-005', 'rufus-registration-key', 'offline', NOW() - INTERVAL '2 hours', '{"model": "Mobile Reader", "location": "Field"}')
-            ON CONFLICT (device_id) DO NOTHING;
-        """)
+        async with persistence.pool.acquire() as conn:
+            result = await conn.execute("""
+                INSERT INTO edge_devices (
+                    device_id, device_type, device_name, location,
+                    api_key_hash, status, metadata, last_heartbeat_at
+                )
+                VALUES
+                    ('device-001', 'POS Terminal', 'Store 001 POS', 'Store 001',
+                     'demo_hash_001', 'online', '{"model": "POS Terminal v2"}', NOW()),
+                    ('device-002', 'POS Terminal', 'Store 002 POS', 'Store 002',
+                     'demo_hash_002', 'online', '{"model": "POS Terminal v2"}', NOW()),
+                    ('device-003', 'ATM', 'Branch 001 ATM', 'Branch 001',
+                     'demo_hash_003', 'offline', '{"model": "ATM v3"}', NOW() - INTERVAL '1 day'),
+                    ('device-004', 'Kiosk', 'Mall 001 Kiosk', 'Mall 001',
+                     'demo_hash_004', 'online', '{"model": "Kiosk v1"}', NOW()),
+                    ('device-005', 'Mobile Reader', 'Field Reader', 'Field',
+                     'demo_hash_005', 'offline', '{"model": "Mobile Reader"}', NOW() - INTERVAL '2 hours')
+                ON CONFLICT (device_id) DO NOTHING;
+            """)
 
         # Get number of rows inserted
         devices_seeded = 5  # We tried to insert 5 devices
@@ -220,85 +257,24 @@ async def seed_registration_keys(persistence, verbose: bool = False):
     """
     Seed registration keys for device enrollment.
 
-    Creates a default registration key that can be used by edge devices
-    to register with the cloud control plane.
+    Note: registration_keys table not present in current schema.
+    Device authentication uses api_key_hash in edge_devices table instead.
     """
-    # Only works with PostgreSQL
-    if not hasattr(persistence, 'conn') or not hasattr(persistence.conn, 'execute'):
-        print("⚠ Skipping registration keys (only supported for PostgreSQL)")
-        return 0
-
-    keys_seeded = 0
-
-    try:
-        await persistence.conn.execute("""
-            INSERT INTO registration_keys (key_value, max_uses, expires_at, created_at)
-            VALUES ('rufus-registration-key', 10000, NOW() + INTERVAL '1 year', NOW())
-            ON CONFLICT (key_value) DO NOTHING;
-        """)
-        keys_seeded = 1
-
-        if verbose:
-            print(f"  ✓ Created registration key: rufus-registration-key")
-
-        print(f"✓ Seeded registration keys")
-        return keys_seeded
-
-    except Exception as e:
-        print(f"⚠ Skipping registration keys (table not found or error): {e}")
-        return 0
+    if verbose:
+        print("  ℹ Skipping registration keys (not in current schema)")
+    return 0
 
 
 async def seed_artifacts(persistence, verbose: bool = False):
     """
     Seed ML model artifacts for testing model updates.
 
-    Creates example artifact versions for testing the edge deployment
-    model update workflow.
+    Note: artifacts table not present in current schema as a separate table.
+    Artifact information is stored in device_commands and related tables.
     """
-    # Only works with PostgreSQL
-    if not hasattr(persistence, 'conn') or not hasattr(persistence.conn, 'execute'):
-        print("⚠ Skipping artifacts (only supported for PostgreSQL)")
-        return 0
-
-    artifacts_seeded = 0
-
-    try:
-        await persistence.conn.execute("""
-            INSERT INTO artifacts (
-                artifact_id, artifact_type, version, s3_key, checksum,
-                size_bytes, metadata, created_at
-            )
-            VALUES
-                (
-                    'fraud-detection-model', 'ml_model', '1.0.0',
-                    's3://rufus-artifacts/models/fraud-detection-v1.0.0.onnx',
-                    'abc123def456',
-                    2048576,
-                    '{"framework": "onnx", "input_shape": [1, 10], "output_shape": [1, 2]}',
-                    NOW() - INTERVAL '7 days'
-                ),
-                (
-                    'fraud-detection-model', 'ml_model', '1.1.0',
-                    's3://rufus-artifacts/models/fraud-detection-v1.1.0.onnx',
-                    'def789ghi012',
-                    2148576,
-                    '{"framework": "onnx", "input_shape": [1, 10], "output_shape": [1, 2], "improvements": "Better accuracy"}',
-                    NOW() - INTERVAL '1 day'
-                )
-            ON CONFLICT (artifact_id, version) DO NOTHING;
-        """)
-        artifacts_seeded = 2
-
-        if verbose:
-            print(f"  ✓ Created {artifacts_seeded} artifact versions")
-
-        print(f"✓ Seeded artifacts")
-        return artifacts_seeded
-
-    except Exception as e:
-        print(f"⚠ Skipping artifacts (table not found or error): {e}")
-        return 0
+    if verbose:
+        print("  ℹ Skipping artifacts (not in current schema)")
+    return 0
 
 
 async def verify_seed_data(persistence, verbose: bool = False):
@@ -309,9 +285,7 @@ async def verify_seed_data(persistence, verbose: bool = False):
     """
     summary = {
         "workflows": 0,
-        "edge_devices": 0,
-        "registration_keys": 0,
-        "artifacts": 0
+        "edge_devices": 0
     }
 
     # Count workflows
@@ -325,28 +299,13 @@ async def verify_seed_data(persistence, verbose: bool = False):
             print(f"  Could not count workflows: {e}")
 
     # Count edge devices (PostgreSQL only)
-    if hasattr(persistence, 'conn') and hasattr(persistence.conn, 'fetchval'):
+    if hasattr(persistence, 'pool'):
         try:
-            count = await persistence.conn.fetchval("SELECT COUNT(*) FROM edge_devices;")
-            summary["edge_devices"] = count
-            if verbose:
-                print(f"  Found {count} edge devices")
-        except Exception:
-            pass
-
-        try:
-            count = await persistence.conn.fetchval("SELECT COUNT(*) FROM registration_keys;")
-            summary["registration_keys"] = count
-            if verbose:
-                print(f"  Found {count} registration keys")
-        except Exception:
-            pass
-
-        try:
-            count = await persistence.conn.fetchval("SELECT COUNT(*) FROM artifacts;")
-            summary["artifacts"] = count
-            if verbose:
-                print(f"  Found {count} artifacts")
+            async with persistence.pool.acquire() as conn:
+                count = await conn.fetchval("SELECT COUNT(*) FROM edge_devices;")
+                summary["edge_devices"] = count
+                if verbose:
+                    print(f"  Found {count} edge devices")
         except Exception:
             pass
 
@@ -452,8 +411,6 @@ Examples:
             print(f"\nSummary:")
             print(f"  Workflows: {summary['workflows']}")
             print(f"  Edge Devices: {summary['edge_devices']}")
-            print(f"  Registration Keys: {summary['registration_keys']}")
-            print(f"  Artifacts: {summary['artifacts']}")
 
         print(f"\n{'='*60}")
         print(f"✓ Seeding complete! Total items: {total_seeded}")

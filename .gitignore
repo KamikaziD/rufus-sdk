@@ -20,3 +20,5 @@ results/
 .env
 .env.local
 .env.*.local
+
+usecase_pilot/

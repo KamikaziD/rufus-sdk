@@ -22,6 +22,17 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     blocked_on_child_id UUID,
     idempotency_key VARCHAR(255),
     error_message TEXT,
+
+    -- Additional fields required by PostgresPersistenceProvider
+    steps_config JSONB NOT NULL DEFAULT '[]',
+    state_model_path VARCHAR(500) NOT NULL,
+    saga_mode BOOLEAN DEFAULT FALSE,
+    completed_steps_stack JSONB DEFAULT '[]',
+    priority INTEGER DEFAULT 5,
+    metadata JSONB DEFAULT '{}',
+    encrypted_state BYTEA,
+    encryption_key_id VARCHAR(100),
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ
