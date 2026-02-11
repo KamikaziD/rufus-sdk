@@ -47,6 +47,153 @@ python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus SDK ready
 
 ---
 
+## Choose Your Installation Path
+
+Rufus offers three installation paths depending on your needs. Choose the one that fits your use case:
+
+### 🔀 Decision Tree
+
+```
+Start Here
+    │
+    ├─ Need Docker containerization?
+    │  │
+    │  ├─ Yes → Want full cloud control plane + edge simulation?
+    │  │         ├─ Yes → PATH 1: Docker Compose (Full Stack)
+    │  │         └─ No  → PATH 2: Docker (SDK + PostgreSQL)
+    │  │
+    │  └─ No  → PATH 3: Direct Install (SDK + SQLite)
+```
+
+### PATH 1: Docker Compose - Full Stack (Recommended for Edge Development)
+
+**Best for:** Testing edge device scenarios, cloud control plane development
+
+**What you get:**
+- ✅ Cloud control plane (FastAPI server)
+- ✅ PostgreSQL database with seed data
+- ✅ All edge-specific tables (devices, commands, webhooks)
+- ✅ Zero manual setup - everything automatic
+
+```bash
+cd docker
+docker compose up -d
+
+# Verify services
+docker compose ps
+# Expected: postgres (healthy), rufus-server (healthy)
+
+# Check API
+curl http://localhost:8000/health
+# Expected: {"status": "healthy"}
+
+# Database automatically seeded with:
+# - 4 demo workflows
+# - 5 edge devices
+```
+
+**When to use:**
+- Testing edge device workflows
+- Developing cloud APIs
+- Full-stack local development
+- Load testing with device simulation
+
+**Ports:**
+- `8000` - Rufus API server
+- `5433` - PostgreSQL database
+
+### PATH 2: Docker (SDK + PostgreSQL) - Lightweight
+
+**Best for:** SDK development with production database, without full cloud services
+
+**What you get:**
+- ✅ PostgreSQL database in Docker
+- ✅ Rufus SDK in your local Python environment
+- ✅ No server overhead
+
+```bash
+# Start only PostgreSQL
+cd docker
+docker compose up postgres -d
+
+# Install SDK
+pip install -r requirements.txt
+
+# Initialize database
+python tools/seed_data.py \
+  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --type all
+
+# Verify
+python -c "
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+import asyncio
+
+async def test():
+    p = PostgresPersistenceProvider('postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud')
+    await p.initialize()
+    workflows = await p.list_workflows()
+    print(f'✅ PostgreSQL ready! Found {len(workflows)} workflows')
+    await p.close()
+
+asyncio.run(test())
+"
+```
+
+**When to use:**
+- SDK development with PostgreSQL
+- Testing migrations
+- Production-like environment locally
+- CI/CD pipelines
+
+### PATH 3: Direct Install (SDK + SQLite) - Fastest
+
+**Best for:** Quick testing, examples, SDK-only development
+
+**What you get:**
+- ✅ Zero infrastructure (embedded SQLite)
+- ✅ Instant start - no Docker required
+- ✅ Perfect for learning and prototyping
+
+```bash
+# Install SDK
+pip install -r requirements.txt
+
+# Run example with automatic SQLite setup
+cd examples/sqlite_task_manager
+python simple_demo.py
+
+# Or use CLI with SQLite
+rufus config set-persistence
+# Choose: SQLite
+# Database path: workflow.db
+
+rufus db init
+```
+
+**When to use:**
+- Learning Rufus SDK
+- Running examples
+- Quick prototyping
+- Testing without infrastructure
+- CI/CD without Docker
+
+---
+
+### 📊 Installation Path Comparison
+
+| Feature | PATH 1: Docker Compose | PATH 2: Docker DB Only | PATH 3: Direct Install |
+|---------|----------------------|---------------------|---------------------|
+| **Setup Time** | 2 min | 3 min | 1 min |
+| **Infrastructure** | Docker Compose | Docker | None |
+| **Database** | PostgreSQL | PostgreSQL | SQLite |
+| **Cloud API Server** | ✅ Yes | ❌ No | ❌ No |
+| **Edge Tables** | ✅ Yes | ✅ Yes | ❌ No |
+| **Auto Seed Data** | ✅ Yes | ⚠️ Manual | ⚠️ Manual |
+| **Best For** | Edge dev, Full stack | SDK + Postgres | Learning, Examples |
+
+---
+
 ## Run Your First Workflow (3 minutes)
 
 ### Option 1: SQLite Task Manager Demo (Recommended)
