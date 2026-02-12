@@ -120,6 +120,8 @@ class JavaScriptWorkflowStep(WorkflowStep):
 class AIInferenceConfig(BaseModel):
     """Configuration for AI/ML inference step execution."""
 
+    model_config = {"protected_namespaces": ()}  # Allow model_ prefix for ML model fields
+
     # Model identification
     model_name: str = Field(
         ...,
