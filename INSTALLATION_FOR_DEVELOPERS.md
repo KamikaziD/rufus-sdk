@@ -13,7 +13,7 @@ This guide explains how to install Rufus SDK directly from GitHub for testing an
 pip install git+https://github.com/KamikaziD/rufus-sdk.git
 
 # Install with all optional dependencies
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 ```
 
 ### Method 2: Install Specific Branch (e.g., feature branch)
@@ -23,7 +23,7 @@ pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 pip install git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
 
 # With extras
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]"
+pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration"
 ```
 
 ### Method 3: Install Specific Version/Tag
@@ -41,19 +41,19 @@ The package supports optional feature sets via extras:
 
 ```bash
 # Server features (FastAPI, Uvicorn)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[server]"
+pip install "rufus[server] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 # PostgreSQL support
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[postgres]"
+pip install "rufus[postgres] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 # CLI enhancements (Rich formatting)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[cli]"
+pip install "rufus[cli] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 # Performance optimizations (uvloop)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[performance]"
+pip install "rufus[performance] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 # Everything
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 ```
 
 **What each extra includes:**
@@ -159,10 +159,10 @@ For teams, create a `requirements.txt`:
 ```text
 # requirements.txt
 # Install Rufus SDK from GitHub
-git+https://github.com/KamikaziD/rufus-sdk.git@main#egg=rufus[all]
+rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@main
 
 # Or specific branch for testing
-# git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]
+# rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
 
 # Or with SSH (for private repo)
 # git+ssh://git@github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]
@@ -184,7 +184,7 @@ If you want to distribute as a Docker image:
 FROM python:3.11-slim
 
 # Install Rufus SDK from GitHub
-RUN pip install git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]
+RUN pip install rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git
 
 # Verify installation
 RUN rufus --version
@@ -263,7 +263,7 @@ poetry install --with dev
 
 **Solution**: Make sure you're using the correct syntax with quotes:
 ```bash
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 #          ↑ quotes are important!              ↑
 ```
 
@@ -329,7 +329,7 @@ If you encounter issues:
 
 1. **Install package**:
    ```bash
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
    ```
 
 2. **Verify it works**:

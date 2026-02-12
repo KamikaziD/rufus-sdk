@@ -50,7 +50,7 @@ git push origin v0.1.0
 Send testers this one-liner:
 
 ```bash
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 ```
 
 ### Verify Installation
@@ -84,7 +84,7 @@ I'm excited to share the Rufus SDK beta for testing! Here's how to get started:
 **Installation (5 minutes):**
 
 1. Install the package:
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
+   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 2. Verify it works:
    rufus --version
@@ -163,7 +163,7 @@ Testers will need GitHub access. Two options:
 1. Commit and push the packaging files (commands above)
 2. Test the installation yourself:
    ```bash
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]"
+   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration"
    python verify_installation.py
    ```
 
