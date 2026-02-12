@@ -1,0 +1,64 @@
+Initializing SQLite provider (in-memory)...
+Initializing PostgreSQL provider...
+Setting up schemas...
+
+======================================================================
+  Running benchmarks for SQLITE
+======================================================================
+
+  → Benchmarking save_workflow...
+  → Benchmarking load_workflow...
+  → Benchmarking list_workflows...
+  → Benchmarking create_task...
+  → Benchmarking log_execution...
+  → Benchmarking record_metric...
+  ✓ Completed sqlite benchmarks
+
+======================================================================
+  Running benchmarks for POSTGRES
+======================================================================
+
+  → Benchmarking save_workflow...
+Traceback (most recent call last):
+  File "asyncpg/protocol/prepared_stmt.pyx", line 175, in asyncpg.protocol.protocol.PreparedStatementState._encode_bind_msg
+  File "asyncpg/protocol/codecs/base.pyx", line 251, in asyncpg.protocol.protocol.Codec.encode
+  File "asyncpg/protocol/codecs/base.pyx", line 153, in asyncpg.protocol.protocol.Codec.encode_scalar
+  File "asyncpg/pgproto/codecs/text.pyx", line 29, in asyncpg.pgproto.pgproto.text_encode
+  File "asyncpg/pgproto/codecs/text.pyx", line 12, in asyncpg.pgproto.pgproto.as_pg_string_and_size
+TypeError: expected str, got int
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/kim/PycharmProjects/rufus/tests/benchmarks/persistence_benchmark.py", line 431, in <module>
+    asyncio.run(main())
+  File "/Users/kim/anaconda3/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/Users/kim/anaconda3/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+  File "/Users/kim/PycharmProjects/rufus/tests/benchmarks/persistence_benchmark.py", line 419, in main
+    await benchmark.run_all_benchmarks()
+  File "/Users/kim/PycharmProjects/rufus/tests/benchmarks/persistence_benchmark.py", line 298, in run_all_benchmarks
+    await self.benchmark_save_workflow(provider_name, provider, iterations=100)
+  File "/Users/kim/PycharmProjects/rufus/tests/benchmarks/persistence_benchmark.py", line 186, in benchmark_save_workflow
+    await provider.save_workflow(workflow_ids[i], workflow_data)
+  File "/Users/kim/PycharmProjects/rufus/src/rufus/implementations/persistence/postgres.py", line 133, in save_workflow
+    await conn.execute("""
+  File "/Users/kim/anaconda3/lib/python3.12/site-packages/asyncpg/connection.py", line 357, in execute
+    _, status, _ = await self._execute(
+                   ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kim/anaconda3/lib/python3.12/site-packages/asyncpg/connection.py", line 1873, in _execute
+    result, _ = await self.__execute(
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kim/anaconda3/lib/python3.12/site-packages/asyncpg/connection.py", line 1970, in __execute
+    result, stmt = await self._do_execute(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kim/anaconda3/lib/python3.12/site-packages/asyncpg/connection.py", line 2036, in _do_execute
+    result = await executor(stmt, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 184, in bind_execute
+  File "asyncpg/protocol/prepared_stmt.pyx", line 204, in asyncpg.protocol.protocol.PreparedStatementState._encode_bind_msg
+asyncpg.exceptions.DataError: invalid input for query argument $5: 0 (expected str, got int)

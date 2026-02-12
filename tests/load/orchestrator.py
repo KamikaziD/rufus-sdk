@@ -204,7 +204,8 @@ class LoadTestOrchestrator:
 
         # Setup devices if not skipped (for single-scenario tests)
         if not skip_device_setup and not self._devices:
-            raise ValueError("No devices available. Call setup_devices() first or set skip_device_setup=False")
+            raise ValueError(
+                "No devices available. Call setup_devices() first or set skip_device_setup=False")
         elif not skip_device_setup:
             # Single scenario mode - setup and cleanup
             await self.setup_devices(num_devices, cleanup_first=True)
@@ -286,7 +287,8 @@ class LoadTestOrchestrator:
         import httpx
         import os
 
-        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
+        registration_key = os.getenv(
+            "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
         async def register_single_device(device):
             """Register a single device (idempotent)."""
@@ -319,7 +321,8 @@ class LoadTestOrchestrator:
                                         "Content-Type": "application/json",
                                     }
                                 )
-                                logger.debug(f"Device {device.config.device_id} already registered (using existing)")
+                                logger.debug(
+                                    f"Device {device.config.device_id} already registered (using existing)")
                                 return True
 
                     # Register new device
@@ -344,7 +347,8 @@ class LoadTestOrchestrator:
                     if response.status_code == 200:
                         data = response.json()
                         # Update device API key to match what was returned
-                        device.config.api_key = data.get("api_key", device.config.api_key)
+                        device.config.api_key = data.get(
+                            "api_key", device.config.api_key)
                         # Recreate HTTP client with new API key (httpx headers are immutable)
                         await device._http_client.aclose()
                         device._http_client = httpx.AsyncClient(
@@ -355,11 +359,13 @@ class LoadTestOrchestrator:
                                 "Content-Type": "application/json",
                             }
                         )
-                        logger.debug(f"Registered device {device.config.device_id}")
+                        logger.debug(
+                            f"Registered device {device.config.device_id}")
                         return True
                     elif response.status_code == 400 and "already registered" in response.text:
                         # Device already registered (backup check)
-                        logger.debug(f"Device {device.config.device_id} already registered (via 400)")
+                        logger.debug(
+                            f"Device {device.config.device_id} already registered (via 400)")
                         return True
                     else:
                         logger.error(
@@ -369,7 +375,8 @@ class LoadTestOrchestrator:
                         return False
 
             except Exception as e:
-                logger.error(f"Error registering device {device.config.device_id}: {e}", exc_info=True)
+                logger.error(
+                    f"Error registering device {device.config.device_id}: {e}", exc_info=True)
                 return False
 
         # Register all devices in parallel
@@ -378,17 +385,20 @@ class LoadTestOrchestrator:
         ])
 
         successful = sum(1 for r in results if r)
-        logger.info(f"Registered {successful}/{len(self._devices)} devices successfully")
+        logger.info(
+            f"Registered {successful}/{len(self._devices)} devices successfully")
 
         if successful < len(self._devices):
-            logger.warning(f"{len(self._devices) - successful} devices failed to register")
+            logger.warning(
+                f"{len(self._devices) - successful} devices failed to register")
 
     async def _cleanup_devices(self):
         """Clean up existing load test devices."""
         import httpx
         import os
 
-        registration_key = os.getenv("RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
+        registration_key = os.getenv(
+            "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
         async def delete_single_device(device):
             """Delete a single device if it exists."""
@@ -402,11 +412,13 @@ class LoadTestOrchestrator:
                     )
 
                     if response.status_code == 200:
-                        logger.debug(f"Deleted existing device {device.config.device_id}")
+                        logger.debug(
+                            f"Deleted existing device {device.config.device_id}")
                         return True
                     elif response.status_code == 404:
                         # Device doesn't exist - that's fine
-                        logger.debug(f"Device {device.config.device_id} not found (already clean)")
+                        logger.debug(
+                            f"Device {device.config.device_id} not found (already clean)")
                         return True
                     else:
                         logger.warning(
@@ -416,7 +428,8 @@ class LoadTestOrchestrator:
                         return False
 
             except Exception as e:
-                logger.debug(f"Error deleting device {device.config.device_id}: {e}", exc_info=True)
+                logger.debug(
+                    f"Error deleting device {device.config.device_id}: {e}", exc_info=True)
                 return False
 
         # Delete all devices in parallel
