@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
 readme = "README.md"
