@@ -34,27 +34,45 @@ pydantic = "^2.0"
 PyYAML = "^6.0"
 jinja2 = "^3.1.2"
 typer = "^0.21"
+click = "^8.0"
 aiosqlite = "^0.19"
+anyio = "^4.0"
 orjson = "^3.9"
 httpx = "^0.25"
 cryptography = "^41.0"
 sqlalchemy = "^2.0"
 alembic = "^1.13"
+python-dotenv = "^1.0"
+typing-extensions = "^4.0"
+annotated-types = "^0.5"
+jsonschema = "^4.17,<5.0"
 
-# Optional dependencies
+# Workflow scheduling
+croniter = "^2.0"
+
+# Edge device support (optional but recommended)
+websockets = {version = "^12.0", optional = true}
+psutil = {version = "^5.9", optional = true}
+numpy = {version = "^1.24", optional = true}
+
+# Server dependencies (optional)
 fastapi = {version = "^0.100", optional = true}
 uvicorn = {version = "^0.20", optional = true}
+starlette = {version = "^0.27", optional = true}
+slowapi = {version = "^0.1", optional = true}
 asyncpg = {version = "^0.27", optional = true}
+
+# CLI and performance (optional)
 rich = {version = "^13.0", optional = true}
 uvloop = {version = "^0.19", optional = true}
-slowapi = {version = "^0.1", optional = true}
 
 [tool.poetry.extras]
-server = ["fastapi", "uvicorn", "slowapi"]
+server = ["fastapi", "uvicorn", "starlette", "slowapi"]
 postgres = ["asyncpg"]
 cli = ["rich"]
 performance = ["uvloop"]
-all = ["fastapi", "uvicorn", "asyncpg", "rich", "uvloop", "slowapi"]
+edge = ["websockets", "psutil", "numpy"]
+all = ["fastapi", "uvicorn", "starlette", "slowapi", "asyncpg", "rich", "uvloop", "websockets", "psutil", "numpy"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0"
