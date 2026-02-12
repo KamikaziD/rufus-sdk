@@ -47,7 +47,7 @@ class Workflow:
                  ):
         self.id = workflow_id or str(uuid.uuid4())
         self.workflow_steps = workflow_steps or []
-        self.current_step = 0
+        self.current_step = 0  # Index of current step
         self.state = initial_state_model
         self.status = "ACTIVE"
         self.workflow_type = workflow_type
@@ -123,7 +123,7 @@ class Workflow:
             "workflow_type": self.workflow_type,
             "workflow_version": self.workflow_version,
             "definition_snapshot": self.definition_snapshot,
-            "current_step": self.current_step,
+            "current_step": self.current_step_name,  # Convert index to step name for storage
             "status": self.status,
             "state": self.state.model_dump() if self.state else {},
             "steps_config": self.steps_config,
@@ -182,7 +182,24 @@ class Workflow:
             template_engine_cls=template_engine_cls,
             workflow_observer=workflow_observer
         )
-        instance.current_step = data["current_step"]
+        # Convert current_step from name (string) back to index (int)
+        current_step_value = data.get("current_step")
+        if current_step_value is None:
+            instance.current_step = 0
+        elif isinstance(current_step_value, int):
+            # Old format (index) - use directly
+            instance.current_step = current_step_value
+        else:
+            # New format (step name) - convert to index
+            try:
+                instance.current_step = next(
+                    i for i, step in enumerate(instance.workflow_steps)
+                    if step.name == current_step_value
+                )
+            except StopIteration:
+                # Step name not found, default to 0
+                instance.current_step = 0
+
         instance.status = data["status"]
 
         if "state" in data and data["state"]:
@@ -805,7 +822,7 @@ class Workflow:
             try:
                 target_index = next(i for i, s in enumerate(
                     self.workflow_steps) if s.name == e.target_step_name)
-                self.current_step = target_index
+                self.current_step = target_index  # Keep as index internally
                 await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())
                 await self.observer.on_step_executed(self.id, step.name, step_index_before_jump, "JUMPED", { # Changed to await
