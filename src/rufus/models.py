@@ -131,9 +131,6 @@ class JavaScriptWorkflowStep(WorkflowStep):
 class AIInferenceConfig(BaseModel):
     """Configuration for AI/ML inference step execution."""
 
-    # Allow model_ prefix for ML model fields
-    model_config["protected_namespaces"] = ()
-
     # Model identification
     model_name: str = Field(
         ...,
@@ -210,7 +207,8 @@ class AIInferenceConfig(BaseModel):
         description="Maximum inference time in milliseconds"
     )
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", 'protected_namespaces': ()}
+    # Allow model_ prefix for ML model fields
 
 
 class AIInferenceWorkflowStep(WorkflowStep):
