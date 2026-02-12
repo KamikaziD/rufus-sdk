@@ -119,7 +119,13 @@ docker compose up postgres -d
 # Install SDK
 pip install -r requirements.txt
 
-# Initialize database
+# Initialize database with Alembic migrations
+cd src/rufus
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+alembic upgrade head
+
+# (Optional) Seed demo data
+cd ../..
 python tools/seed_data.py \
   --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
   --type all
@@ -464,9 +470,16 @@ PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
 ```
 
 ### Database Schema Missing
-**Solution:** Initialize database schema:
+**Solution:** Initialize database schema with Alembic:
 ```bash
-rufus db init
+# For PostgreSQL
+cd src/rufus
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+alembic upgrade head
+
+# For SQLite (CLI will auto-create schema)
+rufus config set-persistence  # Choose SQLite
+rufus db init  # Auto-creates SQLite schema
 ```
 
 ### Missing Dependencies
@@ -492,10 +505,15 @@ rufus show <workflow-id>         # Show workflow details
 rufus resume <workflow-id>       # Resume paused workflow
 rufus cancel <workflow-id>       # Cancel running workflow
 
-# Database Management
-rufus db init                    # Initialize database schema
-rufus db migrate                 # Apply migrations
-rufus db status                  # Check migration status
+# Database Management (Alembic)
+cd src/rufus
+alembic upgrade head             # Apply all pending migrations
+alembic current                  # Show current migration version
+alembic history                  # Show migration history
+alembic downgrade -1             # Rollback one migration
+
+# Database Management (SQLite - CLI auto-creates schema)
+rufus db init                    # Initialize SQLite schema (auto)
 
 # Monitoring
 rufus logs <workflow-id>         # View workflow logs

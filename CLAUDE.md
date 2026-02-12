@@ -704,97 +704,115 @@ export RUFUS_USE_ORJSON=false  # Use stdlib json
 
 ## Database Schema Management
 
-Rufus uses a **unified schema definition** approach to support multiple databases (PostgreSQL and SQLite) without schema divergence.
+Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach optimized for performance.
 
-### Schema Standardization Architecture
+### Migration Architecture
 
 ```
-migrations/schema.yaml (unified definition)
+src/rufus/db_schema/database.py (SQLAlchemy Core models)
            │
-    ┌──────┴──────┐
-    ▼             ▼
-PostgreSQL     SQLite
- .sql files    .sql files
+           ├─> Alembic autogenerate
+           │   └─> versions/*.py (migration files)
+           │
+           └─> Runtime: Raw SQL queries (0% overhead)
 ```
 
-**Key Components:**
+**Key Decision:** After performance benchmarking (Phase 3), we chose a **hybrid approach**:
+- ✅ **Use SQLAlchemy** for schema definition and migration generation
+- ✅ **Keep raw SQL** for all runtime queries (45% faster than SQLAlchemy Core)
+- 🎯 **Result**: 100% migration benefits, 0% query performance impact
 
-1. **`migrations/schema.yaml`** - Single source of truth for database schema
-   - Database-agnostic column types (uuid, jsonb, timestamp, etc.)
-   - Type mappings for each database (JSONB→TEXT for SQLite)
-   - Table definitions, indexes, triggers, views
-   - Version: 1.0.0
+### Key Components
 
-2. **`tools/compile_schema.py`** - Schema compiler
-   - Generates database-specific SQL from YAML
-   - Handles type conversions automatically
-   - Supports PostgreSQL and SQLite
+1. **`src/rufus/db_schema/database.py`** - SQLAlchemy Core table definitions
+   - Single source of truth for schema
+   - Database-agnostic type mapping
+   - Used by Alembic for migration generation only
+   - NOT used for runtime queries (raw SQL for performance)
 
-3. **`tools/validate_schema.py`** - Schema validation
-   - Compares generated SQL against original
-   - Verifies type mappings are correct
-   - Ensures all tables, indexes, triggers present
+2. **`src/rufus/alembic/`** - Alembic migration system
+   - `alembic.ini` - Configuration file
+   - `env.py` - Migration environment (PostgreSQL + SQLite support)
+   - `versions/` - Auto-generated migration files
 
-4. **`tools/migrate.py`** - Migration manager
-   - Tracks applied migrations via `schema_migrations` table
-   - Applies pending migrations in order
-   - Supports both PostgreSQL and SQLite
+3. **Runtime Persistence** - Raw SQL queries
+   - `src/rufus/implementations/persistence/postgres.py` - Direct asyncpg usage
+   - `src/rufus/implementations/persistence/sqlite.py` - Direct aiosqlite usage
+   - Zero abstraction overhead
 
-### Type Mappings
+### Type Mappings (SQLAlchemy ↔ Database)
 
-| Unified Type | PostgreSQL | SQLite |
-|--------------|------------|--------|
-| `uuid` | UUID | TEXT |
-| `jsonb` | JSONB | TEXT |
-| `timestamp` | TIMESTAMPTZ | TEXT |
-| `boolean` | BOOLEAN | INTEGER (0/1) |
-| `bigserial` | BIGSERIAL | INTEGER AUTOINCREMENT |
-| `numeric` | NUMERIC | REAL |
-| `inet` | INET | TEXT |
+| SQLAlchemy Type | PostgreSQL | SQLite | Notes |
+|-----------------|------------|--------|-------|
+| `String(36)` | VARCHAR(36) | TEXT | For UUIDs (cross-DB compat) |
+| `Text` | TEXT | TEXT | For JSONB in SQLite |
+| `DateTime` | TIMESTAMPTZ | TEXT | Timezone-aware |
+| `Boolean` | BOOLEAN | INTEGER | 0/1 in SQLite |
+| `Integer` | INTEGER | INTEGER | Auto-increment supported |
+| `LargeBinary` | BYTEA | BLOB | For encrypted state |
 
-### Workflow
+**Note:** PostgreSQL migrations use native types (UUID, JSONB) for optimal performance. SQLite uses TEXT equivalents.
 
-**Generate Migrations:**
+### Migration Workflow
+
+**1. Create a New Migration:**
 ```bash
-# Generate both PostgreSQL and SQLite migrations
-python tools/compile_schema.py --all
+cd src/rufus
 
-# Generate specific database
-python tools/compile_schema.py --target postgres --output migrations/002_postgres.sql
-python tools/compile_schema.py --target sqlite --output migrations/002_sqlite.sql
+# Auto-generate from SQLAlchemy model changes
+alembic revision --autogenerate -m "add user preferences table"
+
+# Or create empty migration for manual SQL
+alembic revision -m "add custom index"
 ```
 
-**Validate Schema:**
+**2. Review Generated Migration:**
 ```bash
-# Validate all databases
-python tools/validate_schema.py --all
+# Check what Alembic detected
+cat alembic/versions/<revision>_add_user_preferences_table.py
 
-# Validate specific database
-python tools/validate_schema.py --target postgres
+# Alembic auto-generates:
+# - Table creation/deletion
+# - Column additions/changes
+# - Index creation/deletion
+# - Foreign key constraints
+
+# Warning: ~15% false positive rate - always review!
 ```
 
-**Apply Migrations:**
+**3. Apply Migrations:**
 ```bash
 # PostgreSQL
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --init
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --status
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --up
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+alembic upgrade head
 
-# SQLite
-python tools/migrate.py --db sqlite:///path/to/db.sqlite --init
-python tools/migrate.py --db sqlite:///path/to/db.sqlite --up
+# Check current version
+alembic current
+
+# View history
+alembic history
+
+# Rollback one migration
+alembic downgrade -1
+```
+
+**4. For SQLite:**
+```bash
+# SQLite (uses batch mode for ALTER compatibility)
+export DATABASE_URL="sqlite:///workflow.db"
+alembic upgrade head
 ```
 
 ### Schema Modification Process
 
 When modifying the database schema:
 
-1. **Edit only `migrations/schema.yaml`** - Never edit .sql files directly
-2. **Increment schema version** in schema.yaml
-3. **Generate migrations** using compile_schema.py
-4. **Validate** using validate_schema.py
-5. **Test migrations** against test databases
-6. **Commit all files** (schema.yaml + generated .sql files)
+1. **Edit `src/rufus/db_schema/database.py`** - Modify SQLAlchemy table definitions
+2. **Generate migration** - `alembic revision --autogenerate -m "description"`
+3. **Review migration** - Check auto-generated code (Alembic ~15% false positive rate)
+4. **Test migration** - Apply to dev database first
+5. **Update runtime SQL** - If schema changed, update raw SQL queries in persistence providers
+6. **Commit all files** - SQLAlchemy models + generated migration file
 
 Example schema.yaml structure:
 ```yaml
@@ -854,147 +872,178 @@ persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
 ```
 
-### Migration Systems
+### Migration System: Alembic
 
-Rufus currently has **two migration systems** serving different purposes:
+Rufus uses **Alembic** as the primary migration system for all deployments:
 
-#### System 1: Docker Init Script (`docker/init-db.sql`)
-
-**Purpose**: Initialize PostgreSQL database on first Docker container start
+#### Alembic Features
 
 **Characteristics:**
-- 850+ lines of SQL
-- Includes edge-specific tables (edge_devices, device_commands, webhooks)
-- Executed automatically by Docker entrypoint
-- No version tracking (runs once on container creation)
-
-**When to use:**
-- Fresh Docker deployments
-- Local development with Docker Compose
-- CI/CD environments using Docker
-
-**Pros:**
-- Zero manual steps for Docker users
-- Includes all Rufus Edge tables
-- Automatically runs on `docker compose up`
-
-**Cons:**
-- Separate from unified migration system
-- No incremental migration support
-- Schema changes require container rebuild
-
-#### System 2: Unified Migrations (`migrations/*.sql`)
-
-**Purpose**: Consistent, versioned schema across SQLite and PostgreSQL
-
-**Characteristics:**
-- Generated from `migrations/schema.yaml`
-- Version tracked via `schema_migrations` table
-- Supports incremental migrations
-- Works with both SQLite and PostgreSQL
-
-**When to use:**
-- Non-Docker deployments
-- SQLite databases (development/testing)
-- Production PostgreSQL (without Docker)
-- When you need migration history/rollback
-
-**Pros:**
-- Single source of truth (`schema.yaml`)
-- Version tracking and history
-- Database-agnostic (PostgreSQL + SQLite)
+- Auto-generate migrations from SQLAlchemy model changes
+- Version tracking via `alembic_version` table
 - Incremental migration support
+- Rollback capability (`alembic downgrade`)
+- Works with both PostgreSQL and SQLite (batch mode)
 
-**Cons:**
-- Requires manual execution (`rufus db migrate`)
-- SQLite `auto_init` only (PostgreSQL needs explicit migration)
+**Migration Sources:**
+1. **Auto-generated**: `alembic revision --autogenerate`
+   - Detects table/column changes
+   - Generates upgrade/downgrade functions
+   - ~15% false positive rate - always review
 
-#### Migration System Comparison
+2. **Manual**: `alembic revision` (empty template)
+   - For complex migrations
+   - Custom SQL or data migrations
+   - Python-based logic
 
-| Feature | Docker init-db.sql | Unified Migrations |
-|---------|-------------------|-------------------|
-| **Trigger** | Automatic (Docker entrypoint) | Manual (`rufus db migrate`) |
-| **Version Tracking** | ❌ No | ✅ Yes (`schema_migrations`) |
-| **Edge Tables** | ✅ Included | ⚠️ Core tables only |
-| **PostgreSQL** | ✅ Full support | ✅ Full support |
-| **SQLite** | ❌ N/A | ✅ Full support |
-| **Incremental** | ❌ All-or-nothing | ✅ Step-by-step |
-| **Rollback** | ❌ No | ⚠️ Limited |
+**Version Tracking:**
+- `alembic_version` table tracks current schema version
+- Migration history: `alembic history`
+- Current version: `alembic current`
 
-#### Schema Synchronization
+**Batch Mode (SQLite):**
+- Automatically enabled for SQLite in `env.py`
+- Allows ALTER TABLE operations (SQLite limitation workaround)
+- No code changes needed - transparent
 
-The two systems are **intentionally separate** but must stay synchronized:
+#### Alembic vs Legacy Systems
 
-**Core Workflow Tables** (present in both):
-- `workflow_executions`
-- `workflow_audit_log`
-- `workflow_metrics`
-- `workflow_heartbeats` (reliability tier 2)
-- `schema_migrations`
+| Feature | Alembic (Current) | Old schema.yaml | Docker init-db.sql |
+|---------|------------------|-----------------|-------------------|
+| **Version Tracking** | ✅ alembic_version | ✅ schema_migrations | ❌ No |
+| **Auto-generate** | ✅ From SQLAlchemy | ❌ Manual YAML | ❌ Manual SQL |
+| **PostgreSQL** | ✅ Full support | ✅ Full support | ✅ Full support |
+| **SQLite** | ✅ Batch mode | ✅ Full support | ❌ N/A |
+| **Incremental** | ✅ Step-by-step | ✅ Step-by-step | ❌ All-or-nothing |
+| **Rollback** | ✅ Full support | ⚠️ Limited | ❌ No |
+| **IDE Support** | ✅ Python autocomplete | ❌ YAML only | ❌ SQL only |
 
-**Edge-Specific Tables** (only in `docker/init-db.sql`):
-- `edge_devices`
-- `device_commands`
-- `command_broadcasts`
-- `webhook_registrations`
-- And 15+ other edge/cloud tables
+#### Tables Managed by Alembic
 
-**Synchronization Process:**
+**Core Workflow Tables** (in all Alembic migrations):
+- `workflow_executions` - Main workflow state
+- `workflow_audit_log` - Event audit trail
+- `workflow_metrics` - Performance metrics
+- `workflow_heartbeats` - Zombie detection
+- `alembic_version` - Migration version tracking
 
-When you modify the core workflow schema:
+**Edge-Specific Tables** (also in SQLAlchemy schema):
+- `edge_devices` - Device registry
+- `device_commands` - Cloud-to-device commands
 
-1. **Update `migrations/schema.yaml`** (single source of truth)
-2. **Generate unified migrations:**
-   ```bash
-   python tools/compile_schema.py --all
+**Note:** Legacy tables from `docker/init-db.sql` (webhooks, broadcasts, etc.) remain in existing databases but are not in the new Alembic schema. They will not be created in fresh installations.
+
+#### Adding a New Table (Step-by-Step)
+
+When adding a new table to the schema:
+
+1. **Define in SQLAlchemy** (`src/rufus/db_schema/database.py`):
+   ```python
+   user_preferences = Table(
+       'user_preferences',
+       metadata,
+       Column('id', String(36), primary_key=True),
+       Column('user_id', String(200), nullable=False, index=True),
+       Column('preferences', Text, server_default='{}'),
+       Column('created_at', DateTime, server_default=func.now()),
+   )
    ```
-3. **Update `docker/init-db.sql` manually:**
-   ```bash
-   # Add the same changes to docker/init-db.sql
-   # Ensure column types match PostgreSQL output
-   ```
-4. **Test both systems:**
-   ```bash
-   # Test Docker init
-   cd docker && docker compose down -v && docker compose up -d
 
-   # Test unified migration
-   python tools/migrate.py --db postgresql://... --up
+2. **Export in __init__.py**:
+   ```python
+   from rufus.db_schema.database import user_preferences
+   __all__ = [..., 'user_preferences']
    ```
-5. **Commit both files** together
 
-#### Recommendations
+3. **Generate migration:**
+   ```bash
+   cd src/rufus
+   alembic revision --autogenerate -m "add user preferences table"
+   ```
+
+4. **Review generated migration:**
+   ```bash
+   # Check alembic/versions/<revision>_add_user_preferences_table.py
+   # Verify upgrade() and downgrade() functions
+   ```
+
+5. **Test migration:**
+   ```bash
+   alembic upgrade head
+   alembic downgrade -1  # Test rollback
+   alembic upgrade head  # Re-apply
+   ```
+
+6. **Commit files:**
+   ```bash
+   git add src/rufus/db_schema/database.py
+   git add src/rufus/db_schema/__init__.py
+   git add src/rufus/alembic/versions/<revision>_*.py
+   git commit -m "feat(schema): add user_preferences table"
+   ```
+
+#### Deployment Recommendations
 
 **For Development:**
-- Use SQLite with unified migrations (`rufus db init`)
-- Or use Docker Compose (automatic with `init-db.sql`)
+```bash
+# Option 1: SQLite (fastest)
+export DATABASE_URL="sqlite:///dev.db"
+cd src/rufus && alembic upgrade head
+
+# Option 2: PostgreSQL with Docker
+docker compose up postgres -d
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/rufus && alembic upgrade head
+```
 
 **For Production:**
-- **Option A (Docker):** Use Docker Compose, schema initialized automatically
-- **Option B (Kubernetes/ECS):** Use unified migrations with `rufus db migrate`
-- **Option C (Managed DB):** Run `docker/init-db.sql` manually once, then use unified migrations for updates
+```bash
+# Fresh installation
+export DATABASE_URL="postgresql://user:pass@host:5432/dbname"
+cd src/rufus
+alembic upgrade head
+
+# Schema updates
+alembic upgrade head  # Apply pending migrations
+alembic current       # Verify version
+```
 
 **For Testing:**
-- Use SQLite with `auto_init=True` (automatic schema)
-- Or in-memory database (`:memory:`)
+```python
+# In-memory SQLite (auto-creates schema)
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 
-#### Future Consolidation (Optional)
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()  # Schema auto-created
+```
 
-To unify these systems in the future:
+**For Docker/Kubernetes:**
+```yaml
+# Add to entrypoint script
+services:
+  rufus-server:
+    command: >
+      sh -c "
+        cd /app/src/rufus &&
+        alembic upgrade head &&
+        cd /app &&
+        uvicorn rufus_server.main:app --host 0.0.0.0
+      "
+```
 
-1. **Generate `init-db.sql` from `schema.yaml`**:
-   - Extend `compile_schema.py` to include edge tables
-   - Auto-generate `docker/init-db.sql` from YAML
+#### Legacy Migration Systems (Deprecated)
 
-2. **Use migration runner in Docker entrypoint**:
-   - Replace `init-db.sql` with `rufus db migrate --auto`
-   - Track migrations even in Docker deployments
+**Note:** Prior to Alembic adoption (2026-02), Rufus had two migration systems:
+1. `migrations/schema.yaml` + compile scripts (deprecated)
+2. `docker/init-db.sql` (deprecated)
 
-3. **Add edge tables to `schema.yaml`**:
-   - Include all edge-specific tables in unified definition
-   - Single command to regenerate all migration files
+These are no longer actively maintained. **Use Alembic for all new deployments and schema changes.**
 
-**Decision:** Defer to Phase 2 (document dual system for now)
+**Migration Path from Legacy:**
+- Existing databases continue to work (schema is compatible)
+- New tables added via Alembic migrations only
+- No migration required for running systems
+- Fresh installations use `alembic upgrade head`
 
 ## SQLite Persistence Provider
 
