@@ -13,7 +13,7 @@ This guide explains how to install Rufus SDK directly from GitHub for testing an
 pip install git+https://github.com/KamikaziD/rufus-sdk.git
 
 # Install with all optional dependencies
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 ```
 
 ### Method 2: Install Specific Branch (e.g., feature branch)
@@ -23,7 +23,7 @@ pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
 pip install git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
 
 # With extras
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus-edge[all]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]"
 ```
 
 ### Method 3: Install Specific Version/Tag
@@ -41,19 +41,19 @@ The package supports optional feature sets via extras:
 
 ```bash
 # Server features (FastAPI, Uvicorn)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[server]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[server]"
 
 # PostgreSQL support
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[postgres]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[postgres]"
 
 # CLI enhancements (Rich formatting)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[cli]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[cli]"
 
 # Performance optimizations (uvloop)
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[performance]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[performance]"
 
 # Everything
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 ```
 
 **What each extra includes:**
@@ -141,7 +141,7 @@ python simple_demo.py
 
 ```bash
 # Uninstall old version
-pip uninstall rufus-edge -y
+pip uninstall rufus -y
 
 # Install latest
 pip install git+https://github.com/KamikaziD/rufus-sdk.git
@@ -159,13 +159,13 @@ For teams, create a `requirements.txt`:
 ```text
 # requirements.txt
 # Install Rufus SDK from GitHub
-git+https://github.com/KamikaziD/rufus-sdk.git@main#egg=rufus-edge[all]
+git+https://github.com/KamikaziD/rufus-sdk.git@main#egg=rufus[all]
 
 # Or specific branch for testing
-# git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus-edge[all]
+# git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]
 
 # Or with SSH (for private repo)
-# git+ssh://git@github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]
+# git+ssh://git@github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]
 ```
 
 Then install:
@@ -184,7 +184,7 @@ If you want to distribute as a Docker image:
 FROM python:3.11-slim
 
 # Install Rufus SDK from GitHub
-RUN pip install git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]
+RUN pip install git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]
 
 # Verify installation
 RUN rufus --version
@@ -263,7 +263,7 @@ poetry install --with dev
 
 **Solution**: Make sure you're using the correct syntax with quotes:
 ```bash
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 #          ↑ quotes are important!              ↑
 ```
 
@@ -273,7 +273,7 @@ pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
 
 ### Error: "No module named 'rufus'"
 
-**Solution**: The package installs as `rufus-edge` but imports as `rufus`:
+**Solution**: The package installs as `rufus` but imports as `rufus`:
 ```python
 # Correct
 from rufus.builder import WorkflowBuilder
@@ -300,17 +300,17 @@ If you encounter issues:
 
 1. **Check installed version**:
    ```bash
-   pip show rufus-edge
+   pip show rufus
    ```
 
 2. **Check installed files**:
    ```bash
-   pip show -f rufus-edge
+   pip show -f rufus
    ```
 
 3. **Reinstall from scratch**:
    ```bash
-   pip uninstall rufus-edge -y
+   pip uninstall rufus -y
    pip cache purge
    pip install git+https://github.com/KamikaziD/rufus-sdk.git
    ```
@@ -329,7 +329,7 @@ If you encounter issues:
 
 1. **Install package**:
    ```bash
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
    ```
 
 2. **Verify it works**:

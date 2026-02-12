@@ -50,7 +50,7 @@ git push origin v0.1.0
 Send testers this one-liner:
 
 ```bash
-pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 ```
 
 ### Verify Installation
@@ -84,7 +84,7 @@ I'm excited to share the Rufus SDK beta for testing! Here's how to get started:
 **Installation (5 minutes):**
 
 1. Install the package:
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus-edge[all]"
+   pip install "git+https://github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]"
 
 2. Verify it works:
    rufus --version
@@ -141,7 +141,7 @@ Testers will need GitHub access. Two options:
 | **Latest from main** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git` | Most stable |
 | **Specific branch** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git@BRANCH` | Test features |
 | **Specific version** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git@v0.1.0` | Reproducible |
-| **With extras** | `pip install "git+...#egg=rufus-edge[all]"` | Full features |
+| **With extras** | `pip install "git+...#egg=rufus[all]"` | Full features |
 | **SSH (private)** | `pip install git+ssh://git@github.com/KamikaziD/rufus-sdk.git` | Private repo |
 
 ---
@@ -163,7 +163,7 @@ Testers will need GitHub access. Two options:
 1. Commit and push the packaging files (commands above)
 2. Test the installation yourself:
    ```bash
-   pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus-edge[all]"
+   pip install "git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration#egg=rufus[all]"
    python verify_installation.py
    ```
 
@@ -208,7 +208,7 @@ pip install --force-reinstall git+https://github.com/KamikaziD/rufus-sdk.git
 
 ## 📝 Additional Notes
 
-- **Package name**: `rufus-edge` (what pip installs)
+- **Package name**: `rufus` (what pip installs)
 - **Import name**: `rufus` (what Python imports)
 - **CLI command**: `rufus` (command line tool)
 - **Extras available**: `all`, `server`, `postgres`, `cli`, `performance`
