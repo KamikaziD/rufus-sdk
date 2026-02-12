@@ -1,0 +1,30 @@
+# Include documentation files
+include README.md
+include LICENSE
+include QUICKSTART.md
+include INSTALLATION_FOR_DEVELOPERS.md
+include CLAUDE.md
+
+# Include configuration files
+include pyproject.toml
+include requirements.txt
+
+# Include Alembic migrations
+recursive-include src/rufus/alembic *.py *.mako *.ini
+
+# Include example workflows and config files
+recursive-include config *.yaml *.yml
+recursive-include examples *.py *.yaml *.yml *.md
+
+# Exclude development and build files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *$py.class
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.egg-info
+global-exclude .git*
+global-exclude .venv
+global-exclude venv
+global-exclude *.db
+global-exclude *.sqlite

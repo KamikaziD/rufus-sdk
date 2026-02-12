@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
 readme = "README.md"
-homepage = "https://github.com/rufus-ai/rufus-edge"
-repository = "https://github.com/rufus-ai/rufus-edge"
+homepage = "https://github.com/KamikaziD/rufus-sdk"
+repository = "https://github.com/KamikaziD/rufus-sdk"
 keywords = ["workflow", "fintech", "pos", "edge", "offline", "store-and-forward", "saga", "payment"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -38,6 +38,8 @@ aiosqlite = "^0.19"
 orjson = "^3.9"
 httpx = "^0.25"
 cryptography = "^41.0"
+sqlalchemy = "^2.0"
+alembic = "^1.13"
 
 # Optional dependencies
 fastapi = {version = "^0.100", optional = true}
