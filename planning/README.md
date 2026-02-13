@@ -62,6 +62,15 @@ Testing strategy and results:
 - `LOAD_TEST_FIXES.md` - Load test fixes and improvements
 - `load_test.md` - Load testing documentation
 
+### Legacy User Guides (Archived 2026-02-13)
+Superseded by comprehensive Diátaxis documentation in `/docs/`:
+- `YAML_GUIDE.md` - ⚠️ REPLACED by `docs/reference/configuration/yaml-schema.md` and `docs/reference/configuration/step-types.md`
+- `USAGE_GUIDE.md` - ⚠️ REPLACED by `docs/tutorials/`, `docs/how-to-guides/`, and `docs/explanation/`
+- `TESTING_GUIDE.md` - ⚠️ REPLACED by `docs/how-to-guides/testing.md`
+- `QUICKSTART.md` - ⚠️ REPLACED by `docs/tutorials/getting-started.md` and new README.md
+
+**Note:** These guides were archived when v0.3.1 introduced comprehensive Diátaxis-organized documentation. All content has been migrated, reorganized, and expanded in the new documentation structure.
+
 ## Using These Documents
 
 **For Historical Research:**
