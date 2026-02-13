@@ -282,16 +282,30 @@ class WorkflowDetailFormatter(Formatter):
     def _format_steps_tree(self, workflow: Dict[str, Any]) -> None:
         """Format steps as a tree"""
         tree = Tree("[bold]Steps[/bold]")
-        current_step = workflow.get('current_step', 0)
+        current_step_name = workflow.get('current_step')
 
-        for i, step in enumerate(workflow.get('steps_config', [])):
-            if i < current_step:
-                status = "✅"
-                style = "green"
-            elif i == current_step:
-                status = "⏳"
-                style = "yellow bold"
+        # Find the index of the current step by name
+        steps_config = workflow.get('steps_config', [])
+        current_step_index = None
+        if current_step_name:
+            for idx, step in enumerate(steps_config):
+                if step.get('name') == current_step_name:
+                    current_step_index = idx
+                    break
+
+        for i, step in enumerate(steps_config):
+            if current_step_index is not None:
+                if i < current_step_index:
+                    status = "✅"
+                    style = "green"
+                elif i == current_step_index:
+                    status = "⏳"
+                    style = "yellow bold"
+                else:
+                    status = "⏸"
+                    style = "dim"
             else:
+                # No current step (workflow not started or completed)
                 status = "⏸"
                 style = "dim"
 

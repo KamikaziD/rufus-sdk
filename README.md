@@ -296,7 +296,7 @@ steps:
         result: "{{state.ml_prediction}}"
 ```
 
-**Documentation**: See [USAGE_GUIDE.md - Polyglot Workflows](USAGE_GUIDE.md#polyglot-workflows-http-steps) for complete polyglot documentation.
+**Documentation**: See [How to Use HTTP Steps](docs/how-to-guides/http-steps.md) for complete polyglot documentation.
 
 ---
 
@@ -813,29 +813,39 @@ Rufus uses **Python Protocol interfaces** to decouple core logic from external d
 
 ## Documentation
 
-### Getting Started (Read These First)
+Our documentation follows the [Diátaxis framework](https://diataxis.fr/) - organized by what you need to do:
 
-- **[README.md](README.md)** ← You are here - Use cases and quick start
-- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
-- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Core concepts and patterns
-- **[examples/](examples/)** - Working examples across 6 sectors
+### 🎓 New to Rufus? Start Here
 
-### Reference Documentation
+- **[Getting Started in 5 Minutes](docs/tutorials/getting-started.md)** - Your first workflow
+- **[Complete Documentation Index](docs/index.md)** - Browse all docs by type
 
-- **[YAML_GUIDE.md](YAML_GUIDE.md)** - Complete YAML workflow syntax
-- **[API_REFERENCE.md](API_REFERENCE.md)** - SDK API documentation
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** - CLI command reference
-- **[docs/FEATURES_AND_CAPABILITIES.md](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature catalog
+### 📖 Documentation by Type
 
-### Advanced Topics
+| When You Need | Go To | What You'll Find |
+|---------------|-------|------------------|
+| **Learn workflows** | [Tutorials](docs/tutorials/) | Step-by-step lessons to build skills |
+| **Accomplish a task** | [How-To Guides](docs/how-to-guides/) | Practical directions for specific goals |
+| **Look up syntax** | [Reference](docs/reference/) | API docs, YAML schema, CLI commands |
+| **Understand concepts** | [Explanation](docs/explanation/) | Architecture, patterns, design decisions |
+| **Expert topics** | [Advanced](docs/advanced/) | Custom providers, security, performance |
 
-- **[CLAUDE.md](CLAUDE.md)** - Developer guide with critical warnings (executor portability, dynamic injection)
-- **[TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md)** - Architecture deep-dive
-- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Migration from Temporal/Airflow
+### 🔗 Quick Links
 
-### All Documentation
+- **[Installation](docs/how-to-guides/installation.md)** - Get Rufus running
+- **[Create a Workflow](docs/how-to-guides/create-workflow.md)** - Build your first workflow
+- **[YAML Reference](docs/reference/yaml-schema.md)** - Complete YAML syntax
+- **[CLI Commands](docs/reference/cli-commands.md)** - Command-line reference
+- **[Examples](examples/)** - Working code across 6 industries
+- **[Troubleshooting](docs/how-to-guides/troubleshooting.md)** - Solve common issues
 
-- **[docs/README.md](docs/README.md)** - Complete documentation index
+### 🤖 For AI Assistants
+
+- **[CLAUDE.md](CLAUDE.md)** - Complete developer guide (optimized for Claude Code)
+
+### 📊 Feature Overview
+
+- **[Features & Capabilities](docs/FEATURES_AND_CAPABILITIES.md)** - Complete feature catalog
 
 ---
 
