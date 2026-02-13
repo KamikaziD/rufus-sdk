@@ -1,0 +1,657 @@
+# YAML Schema Reference
+
+## Overview
+
+Complete specification for workflow definition YAML files.
+
+## Workflow Registry Schema
+
+**File:** `workflow_registry.yaml`
+
+### Top-Level Structure
+
+```yaml
+workflows:
+  - type: string              # Required
+    description: string       # Optional
+    config_file: string       # Required
+    initial_state_model: string  # Required
+    requires: list[string]    # Optional
+
+requires: list[string]        # Optional
+```
+
+### Fields
+
+#### `workflows`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+List of workflow definitions.
+
+#### `workflows[].type`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Unique workflow type identifier (e.g., "OrderProcessing").
+
+#### `workflows[].description`
+
+**Type:** `string`
+
+**Required:** No
+
+Human-readable workflow description.
+
+#### `workflows[].config_file`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Path to workflow YAML file (relative to registry file).
+
+#### `workflows[].initial_state_model`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Python import path to Pydantic state model (e.g., "my_app.models.OrderState").
+
+#### `workflows[].requires`
+
+**Type:** `list[string]`
+
+**Required:** No
+
+List of required Python packages for this workflow.
+
+#### `requires`
+
+**Type:** `list[string]`
+
+**Required:** No
+
+Global list of required packages for all workflows.
+
+### Example
+
+```yaml
+workflows:
+  - type: "OrderProcessing"
+    description: "E-commerce order processing workflow"
+    config_file: "order_processing.yaml"
+    initial_state_model: "my_app.models.OrderState"
+    requires:
+      - rufus-payment-gateway
+      - rufus-inventory
+
+  - type: "UserOnboarding"
+    description: "New user onboarding workflow"
+    config_file: "user_onboarding.yaml"
+    initial_state_model: "my_app.models.UserState"
+
+requires:
+  - rufus-notifications
+```
+
+---
+
+## Workflow Definition Schema
+
+**File:** `<workflow_name>.yaml`
+
+### Top-Level Structure
+
+```yaml
+workflow_type: string         # Required
+workflow_version: string      # Optional
+initial_state_model: string   # Required
+description: string           # Optional
+steps: list[dict]             # Required
+```
+
+### Fields
+
+#### `workflow_type`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Must match registry entry.
+
+#### `workflow_version`
+
+**Type:** `string`
+
+**Required:** No
+
+Semantic version (e.g., "1.0.0").
+
+#### `initial_state_model`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Python import path to Pydantic state model.
+
+#### `description`
+
+**Type:** `string`
+
+**Required:** No
+
+Human-readable description.
+
+#### `steps`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+List of workflow steps.
+
+### Example
+
+```yaml
+workflow_type: "OrderProcessing"
+workflow_version: "1.5.0"
+initial_state_model: "my_app.models.OrderState"
+description: "Process customer orders with payment and fulfillment"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "my_app.steps.validate_order"
+    automate_next: true
+```
+
+---
+
+## Step Schema
+
+### Common Step Fields
+
+All step types support these fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Unique step identifier |
+| `type` | `string` | Yes | Step type (see [Step Types](step-types.md)) |
+| `function` | `string` | Conditional | Python import path to step function |
+| `compensate_function` | `string` | No | Python import path to compensation function |
+| `input_model` | `string` | No | Python import path to input Pydantic model |
+| `required_input` | `list[string]` | No | List of required input keys (legacy) |
+| `automate_next` | `boolean` | No | Auto-execute next step (default: false) |
+| `dependencies` | `list[string]` | No | List of prerequisite step names |
+| `dynamic_injection` | `dict` | No | Dynamic step injection rules |
+| `routes` | `list[dict]` | No | Declarative routing (DECISION steps) |
+
+### Step Type-Specific Fields
+
+Different step types require additional fields. See [Step Types Reference](step-types.md) for details.
+
+---
+
+## Dynamic Injection Schema
+
+### Structure
+
+```yaml
+dynamic_injection:
+  rules:
+    - condition_key: string         # Required
+      value_match: any              # Conditional
+      value_is_not: list[any]       # Conditional
+      action: string                # Required
+      steps_to_insert: list[dict]   # Required
+```
+
+### Fields
+
+#### `rules`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+List of injection rules.
+
+#### `rules[].condition_key`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Dot-notation path in workflow state (e.g., "user.profile.age").
+
+#### `rules[].value_match`
+
+**Type:** `any`
+
+**Required:** Conditional (one of value_match or value_is_not)
+
+Inject if condition_key equals this value.
+
+#### `rules[].value_is_not`
+
+**Type:** `list[any]`
+
+**Required:** Conditional (one of value_match or value_is_not)
+
+Inject if condition_key NOT in this list.
+
+#### `rules[].action`
+
+**Type:** `string`
+
+**Required:** Yes
+
+**Allowed values:** `"INSERT_AFTER_CURRENT"`
+
+#### `rules[].steps_to_insert`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+List of step configurations to inject (same schema as regular steps).
+
+### Example
+
+```yaml
+steps:
+  - name: "Evaluate_Risk"
+    type: "STANDARD"
+    function: "my_app.risk.evaluate"
+    dynamic_injection:
+      rules:
+        - condition_key: "risk_level"
+          value_match: "high"
+          action: "INSERT_AFTER_CURRENT"
+          steps_to_insert:
+            - name: "Manual_Review"
+              type: "HUMAN_IN_LOOP"
+              function: "my_app.approvals.request_review"
+```
+
+---
+
+## Routes Schema (DECISION Steps)
+
+### Structure
+
+```yaml
+routes:
+  - condition: string       # Required
+    target: string          # Required
+  - default: string         # Optional (fallback route)
+```
+
+### Fields
+
+#### `routes[].condition`
+
+**Type:** `string`
+
+**Required:** Yes (except for default route)
+
+Python expression evaluated against workflow state.
+
+#### `routes[].target`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Target step name to jump to.
+
+#### `routes[].default`
+
+**Type:** `string`
+
+**Required:** No
+
+Fallback target if no conditions match.
+
+### Example
+
+```yaml
+steps:
+  - name: "Check_Order_Value"
+    type: "DECISION"
+    function: "my_app.steps.check_order_value"
+    routes:
+      - condition: "state.amount > 10000"
+        target: "High_Value_Review"
+      - condition: "state.amount > 1000"
+        target: "Standard_Processing"
+      - default: "Auto_Approve"
+```
+
+---
+
+## HTTP Step Schema
+
+### Structure
+
+```yaml
+type: "HTTP"
+http_config:
+  method: string              # Required
+  url: string                 # Required
+  headers: dict[string, string]  # Optional
+  query_params: dict[string, string]  # Optional
+  body: dict                  # Optional
+  timeout: int                # Optional
+  retry_policy: dict          # Optional
+output_key: string            # Required
+includes: list[string]        # Optional
+```
+
+### Fields
+
+#### `http_config.method`
+
+**Type:** `string`
+
+**Required:** Yes
+
+**Allowed values:** `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+
+#### `http_config.url`
+
+**Type:** `string`
+
+**Required:** Yes
+
+URL template (supports Jinja2 syntax: `{{state.field}}`).
+
+#### `http_config.headers`
+
+**Type:** `dict[string, string]`
+
+**Required:** No
+
+HTTP headers (supports templating).
+
+#### `http_config.query_params`
+
+**Type:** `dict[string, string]`
+
+**Required:** No
+
+Query parameters (supports templating).
+
+#### `http_config.body`
+
+**Type:** `dict`
+
+**Required:** No
+
+Request body (JSON, supports templating).
+
+#### `http_config.timeout`
+
+**Type:** `int`
+
+**Required:** No
+
+Request timeout in seconds (default: 30).
+
+#### `http_config.retry_policy`
+
+**Type:** `dict`
+
+**Required:** No
+
+Retry configuration (max_attempts, delay_seconds).
+
+#### `output_key`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Key to store response in workflow state.
+
+#### `includes`
+
+**Type:** `list[string]`
+
+**Required:** No
+
+Response fields to include (default: all).
+
+**Allowed values:** `body`, `status_code`, `headers`
+
+### Example
+
+```yaml
+steps:
+  - name: "Fetch_Product"
+    type: "HTTP"
+    http_config:
+      method: "GET"
+      url: "https://api.example.com/products/{{state.product_id}}"
+      headers:
+        Authorization: "Bearer {{secrets.API_TOKEN}}"
+      timeout: 10
+      retry_policy:
+        max_attempts: 3
+        delay_seconds: 5
+    output_key: "product_data"
+    includes: ["body", "status_code"]
+```
+
+---
+
+## PARALLEL Step Schema
+
+### Structure
+
+```yaml
+type: "PARALLEL"
+tasks:
+  - name: string              # Required
+    function_path: string     # Required
+merge_strategy: string        # Optional
+merge_conflict_behavior: string  # Optional
+allow_partial_success: boolean   # Optional
+timeout_seconds: int        # Optional
+```
+
+### Fields
+
+#### `tasks`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+List of parallel tasks.
+
+#### `tasks[].name`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Unique task name.
+
+#### `tasks[].function_path`
+
+**Type:** `string`
+
+**Required:** Yes
+
+Python import path to task function.
+
+#### `merge_strategy`
+
+**Type:** `string`
+
+**Required:** No
+
+**Allowed values:** `SHALLOW`, `DEEP`
+
+**Default:** `SHALLOW`
+
+#### `merge_conflict_behavior`
+
+**Type:** `string`
+
+**Required:** No
+
+**Allowed values:** `PREFER_NEW`, `PREFER_OLD`, `RAISE_ERROR`
+
+**Default:** `PREFER_NEW`
+
+#### `allow_partial_success`
+
+**Type:** `boolean`
+
+**Required:** No
+
+**Default:** `false`
+
+If true, workflow continues even if some tasks fail.
+
+#### `timeout_seconds`
+
+**Type:** `int`
+
+**Required:** No
+
+Maximum time for all tasks to complete.
+
+### Example
+
+```yaml
+steps:
+  - name: "Parallel_Services"
+    type: "PARALLEL"
+    tasks:
+      - name: "check_inventory"
+        function_path: "my_app.services.check_inventory"
+      - name: "validate_address"
+        function_path: "my_app.services.validate_address"
+    merge_strategy: "DEEP"
+    allow_partial_success: false
+    timeout_seconds: 60
+```
+
+---
+
+## LOOP Step Schema
+
+### Structure
+
+```yaml
+type: "LOOP"
+mode: string                  # Required
+iterate_over: string          # Conditional (ITERATE mode)
+item_var_name: string         # Conditional (ITERATE mode)
+while_condition: string       # Conditional (WHILE mode)
+max_iterations: int           # Required
+loop_body: list[dict]         # Required
+```
+
+### Fields
+
+#### `mode`
+
+**Type:** `string`
+
+**Required:** Yes
+
+**Allowed values:** `ITERATE`, `WHILE`
+
+#### `iterate_over`
+
+**Type:** `string`
+
+**Required:** Yes (ITERATE mode)
+
+Dot-notation path to list in workflow state.
+
+#### `item_var_name`
+
+**Type:** `string`
+
+**Required:** Yes (ITERATE mode)
+
+Variable name for current item.
+
+#### `while_condition`
+
+**Type:** `string`
+
+**Required:** Yes (WHILE mode)
+
+Python expression for loop continuation.
+
+#### `max_iterations`
+
+**Type:** `int`
+
+**Required:** Yes
+
+Safety limit for maximum iterations.
+
+#### `loop_body`
+
+**Type:** `list[dict]`
+
+**Required:** Yes
+
+Steps to execute in each iteration.
+
+### Example (ITERATE)
+
+```yaml
+steps:
+  - name: "Process_Items"
+    type: "LOOP"
+    mode: "ITERATE"
+    iterate_over: "state.order_items"
+    item_var_name: "current_item"
+    max_iterations: 100
+    loop_body:
+      - name: "Update_Inventory"
+        type: "STANDARD"
+        function: "my_app.inventory.update_stock"
+```
+
+### Example (WHILE)
+
+```yaml
+steps:
+  - name: "Poll_Status"
+    type: "LOOP"
+    mode: "WHILE"
+    while_condition: "state.status != 'READY'"
+    max_iterations: 10
+    loop_body:
+      - name: "Check_API"
+        type: "HTTP"
+        http_config:
+          method: "GET"
+          url: "https://api.example.com/status"
+        output_key: "api_status"
+```
+
+---
+
+## See Also
+
+- [Step Types Reference](step-types.md)
+- [CLI Commands](cli-commands.md)
+- [Database Schema](database-schema.md)
