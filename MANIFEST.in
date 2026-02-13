@@ -1,9 +1,10 @@
 # Include documentation files
 include README.md
 include LICENSE
-include QUICKSTART.md
-include INSTALLATION_FOR_DEVELOPERS.md
 include CLAUDE.md
+
+# Include documentation directory
+recursive-include docs *.md *.rst
 
 # Include configuration files
 include pyproject.toml
