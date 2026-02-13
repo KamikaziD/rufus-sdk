@@ -10,3 +10,17 @@ htmlcov/
 .coverage*.db
 *.db-shm
 *.db-wal
+models/
+
+# Load testing
+load_test.log
+results/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+usecase_pilot/
+
+confucius/

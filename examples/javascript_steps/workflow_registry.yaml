@@ -1,5 +1,0 @@
-workflows:
-  - type: "OrderWithJavaScript"
-    description: "E-commerce order with JavaScript data transformation"
-    config_file: "workflow.yaml"
-    initial_state_model_path: "state_models.OrderState"

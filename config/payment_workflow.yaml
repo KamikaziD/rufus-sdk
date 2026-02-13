@@ -1,0 +1,52 @@
+# Payment Authorization Workflow
+# Handles both online and offline (Store-and-Forward) payment processing
+
+workflow_type: "PaymentAuthorization"
+workflow_version: "1.0.0"
+description: "Payment authorization with offline fallback support"
+initial_state_model: "rufus_edge.models.PaymentState"
+
+steps:
+  # Step 1: Validate payment request
+  - name: "Validate_Payment"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.validate_payment"
+    description: "Validate card token and amount"
+    automate_next: true
+
+  # Step 2: Check network connectivity (uses WorkflowJumpDirective for routing)
+  - name: "Check_Connectivity"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.check_connectivity"
+    description: "Determine if device is online or offline"
+
+  # Step 3a: Online path - call payment gateway
+  - name: "Online_Authorization"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.authorize_online"
+    description: "Send authorization request to payment gateway"
+    compensate_function: "rufus_edge.payment_steps.void_authorization"
+
+  # Step 3b: Offline path - check floor limit (uses WorkflowJumpDirective for routing)
+  - name: "Check_Floor_Limit"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.check_floor_limit"
+    description: "Check if amount is under floor limit for offline approval"
+
+  # Step 4a: Offline approval
+  - name: "Offline_Approval"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.approve_offline"
+    description: "Approve transaction offline and queue for sync"
+
+  # Step 4b: Decline (over floor limit)
+  - name: "Decline_Offline"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.decline_offline"
+    description: "Decline transaction - amount exceeds offline floor limit"
+
+  # Step 5: Complete transaction
+  - name: "Complete_Transaction"
+    type: "STANDARD"
+    function: "rufus_edge.payment_steps.complete_transaction"
+    description: "Finalize transaction and return result"

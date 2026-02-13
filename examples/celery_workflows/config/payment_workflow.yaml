@@ -1,0 +1,41 @@
+workflow_type: "PaymentProcessing"
+workflow_version: "1.0.0"
+initial_state_model: "models.state_models.PaymentState"
+description: "Payment processing with parallel credit/fraud/limit checks"
+
+steps:
+  - name: "Validate_Card"
+    type: "ASYNC"
+    description: "Validate credit card format and type"
+    function: "tasks.validation_tasks.validate_card_task"
+    automate_next: true
+
+  - name: "Run_Parallel_Checks"
+    type: "PARALLEL"
+    description: "Run credit, fraud, and limit checks in parallel"
+    tasks:
+      - name: "credit_check"
+        function_path: "tasks.validation_tasks.check_credit_task"
+      - name: "fraud_check"
+        function_path: "tasks.validation_tasks.check_fraud_task"
+      - name: "limit_check"
+        function_path: "tasks.validation_tasks.check_limit_task"
+    merge_strategy: "SHALLOW"
+    merge_conflict_behavior: "PREFER_NEW"
+    allow_partial_success: false
+    timeout_seconds: 30
+    automate_next: true
+    dependencies: ["Validate_Card"]
+
+  - name: "Verify_Checks"
+    type: "STANDARD"
+    description: "Verify all checks passed"
+    function: "steps.verify_payment_checks"
+    automate_next: true
+    dependencies: ["Run_Parallel_Checks"]
+
+  - name: "Charge_Payment"
+    type: "ASYNC"
+    description: "Charge the payment after all checks pass"
+    function: "tasks.payment_tasks.charge_payment_task"
+    dependencies: ["Verify_Checks"]

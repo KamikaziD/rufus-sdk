@@ -1,0 +1,20 @@
+# Rufus Edge Workflow Registry
+# Register all available workflows for the fintech edge platform
+
+workflows:
+  - type: "PaymentAuthorization"
+    description: "Payment authorization with offline fallback"
+    config_file: "payment_workflow.yaml"
+    initial_state_model: "rufus_edge.models.PaymentState"
+
+  - type: "RefundTransaction"
+    description: "Process refunds for completed transactions"
+    config_file: "refund_workflow.yaml"
+    initial_state_model: "rufus_edge.models.PaymentState"
+    # Not yet implemented
+
+  - type: "VoidTransaction"
+    description: "Void a pending authorization"
+    config_file: "void_workflow.yaml"
+    initial_state_model: "rufus_edge.models.PaymentState"
+    # Not yet implemented

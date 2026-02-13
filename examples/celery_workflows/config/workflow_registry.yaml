@@ -1,0 +1,15 @@
+workflows:
+  - type: "OrderProcessing"
+    description: "Complete order processing with async payment and notifications"
+    config_file: "order_processing.yaml"
+    initial_state_model: "models.state_models.OrderState"
+
+  - type: "PaymentProcessing"
+    description: "Payment workflow with parallel validation checks"
+    config_file: "payment_workflow.yaml"
+    initial_state_model: "models.state_models.PaymentState"
+
+  - type: "SendNotifications"
+    description: "Notification sub-workflow with parallel email/SMS/push"
+    config_file: "notification_workflow.yaml"
+    initial_state_model: "models.state_models.NotificationState"

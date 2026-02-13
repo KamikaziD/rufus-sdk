@@ -89,9 +89,15 @@ class ConfigManager:
 
         Args:
             config_path: Optional path to config file. Defaults to ~/.rufus/config.yaml
+                or $RUFUS_CONFIG_DIR/config.yaml if set
         """
         if config_path is None:
-            self.config_path = Path.home() / ".rufus" / "config.yaml"
+            # Check for RUFUS_CONFIG_DIR environment variable (used in tests)
+            config_dir = os.environ.get("RUFUS_CONFIG_DIR")
+            if config_dir:
+                self.config_path = Path(config_dir) / "config.yaml"
+            else:
+                self.config_path = Path.home() / ".rufus" / "config.yaml"
         else:
             self.config_path = Path(config_path)
 

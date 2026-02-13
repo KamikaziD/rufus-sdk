@@ -1,0 +1,23 @@
+# Test Application Workflow
+# Demonstrates: Parallel execution, Decision steps, Sub-workflows, Dynamic injection,
+# Human-in-the-loop, Saga compensation
+
+workflow_type: "TestApplication"
+workflow_version: "1.1"
+initial_state_model: "state_models.TestApplicationState"
+
+steps:
+  - name: "Initialize_Application"
+    type: "STANDARD"
+    function: "workflow_functions.initialize_application"
+    dependencies: []
+    automate_next: true
+  - name: "ProcessStep1"
+    type: "STANDARD"
+    function: "workflow_functions.process_step1"
+    dependencies: ["Initialize_Application"]
+    automate_next: true
+  - name: "ProcessFinal"
+    type: "STANDARD"
+    function: "workflow_functions.process_final"
+    dependencies: ["ProcessStep1"]

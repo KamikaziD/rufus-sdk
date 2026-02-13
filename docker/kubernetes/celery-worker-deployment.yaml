@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rufus-celery-worker
+  labels:
+    app: rufus
+    component: celery-worker
+spec:
+  replicas: 3  # Horizontal scaling - adjust as needed
+  selector:
+    matchLabels:
+      app: rufus
+      component: celery-worker
+  template:
+    metadata:
+      labels:
+        app: rufus
+        component: celery-worker
+    spec:
+      containers:
+      - name: celery-worker
+        image: your-registry/rufus-celery-worker:latest
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: database-url
+        - name: CELERY_BROKER_URL
+          valueFrom:
+            configMapKeyRef:
+              name: rufus-config
+              key: celery-broker-url
+        - name: CELERY_RESULT_BACKEND
+          valueFrom:
+            configMapKeyRef:
+              name: rufus-config
+              key: celery-result-backend
+        - name: WORKER_CONCURRENCY
+          value: "4"
+        - name: WORKER_POOL
+          value: "prefork"
+        - name: WORKER_LOG_LEVEL
+          value: "info"
+        - name: WORKER_REGION
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['topology.kubernetes.io/region']
+        - name: WORKER_ZONE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['topology.kubernetes.io/zone']
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+        livenessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - rufus.celery_app
+            - inspect
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - rufus.celery_app
+            - inspect
+            - active
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rufus-celery-worker-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rufus-celery-worker
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 5
+        periodSeconds: 30
+      selectPolicy: Max

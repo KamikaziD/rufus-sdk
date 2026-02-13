@@ -16,6 +16,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import tempfile
 import os
+import uuid
 
 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 
@@ -149,34 +150,57 @@ class PersistenceBenchmark:
         """Benchmark workflow save operations"""
         result = BenchmarkResult(f"{provider_name}_save_workflow")
 
+        # Generate UUIDs upfront for reuse
+        workflow_ids = [str(uuid.uuid4()) for _ in range(iterations)]
+
         for i in range(iterations):
             workflow_data = {
-                'id': f'workflow_{i}',
+                'id': workflow_ids[i],
                 'workflow_type': 'BenchmarkWorkflow',
-                'current_step': 0,
+                'workflow_version': 'v1',
+                'current_step': 'Step1',  # String, not int
                 'status': 'ACTIVE',
                 'state': {'iteration': i, 'data': {'key': f'value_{i}'}},
+                'definition_snapshot': None,
                 'steps_config': [
                     {'name': 'Step1', 'type': 'STANDARD'},
                     {'name': 'Step2', 'type': 'ASYNC'},
                 ],
                 'state_model_path': 'benchmark.State',
+                'saga_mode': False,
+                'completed_steps_stack': [],
+                'parent_execution_id': None,
+                'blocked_on_child_id': None,
+                'data_region': 'us-east-1',
+                'priority': 5,
+                'idempotency_key': None,
+                'metadata': {},
+                'owner_id': None,
+                'org_id': None,
+                'encrypted_state': None,
+                'encryption_key_id': None,
+                'error_message': None,
             }
 
             start = time.perf_counter()
-            await provider.save_workflow(f'workflow_{i}', workflow_data)
+            await provider.save_workflow(workflow_ids[i], workflow_data)
             elapsed = time.perf_counter() - start
             result.add_time(elapsed)
 
         self.results[provider_name]['save_workflow'] = result
+        # Store workflow IDs for later benchmarks
+        setattr(provider, '_benchmark_workflow_ids', workflow_ids)
 
     async def benchmark_load_workflow(self, provider_name: str, provider, iterations: int = 100):
         """Benchmark workflow load operations"""
         result = BenchmarkResult(f"{provider_name}_load_workflow")
 
+        # Retrieve saved workflow IDs
+        workflow_ids = getattr(provider, '_benchmark_workflow_ids', [str(uuid.uuid4()) for _ in range(iterations)])
+
         for i in range(iterations):
             start = time.perf_counter()
-            await provider.load_workflow(f'workflow_{i}')
+            await provider.load_workflow(workflow_ids[i])
             elapsed = time.perf_counter() - start
             result.add_time(elapsed)
 
@@ -198,10 +222,13 @@ class PersistenceBenchmark:
         """Benchmark task creation"""
         result = BenchmarkResult(f"{provider_name}_create_task")
 
+        # Get saved workflow IDs
+        workflow_ids = getattr(provider, '_benchmark_workflow_ids', [str(uuid.uuid4()) for _ in range(100)])
+
         for i in range(iterations):
             start = time.perf_counter()
             await provider.create_task_record(
-                execution_id=f'workflow_{i % 100}',
+                execution_id=workflow_ids[i % len(workflow_ids)],
                 step_name='BenchmarkStep',
                 step_index=0,
                 task_data={'iteration': i}
@@ -215,10 +242,13 @@ class PersistenceBenchmark:
         """Benchmark execution logging"""
         result = BenchmarkResult(f"{provider_name}_log_execution")
 
+        # Get saved workflow IDs
+        workflow_ids = getattr(provider, '_benchmark_workflow_ids', [str(uuid.uuid4()) for _ in range(100)])
+
         for i in range(iterations):
             start = time.perf_counter()
             await provider.log_execution(
-                workflow_id=f'workflow_{i % 100}',
+                workflow_id=workflow_ids[i % len(workflow_ids)],
                 log_level='INFO',
                 message=f'Benchmark log message {i}',
                 step_name='BenchmarkStep'
@@ -232,10 +262,13 @@ class PersistenceBenchmark:
         """Benchmark metric recording"""
         result = BenchmarkResult(f"{provider_name}_record_metric")
 
+        # Get saved workflow IDs
+        workflow_ids = getattr(provider, '_benchmark_workflow_ids', [str(uuid.uuid4()) for _ in range(100)])
+
         for i in range(iterations):
             start = time.perf_counter()
             await provider.record_metric(
-                workflow_id=f'workflow_{i % 100}',
+                workflow_id=workflow_ids[i % len(workflow_ids)],
                 workflow_type='BenchmarkWorkflow',
                 metric_name='step_duration_ms',
                 metric_value=float(i % 1000),

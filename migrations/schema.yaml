@@ -1,9 +1,9 @@
-# Rufus SDK - Unified Database Schema Definition
-# Version: 1.1.0
+# Rufus Edge SDK - Unified Database Schema Definition
+# Version: 2.0.0
 # This schema is compiled to database-specific SQL by tools/compile_schema.py
 
-version: "1.1.0"
-description: "Rufus workflow engine persistence schema"
+version: "2.0.0"
+description: "Rufus Edge fintech workflow engine persistence schema"
 
 # Type mappings for different databases
 type_mappings:
@@ -667,6 +667,378 @@ tables:
         columns: [step_name, metric_name, recorded_at]
         order:
           recorded_at: DESC
+
+  # ============================================================================
+  # EDGE DEVICES (Fintech Device Fleet Management)
+  # ============================================================================
+  edge_devices:
+    description: "Registered edge devices (POS terminals, ATMs, kiosks)"
+    columns:
+      - name: device_id
+        type: varchar
+        size: 100
+        primary_key: true
+
+      - name: device_type
+        type: varchar
+        size: 50
+        nullable: false
+        comment: "pos, atm, kiosk, mobile"
+
+      - name: device_name
+        type: varchar
+        size: 200
+        nullable: false
+
+      - name: merchant_id
+        type: varchar
+        size: 100
+        nullable: false
+
+      - name: location
+        type: varchar
+        size: 500
+        nullable: true
+
+      - name: status
+        type: varchar
+        size: 50
+        default: "'online'"
+        comment: "online, offline, maintenance, disabled"
+
+      - name: api_key_hash
+        type: varchar
+        size: 255
+        nullable: false
+        comment: "SHA256 hash of device API key"
+
+      - name: public_key
+        type: text
+        nullable: true
+        comment: "Device public key for mTLS"
+
+      - name: firmware_version
+        type: varchar
+        size: 50
+        nullable: true
+
+      - name: sdk_version
+        type: varchar
+        size: 50
+        nullable: true
+
+      - name: capabilities
+        type: jsonb
+        default:
+          postgres: "'[]'::jsonb"
+          sqlite: "'[]'"
+
+      - name: last_heartbeat_at
+        type: timestamp
+        nullable: true
+
+      - name: last_sync_at
+        type: timestamp
+        nullable: true
+
+      - name: config_version
+        type: varchar
+        size: 50
+        nullable: true
+        comment: "Current config version on device"
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: updated_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+    indexes:
+      - name: idx_device_merchant
+        columns: [merchant_id]
+
+      - name: idx_device_status
+        columns: [status, last_heartbeat_at]
+
+      - name: idx_device_type
+        columns: [device_type]
+
+  # ============================================================================
+  # DEVICE CONFIGURATIONS (ETag-based Config Push)
+  # ============================================================================
+  device_configs:
+    description: "Device configuration versions for ETag-based config pull"
+    columns:
+      - name: config_id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: config_version
+        type: varchar
+        size: 50
+        nullable: false
+        unique: true
+
+      - name: config_data
+        type: jsonb
+        nullable: false
+        comment: "Full config: floor_limit, fraud_rules, workflows, features"
+
+      - name: etag
+        type: varchar
+        size: 64
+        nullable: false
+        comment: "SHA256 hash of config_data for caching"
+
+      - name: is_active
+        type: boolean
+        default: true
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: created_by
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: description
+        type: text
+        nullable: true
+
+    indexes:
+      - name: idx_config_version
+        columns: [config_version]
+
+      - name: idx_config_active
+        columns: [is_active, created_at]
+        order:
+          created_at: DESC
+
+  # ============================================================================
+  # SAF TRANSACTIONS (Store-and-Forward for Offline Payments)
+  # ============================================================================
+  saf_transactions:
+    description: "Store-and-Forward transactions from edge devices"
+    columns:
+      - name: transaction_id
+        type: varchar
+        size: 100
+        primary_key: true
+
+      - name: idempotency_key
+        type: varchar
+        size: 255
+        nullable: false
+        unique: true
+
+      - name: device_id
+        type: varchar
+        size: 100
+        nullable: false
+        foreign_key:
+          table: edge_devices
+          column: device_id
+          on_delete: CASCADE
+
+      - name: merchant_id
+        type: varchar
+        size: 100
+        nullable: false
+
+      - name: amount_cents
+        type: integer
+        nullable: false
+
+      - name: currency
+        type: varchar
+        size: 3
+        default: "'USD'"
+
+      - name: card_token
+        type: varchar
+        size: 255
+        nullable: false
+        comment: "Tokenized card reference - NEVER store raw PAN"
+
+      - name: card_last_four
+        type: varchar
+        size: 4
+        nullable: true
+
+      - name: card_type
+        type: varchar
+        size: 20
+        nullable: true
+
+      - name: encrypted_payload
+        type: text
+        nullable: true
+        comment: "P2PE encrypted transaction data (base64)"
+
+      - name: encryption_key_id
+        type: varchar
+        size: 100
+        nullable: true
+
+      - name: status
+        type: varchar
+        size: 50
+        default: "'pending_sync'"
+        comment: "pending_sync, synced, settled, failed, voided"
+
+      - name: offline_approved_at
+        type: timestamp
+        nullable: true
+
+      - name: synced_at
+        type: timestamp
+        nullable: true
+
+      - name: settled_at
+        type: timestamp
+        nullable: true
+
+      - name: sync_attempts
+        type: integer
+        default: 0
+
+      - name: last_sync_error
+        type: text
+        nullable: true
+
+      - name: workflow_id
+        type: uuid
+        nullable: true
+        foreign_key:
+          table: workflow_executions
+          column: id
+          on_delete: SET NULL
+
+      - name: gateway_response
+        type: jsonb
+        nullable: true
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: updated_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: metadata
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+    indexes:
+      - name: idx_saf_device
+        columns: [device_id, created_at]
+        order:
+          created_at: DESC
+
+      - name: idx_saf_status
+        columns: [status, created_at]
+
+      - name: idx_saf_merchant
+        columns: [merchant_id, created_at]
+        order:
+          created_at: DESC
+
+      - name: idx_saf_pending
+        columns: [status, sync_attempts]
+        where: "status = 'pending_sync'"
+
+  # ============================================================================
+  # DEVICE COMMANDS (Remote Commands to Edge Devices)
+  # ============================================================================
+  device_commands:
+    description: "Pending commands for edge devices"
+    columns:
+      - name: command_id
+        type: uuid
+        primary_key: true
+        default:
+          postgres: "gen_random_uuid()"
+          sqlite: "lower(hex(randomblob(16)))"
+
+      - name: device_id
+        type: varchar
+        size: 100
+        nullable: false
+        foreign_key:
+          table: edge_devices
+          column: device_id
+          on_delete: CASCADE
+
+      - name: command_type
+        type: varchar
+        size: 50
+        nullable: false
+        comment: "reload_config, restart, update_firmware, sync_now"
+
+      - name: command_data
+        type: jsonb
+        default:
+          postgres: "'{}'::jsonb"
+          sqlite: "'{}'"
+
+      - name: status
+        type: varchar
+        size: 50
+        default: "'pending'"
+        comment: "pending, sent, acknowledged, failed, expired"
+
+      - name: created_at
+        type: timestamp
+        default:
+          postgres: "NOW()"
+          sqlite: "CURRENT_TIMESTAMP"
+
+      - name: sent_at
+        type: timestamp
+        nullable: true
+
+      - name: acknowledged_at
+        type: timestamp
+        nullable: true
+
+      - name: expires_at
+        type: timestamp
+        nullable: true
+
+      - name: error_message
+        type: text
+        nullable: true
+
+    indexes:
+      - name: idx_command_device_pending
+        columns: [device_id, status, created_at]
+        where: "status = 'pending'"
 
 # ============================================================================
 # TRIGGERS (PostgreSQL only)

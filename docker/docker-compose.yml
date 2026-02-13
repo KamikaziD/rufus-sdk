@@ -1,0 +1,96 @@
+# Rufus Edge Cloud Platform - Docker Compose
+#
+# Usage:
+#   cd docker
+#   docker compose up -d
+#
+# Environment Variables:
+#   - Copy .env.example to .env and customize (optional)
+#   - All values have sensible defaults in docker-compose.yml
+#   - See .env.example for full configuration options
+#
+# Services:
+#   - rufus-server: FastAPI control plane (port 8000)
+#   - postgres: PostgreSQL database (port 5433)
+#
+# Access:
+#   - API: http://localhost:8000
+#   - Docs: http://localhost:8000/docs
+#   - Health: http://localhost:8000/health
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: rufus-postgres
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-1000} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB} -c max_wal_size=${POSTGRES_MAX_WAL_SIZE:-2GB}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rufus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-rufus_cloud}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rufus} -d ${POSTGRES_DB:-rufus_cloud}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rufus-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Rufus Cloud Control Plane
+  # ─────────────────────────────────────────────────────────────────────────
+  rufus-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: rufus-cloud
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rufus}:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/${POSTGRES_DB:-rufus_cloud}
+      WORKFLOW_STORAGE: ${WORKFLOW_STORAGE:-postgres}
+
+      # PostgreSQL Connection Pool (optimized for high-load testing)
+      POSTGRES_POOL_MIN_SIZE: ${POSTGRES_POOL_MIN_SIZE:-50}
+      POSTGRES_POOL_MAX_SIZE: ${POSTGRES_POOL_MAX_SIZE:-500}
+      POSTGRES_POOL_COMMAND_TIMEOUT: ${POSTGRES_POOL_COMMAND_TIMEOUT:-60}
+      POSTGRES_POOL_MAX_QUERIES: ${POSTGRES_POOL_MAX_QUERIES:-500000}
+      POSTGRES_POOL_MAX_INACTIVE_LIFETIME: ${POSTGRES_POOL_MAX_INACTIVE_LIFETIME:-600}
+
+      # Server settings
+      RUFUS_REGISTRATION_KEY: ${RUFUS_REGISTRATION_KEY:-demo-registration-key-2024}
+
+      # Artifacts
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - artifacts_data:/app/artifacts
+    ports:
+      - "${RUFUS_SERVER_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+networks:
+  rufus-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  artifacts_data:

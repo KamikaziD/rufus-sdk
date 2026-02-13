@@ -4,13 +4,74 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rufus is a Python-native, SDK-first workflow engine designed for orchestrating complex business processes and AI pipelines. It emphasizes a declarative, developer-friendly approach where workflows are defined in YAML and executed via an embedded SDK. The project consists of:
+**Rufus Edge** is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides:
+
+- **Offline-first architecture** with SQLite for edge deployment
+- **Store-and-Forward (SAF)** for offline payment transactions
+- **Cloud control plane** for device fleet management
+- **ETag-based config push** for fraud rules and workflow updates
+- **Saga pattern** for transaction compensation/rollback
+- **PCI-DSS ready** architecture with encryption support
+
+The project consists of:
 
 1. **Core SDK** (`src/rufus/`) - The reusable workflow engine library
-2. **CLI Tool** (`src/rufus_cli/`) - Comprehensive command-line interface with 21 commands for workflow management, database operations, and monitoring
-3. **Server** (`src/rufus_server/`) - Optional FastAPI wrapper for REST API access
+2. **Edge Agent** (`src/rufus_edge/`) - Runtime for edge devices with offline support
+3. **Cloud Control Plane** (`src/rufus_server/`) - FastAPI server for device management
+4. **CLI Tool** (`src/rufus_cli/`) - Command-line interface for workflow management
+
+### Fintech Edge Architecture
+
+```
+CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
+├── Device Registry API                    ├── RufusEdgeAgent
+├── Config Server (ETag)         <─────>   ├── SyncManager (SAF)
+├── Transaction Sync API                   ├── ConfigManager
+└── Settlement Gateway                     └── Local Workflows
+```
+
+### Key Use Cases
+
+| Use Case | Description |
+|----------|-------------|
+| **Store-and-Forward** | Process payments offline, sync when online |
+| **TMS Config Push** | Hot-deploy fraud rules without firmware updates |
+| **Transaction Compensation** | Saga-based rollback for failed operations |
+| **Offline Floor Limits** | Approve small transactions without network |
 
 The architecture separates workflow definition (YAML) from implementation (Python functions) and decouples core engine logic from external dependencies through pluggable provider interfaces.
+
+### Heritage and Evolution
+
+**Rufus is extracted from "Confucius"**, a monolithic workflow engine prototype. During the extraction and refactoring, several key features were inherited and preserved:
+
+**Inherited from Confucius:**
+- ✅ **HTTP Steps** - Polyglot workflow support (call services in any language)
+- ✅ **Phase 8 Step Types** - Loop, Fire-and-Forget, Cron Scheduler (added Jan 2026)
+- ✅ **Semantic Firewall** - XSS/SQLi input sanitization (`src/rufus/implementations/security/`)
+- ✅ **PostgresExecutor Pattern** - Async/sync bridge for Celery workers (`src/rufus/utils/postgres_executor.py`)
+- ✅ **Saga Pattern** - Transaction compensation/rollback
+- ✅ **Sub-Workflows** - Hierarchical workflow composition
+- ✅ **Dynamic Injection** - Runtime step insertion based on conditions
+
+**Rufus Additions:**
+- ✅ **Provider Pattern** - Pluggable interfaces for persistence/execution/observability
+- ✅ **Multi-Executor Support** - Sync, ThreadPool, Celery, PostgreSQL task queue
+- ✅ **Production Tooling** - Docker, Kubernetes, Helm charts
+- ✅ **CLI Tool** - Comprehensive command-line interface
+- ✅ **SQLite Support** - Embedded database for development/edge deployment
+- ✅ **Performance Optimizations** - uvloop, orjson, connection pooling, import caching
+- ✅ **Reliability Features** - Zombie workflow recovery, heartbeat monitoring
+- ✅ **Workflow Versioning** - Definition snapshots for safe deployments
+
+**Not Yet Ported:**
+- ⏳ **Debug UI** - Visual workflow editor/inspector (planned future enhancement)
+
+**Key Architectural Difference:**
+- **Confucius**: Monolithic application (4,637 lines, 22 files)
+- **Rufus**: Modular SDK + CLI + Server (31,112 lines, 125 files)
+
+The 5.7x code growth reflects architectural improvements (provider pattern), production tooling (Docker/K8s), and comprehensive testing infrastructure - not feature bloat. Rufus preserved 80% of Confucius's advanced features while adding enterprise-grade capabilities.
 
 ## Development Commands
 
@@ -281,7 +342,7 @@ All external integrations are abstracted via Python Protocol interfaces:
 
 **Step Configuration Keys**
 - `name`: Unique step identifier within workflow
-- `type`: Execution type (STANDARD, ASYNC, DECISION, PARALLEL, etc.)
+- `type`: Execution type (see Available Step Types below)
 - `function`: Python path to step function
 - `compensate_function`: Optional compensation logic for Saga pattern
 - `input_model`: Pydantic model for input validation
@@ -289,6 +350,17 @@ All external integrations are abstracted via Python Protocol interfaces:
 - `dependencies`: List of prerequisite step names
 - `dynamic_injection`: Rules for runtime step insertion
 - `routes`: Declarative routing for DECISION steps
+
+**Available Step Types:**
+- `STANDARD` - Synchronous function execution
+- `ASYNC` - Long-running task executed by async executor (e.g., Celery)
+- `DECISION` - Can raise `WorkflowJumpDirective` to change flow
+- `PARALLEL` - Multiple tasks executed concurrently, results merged
+- `HTTP` - Call external services in any language (polyglot workflows)
+- `LOOP` - Execute step repeatedly over collection or until condition met *(Phase 8)*
+- `FIRE_AND_FORGET` - Async execution without waiting for completion *(Phase 8)*
+- `CRON_SCHEDULE` - Schedule step to run at specific times/intervals *(Phase 8)*
+- `HUMAN_IN_LOOP` - Pauses workflow, raises `WorkflowPauseDirective`
 
 ## Key Patterns
 
@@ -550,6 +622,723 @@ steps:
 
 **Documentation**: See [USAGE_GUIDE.md](USAGE_GUIDE.md#81-polyglot-workflows-http-steps) for complete polyglot documentation.
 
+### Advanced Step Types (Phase 8 Features)
+
+Rufus includes advanced step types inherited from Confucius Phase 8, enabling sophisticated control flow patterns:
+
+#### Loop Steps
+
+Execute a step repeatedly over a collection or until a condition is met.
+
+**Basic Loop Configuration**:
+```yaml
+- name: "Process_Batch"
+  type: "LOOP"
+  loop_config:
+    items: "{{state.user_ids}}"  # Collection to iterate over
+    item_var: "current_user_id"   # Variable name for current item
+    max_iterations: 100            # Safety limit
+  function: "steps.process_user"
+  automate_next: true
+```
+
+**Conditional Loop**:
+```yaml
+- name: "Poll_Until_Ready"
+  type: "LOOP"
+  loop_config:
+    condition: "state.status != 'ready'"
+    max_iterations: 10
+    delay_seconds: 5  # Wait between iterations
+  function: "steps.check_status"
+```
+
+**Loop Step Function**:
+```python
+from rufus.models import StepContext
+
+def process_user(state: MyState, context: StepContext, current_user_id: str) -> dict:
+    """Loop iteration receives item_var as parameter."""
+    result = process_single_user(current_user_id)
+    return {"processed_count": state.processed_count + 1}
+```
+
+**Use Cases**:
+- Batch processing (process 1000 orders)
+- Polling external APIs until ready
+- Retry logic with exponential backoff
+- Paginated API consumption
+
+#### Fire-and-Forget Steps
+
+Execute a step asynchronously without waiting for completion. Workflow continues immediately.
+
+**Configuration**:
+```yaml
+- name: "Send_Notification"
+  type: "FIRE_AND_FORGET"
+  function: "steps.send_email"
+  fire_and_forget_config:
+    timeout_seconds: 30
+    on_error: "log"  # Options: log, ignore, fail_workflow
+```
+
+**Fire-and-Forget Function**:
+```python
+def send_email(state: OrderState, context: StepContext) -> dict:
+    """This executes asynchronously, workflow doesn't wait."""
+    email_service.send(
+        to=state.customer_email,
+        subject="Order Confirmation",
+        body=f"Order {state.order_id} confirmed"
+    )
+    return {}  # Return value not merged into workflow state
+```
+
+**Use Cases**:
+- Sending notifications (email, SMS, push)
+- Audit logging to external systems
+- Analytics tracking
+- Cache warming
+
+**⚠️ Important Notes**:
+- Workflow doesn't wait for completion
+- Return value is NOT merged into state
+- Errors are logged but don't fail workflow (by default)
+- Use for non-critical side effects only
+
+#### Cron Schedule Steps
+
+Schedule steps to run at specific times or intervals (like cron jobs).
+
+**Configuration**:
+```yaml
+- name: "Daily_Report"
+  type: "CRON_SCHEDULE"
+  cron_config:
+    cron_expression: "0 9 * * *"  # Every day at 9 AM
+    timezone: "America/New_York"
+  function: "steps.generate_report"
+
+- name: "Hourly_Sync"
+  type: "CRON_SCHEDULE"
+  cron_config:
+    cron_expression: "0 * * * *"  # Every hour
+    max_runs: 100  # Stop after 100 executions
+  function: "steps.sync_data"
+```
+
+**Cron Expression Format**:
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6) (Sunday to Saturday)
+│ │ │ │ │
+│ │ │ │ │
+* * * * *
+```
+
+**Common Expressions**:
+- `0 0 * * *` - Daily at midnight
+- `0 9 * * 1-5` - Weekdays at 9 AM
+- `*/15 * * * *` - Every 15 minutes
+- `0 0 1 * *` - First day of every month
+
+**Cron Step Function**:
+```python
+def generate_report(state: ReportState, context: StepContext) -> dict:
+    """Executed on schedule."""
+    report = create_daily_report(state.account_id)
+    send_report(report)
+    return {"last_report_time": datetime.utcnow().isoformat()}
+```
+
+**Use Cases**:
+- Daily/weekly/monthly reports
+- Periodic data synchronization
+- Scheduled maintenance tasks
+- Recurring payment processing
+
+**⚠️ Important Notes**:
+- Requires persistent workflow (doesn't complete)
+- Uses `CronScheduleWorkflowStep` internally
+- Timezone-aware scheduling
+- Ensure workflow stays in `ACTIVE` status for recurring execution
+
+#### Combining Advanced Step Types
+
+**Example: E-commerce Order Processing**:
+```yaml
+workflow_type: "OrderProcessing"
+initial_state_model: "models.OrderState"
+
+steps:
+  # Standard validation
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "steps.validate_order"
+    automate_next: true
+
+  # Loop over order items
+  - name: "Reserve_Inventory"
+    type: "LOOP"
+    loop_config:
+      items: "{{state.order_items}}"
+      item_var: "item"
+      max_iterations: 50
+    function: "steps.reserve_item"
+    automate_next: true
+
+  # Fire-and-forget notification
+  - name: "Send_SMS_Notification"
+    type: "FIRE_AND_FORGET"
+    function: "steps.send_sms"
+
+  # HTTP call to payment gateway
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://payment-gateway.com/charge"
+      body:
+        amount: "{{state.total_amount}}"
+        token: "{{state.payment_token}}"
+    automate_next: true
+
+  # Schedule follow-up email
+  - name: "Schedule_Followup"
+    type: "CRON_SCHEDULE"
+    cron_config:
+      cron_expression: "0 0 * * *"  # Daily check
+      max_runs: 7  # Stop after 7 days
+    function: "steps.check_delivery_status"
+```
+
+**Best Practices**:
+1. **Loop Steps**: Always set `max_iterations` to prevent infinite loops
+2. **Fire-and-Forget**: Only use for non-critical operations
+3. **Cron Steps**: Set `max_runs` for finite workflows
+4. **Error Handling**: Add DECISION steps after loops for error checking
+5. **Testing**: Use `SyncExecutionProvider` for testing (runs immediately)
+
+## Distributed Execution with Celery
+
+Rufus supports distributed workflow execution using Celery for production deployments requiring high concurrency, async tasks, and horizontal scaling.
+
+### Architecture
+
+```
+┌─────────────────┐
+│ Rufus API/CLI   │
+│ (Workflow Start)│
+└────────┬────────┘
+         │
+    ┌────▼─────┐
+    │PostgreSQL│ ← Workflow State
+    └────┬─────┘
+         │
+    ┌────▼─────┐
+    │  Redis   │ ← Celery Broker/Backend
+    └────┬─────┘
+         │
+    ┌────▼──────────────────┐
+    │ Celery Workers (1-N)  │
+    │ • Async Tasks         │
+    │ • Parallel Execution  │
+    │ • Sub-Workflows       │
+    │ • HTTP Steps          │
+    └───────────────────────┘
+```
+
+### Installation
+
+**Install Celery dependencies:**
+```bash
+# Install with Celery support
+pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+
+# Or install directly
+pip install celery redis psycopg2-binary prometheus-client
+```
+
+**Start Redis (required for Celery):**
+```bash
+# Using Docker
+docker run -d --name redis -p 6379:6379 redis:latest
+
+# Or install locally
+brew install redis  # macOS
+redis-server
+```
+
+### Configuration
+
+**Environment Variables:**
+```bash
+# Celery broker and backend
+export CELERY_BROKER_URL="redis://localhost:6379/0"
+export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
+
+# Database for workflow state
+export DATABASE_URL="postgresql://user:pass@localhost:5432/rufus"
+
+# Optional: Worker configuration
+export WORKER_ID="worker-01"
+export WORKER_REGION="us-east-1"
+export WORKER_ZONE="us-east-1a"
+export WORKER_CAPABILITIES='{"gpu": true, "memory_gb": 16}'
+```
+
+**Create Celery app in your application:**
+```python
+# my_app/celery_app.py
+from rufus.celery_app import celery_app
+
+# Configure Celery (optional customization)
+celery_app.conf.update(
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+    timezone='UTC',
+    enable_utc=True,
+)
+
+# Export for Celery worker
+app = celery_app
+```
+
+### Starting Workers
+
+**Basic worker:**
+```bash
+# Start worker with auto-reload (development)
+celery -A rufus.celery_app worker --loglevel=info --autoreload
+
+# Production worker
+celery -A rufus.celery_app worker --loglevel=warning --concurrency=4
+```
+
+**Regional workers (for geo-distributed systems):**
+```bash
+# US East worker
+export WORKER_REGION="us-east-1"
+celery -A rufus.celery_app worker -Q us-east-1,default --loglevel=info
+
+# EU Central worker
+export WORKER_REGION="eu-central-1"
+celery -A rufus.celery_app worker -Q eu-central-1,default --loglevel=info
+```
+
+**Worker with specific capabilities:**
+```bash
+# GPU-enabled worker
+export WORKER_CAPABILITIES='{"gpu": true, "cuda_version": "12.1"}'
+celery -A rufus.celery_app worker -Q gpu-tasks --loglevel=info
+
+# High-memory worker
+export WORKER_CAPABILITIES='{"memory_gb": 64, "cpu_cores": 32}'
+celery -A rufus.celery_app worker -Q memory-intensive --loglevel=info
+```
+
+### Using CeleryExecutionProvider
+
+**Initialize workflow with Celery:**
+```python
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.execution.celery import CeleryExecutionProvider
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from rufus.implementations.observability.logging import LoggingObserver
+
+# Create Celery execution provider
+execution_provider = CeleryExecutionProvider()
+
+# Create persistence (PostgreSQL recommended for production)
+persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/rufus")
+await persistence.initialize()
+
+# Build workflow with Celery execution
+builder = WorkflowBuilder(
+    config_dir="config/",
+    persistence_provider=persistence,
+    execution_provider=execution_provider,
+    observer=LoggingObserver()
+)
+
+# Create and start workflow
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "12345"},
+    data_region="us-east-1"  # Route to regional workers
+)
+
+# Workflow will use Celery for async/parallel steps
+await workflow.next_step()
+```
+
+### Async Steps with Celery
+
+**Define async task (in your application):**
+```python
+# my_app/tasks.py
+from rufus.celery_app import celery_app
+
+@celery_app.task
+def process_payment(state: dict, workflow_id: str):
+    """Long-running payment processing task."""
+    import time
+    time.sleep(10)  # Simulate processing
+
+    return {
+        "transaction_id": "tx_12345",
+        "status": "approved",
+        "amount": state.get("amount", 0)
+    }
+```
+
+**Workflow YAML:**
+```yaml
+workflow_type: "OrderProcessing"
+initial_state_model: "my_app.models.OrderState"
+steps:
+  - name: "Process_Payment"
+    type: "ASYNC"
+    function: "my_app.tasks.process_payment"
+    automate_next: true
+```
+
+**Execution flow:**
+1. Workflow hits `Process_Payment` → status becomes `PENDING_ASYNC`
+2. Celery task `process_payment` dispatched to worker
+3. Worker processes payment (10 seconds)
+4. Task completes → calls `resume_from_async_task`
+5. Workflow resumes with result → status becomes `ACTIVE`
+6. If `automate_next: true`, workflow advances to next step
+
+### Parallel Execution with Celery
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Parallel_Checks"
+    type: "PARALLEL"
+    tasks:
+      - name: "credit_check"
+        function_path: "my_app.tasks.check_credit"
+      - name: "inventory_check"
+        function_path: "my_app.tasks.check_inventory"
+      - name: "fraud_check"
+        function_path: "my_app.tasks.check_fraud"
+    merge_strategy: "SHALLOW"
+    merge_conflict_behavior: "PREFER_NEW"
+    allow_partial_success: false
+    timeout_seconds: 60
+```
+
+**Tasks (all run in parallel):**
+```python
+@celery_app.task
+def check_credit(state: dict, workflow_id: str):
+    return {"credit_score": 750, "approved": True}
+
+@celery_app.task
+def check_inventory(state: dict, workflow_id: str):
+    return {"in_stock": True, "quantity": 50}
+
+@celery_app.task
+def check_fraud(state: dict, workflow_id: str):
+    return {"fraud_score": 0.05, "risk_level": "low"}
+```
+
+**Result merging:**
+```python
+# After all tasks complete, results merged into state:
+{
+    "credit_score": 750,
+    "approved": True,
+    "in_stock": True,
+    "quantity": 50,
+    "fraud_score": 0.05,
+    "risk_level": "low"
+}
+```
+
+### Sub-Workflows with Celery
+
+**Parent workflow:**
+```python
+from rufus.models import StartSubWorkflowDirective
+
+def trigger_kyc(state: OrderState, context: StepContext):
+    """Trigger KYC sub-workflow."""
+    raise StartSubWorkflowDirective(
+        workflow_type="KYC",
+        initial_data={
+            "user_id": state.user_id,
+            "document_url": state.id_document
+        },
+        data_region="eu-central-1"  # Run in EU region
+    )
+```
+
+**Execution flow:**
+1. Parent hits `trigger_kyc` → creates child workflow → status `PENDING_SUB_WORKFLOW`
+2. Celery task `execute_sub_workflow` dispatched
+3. Child workflow runs to completion on worker
+4. When child completes → `resume_parent_from_child` dispatched
+5. Parent resumes with child results in `state.sub_workflow_results["KYC"]`
+
+### Worker Registry
+
+Celery workers automatically register with PostgreSQL database for fleet management and monitoring.
+
+**Database table (auto-created by migration):**
+```sql
+CREATE TABLE worker_nodes (
+    worker_id VARCHAR(100) PRIMARY KEY,
+    hostname VARCHAR(255),
+    region VARCHAR(50),
+    zone VARCHAR(50),
+    capabilities JSONB DEFAULT '{}',
+    status VARCHAR(20),  -- 'online', 'offline'
+    last_heartbeat TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Query active workers:**
+```sql
+-- Active workers (heartbeat within last 2 minutes)
+SELECT worker_id, hostname, region, last_heartbeat
+FROM worker_nodes
+WHERE status = 'online'
+  AND last_heartbeat > NOW() - INTERVAL '2 minutes';
+
+-- Workers by region
+SELECT region, COUNT(*) as worker_count
+FROM worker_nodes
+WHERE status = 'online'
+GROUP BY region;
+```
+
+### Event Publishing
+
+Celery workers publish workflow events to Redis for real-time monitoring and audit logging.
+
+**Redis Streams (persistent events):**
+```bash
+# View workflow events
+redis-cli XREAD STREAMS workflow:persistence 0
+
+# View retry queue
+redis-cli XREAD STREAMS workflow:retry:bridge 0
+```
+
+**Redis Pub/Sub (real-time):**
+```python
+import redis.asyncio as redis
+
+async def monitor_workflow(workflow_id: str):
+    """Monitor workflow events in real-time."""
+    r = redis.from_url("redis://localhost:6379")
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"workflow:events:{workflow_id}")
+
+    async for message in pubsub.listen():
+        if message['type'] == 'message':
+            print(f"Event: {message['data']}")
+```
+
+### Monitoring and Metrics
+
+**Prometheus metrics (via EventPublisher):**
+```python
+# Metrics exported at /metrics endpoint (if server is running)
+workflow_events_total{event_type="workflow.created"} 150
+workflow_events_total{event_type="workflow.completed"} 120
+workflow_events_total{event_type="workflow.failed"} 5
+```
+
+**Celery monitoring with Flower:**
+```bash
+# Install Flower
+pip install flower
+
+# Start Flower dashboard
+celery -A rufus.celery_app flower --port=5555
+
+# Open http://localhost:5555
+```
+
+**Query worker heartbeats:**
+```python
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+persistence = PostgresPersistenceProvider(db_url)
+await persistence.initialize()
+
+# Get stale workers (no heartbeat in 5 minutes)
+async with persistence.pool.acquire() as conn:
+    stale_workers = await conn.fetch("""
+        SELECT worker_id, hostname, last_heartbeat
+        FROM worker_nodes
+        WHERE status = 'online'
+          AND last_heartbeat < NOW() - INTERVAL '5 minutes'
+    """)
+```
+
+### Production Deployment
+
+**Docker Compose example:**
+```yaml
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: rufus
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    build: .
+    command: celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      WORKER_REGION: us-east-1
+    depends_on:
+      - postgres
+      - redis
+    deploy:
+      replicas: 3  # Scale to 3 workers
+
+  api:
+    build: .
+    command: uvicorn rufus_server.main:app --host 0.0.0.0
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+    depends_on:
+      - postgres
+      - redis
+      - worker
+```
+
+**Kubernetes deployment:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rufus-worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: rufus-worker
+  template:
+    metadata:
+      labels:
+        app: rufus-worker
+    spec:
+      containers:
+      - name: worker
+        image: myregistry/rufus-worker:latest
+        command: ["celery", "-A", "rufus.celery_app", "worker", "--concurrency=4"]
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: database-url
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service:6379/0"
+        - name: WORKER_REGION
+          value: "us-east-1"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+```
+
+### Troubleshooting
+
+**Workers not picking up tasks:**
+```bash
+# Check Redis connection
+redis-cli ping
+
+# Verify worker is running
+celery -A rufus.celery_app inspect active
+
+# Check task routes
+celery -A rufus.celery_app inspect registered
+```
+
+**Workflows stuck in PENDING_ASYNC:**
+```bash
+# Check for failed tasks
+celery -A rufus.celery_app events
+
+# Inspect task results
+redis-cli GET celery-task-meta-<task_id>
+
+# Check worker logs
+celery -A rufus.celery_app worker --loglevel=debug
+```
+
+**Worker registry not updating:**
+```sql
+-- Check worker heartbeats
+SELECT * FROM worker_nodes ORDER BY last_heartbeat DESC;
+
+-- Reset stuck workers
+UPDATE worker_nodes SET status = 'offline' WHERE last_heartbeat < NOW() - INTERVAL '10 minutes';
+```
+
+### Performance Tuning
+
+**Worker concurrency:**
+```bash
+# CPU-bound tasks (lower concurrency)
+celery -A rufus.celery_app worker --concurrency=2
+
+# I/O-bound tasks (higher concurrency)
+celery -A rufus.celery_app worker --concurrency=20
+
+# Auto-scale workers
+celery -A rufus.celery_app worker --autoscale=10,2
+```
+
+**Task time limits:**
+```python
+@celery_app.task(time_limit=300, soft_time_limit=270)
+def long_running_task(state: dict, workflow_id: str):
+    # Task killed after 300 seconds
+    # Soft limit warning at 270 seconds
+    pass
+```
+
+**Result expiration:**
+```python
+celery_app.conf.update(
+    result_expires=3600,  # Results expire after 1 hour
+)
+```
+
 ## Testing
 
 ### Using TestHarness
@@ -675,97 +1464,115 @@ export RUFUS_USE_ORJSON=false  # Use stdlib json
 
 ## Database Schema Management
 
-Rufus uses a **unified schema definition** approach to support multiple databases (PostgreSQL and SQLite) without schema divergence.
+Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach optimized for performance.
 
-### Schema Standardization Architecture
+### Migration Architecture
 
 ```
-migrations/schema.yaml (unified definition)
+src/rufus/db_schema/database.py (SQLAlchemy Core models)
            │
-    ┌──────┴──────┐
-    ▼             ▼
-PostgreSQL     SQLite
- .sql files    .sql files
+           ├─> Alembic autogenerate
+           │   └─> versions/*.py (migration files)
+           │
+           └─> Runtime: Raw SQL queries (0% overhead)
 ```
 
-**Key Components:**
+**Key Decision:** After performance benchmarking (Phase 3), we chose a **hybrid approach**:
+- ✅ **Use SQLAlchemy** for schema definition and migration generation
+- ✅ **Keep raw SQL** for all runtime queries (45% faster than SQLAlchemy Core)
+- 🎯 **Result**: 100% migration benefits, 0% query performance impact
 
-1. **`migrations/schema.yaml`** - Single source of truth for database schema
-   - Database-agnostic column types (uuid, jsonb, timestamp, etc.)
-   - Type mappings for each database (JSONB→TEXT for SQLite)
-   - Table definitions, indexes, triggers, views
-   - Version: 1.0.0
+### Key Components
 
-2. **`tools/compile_schema.py`** - Schema compiler
-   - Generates database-specific SQL from YAML
-   - Handles type conversions automatically
-   - Supports PostgreSQL and SQLite
+1. **`src/rufus/db_schema/database.py`** - SQLAlchemy Core table definitions
+   - Single source of truth for schema
+   - Database-agnostic type mapping
+   - Used by Alembic for migration generation only
+   - NOT used for runtime queries (raw SQL for performance)
 
-3. **`tools/validate_schema.py`** - Schema validation
-   - Compares generated SQL against original
-   - Verifies type mappings are correct
-   - Ensures all tables, indexes, triggers present
+2. **`src/rufus/alembic/`** - Alembic migration system
+   - `alembic.ini` - Configuration file
+   - `env.py` - Migration environment (PostgreSQL + SQLite support)
+   - `versions/` - Auto-generated migration files
 
-4. **`tools/migrate.py`** - Migration manager
-   - Tracks applied migrations via `schema_migrations` table
-   - Applies pending migrations in order
-   - Supports both PostgreSQL and SQLite
+3. **Runtime Persistence** - Raw SQL queries
+   - `src/rufus/implementations/persistence/postgres.py` - Direct asyncpg usage
+   - `src/rufus/implementations/persistence/sqlite.py` - Direct aiosqlite usage
+   - Zero abstraction overhead
 
-### Type Mappings
+### Type Mappings (SQLAlchemy ↔ Database)
 
-| Unified Type | PostgreSQL | SQLite |
-|--------------|------------|--------|
-| `uuid` | UUID | TEXT |
-| `jsonb` | JSONB | TEXT |
-| `timestamp` | TIMESTAMPTZ | TEXT |
-| `boolean` | BOOLEAN | INTEGER (0/1) |
-| `bigserial` | BIGSERIAL | INTEGER AUTOINCREMENT |
-| `numeric` | NUMERIC | REAL |
-| `inet` | INET | TEXT |
+| SQLAlchemy Type | PostgreSQL | SQLite | Notes |
+|-----------------|------------|--------|-------|
+| `String(36)` | VARCHAR(36) | TEXT | For UUIDs (cross-DB compat) |
+| `Text` | TEXT | TEXT | For JSONB in SQLite |
+| `DateTime` | TIMESTAMPTZ | TEXT | Timezone-aware |
+| `Boolean` | BOOLEAN | INTEGER | 0/1 in SQLite |
+| `Integer` | INTEGER | INTEGER | Auto-increment supported |
+| `LargeBinary` | BYTEA | BLOB | For encrypted state |
 
-### Workflow
+**Note:** PostgreSQL migrations use native types (UUID, JSONB) for optimal performance. SQLite uses TEXT equivalents.
 
-**Generate Migrations:**
+### Migration Workflow
+
+**1. Create a New Migration:**
 ```bash
-# Generate both PostgreSQL and SQLite migrations
-python tools/compile_schema.py --all
+cd src/rufus
 
-# Generate specific database
-python tools/compile_schema.py --target postgres --output migrations/002_postgres.sql
-python tools/compile_schema.py --target sqlite --output migrations/002_sqlite.sql
+# Auto-generate from SQLAlchemy model changes
+alembic revision --autogenerate -m "add user preferences table"
+
+# Or create empty migration for manual SQL
+alembic revision -m "add custom index"
 ```
 
-**Validate Schema:**
+**2. Review Generated Migration:**
 ```bash
-# Validate all databases
-python tools/validate_schema.py --all
+# Check what Alembic detected
+cat alembic/versions/<revision>_add_user_preferences_table.py
 
-# Validate specific database
-python tools/validate_schema.py --target postgres
+# Alembic auto-generates:
+# - Table creation/deletion
+# - Column additions/changes
+# - Index creation/deletion
+# - Foreign key constraints
+
+# Warning: ~15% false positive rate - always review!
 ```
 
-**Apply Migrations:**
+**3. Apply Migrations:**
 ```bash
 # PostgreSQL
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --init
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --status
-python tools/migrate.py --db postgres://user:pass@localhost/dbname --up
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+alembic upgrade head
 
-# SQLite
-python tools/migrate.py --db sqlite:///path/to/db.sqlite --init
-python tools/migrate.py --db sqlite:///path/to/db.sqlite --up
+# Check current version
+alembic current
+
+# View history
+alembic history
+
+# Rollback one migration
+alembic downgrade -1
+```
+
+**4. For SQLite:**
+```bash
+# SQLite (uses batch mode for ALTER compatibility)
+export DATABASE_URL="sqlite:///workflow.db"
+alembic upgrade head
 ```
 
 ### Schema Modification Process
 
 When modifying the database schema:
 
-1. **Edit only `migrations/schema.yaml`** - Never edit .sql files directly
-2. **Increment schema version** in schema.yaml
-3. **Generate migrations** using compile_schema.py
-4. **Validate** using validate_schema.py
-5. **Test migrations** against test databases
-6. **Commit all files** (schema.yaml + generated .sql files)
+1. **Edit `src/rufus/db_schema/database.py`** - Modify SQLAlchemy table definitions
+2. **Generate migration** - `alembic revision --autogenerate -m "description"`
+3. **Review migration** - Check auto-generated code (Alembic ~15% false positive rate)
+4. **Test migration** - Apply to dev database first
+5. **Update runtime SQL** - If schema changed, update raw SQL queries in persistence providers
+6. **Commit all files** - SQLAlchemy models + generated migration file
 
 Example schema.yaml structure:
 ```yaml
@@ -824,6 +1631,179 @@ from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
 ```
+
+### Migration System: Alembic
+
+Rufus uses **Alembic** as the primary migration system for all deployments:
+
+#### Alembic Features
+
+**Characteristics:**
+- Auto-generate migrations from SQLAlchemy model changes
+- Version tracking via `alembic_version` table
+- Incremental migration support
+- Rollback capability (`alembic downgrade`)
+- Works with both PostgreSQL and SQLite (batch mode)
+
+**Migration Sources:**
+1. **Auto-generated**: `alembic revision --autogenerate`
+   - Detects table/column changes
+   - Generates upgrade/downgrade functions
+   - ~15% false positive rate - always review
+
+2. **Manual**: `alembic revision` (empty template)
+   - For complex migrations
+   - Custom SQL or data migrations
+   - Python-based logic
+
+**Version Tracking:**
+- `alembic_version` table tracks current schema version
+- Migration history: `alembic history`
+- Current version: `alembic current`
+
+**Batch Mode (SQLite):**
+- Automatically enabled for SQLite in `env.py`
+- Allows ALTER TABLE operations (SQLite limitation workaround)
+- No code changes needed - transparent
+
+#### Alembic vs Legacy Systems
+
+| Feature | Alembic (Current) | Old schema.yaml | Docker init-db.sql |
+|---------|------------------|-----------------|-------------------|
+| **Version Tracking** | ✅ alembic_version | ✅ schema_migrations | ❌ No |
+| **Auto-generate** | ✅ From SQLAlchemy | ❌ Manual YAML | ❌ Manual SQL |
+| **PostgreSQL** | ✅ Full support | ✅ Full support | ✅ Full support |
+| **SQLite** | ✅ Batch mode | ✅ Full support | ❌ N/A |
+| **Incremental** | ✅ Step-by-step | ✅ Step-by-step | ❌ All-or-nothing |
+| **Rollback** | ✅ Full support | ⚠️ Limited | ❌ No |
+| **IDE Support** | ✅ Python autocomplete | ❌ YAML only | ❌ SQL only |
+
+#### Tables Managed by Alembic
+
+**Core Workflow Tables** (in all Alembic migrations):
+- `workflow_executions` - Main workflow state
+- `workflow_audit_log` - Event audit trail
+- `workflow_metrics` - Performance metrics
+- `workflow_heartbeats` - Zombie detection
+- `alembic_version` - Migration version tracking
+
+**Edge-Specific Tables** (also in SQLAlchemy schema):
+- `edge_devices` - Device registry
+- `device_commands` - Cloud-to-device commands
+
+**Note:** Legacy tables from `docker/init-db.sql` (webhooks, broadcasts, etc.) remain in existing databases but are not in the new Alembic schema. They will not be created in fresh installations.
+
+#### Adding a New Table (Step-by-Step)
+
+When adding a new table to the schema:
+
+1. **Define in SQLAlchemy** (`src/rufus/db_schema/database.py`):
+   ```python
+   user_preferences = Table(
+       'user_preferences',
+       metadata,
+       Column('id', String(36), primary_key=True),
+       Column('user_id', String(200), nullable=False, index=True),
+       Column('preferences', Text, server_default='{}'),
+       Column('created_at', DateTime, server_default=func.now()),
+   )
+   ```
+
+2. **Export in __init__.py**:
+   ```python
+   from rufus.db_schema.database import user_preferences
+   __all__ = [..., 'user_preferences']
+   ```
+
+3. **Generate migration:**
+   ```bash
+   cd src/rufus
+   alembic revision --autogenerate -m "add user preferences table"
+   ```
+
+4. **Review generated migration:**
+   ```bash
+   # Check alembic/versions/<revision>_add_user_preferences_table.py
+   # Verify upgrade() and downgrade() functions
+   ```
+
+5. **Test migration:**
+   ```bash
+   alembic upgrade head
+   alembic downgrade -1  # Test rollback
+   alembic upgrade head  # Re-apply
+   ```
+
+6. **Commit files:**
+   ```bash
+   git add src/rufus/db_schema/database.py
+   git add src/rufus/db_schema/__init__.py
+   git add src/rufus/alembic/versions/<revision>_*.py
+   git commit -m "feat(schema): add user_preferences table"
+   ```
+
+#### Deployment Recommendations
+
+**For Development:**
+```bash
+# Option 1: SQLite (fastest)
+export DATABASE_URL="sqlite:///dev.db"
+cd src/rufus && alembic upgrade head
+
+# Option 2: PostgreSQL with Docker
+docker compose up postgres -d
+export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/rufus && alembic upgrade head
+```
+
+**For Production:**
+```bash
+# Fresh installation
+export DATABASE_URL="postgresql://user:pass@host:5432/dbname"
+cd src/rufus
+alembic upgrade head
+
+# Schema updates
+alembic upgrade head  # Apply pending migrations
+alembic current       # Verify version
+```
+
+**For Testing:**
+```python
+# In-memory SQLite (auto-creates schema)
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()  # Schema auto-created
+```
+
+**For Docker/Kubernetes:**
+```yaml
+# Add to entrypoint script
+services:
+  rufus-server:
+    command: >
+      sh -c "
+        cd /app/src/rufus &&
+        alembic upgrade head &&
+        cd /app &&
+        uvicorn rufus_server.main:app --host 0.0.0.0
+      "
+```
+
+#### Legacy Migration Systems (Deprecated)
+
+**Note:** Prior to Alembic adoption (2026-02), Rufus had two migration systems:
+1. `migrations/schema.yaml` + compile scripts (deprecated)
+2. `docker/init-db.sql` (deprecated)
+
+These are no longer actively maintained. **Use Alembic for all new deployments and schema changes.**
+
+**Migration Path from Legacy:**
+- Existing databases continue to work (schema is compatible)
+- New tables added via Alembic migrations only
+- No migration required for running systems
+- Fresh installations use `alembic upgrade head`
 
 ## SQLite Persistence Provider
 
