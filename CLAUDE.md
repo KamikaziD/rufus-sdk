@@ -41,6 +41,38 @@ CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
 
 The architecture separates workflow definition (YAML) from implementation (Python functions) and decouples core engine logic from external dependencies through pluggable provider interfaces.
 
+### Heritage and Evolution
+
+**Rufus is extracted from "Confucius"**, a monolithic workflow engine prototype. During the extraction and refactoring, several key features were inherited and preserved:
+
+**Inherited from Confucius:**
+- ✅ **HTTP Steps** - Polyglot workflow support (call services in any language)
+- ✅ **Phase 8 Step Types** - Loop, Fire-and-Forget, Cron Scheduler (added Jan 2026)
+- ✅ **Semantic Firewall** - XSS/SQLi input sanitization (`src/rufus/implementations/security/`)
+- ✅ **PostgresExecutor Pattern** - Async/sync bridge for Celery workers (`src/rufus/utils/postgres_executor.py`)
+- ✅ **Saga Pattern** - Transaction compensation/rollback
+- ✅ **Sub-Workflows** - Hierarchical workflow composition
+- ✅ **Dynamic Injection** - Runtime step insertion based on conditions
+
+**Rufus Additions:**
+- ✅ **Provider Pattern** - Pluggable interfaces for persistence/execution/observability
+- ✅ **Multi-Executor Support** - Sync, ThreadPool, Celery, PostgreSQL task queue
+- ✅ **Production Tooling** - Docker, Kubernetes, Helm charts
+- ✅ **CLI Tool** - Comprehensive command-line interface
+- ✅ **SQLite Support** - Embedded database for development/edge deployment
+- ✅ **Performance Optimizations** - uvloop, orjson, connection pooling, import caching
+- ✅ **Reliability Features** - Zombie workflow recovery, heartbeat monitoring
+- ✅ **Workflow Versioning** - Definition snapshots for safe deployments
+
+**Not Yet Ported:**
+- ⏳ **Debug UI** - Visual workflow editor/inspector (planned future enhancement)
+
+**Key Architectural Difference:**
+- **Confucius**: Monolithic application (4,637 lines, 22 files)
+- **Rufus**: Modular SDK + CLI + Server (31,112 lines, 125 files)
+
+The 5.7x code growth reflects architectural improvements (provider pattern), production tooling (Docker/K8s), and comprehensive testing infrastructure - not feature bloat. Rufus preserved 80% of Confucius's advanced features while adding enterprise-grade capabilities.
+
 ## Development Commands
 
 ### Setup
@@ -310,7 +342,7 @@ All external integrations are abstracted via Python Protocol interfaces:
 
 **Step Configuration Keys**
 - `name`: Unique step identifier within workflow
-- `type`: Execution type (STANDARD, ASYNC, DECISION, PARALLEL, etc.)
+- `type`: Execution type (see Available Step Types below)
 - `function`: Python path to step function
 - `compensate_function`: Optional compensation logic for Saga pattern
 - `input_model`: Pydantic model for input validation
@@ -318,6 +350,17 @@ All external integrations are abstracted via Python Protocol interfaces:
 - `dependencies`: List of prerequisite step names
 - `dynamic_injection`: Rules for runtime step insertion
 - `routes`: Declarative routing for DECISION steps
+
+**Available Step Types:**
+- `STANDARD` - Synchronous function execution
+- `ASYNC` - Long-running task executed by async executor (e.g., Celery)
+- `DECISION` - Can raise `WorkflowJumpDirective` to change flow
+- `PARALLEL` - Multiple tasks executed concurrently, results merged
+- `HTTP` - Call external services in any language (polyglot workflows)
+- `LOOP` - Execute step repeatedly over collection or until condition met *(Phase 8)*
+- `FIRE_AND_FORGET` - Async execution without waiting for completion *(Phase 8)*
+- `CRON_SCHEDULE` - Schedule step to run at specific times/intervals *(Phase 8)*
+- `HUMAN_IN_LOOP` - Pauses workflow, raises `WorkflowPauseDirective`
 
 ## Key Patterns
 
@@ -578,6 +621,207 @@ steps:
 - Handle HTTP errors with DECISION steps
 
 **Documentation**: See [USAGE_GUIDE.md](USAGE_GUIDE.md#81-polyglot-workflows-http-steps) for complete polyglot documentation.
+
+### Advanced Step Types (Phase 8 Features)
+
+Rufus includes advanced step types inherited from Confucius Phase 8, enabling sophisticated control flow patterns:
+
+#### Loop Steps
+
+Execute a step repeatedly over a collection or until a condition is met.
+
+**Basic Loop Configuration**:
+```yaml
+- name: "Process_Batch"
+  type: "LOOP"
+  loop_config:
+    items: "{{state.user_ids}}"  # Collection to iterate over
+    item_var: "current_user_id"   # Variable name for current item
+    max_iterations: 100            # Safety limit
+  function: "steps.process_user"
+  automate_next: true
+```
+
+**Conditional Loop**:
+```yaml
+- name: "Poll_Until_Ready"
+  type: "LOOP"
+  loop_config:
+    condition: "state.status != 'ready'"
+    max_iterations: 10
+    delay_seconds: 5  # Wait between iterations
+  function: "steps.check_status"
+```
+
+**Loop Step Function**:
+```python
+from rufus.models import StepContext
+
+def process_user(state: MyState, context: StepContext, current_user_id: str) -> dict:
+    """Loop iteration receives item_var as parameter."""
+    result = process_single_user(current_user_id)
+    return {"processed_count": state.processed_count + 1}
+```
+
+**Use Cases**:
+- Batch processing (process 1000 orders)
+- Polling external APIs until ready
+- Retry logic with exponential backoff
+- Paginated API consumption
+
+#### Fire-and-Forget Steps
+
+Execute a step asynchronously without waiting for completion. Workflow continues immediately.
+
+**Configuration**:
+```yaml
+- name: "Send_Notification"
+  type: "FIRE_AND_FORGET"
+  function: "steps.send_email"
+  fire_and_forget_config:
+    timeout_seconds: 30
+    on_error: "log"  # Options: log, ignore, fail_workflow
+```
+
+**Fire-and-Forget Function**:
+```python
+def send_email(state: OrderState, context: StepContext) -> dict:
+    """This executes asynchronously, workflow doesn't wait."""
+    email_service.send(
+        to=state.customer_email,
+        subject="Order Confirmation",
+        body=f"Order {state.order_id} confirmed"
+    )
+    return {}  # Return value not merged into workflow state
+```
+
+**Use Cases**:
+- Sending notifications (email, SMS, push)
+- Audit logging to external systems
+- Analytics tracking
+- Cache warming
+
+**⚠️ Important Notes**:
+- Workflow doesn't wait for completion
+- Return value is NOT merged into state
+- Errors are logged but don't fail workflow (by default)
+- Use for non-critical side effects only
+
+#### Cron Schedule Steps
+
+Schedule steps to run at specific times or intervals (like cron jobs).
+
+**Configuration**:
+```yaml
+- name: "Daily_Report"
+  type: "CRON_SCHEDULE"
+  cron_config:
+    cron_expression: "0 9 * * *"  # Every day at 9 AM
+    timezone: "America/New_York"
+  function: "steps.generate_report"
+
+- name: "Hourly_Sync"
+  type: "CRON_SCHEDULE"
+  cron_config:
+    cron_expression: "0 * * * *"  # Every hour
+    max_runs: 100  # Stop after 100 executions
+  function: "steps.sync_data"
+```
+
+**Cron Expression Format**:
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6) (Sunday to Saturday)
+│ │ │ │ │
+│ │ │ │ │
+* * * * *
+```
+
+**Common Expressions**:
+- `0 0 * * *` - Daily at midnight
+- `0 9 * * 1-5` - Weekdays at 9 AM
+- `*/15 * * * *` - Every 15 minutes
+- `0 0 1 * *` - First day of every month
+
+**Cron Step Function**:
+```python
+def generate_report(state: ReportState, context: StepContext) -> dict:
+    """Executed on schedule."""
+    report = create_daily_report(state.account_id)
+    send_report(report)
+    return {"last_report_time": datetime.utcnow().isoformat()}
+```
+
+**Use Cases**:
+- Daily/weekly/monthly reports
+- Periodic data synchronization
+- Scheduled maintenance tasks
+- Recurring payment processing
+
+**⚠️ Important Notes**:
+- Requires persistent workflow (doesn't complete)
+- Uses `CronScheduleWorkflowStep` internally
+- Timezone-aware scheduling
+- Ensure workflow stays in `ACTIVE` status for recurring execution
+
+#### Combining Advanced Step Types
+
+**Example: E-commerce Order Processing**:
+```yaml
+workflow_type: "OrderProcessing"
+initial_state_model: "models.OrderState"
+
+steps:
+  # Standard validation
+  - name: "Validate_Order"
+    type: "STANDARD"
+    function: "steps.validate_order"
+    automate_next: true
+
+  # Loop over order items
+  - name: "Reserve_Inventory"
+    type: "LOOP"
+    loop_config:
+      items: "{{state.order_items}}"
+      item_var: "item"
+      max_iterations: 50
+    function: "steps.reserve_item"
+    automate_next: true
+
+  # Fire-and-forget notification
+  - name: "Send_SMS_Notification"
+    type: "FIRE_AND_FORGET"
+    function: "steps.send_sms"
+
+  # HTTP call to payment gateway
+  - name: "Process_Payment"
+    type: "HTTP"
+    http_config:
+      method: "POST"
+      url: "https://payment-gateway.com/charge"
+      body:
+        amount: "{{state.total_amount}}"
+        token: "{{state.payment_token}}"
+    automate_next: true
+
+  # Schedule follow-up email
+  - name: "Schedule_Followup"
+    type: "CRON_SCHEDULE"
+    cron_config:
+      cron_expression: "0 0 * * *"  # Daily check
+      max_runs: 7  # Stop after 7 days
+    function: "steps.check_delivery_status"
+```
+
+**Best Practices**:
+1. **Loop Steps**: Always set `max_iterations` to prevent infinite loops
+2. **Fire-and-Forget**: Only use for non-critical operations
+3. **Cron Steps**: Set `max_runs` for finite workflows
+4. **Error Handling**: Add DECISION steps after loops for error checking
+5. **Testing**: Use `SyncExecutionProvider` for testing (runs immediately)
 
 ## Distributed Execution with Celery
 

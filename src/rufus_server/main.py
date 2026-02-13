@@ -661,22 +661,36 @@ async def sync_device_transactions(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Static Files (optional debug UI)
+# Debug UI (ported from Confucius)
 # ─────────────────────────────────────────────────────────────────────────────
 
-contrib_static_path = Path(__file__).parent / "contrib" / "static"
-if contrib_static_path.is_dir():
-    app.mount("/static", StaticFiles(directory=contrib_static_path), name="rufus_static")
+debug_ui_static_path = Path(__file__).parent / "debug_ui" / "static"
+if debug_ui_static_path.is_dir():
+    app.mount("/static", StaticFiles(directory=debug_ui_static_path), name="debug_ui_static")
+    logger.info(f"✅ Debug UI static files mounted at /static from {debug_ui_static_path}")
+else:
+    logger.warning(f"⚠️  Debug UI static files not found at {debug_ui_static_path}")
 
-templates_path = Path(__file__).parent / "contrib" / "templates"
-if templates_path.is_dir():
+debug_ui_templates_path = Path(__file__).parent / "debug_ui" / "templates"
+if debug_ui_templates_path.is_dir():
     from fastapi.templating import Jinja2Templates
-    templates = Jinja2Templates(directory=templates_path)
+    templates = Jinja2Templates(directory=debug_ui_templates_path)
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def read_root(request: Request):
-        """Serves the debug UI's main page."""
+    async def debug_ui_root(request: Request):
+        """Serves the Debug UI's main page (ported from Confucius)."""
         return templates.TemplateResponse("index.html", {"request": request})
+
+    @app.get("/debug", response_class=HTMLResponse, include_in_schema=False)
+    async def debug_ui_alias(request: Request):
+        """Alias for Debug UI."""
+        return templates.TemplateResponse("index.html", {"request": request})
+
+    logger.info(f"✅ Debug UI templates loaded from {debug_ui_templates_path}")
+    logger.info("🎨 Debug UI available at http://localhost:8000/ and http://localhost:8000/debug")
+else:
+    logger.warning(f"⚠️  Debug UI templates not found at {debug_ui_templates_path}")
+    logger.info("💡 To enable Debug UI, copy templates from confucius/src/confucius/contrib/")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
