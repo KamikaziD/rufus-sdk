@@ -5,7 +5,7 @@
 Rufus is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides offline-first architecture, store-and-forward, and production-grade reliability features.
 
 ```bash
-pip install -r requirements.txt  # SQLite included, zero setup
+pip install rufus-sdk[all]  # SQLite included, zero setup
 ```
 
 ---
@@ -28,9 +28,13 @@ pip install -r requirements.txt  # SQLite included, zero setup
 ### 1. Install
 
 ```bash
+# Install from PyPI (recommended)
+pip install rufus-sdk[all]
+
+# Or install from source for development
 git clone https://github.com/KamikaziD/rufus-sdk.git
 cd rufus-sdk
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 2. Run Your First Workflow
