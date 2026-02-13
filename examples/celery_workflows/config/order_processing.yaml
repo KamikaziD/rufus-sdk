@@ -1,0 +1,38 @@
+workflow_type: "OrderProcessing"
+workflow_version: "1.0.0"
+initial_state_model: "models.state_models.OrderState"
+description: "Order processing workflow with async payment and sub-workflow notifications"
+
+steps:
+  - name: "Validate_Order"
+    type: "STANDARD"
+    description: "Validate order data"
+    function: "steps.validate_order"
+    automate_next: true
+
+  - name: "Process_Payment"
+    type: "ASYNC"
+    description: "Process payment asynchronously via Celery"
+    function: "tasks.payment_tasks.process_payment_task"
+    automate_next: true
+    dependencies: ["Validate_Order"]
+
+  - name: "Send_Receipt"
+    type: "ASYNC"
+    description: "Send payment receipt to customer"
+    function: "tasks.payment_tasks.send_receipt_task"
+    automate_next: true
+    dependencies: ["Process_Payment"]
+
+  - name: "Send_Notifications"
+    type: "STANDARD"
+    description: "Trigger notification sub-workflow"
+    function: "steps.trigger_notifications"
+    automate_next: true
+    dependencies: ["Send_Receipt"]
+
+  - name: "Mark_Complete"
+    type: "STANDARD"
+    description: "Mark order as complete"
+    function: "steps.mark_order_complete"
+    dependencies: ["Send_Notifications"]

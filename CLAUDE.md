@@ -579,6 +579,522 @@ steps:
 
 **Documentation**: See [USAGE_GUIDE.md](USAGE_GUIDE.md#81-polyglot-workflows-http-steps) for complete polyglot documentation.
 
+## Distributed Execution with Celery
+
+Rufus supports distributed workflow execution using Celery for production deployments requiring high concurrency, async tasks, and horizontal scaling.
+
+### Architecture
+
+```
+┌─────────────────┐
+│ Rufus API/CLI   │
+│ (Workflow Start)│
+└────────┬────────┘
+         │
+    ┌────▼─────┐
+    │PostgreSQL│ ← Workflow State
+    └────┬─────┘
+         │
+    ┌────▼─────┐
+    │  Redis   │ ← Celery Broker/Backend
+    └────┬─────┘
+         │
+    ┌────▼──────────────────┐
+    │ Celery Workers (1-N)  │
+    │ • Async Tasks         │
+    │ • Parallel Execution  │
+    │ • Sub-Workflows       │
+    │ • HTTP Steps          │
+    └───────────────────────┘
+```
+
+### Installation
+
+**Install Celery dependencies:**
+```bash
+# Install with Celery support
+pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+
+# Or install directly
+pip install celery redis psycopg2-binary prometheus-client
+```
+
+**Start Redis (required for Celery):**
+```bash
+# Using Docker
+docker run -d --name redis -p 6379:6379 redis:latest
+
+# Or install locally
+brew install redis  # macOS
+redis-server
+```
+
+### Configuration
+
+**Environment Variables:**
+```bash
+# Celery broker and backend
+export CELERY_BROKER_URL="redis://localhost:6379/0"
+export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
+
+# Database for workflow state
+export DATABASE_URL="postgresql://user:pass@localhost:5432/rufus"
+
+# Optional: Worker configuration
+export WORKER_ID="worker-01"
+export WORKER_REGION="us-east-1"
+export WORKER_ZONE="us-east-1a"
+export WORKER_CAPABILITIES='{"gpu": true, "memory_gb": 16}'
+```
+
+**Create Celery app in your application:**
+```python
+# my_app/celery_app.py
+from rufus.celery_app import celery_app
+
+# Configure Celery (optional customization)
+celery_app.conf.update(
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+    timezone='UTC',
+    enable_utc=True,
+)
+
+# Export for Celery worker
+app = celery_app
+```
+
+### Starting Workers
+
+**Basic worker:**
+```bash
+# Start worker with auto-reload (development)
+celery -A rufus.celery_app worker --loglevel=info --autoreload
+
+# Production worker
+celery -A rufus.celery_app worker --loglevel=warning --concurrency=4
+```
+
+**Regional workers (for geo-distributed systems):**
+```bash
+# US East worker
+export WORKER_REGION="us-east-1"
+celery -A rufus.celery_app worker -Q us-east-1,default --loglevel=info
+
+# EU Central worker
+export WORKER_REGION="eu-central-1"
+celery -A rufus.celery_app worker -Q eu-central-1,default --loglevel=info
+```
+
+**Worker with specific capabilities:**
+```bash
+# GPU-enabled worker
+export WORKER_CAPABILITIES='{"gpu": true, "cuda_version": "12.1"}'
+celery -A rufus.celery_app worker -Q gpu-tasks --loglevel=info
+
+# High-memory worker
+export WORKER_CAPABILITIES='{"memory_gb": 64, "cpu_cores": 32}'
+celery -A rufus.celery_app worker -Q memory-intensive --loglevel=info
+```
+
+### Using CeleryExecutionProvider
+
+**Initialize workflow with Celery:**
+```python
+from rufus.builder import WorkflowBuilder
+from rufus.implementations.execution.celery import CeleryExecutionProvider
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from rufus.implementations.observability.logging import LoggingObserver
+
+# Create Celery execution provider
+execution_provider = CeleryExecutionProvider()
+
+# Create persistence (PostgreSQL recommended for production)
+persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/rufus")
+await persistence.initialize()
+
+# Build workflow with Celery execution
+builder = WorkflowBuilder(
+    config_dir="config/",
+    persistence_provider=persistence,
+    execution_provider=execution_provider,
+    observer=LoggingObserver()
+)
+
+# Create and start workflow
+workflow = await builder.create_workflow(
+    workflow_type="OrderProcessing",
+    initial_data={"order_id": "12345"},
+    data_region="us-east-1"  # Route to regional workers
+)
+
+# Workflow will use Celery for async/parallel steps
+await workflow.next_step()
+```
+
+### Async Steps with Celery
+
+**Define async task (in your application):**
+```python
+# my_app/tasks.py
+from rufus.celery_app import celery_app
+
+@celery_app.task
+def process_payment(state: dict, workflow_id: str):
+    """Long-running payment processing task."""
+    import time
+    time.sleep(10)  # Simulate processing
+
+    return {
+        "transaction_id": "tx_12345",
+        "status": "approved",
+        "amount": state.get("amount", 0)
+    }
+```
+
+**Workflow YAML:**
+```yaml
+workflow_type: "OrderProcessing"
+initial_state_model: "my_app.models.OrderState"
+steps:
+  - name: "Process_Payment"
+    type: "ASYNC"
+    function: "my_app.tasks.process_payment"
+    automate_next: true
+```
+
+**Execution flow:**
+1. Workflow hits `Process_Payment` → status becomes `PENDING_ASYNC`
+2. Celery task `process_payment` dispatched to worker
+3. Worker processes payment (10 seconds)
+4. Task completes → calls `resume_from_async_task`
+5. Workflow resumes with result → status becomes `ACTIVE`
+6. If `automate_next: true`, workflow advances to next step
+
+### Parallel Execution with Celery
+
+**Workflow YAML:**
+```yaml
+steps:
+  - name: "Parallel_Checks"
+    type: "PARALLEL"
+    tasks:
+      - name: "credit_check"
+        function_path: "my_app.tasks.check_credit"
+      - name: "inventory_check"
+        function_path: "my_app.tasks.check_inventory"
+      - name: "fraud_check"
+        function_path: "my_app.tasks.check_fraud"
+    merge_strategy: "SHALLOW"
+    merge_conflict_behavior: "PREFER_NEW"
+    allow_partial_success: false
+    timeout_seconds: 60
+```
+
+**Tasks (all run in parallel):**
+```python
+@celery_app.task
+def check_credit(state: dict, workflow_id: str):
+    return {"credit_score": 750, "approved": True}
+
+@celery_app.task
+def check_inventory(state: dict, workflow_id: str):
+    return {"in_stock": True, "quantity": 50}
+
+@celery_app.task
+def check_fraud(state: dict, workflow_id: str):
+    return {"fraud_score": 0.05, "risk_level": "low"}
+```
+
+**Result merging:**
+```python
+# After all tasks complete, results merged into state:
+{
+    "credit_score": 750,
+    "approved": True,
+    "in_stock": True,
+    "quantity": 50,
+    "fraud_score": 0.05,
+    "risk_level": "low"
+}
+```
+
+### Sub-Workflows with Celery
+
+**Parent workflow:**
+```python
+from rufus.models import StartSubWorkflowDirective
+
+def trigger_kyc(state: OrderState, context: StepContext):
+    """Trigger KYC sub-workflow."""
+    raise StartSubWorkflowDirective(
+        workflow_type="KYC",
+        initial_data={
+            "user_id": state.user_id,
+            "document_url": state.id_document
+        },
+        data_region="eu-central-1"  # Run in EU region
+    )
+```
+
+**Execution flow:**
+1. Parent hits `trigger_kyc` → creates child workflow → status `PENDING_SUB_WORKFLOW`
+2. Celery task `execute_sub_workflow` dispatched
+3. Child workflow runs to completion on worker
+4. When child completes → `resume_parent_from_child` dispatched
+5. Parent resumes with child results in `state.sub_workflow_results["KYC"]`
+
+### Worker Registry
+
+Celery workers automatically register with PostgreSQL database for fleet management and monitoring.
+
+**Database table (auto-created by migration):**
+```sql
+CREATE TABLE worker_nodes (
+    worker_id VARCHAR(100) PRIMARY KEY,
+    hostname VARCHAR(255),
+    region VARCHAR(50),
+    zone VARCHAR(50),
+    capabilities JSONB DEFAULT '{}',
+    status VARCHAR(20),  -- 'online', 'offline'
+    last_heartbeat TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Query active workers:**
+```sql
+-- Active workers (heartbeat within last 2 minutes)
+SELECT worker_id, hostname, region, last_heartbeat
+FROM worker_nodes
+WHERE status = 'online'
+  AND last_heartbeat > NOW() - INTERVAL '2 minutes';
+
+-- Workers by region
+SELECT region, COUNT(*) as worker_count
+FROM worker_nodes
+WHERE status = 'online'
+GROUP BY region;
+```
+
+### Event Publishing
+
+Celery workers publish workflow events to Redis for real-time monitoring and audit logging.
+
+**Redis Streams (persistent events):**
+```bash
+# View workflow events
+redis-cli XREAD STREAMS workflow:persistence 0
+
+# View retry queue
+redis-cli XREAD STREAMS workflow:retry:bridge 0
+```
+
+**Redis Pub/Sub (real-time):**
+```python
+import redis.asyncio as redis
+
+async def monitor_workflow(workflow_id: str):
+    """Monitor workflow events in real-time."""
+    r = redis.from_url("redis://localhost:6379")
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"workflow:events:{workflow_id}")
+
+    async for message in pubsub.listen():
+        if message['type'] == 'message':
+            print(f"Event: {message['data']}")
+```
+
+### Monitoring and Metrics
+
+**Prometheus metrics (via EventPublisher):**
+```python
+# Metrics exported at /metrics endpoint (if server is running)
+workflow_events_total{event_type="workflow.created"} 150
+workflow_events_total{event_type="workflow.completed"} 120
+workflow_events_total{event_type="workflow.failed"} 5
+```
+
+**Celery monitoring with Flower:**
+```bash
+# Install Flower
+pip install flower
+
+# Start Flower dashboard
+celery -A rufus.celery_app flower --port=5555
+
+# Open http://localhost:5555
+```
+
+**Query worker heartbeats:**
+```python
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+
+persistence = PostgresPersistenceProvider(db_url)
+await persistence.initialize()
+
+# Get stale workers (no heartbeat in 5 minutes)
+async with persistence.pool.acquire() as conn:
+    stale_workers = await conn.fetch("""
+        SELECT worker_id, hostname, last_heartbeat
+        FROM worker_nodes
+        WHERE status = 'online'
+          AND last_heartbeat < NOW() - INTERVAL '5 minutes'
+    """)
+```
+
+### Production Deployment
+
+**Docker Compose example:**
+```yaml
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: rufus
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    build: .
+    command: celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      WORKER_REGION: us-east-1
+    depends_on:
+      - postgres
+      - redis
+    deploy:
+      replicas: 3  # Scale to 3 workers
+
+  api:
+    build: .
+    command: uvicorn rufus_server.main:app --host 0.0.0.0
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+    depends_on:
+      - postgres
+      - redis
+      - worker
+```
+
+**Kubernetes deployment:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rufus-worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: rufus-worker
+  template:
+    metadata:
+      labels:
+        app: rufus-worker
+    spec:
+      containers:
+      - name: worker
+        image: myregistry/rufus-worker:latest
+        command: ["celery", "-A", "rufus.celery_app", "worker", "--concurrency=4"]
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: database-url
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service:6379/0"
+        - name: WORKER_REGION
+          value: "us-east-1"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+```
+
+### Troubleshooting
+
+**Workers not picking up tasks:**
+```bash
+# Check Redis connection
+redis-cli ping
+
+# Verify worker is running
+celery -A rufus.celery_app inspect active
+
+# Check task routes
+celery -A rufus.celery_app inspect registered
+```
+
+**Workflows stuck in PENDING_ASYNC:**
+```bash
+# Check for failed tasks
+celery -A rufus.celery_app events
+
+# Inspect task results
+redis-cli GET celery-task-meta-<task_id>
+
+# Check worker logs
+celery -A rufus.celery_app worker --loglevel=debug
+```
+
+**Worker registry not updating:**
+```sql
+-- Check worker heartbeats
+SELECT * FROM worker_nodes ORDER BY last_heartbeat DESC;
+
+-- Reset stuck workers
+UPDATE worker_nodes SET status = 'offline' WHERE last_heartbeat < NOW() - INTERVAL '10 minutes';
+```
+
+### Performance Tuning
+
+**Worker concurrency:**
+```bash
+# CPU-bound tasks (lower concurrency)
+celery -A rufus.celery_app worker --concurrency=2
+
+# I/O-bound tasks (higher concurrency)
+celery -A rufus.celery_app worker --concurrency=20
+
+# Auto-scale workers
+celery -A rufus.celery_app worker --autoscale=10,2
+```
+
+**Task time limits:**
+```python
+@celery_app.task(time_limit=300, soft_time_limit=270)
+def long_running_task(state: dict, workflow_id: str):
+    # Task killed after 300 seconds
+    # Soft limit warning at 270 seconds
+    pass
+```
+
+**Result expiration:**
+```python
+celery_app.conf.update(
+    result_expires=3600,  # Results expire after 1 hour
+)
+```
+
 ## Testing
 
 ### Using TestHarness

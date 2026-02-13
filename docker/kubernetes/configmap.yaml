@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rufus-config
+data:
+  celery-broker-url: "redis://rufus-redis:6379/0"
+  celery-result-backend: "redis://rufus-redis:6379/0"
+  worker-concurrency: "4"
+  worker-pool: "prefork"
+  worker-log-level: "info"

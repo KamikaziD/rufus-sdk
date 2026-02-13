@@ -31,66 +31,116 @@ def show(
 
 @app.command("set-persistence")
 def set_persistence(
+    provider: Optional[str] = typer.Option(None, "--provider", help="Provider type (memory, sqlite, postgres)"),
     db_path: Optional[str] = typer.Option(None, "--db-path", help="Database path (for SQLite)"),
     db_url: Optional[str] = typer.Option(None, "--db-url", help="Database URL (for PostgreSQL)"),
     pool_min: Optional[int] = typer.Option(None, "--pool-min", help="Min pool size (for PostgreSQL)"),
     pool_max: Optional[int] = typer.Option(None, "--pool-max", help="Max pool size (for PostgreSQL)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Non-interactive mode, skip prompts"),
 ):
     """
-    Set persistence provider configuration (interactive)
+    Set persistence provider configuration
 
     Examples:\n
-        rufus config set-persistence --db-path workflows.db\n
-        rufus config set-persistence --db-url postgresql://localhost/rufus
+        rufus config set-persistence --provider sqlite --db-path workflows.db --yes\n
+        rufus config set-persistence --provider postgres --db-url postgresql://localhost/rufus --yes\n
+        rufus config set-persistence  # Interactive mode
     """
     config_manager = get_config_manager()
     formatter = Formatter()
 
     try:
-        # Interactive provider selection
-        formatter.print("\n[bold]Available persistence providers:[/bold]")
-        formatter.print("  1. memory - In-memory (testing only)")
-        formatter.print("  2. sqlite - SQLite database (development/production)")
-        formatter.print("  3. postgres - PostgreSQL database (production)")
+        # Non-interactive mode if --provider is specified or --yes is used
+        if provider or yes:
+            # Validate provider
+            valid_providers = ["memory", "sqlite", "postgres"]
+            if provider and provider not in valid_providers:
+                formatter.print_error(f"Invalid provider: {provider}. Must be one of: {', '.join(valid_providers)}")
+                raise typer.Exit(code=1)
 
-        provider_choice = typer.prompt("\nSelect provider (1-3)", type=int)
+            # If --yes but no provider, default to sqlite
+            if yes and not provider:
+                provider = "sqlite"
 
-        provider_map = {
-            1: "memory",
-            2: "sqlite",
-            3: "postgres"
-        }
+            # Provider-specific validation
+            kwargs = {}
+            if provider == "sqlite":
+                if not db_path:
+                    if yes:
+                        db_path = "~/.rufus/workflows.db"  # Default for non-interactive
+                    else:
+                        db_path = typer.prompt("Database path", default="~/.rufus/workflows.db")
+                kwargs["db_path"] = db_path
+            elif provider == "postgres":
+                if not db_url:
+                    if yes:
+                        formatter.print_error("--db-url is required for postgres provider in non-interactive mode")
+                        raise typer.Exit(code=1)
+                    else:
+                        db_url = typer.prompt("Database URL", default="postgresql://localhost/rufus")
+                kwargs["db_url"] = db_url
 
-        if provider_choice not in provider_map:
-            formatter.print_error("Invalid choice")
-            raise typer.Exit(code=1)
+                # Pool settings
+                if pool_min is None:
+                    pool_min = 10 if yes else typer.prompt("Min pool size", default=10, type=int)
+                if pool_max is None:
+                    pool_max = 50 if yes else typer.prompt("Max pool size", default=50, type=int)
+                kwargs["pool_min_size"] = pool_min
+                kwargs["pool_max_size"] = pool_max
 
-        provider = provider_map[provider_choice]
-        kwargs = {}
+            # Set configuration
+            config_manager.set_persistence(provider, **kwargs)
+            formatter.print_success(f"\nPersistence provider set to: {provider}")
 
-        # Provider-specific configuration
-        if provider == "sqlite":
-            if not db_path:
-                db_path = typer.prompt("Database path", default="~/.rufus/workflows.db")
-            kwargs["db_path"] = db_path
-        elif provider == "postgres":
-            if not db_url:
-                db_url = typer.prompt("Database URL", default="postgresql://localhost/rufus")
-            kwargs["db_url"] = db_url
-            if not pool_min:
-                pool_min = typer.prompt("Min pool size", default=10, type=int)
-            if not pool_max:
-                pool_max = typer.prompt("Max pool size", default=50, type=int)
-            kwargs["pool_min_size"] = pool_min
-            kwargs["pool_max_size"] = pool_max
+            if provider == "sqlite":
+                formatter.print_info(f"Database path: {db_path}")
+            elif provider == "postgres":
+                formatter.print_info(f"Database URL: {db_url}")
+        else:
+            # Interactive mode (original behavior)
+            formatter.print("\n[bold]Available persistence providers:[/bold]")
+            formatter.print("  1. memory - In-memory (testing only)")
+            formatter.print("  2. sqlite - SQLite database (development/production)")
+            formatter.print("  3. postgres - PostgreSQL database (production)")
 
-        config_manager.set_persistence(provider, **kwargs)
-        formatter.print_success(f"\nPersistence provider set to: {provider}")
+            provider_choice = typer.prompt("\nSelect provider (1-3)", type=int)
 
-        if provider == "sqlite":
-            formatter.print_info(f"Database path: {db_path}")
-        elif provider == "postgres":
-            formatter.print_info(f"Database URL: {db_url}")
+            provider_map = {
+                1: "memory",
+                2: "sqlite",
+                3: "postgres"
+            }
+
+            if provider_choice not in provider_map:
+                formatter.print_error("Invalid choice")
+                raise typer.Exit(code=1)
+
+            provider = provider_map[provider_choice]
+            kwargs = {}
+
+            # Provider-specific configuration
+            if provider == "sqlite":
+                if not db_path:
+                    db_path = typer.prompt("Database path", default="~/.rufus/workflows.db")
+                kwargs["db_path"] = db_path
+            elif provider == "postgres":
+                if not db_url:
+                    db_url = typer.prompt("Database URL", default="postgresql://localhost/rufus")
+                kwargs["db_url"] = db_url
+                if not pool_min:
+                    pool_min = typer.prompt("Min pool size", default=10, type=int)
+                if not pool_max:
+                    pool_max = typer.prompt("Max pool size", default=50, type=int)
+                kwargs["pool_min_size"] = pool_min
+                kwargs["pool_max_size"] = pool_max
+
+            config_manager.set_persistence(provider, **kwargs)
+            formatter.print_success(f"\nPersistence provider set to: {provider}")
+
+            if provider == "sqlite":
+                formatter.print_info(f"Database path: {db_path}")
+            elif provider == "postgres":
+                formatter.print_info(f"Database URL: {db_url}")
 
     except Exception as e:
         formatter.print_error(f"Failed to set persistence: {e}")

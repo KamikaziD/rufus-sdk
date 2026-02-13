@@ -1,0 +1,9 @@
+# Install Rufus with Celery support
+# In production, install from GitHub:
+# rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git
+
+# For local development:
+-e ../../.[celery]
+
+# Additional dependencies for examples
+colorama>=0.4.6

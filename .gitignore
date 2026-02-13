@@ -22,3 +22,5 @@ results/
 .env.*.local
 
 usecase_pilot/
+
+confucius/

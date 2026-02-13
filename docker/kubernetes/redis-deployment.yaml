@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rufus-redis
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: rufus
+    component: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rufus-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rufus
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: rufus
+        component: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - "2gb"
+        - --maxmemory-policy
+        - allkeys-lru
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: rufus-redis-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rufus-redis-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

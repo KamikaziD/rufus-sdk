@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus"
-version = "0.1.2"
+version = "0.2.0"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
 readme = "README.md"
@@ -50,6 +50,12 @@ jsonschema = "^4.17,<5.0"
 # Workflow scheduling
 croniter = "^2.0"
 
+# Celery distributed execution (optional)
+celery = {version = "^5.3", optional = true}
+redis = {version = "^5.0", optional = true}
+psycopg2-binary = {version = "^2.9", optional = true}
+prometheus-client = {version = "^0.19", optional = true}
+
 # Edge device support (optional but recommended)
 websockets = {version = "^12.0", optional = true}
 psutil = {version = "^5.9", optional = true}
@@ -72,7 +78,8 @@ postgres = ["asyncpg"]
 cli = ["rich"]
 performance = ["uvloop"]
 edge = ["websockets", "psutil", "numpy"]
-all = ["fastapi", "uvicorn", "starlette", "slowapi", "asyncpg", "rich", "uvloop", "websockets", "psutil", "numpy"]
+celery = ["celery", "redis", "psycopg2-binary", "prometheus-client"]
+all = ["fastapi", "uvicorn", "starlette", "slowapi", "asyncpg", "rich", "uvloop", "websockets", "psutil", "numpy", "celery", "redis", "psycopg2-binary", "prometheus-client"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0"

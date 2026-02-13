@@ -1,0 +1,26 @@
+workflow_type: "SendNotifications"
+workflow_version: "1.0.0"
+initial_state_model: "models.state_models.NotificationState"
+description: "Sub-workflow for sending parallel notifications"
+
+steps:
+  - name: "Send_All_Notifications"
+    type: "PARALLEL"
+    description: "Send email, SMS, and push notifications in parallel"
+    tasks:
+      - name: "email"
+        function_path: "tasks.notification_tasks.send_email_task"
+      - name: "sms"
+        function_path: "tasks.notification_tasks.send_sms_task"
+      - name: "push"
+        function_path: "tasks.notification_tasks.send_push_notification_task"
+    merge_strategy: "SHALLOW"
+    allow_partial_success: true
+    timeout_seconds: 10
+    automate_next: true
+
+  - name: "Mark_Sent"
+    type: "STANDARD"
+    description: "Mark notifications as sent"
+    function: "steps.mark_notifications_sent"
+    dependencies: ["Send_All_Notifications"]

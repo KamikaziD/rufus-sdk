@@ -1,0 +1,50 @@
+# Celery Worker Dockerfile
+# Optimized for distributed deployment and horizontal scaling
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (better layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Celery dependencies
+RUN pip install --no-cache-dir \
+    celery[redis]==5.3.4 \
+    psycopg2-binary==2.9.9 \
+    prometheus-client==0.19.0
+
+# Copy application code
+COPY src/ /app/src/
+COPY examples/ /app/examples/
+
+# Set Python path
+ENV PYTHONPATH=/app/src:/app/examples
+
+# Default environment variables (override in docker-compose or k8s)
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+ENV DATABASE_URL=postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_production
+ENV WORKER_CONCURRENCY=4
+ENV WORKER_POOL=prefork
+ENV WORKER_LOG_LEVEL=info
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD celery -A rufus.celery_app inspect ping -d celery@${HOSTNAME} || exit 1
+
+# Run Celery worker
+CMD celery -A rufus.celery_app worker \
+    --loglevel=${WORKER_LOG_LEVEL} \
+    --concurrency=${WORKER_CONCURRENCY} \
+    --pool=${WORKER_POOL} \
+    --hostname=worker@${HOSTNAME} \
+    -Q default,high_priority,low_priority

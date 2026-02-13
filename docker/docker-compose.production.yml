@@ -1,0 +1,168 @@
+version: '3.8'
+
+# Production-ready distributed Celery deployment
+# Supports horizontal scaling of workers
+# Usage:
+#   docker-compose -f docker/docker-compose.production.yml up -d
+#   docker-compose -f docker/docker-compose.production.yml up -d --scale celery-worker=5
+
+services:
+  # PostgreSQL - Production database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rufus-postgres
+    environment:
+      POSTGRES_DB: rufus_production
+      POSTGRES_USER: rufus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rufus -d rufus_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+  # Redis - Message broker and result backend
+  redis:
+    image: redis:7-alpine
+    container_name: rufus-redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+  # Celery Worker - Horizontally scalable
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.celery-worker
+    environment:
+      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      WORKER_POOL: ${WORKER_POOL:-prefork}
+      WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-info}
+      WORKER_REGION: ${WORKER_REGION:-us-east-1}
+      WORKER_ZONE: ${WORKER_ZONE:-zone-a}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rufus-network
+    restart: unless-stopped
+    deploy:
+      mode: replicated
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # Celery Worker - High Priority Queue
+  celery-worker-high-priority:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.celery-worker
+    environment:
+      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      WORKER_CONCURRENCY: 2
+      WORKER_POOL: prefork
+      WORKER_LOG_LEVEL: info
+      WORKER_REGION: ${WORKER_REGION:-us-east-1}
+      WORKER_ZONE: ${WORKER_ZONE:-zone-a}
+    command: >
+      celery -A rufus.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --pool=prefork
+      --hostname=worker-high@%h
+      -Q high_priority
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rufus-network
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Celery Flower - Monitoring dashboard
+  flower:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.celery-worker
+    command: celery -A rufus.celery_app flower --port=5555
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+  # Rufus API Server (optional - for REST API)
+  rufus-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rufus-server
+    environment:
+      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rufus-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        cd src/rufus &&
+        alembic upgrade head &&
+        cd ../.. &&
+        uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+      "
+
+networks:
+  rufus-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
