@@ -32,8 +32,9 @@ class SyncExecutor(ExecutionProvider):
 
     For production async workflows with distributed execution, use CeleryExecutor.
     """
-    def __init__(self):
-        self._engine = None # Reference to the WorkflowEngine
+    def __init__(self, workflow_builder=None):
+        self._engine = None # Reference to the WorkflowEngine (legacy)
+        self._workflow_builder = workflow_builder  # Direct reference to WorkflowBuilder
         self._thread_pool_executor = None
         self._loop = None # To store the main event loop
 
@@ -73,14 +74,21 @@ class SyncExecutor(ExecutionProvider):
         For production async workflows, use CeleryExecutor or similar.
         """
         # Load the function dynamically using WorkflowBuilder
-        func = self._engine.workflow_builder._import_from_string(func_path)
+        # Support both old engine-based and new builder-based initialization
+        if self._workflow_builder:
+            from rufus.builder import WorkflowBuilder
+            func = WorkflowBuilder._import_from_string(func_path)
+        elif self._engine and hasattr(self._engine, 'workflow_builder'):
+            func = self._engine.workflow_builder._import_from_string(func_path)
+        else:
+            # Fallback: import directly
+            from rufus.builder import WorkflowBuilder
+            func = WorkflowBuilder._import_from_string(func_path)
+
         if not func:
             raise ValueError(f"Function not found at path: {func_path}")
 
-        # Reconstruct state for the task context
-        workflow = await self._engine.get_workflow(workflow_id)
-        state_model_class = self._engine.workflow_builder._import_from_string(workflow.state_model_path)
-        state_instance = state_model_class(**state_data)
+        # Create minimal context for the task
         context = StepContext(workflow_id=workflow_id, step_name=func.__name__, previous_step_result=kwargs.get('_previous_step_result'))
 
         # Filter out internal parameters that shouldn't be passed to user functions
@@ -104,7 +112,8 @@ class SyncExecutor(ExecutionProvider):
         loop = self._loop # Get the event loop from the main thread
 
         # Reconstruct function and context within the new thread
-        func = self._engine.workflow_builder._import_from_string(func_path)
+        from rufus.builder import WorkflowBuilder
+        func = WorkflowBuilder._import_from_string(func_path)
         context = StepContext(**context_data)
 
         try:
@@ -127,9 +136,8 @@ class SyncExecutor(ExecutionProvider):
         if not self._thread_pool_executor:
             raise RuntimeError("ThreadPoolExecutor not initialized. Call initialize() first.")
 
-        # Get the state_model_path from the workflow before spawning threads
-        workflow = await self._engine.get_workflow(workflow_id)
-        state_model_path = workflow.state_model_path
+        # For now, use empty state_model_path - parallel tasks don't need it
+        state_model_path = ""
 
         futures = []
         for task in tasks:

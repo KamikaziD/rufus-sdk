@@ -79,11 +79,36 @@ def init_worker(**kwargs):
 
                 _, provider = _init_persistence()
 
-                # Inject into tasks module
-                from rufus import tasks
-                tasks.set_persistence_provider(provider)
+                # Create other required providers for workflow reconstruction
+                from rufus.implementations.execution.sync import SyncExecutor
+                from rufus.implementations.observability.logging import LoggingObserver
+                from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+                from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+                from rufus.builder import WorkflowBuilder
 
-                logger.info(f"Initialized PostgreSQL persistence for worker")
+                execution_provider = SyncExecutor()  # Use sync for now (can be made configurable)
+                observer = LoggingObserver()
+
+                # Create workflow builder (need to load registry)
+                # For now, create empty registry - tasks will use definition_snapshot from DB
+                workflow_builder = WorkflowBuilder(
+                    workflow_registry={},
+                    expression_evaluator_cls=SimpleExpressionEvaluator,
+                    template_engine_cls=Jinja2TemplateEngine
+                )
+
+                # Inject all providers into tasks module
+                from rufus import tasks
+                tasks.set_providers(
+                    persistence=provider,
+                    execution=execution_provider,
+                    workflow_builder=workflow_builder,
+                    expression_evaluator_cls=SimpleExpressionEvaluator,
+                    template_engine_cls=Jinja2TemplateEngine,
+                    observer=observer
+                )
+
+                logger.info(f"Initialized all providers for worker")
             elif db_url.startswith("sqlite"):
                 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
                 from rufus.utils.postgres_executor import pg_executor

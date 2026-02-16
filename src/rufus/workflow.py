@@ -603,6 +603,11 @@ class Workflow:
                     **user_input,  # Pass user_input as additional kwargs to the task
                     _previous_step_result=_previous_step_result  # Pass previous result
                 )
+                # Merge result into state if SyncExecutor returned immediately
+                # (for Celery, result would be {"_async_dispatch": True} and merge happens on resume)
+                if isinstance(result, dict) and "_async_dispatch" not in result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
             elif isinstance(step, HttpWorkflowStep):
                 # HttpWorkflowStep uses the ExecutionProvider
                 result = await self.execution.dispatch_async_task(

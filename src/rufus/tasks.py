@@ -25,8 +25,32 @@ except ImportError:
 from rufus.utils.postgres_executor import pg_executor
 from rufus.events import event_publisher
 
-# Global persistence provider (set by celery_app on worker init)
+# Global providers (set by celery_app on worker init)
 _persistence_provider = None
+_execution_provider = None
+_workflow_builder = None
+_expression_evaluator_cls = None
+_template_engine_cls = None
+_workflow_observer = None
+
+
+def set_persistence_provider(provider):
+    """Set the global persistence provider for tasks"""
+    global _persistence_provider
+    _persistence_provider = provider
+
+
+def set_providers(persistence, execution, workflow_builder, expression_evaluator_cls, template_engine_cls, observer):
+    """Set all global providers for tasks"""
+    global _persistence_provider, _execution_provider, _workflow_builder
+    global _expression_evaluator_cls, _template_engine_cls, _workflow_observer
+
+    _persistence_provider = persistence
+    _execution_provider = execution
+    _workflow_builder = workflow_builder
+    _expression_evaluator_cls = expression_evaluator_cls
+    _template_engine_cls = template_engine_cls
+    _workflow_observer = observer
 
 
 def _publish_event_sync(coro):
@@ -58,6 +82,10 @@ def _sync_load_workflow(workflow_id: str):
     """Load workflow synchronously from persistence provider"""
     if not _persistence_provider:
         raise RuntimeError("Persistence provider not initialized in Celery worker")
+    if not _execution_provider:
+        raise RuntimeError("Execution provider not initialized in Celery worker")
+    if not _workflow_builder:
+        raise RuntimeError("Workflow builder not initialized in Celery worker")
 
     # Use pg_executor to run async load in dedicated thread
     workflow_dict = pg_executor.run_coroutine_sync(
@@ -70,8 +98,16 @@ def _sync_load_workflow(workflow_id: str):
     # Import here to avoid circular import
     from rufus.workflow import Workflow
 
-    # Reconstruct Workflow object from dict
-    return Workflow.from_dict(workflow_dict)
+    # Reconstruct Workflow object from dict with all required providers
+    return Workflow.from_dict(
+        workflow_dict,
+        persistence_provider=_persistence_provider,
+        execution_provider=_execution_provider,
+        workflow_builder=_workflow_builder,
+        expression_evaluator_cls=_expression_evaluator_cls,
+        template_engine_cls=_template_engine_cls,
+        workflow_observer=_workflow_observer
+    )
 
 
 def _sync_save_workflow(workflow_id: str, workflow):
