@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus-sdk"
-version = "0.3.3"
+version = "0.3.4"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
 readme = "README.md"
@@ -62,15 +62,15 @@ psutil = {version = "^5.9", optional = true}
 numpy = {version = "^1.24", optional = true}
 
 # Server dependencies (optional)
-fastapi = {version = "^0.100", optional = true}
-uvicorn = {version = "^0.20", optional = true}
-starlette = {version = "^0.27", optional = true}
-slowapi = {version = "^0.1", optional = true}
-asyncpg = {version = "^0.27", optional = true}
+fastapi = {version = ">=0.100", optional = true}
+uvicorn = {version = ">=0.20", optional = true}
+starlette = {version = ">=0.27", optional = true}
+slowapi = {version = ">=0.1", optional = true}
+asyncpg = {version = ">=0.27", optional = true}
 
 # CLI and performance (optional)
-rich = {version = "^13.0", optional = true}
-uvloop = {version = "^0.19", optional = true}
+rich = {version = ">=13.0", optional = true}
+uvloop = {version = ">=0.19", optional = true}
 
 [tool.poetry.extras]
 server = ["fastapi", "uvicorn", "starlette", "slowapi"]
