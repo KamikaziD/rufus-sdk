@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus-sdk"
-version = "0.3.4"
+version = "0.3.5"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
 readme = "README.md"
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 packages = [
-    { include = "rufus", from = "src" },
+    { include = "rufus", from = "src", exclude = ["examples", "examples/**/*"] },
     { include = "rufus_edge", from = "src" },
     { include = "rufus_cli", from = "src" },
     { include = "rufus_server", from = "src" },
