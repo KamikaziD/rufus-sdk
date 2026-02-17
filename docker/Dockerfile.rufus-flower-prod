@@ -1,0 +1,52 @@
+# Production Rufus Flower Dockerfile
+# Installs rufus-sdk from PyPI instead of copying source
+# For pre-built Docker Hub images
+
+FROM python:3.11-slim
+
+LABEL maintainer="Rufus Team <team@rufus.dev>"
+LABEL description="Rufus Workflow Engine - Flower Monitoring Dashboard"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install rufus-sdk from TestPyPI (TEMPORARY - for testing)
+# TODO: Switch to production PyPI once published
+
+# First install rufus-sdk core from TestPyPI
+RUN pip install --no-cache-dir \
+    --index-url https://test.pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'rufus-sdk==0.3.8'
+
+# Then install extras from PyPI to avoid broken packages on TestPyPI
+RUN pip install --no-cache-dir \
+    celery[redis]>=5.3 \
+    redis>=5.0 \
+    flower>=2.0
+
+# PRODUCTION VERSION (uncomment when published to PyPI):
+# RUN pip install --no-cache-dir 'rufus-sdk[all]'
+
+# Default environment variables (override in docker-compose)
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+ENV FLOWER_PORT=5555
+ENV FLOWER_BASIC_AUTH=""
+
+# Expose Flower port
+EXPOSE 5555
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:5555', timeout=5)" || exit 1
+
+# Run Flower
+CMD celery -A rufus.celery_app flower \
+    --port=${FLOWER_PORT} \
+    ${FLOWER_BASIC_AUTH:+--basic-auth=$FLOWER_BASIC_AUTH}

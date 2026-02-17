@@ -1,0 +1,80 @@
+# Production Rufus Server Dockerfile
+# Installs rufus-sdk from PyPI instead of copying source
+# For pre-built Docker Hub images
+
+FROM python:3.11-slim
+
+LABEL maintainer="Rufus Team <team@rufus.dev>"
+LABEL description="Rufus Workflow Engine - REST API Server"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install rufus-sdk from TestPyPI (TEMPORARY - for testing)
+# TODO: Switch to production PyPI once published
+
+# First install rufus-sdk core from TestPyPI
+RUN pip install --no-cache-dir \
+    --index-url https://test.pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'rufus-sdk==0.3.8'
+
+# Then install extras from PyPI to avoid broken packages on TestPyPI
+RUN pip install --no-cache-dir \
+    fastapi>=0.100 \
+    uvicorn[standard]>=0.20 \
+    starlette>=0.27 \
+    slowapi>=0.1 \
+    asyncpg>=0.27 \
+    rich>=13.0 \
+    uvloop>=0.19 \
+    websockets>=12.0 \
+    psutil>=5.9 \
+    numpy>=1.24 \
+    celery[redis]>=5.3 \
+    redis>=5.0 \
+    psycopg2-binary>=2.9 \
+    prometheus-client>=0.19
+
+# PRODUCTION VERSION (uncomment when published to PyPI):
+# RUN pip install --no-cache-dir 'rufus-sdk[all]'
+
+# Install additional server dependencies (if needed beyond [all])
+# RUN pip install --no-cache-dir <any-extra-packages>
+
+# Create directories for user code (will be mounted as volumes)
+RUN mkdir -p /app/config /app/user_code
+
+# Copy database init script
+COPY docker/init-db.sql /app/init-db.sql
+
+# Set Python path to include user code directory
+ENV PYTHONPATH=/app:/app/user_code
+
+# Default environment variables (override in docker-compose)
+ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# Expose API port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5)" || exit 1
+
+# Run migrations and start server
+CMD sh -c "\
+    echo 'Waiting for database...' && \
+    sleep 5 && \
+    echo 'Running database initialization...' && \
+    psql $DATABASE_URL < /app/init-db.sql && \
+    echo 'Database initialized successfully' && \
+    echo 'Starting server...' && \
+    uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000"
