@@ -1,0 +1,32 @@
+# Ollama LLM Workflow Example
+# Demonstrates GPU-accelerated local LLM inference using Ollama
+
+workflow_type: "OllamaContentGeneration"
+workflow_version: "1.0.0"
+description: "Generate content using local LLM (Llama/Mistral) via Ollama"
+initial_state_model: "examples.ollama_llm.models.ContentGenerationState"
+
+steps:
+  # Step 1: Validate input prompt
+  - name: "Validate_Prompt"
+    type: "STANDARD"
+    function: "examples.ollama_llm.steps.validate_prompt"
+    automate_next: true
+
+  # Step 2: Generate content using Ollama LLM on GPU
+  - name: "Generate_Content"
+    type: "ASYNC"
+    function: "examples.ollama_llm.tasks.generate_text"
+    description: "GPU-accelerated LLM inference via Ollama"
+    automate_next: true
+
+  # Step 3: Post-process and validate output
+  - name: "Validate_Output"
+    type: "STANDARD"
+    function: "examples.ollama_llm.steps.validate_output"
+    automate_next: true
+
+  # Step 4: Format final result
+  - name: "Format_Result"
+    type: "STANDARD"
+    function: "examples.ollama_llm.steps.format_result"

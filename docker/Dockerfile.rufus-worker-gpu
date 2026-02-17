@@ -1,0 +1,106 @@
+# GPU-Enabled Rufus Worker Dockerfile
+# Extends the local worker Dockerfile with GPU dependencies
+# Requires: nvidia-docker runtime
+
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+LABEL maintainer="Rufus Team <team@rufus.dev>"
+LABEL description="Rufus Workflow Engine - GPU Celery Worker for AI Inference"
+
+# Set working directory
+WORKDIR /app
+
+# Install Python 3.11 and system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    gcc \
+    postgresql-client \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make python3.11 the default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Copy source code
+COPY src /app/src
+COPY pyproject.toml /app/
+COPY README.md /app/
+
+# Install base dependencies (CPU-only for now)
+RUN pip install --no-cache-dir \
+    pydantic PyYAML jinja2 typer click aiosqlite anyio orjson httpx \
+    cryptography sqlalchemy alembic python-dotenv typing-extensions \
+    annotated-types jsonschema croniter \
+    fastapi uvicorn[standard] starlette slowapi asyncpg \
+    rich uvloop websockets psutil \
+    celery[redis] redis psycopg2-binary prometheus-client
+
+# Install GPU-specific ML dependencies
+# ONNX Runtime GPU (for ONNX model inference)
+RUN pip install --no-cache-dir onnxruntime-gpu==1.18.1
+
+# PyTorch with CUDA 12.1 support
+RUN pip install --no-cache-dir \
+    torch==2.0.1 \
+    torchvision==0.15.2 \
+    torchaudio==2.0.2 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Transformers for LLMs (Llama, Mistral, etc.)
+RUN pip install --no-cache-dir \
+    transformers==4.38.1 \
+    accelerate==0.27.2 \
+    bitsandbytes==0.42.0 \
+    sentencepiece==0.1.99 \
+    protobuf==3.20.3
+
+# NumPy for tensor operations (TFLite optional dependency)
+RUN pip install --no-cache-dir numpy==1.24.3
+
+# Optional: TensorFlow Lite for edge model inference
+# Uncomment if you need TFLite support
+# RUN pip install --no-cache-dir tflite-runtime==2.14.0
+
+# Install rufus-sdk from local source
+RUN pip install -e .
+
+# Create directories for user code and models
+RUN mkdir -p /app/config /app/user_code /app/models
+
+# Set Python path
+ENV PYTHONPATH=/app:/app/user_code
+
+# Environment variables for GPU worker
+ENV CUDA_VISIBLE_DEVICES=0
+ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# Worker configuration (optimized for GPU)
+ENV WORKER_ID=gpu-worker-01
+ENV WORKER_REGION=us-east-1
+ENV WORKER_ZONE=us-east-1a
+ENV WORKER_CONCURRENCY=2
+ENV WORKER_POOL=solo
+ENV WORKER_LOG_LEVEL=info
+
+# GPU worker capabilities (registered in PostgreSQL)
+ENV WORKER_CAPABILITIES='{"gpu": true, "cuda_version": "12.1", "pytorch": true, "onnx_gpu": true, "transformers": true}'
+
+# Verify GPU access at runtime (optional health check)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python3 -c "import torch; assert torch.cuda.is_available(), 'GPU not accessible'" || exit 1
+
+# Default command: Start GPU worker on gpu-inference queue
+CMD celery -A rufus.celery_app worker \
+    --loglevel=${WORKER_LOG_LEVEL} \
+    --concurrency=${WORKER_CONCURRENCY} \
+    --pool=${WORKER_POOL} \
+    -Q gpu-inference \
+    -n ${WORKER_ID}@%h
