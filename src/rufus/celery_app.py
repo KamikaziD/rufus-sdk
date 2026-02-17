@@ -1,6 +1,7 @@
 from celery import Celery
 import os
 from celery.signals import worker_process_init, worker_ready, worker_shutdown
+from celery.schedules import crontab
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,56 @@ base_includes = [
     'rufus.tasks',  # Core tasks from the library
 ]
 
+# Create global workflow builder for task discovery and beat schedule population
+# This allows Celery workers to auto-discover user task modules
+_workflow_config_dir = os.environ.get("WORKFLOW_CONFIG_DIR", "config")
+_workflow_registry_file = os.environ.get("WORKFLOW_REGISTRY_FILE", "workflow_registry.yaml")
+
+workflow_builder = None
+discovered_task_modules = []
+
+try:
+    # Attempt to create workflow builder for automatic task/schedule discovery
+    import yaml
+    from rufus.builder import WorkflowBuilder
+    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+
+    registry_path = os.path.join(_workflow_config_dir, _workflow_registry_file)
+
+    # Check if registry file exists before attempting to load
+    if os.path.exists(registry_path):
+        # Load registry YAML file
+        with open(registry_path, 'r') as f:
+            registry_data = yaml.safe_load(f)
+
+        # Convert list format to dict format
+        workflow_registry = {}
+        for item in registry_data.get("workflows", []):
+            workflow_registry[item["type"]] = item
+
+        # Create WorkflowBuilder with loaded registry
+        workflow_builder = WorkflowBuilder(
+            workflow_registry=workflow_registry,
+            config_dir=_workflow_config_dir,
+            expression_evaluator_cls=SimpleExpressionEvaluator,
+            template_engine_cls=Jinja2TemplateEngine
+        )
+
+        # Discover all task modules from registered workflows
+        discovered_task_modules = workflow_builder.get_all_task_modules()
+        logger.info(f"Loaded workflow registry from {registry_path}")
+        logger.info(f"Discovered task modules: {discovered_task_modules}")
+    else:
+        logger.warning(f"Workflow registry not found at {registry_path}. Task discovery disabled.")
+        logger.warning(f"Set WORKFLOW_CONFIG_DIR and WORKFLOW_REGISTRY_FILE environment variables to enable.")
+except Exception as e:
+    logger.warning(f"Could not load workflow registry: {e}. Task discovery disabled.")
+    workflow_builder = None
+    discovered_task_modules = []
+
 # Combine and deduplicate includes
-# TODO: Add automatic task module discovery from workflow registry
-all_includes = list(set(base_includes))
+all_includes = list(set(base_includes + discovered_task_modules))
 
 celery_app.conf.update(
     broker_url=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
@@ -30,13 +78,61 @@ celery_app.conf.update(
 )
 
 # Add system-wide polling task (for scheduled workflows)
+# This is a fallback for workflows that use dynamic scheduling
 celery_app.conf.beat_schedule['poll-dynamic-schedules'] = {
     'task': 'rufus.tasks.poll_scheduled_workflows',
     'schedule': 60.0,  # Run every minute
 }
 
-# TODO: Populate beat schedule from workflow registry
-# This requires integration with WorkflowBuilder to discover scheduled workflows
+# Populate beat schedule from workflow registry
+# This auto-registers CRON_SCHEDULE workflows with Celery Beat
+if workflow_builder:
+    try:
+        scheduled_workflows = workflow_builder.get_scheduled_workflows()
+
+        for workflow_type, config in scheduled_workflows.items():
+            schedule_config = config.get('schedule')
+
+            if isinstance(schedule_config, str):
+                # Parse cron string: "minute hour day_of_month month day_of_week"
+                parts = schedule_config.split()
+                if len(parts) == 5:
+                    schedule = crontab(
+                        minute=parts[0],
+                        hour=parts[1],
+                        day_of_month=parts[2],
+                        month_of_year=parts[3],
+                        day_of_week=parts[4]
+                    )
+
+                    # Register scheduled workflow with Celery Beat
+                    celery_app.conf.beat_schedule[f'trigger-{workflow_type}'] = {
+                        'task': 'rufus.tasks.trigger_scheduled_workflow',
+                        'schedule': schedule,
+                        'args': (workflow_type, config.get('initial_data', {}))
+                    }
+                    logger.info(f"Registered scheduled workflow: {workflow_type} with cron '{schedule_config}'")
+                else:
+                    logger.warning(f"Invalid cron schedule for {workflow_type}: {schedule_config} (expected 5 parts)")
+            elif isinstance(schedule_config, dict):
+                # Support dict-based schedule configuration (e.g., {"crontab": {...}} or {"interval": {...}})
+                if 'crontab' in schedule_config:
+                    schedule = crontab(**schedule_config['crontab'])
+                elif 'interval' in schedule_config:
+                    from celery.schedules import schedule as celery_schedule
+                    schedule = celery_schedule(run_every=schedule_config['interval'])
+                else:
+                    logger.warning(f"Unsupported schedule format for {workflow_type}: {schedule_config}")
+                    continue
+
+                celery_app.conf.beat_schedule[f'trigger-{workflow_type}'] = {
+                    'task': 'rufus.tasks.trigger_scheduled_workflow',
+                    'schedule': schedule,
+                    'args': (workflow_type, config.get('initial_data', {}))
+                }
+                logger.info(f"Registered scheduled workflow: {workflow_type} with schedule {schedule_config}")
+    except Exception as e:
+        logger.error(f"Failed to populate beat schedule from registry: {e}")
 
 
 @worker_process_init.connect
@@ -89,13 +185,39 @@ def init_worker(**kwargs):
                 execution_provider = SyncExecutor()  # Use sync for now (can be made configurable)
                 observer = LoggingObserver()
 
-                # Create workflow builder (need to load registry)
-                # For now, create empty registry - tasks will use definition_snapshot from DB
-                workflow_builder = WorkflowBuilder(
-                    workflow_registry={},
-                    expression_evaluator_cls=SimpleExpressionEvaluator,
-                    template_engine_cls=Jinja2TemplateEngine
-                )
+                # Create workflow builder with actual registry if available
+                # This allows scheduled workflows and other tasks to create new workflows
+                import yaml
+                config_dir = os.environ.get("WORKFLOW_CONFIG_DIR", "config")
+                registry_file = os.environ.get("WORKFLOW_REGISTRY_FILE", "workflow_registry.yaml")
+                registry_path = os.path.join(config_dir, registry_file)
+
+                if os.path.exists(registry_path):
+                    # Load registry YAML file
+                    with open(registry_path, 'r') as f:
+                        registry_data = yaml.safe_load(f)
+
+                    # Convert list format to dict format
+                    workflow_registry = {}
+                    for item in registry_data.get("workflows", []):
+                        workflow_registry[item["type"]] = item
+
+                    workflow_builder = WorkflowBuilder(
+                        workflow_registry=workflow_registry,
+                        config_dir=config_dir,
+                        expression_evaluator_cls=SimpleExpressionEvaluator,
+                        template_engine_cls=Jinja2TemplateEngine
+                    )
+                    logger.info(f"Worker loaded workflow registry from {registry_path}")
+                else:
+                    # Fallback: empty registry - tasks will use definition_snapshot from DB
+                    workflow_builder = WorkflowBuilder(
+                        workflow_registry={},
+                        config_dir=config_dir,
+                        expression_evaluator_cls=SimpleExpressionEvaluator,
+                        template_engine_cls=Jinja2TemplateEngine
+                    )
+                    logger.warning(f"Worker: Registry not found at {registry_path}, using empty registry")
 
                 # Inject all providers into tasks module
                 from rufus import tasks

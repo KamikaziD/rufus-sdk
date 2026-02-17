@@ -327,31 +327,66 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
 
 
 @celery_app.task if celery_app else lambda f: f
-def trigger_scheduled_workflow(workflow_type: str, initial_data: Dict[str, Any]):
+def trigger_scheduled_workflow(workflow_type: str, initial_data: Dict[str, Any] = None):
     """
     Task called by Celery Beat to instantiate and start a scheduled workflow.
+
+    Args:
+        workflow_type: Type of workflow to create and start
+        initial_data: Initial data for the workflow state
     """
-    # Import locally to avoid circular dependencies
-    from rufus.builder import WorkflowBuilder
-
     logger.info(f"[SCHEDULER] Triggering scheduled workflow: {workflow_type}")
-    try:
-        # Get the builder instance (should be configured by celery_app)
-        # For now, we'll need to pass builder via application context
-        # This will be handled in celery_app.py initialization
 
-        # TODO: Get workflow_builder from application context
-        # workflow = workflow_builder.create_workflow(workflow_type, initial_data)
-        # _sync_save_workflow(workflow.id, workflow)
+    if not _workflow_builder:
+        logger.error(f"[SCHEDULER] Cannot trigger {workflow_type}: WorkflowBuilder not initialized")
+        return
+
+    if initial_data is None:
+        initial_data = {}
+
+    try:
+        # Create workflow using the global workflow builder
+        workflow = pg_executor.run_coroutine_sync(
+            _workflow_builder.create_workflow(workflow_type, initial_data)
+        )
+
+        # Save workflow to persistence
+        _sync_save_workflow(workflow.id, workflow)
 
         # Publish creation event
-        # _publish_event_sync(event_publisher.publish_workflow_created(workflow))
+        _publish_event_sync(event_publisher.publish_workflow_created(workflow))
 
-        # TODO: Complete implementation
-        logger.warning("[SCHEDULER] trigger_scheduled_workflow not fully implemented yet")
+        logger.info(f"[SCHEDULER] Created scheduled workflow {workflow_type}: {workflow.id}")
+
+        # Auto-advance workflow if it's in ACTIVE state
+        if workflow.status == "ACTIVE":
+            max_auto_steps = 100
+            steps_run = 0
+
+            while workflow.status == "ACTIVE" and steps_run < max_auto_steps:
+                steps_run += 1
+                try:
+                    result, next_step = workflow.next_step(user_input={})
+                    _sync_save_workflow(workflow.id, workflow)
+
+                    if workflow.status != "ACTIVE":
+                        # Hit a blocking state (PENDING_ASYNC, WAITING_HUMAN, COMPLETED, etc.)
+                        logger.info(f"[SCHEDULER] Workflow {workflow.id} reached status: {workflow.status}")
+                        break
+
+                except Exception as e:
+                    logger.error(f"[SCHEDULER] Error during execution of {workflow.id}: {e}")
+                    workflow.status = "FAILED"
+                    _sync_save_workflow(workflow.id, workflow)
+                    break
+
+        return {"workflow_id": str(workflow.id), "status": workflow.status}
 
     except Exception as e:
         logger.error(f"[SCHEDULER] Failed to trigger workflow {workflow_type}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"error": str(e)}
 
 
 @celery_app.task if celery_app else lambda f: f
