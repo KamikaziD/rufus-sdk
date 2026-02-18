@@ -45,6 +45,7 @@ from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.execution.thread_pool import ThreadPoolExecutorProvider
+from rufus.implementations.execution.celery import CeleryExecutionProvider
 from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
@@ -215,10 +216,15 @@ async def startup_event():
 
     # Execution Provider
     execution_backend = os.getenv('WORKFLOW_EXECUTION_BACKEND', 'sync').lower()
-    if execution_backend == 'threadpool':
+    if execution_backend == 'celery':
+        execution_provider = CeleryExecutionProvider()
+        logger.info("Using CeleryExecutionProvider for distributed async execution")
+    elif execution_backend == 'threadpool':
         execution_provider = ThreadPoolExecutorProvider()
+        logger.info("Using ThreadPoolExecutorProvider")
     else:  # Default to sync
         execution_provider = SyncExecutor()
+        logger.info("Using SyncExecutor")
 
     # WorkflowEngine
     workflow_engine = WorkflowEngine(
@@ -230,6 +236,11 @@ async def startup_event():
         template_engine_cls=Jinja2TemplateEngine,
         config_dir=RUFUS_CONFIG_DIR
     )
+
+    # Initialize execution provider with engine reference
+    if hasattr(execution_provider, 'initialize'):
+        await execution_provider.initialize(workflow_engine)
+        logger.info(f"Initialized {execution_provider.__class__.__name__} with engine reference")
 
     # Initialize Version Service
     from rufus_server.version_service import VersionService
@@ -711,7 +722,8 @@ async def retry_workflow(
 
     # Dispatch async task to resume execution
     from rufus.tasks import resume_from_async_task
-    resume_from_async_task.delay(str(workflow_uuid), {})
+    current_step_index = workflow_dict.get('current_step', 0)
+    resume_from_async_task.delay({}, str(workflow_uuid), current_step_index)
 
     return {"status": "retry_initiated", "workflow_id": workflow_id}
 
@@ -824,7 +836,7 @@ async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
 
     # Subscribe to workflow events channel
     pubsub = redis_client.pubsub()
-    channel = f"workflow:events:{workflow_id}"
+    channel = f"rufus:events:{workflow_id}"
 
     try:
         await pubsub.subscribe(channel)

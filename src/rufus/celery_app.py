@@ -74,7 +74,11 @@ celery_app.conf.update(
     beat_schedule={},  # Placeholder, will be populated dynamically
     # Regional Queues - allow dynamic queue creation
     # To enforce strict routing, workers must be started with -Q <region>
-    task_create_missing_queues=True
+    task_create_missing_queues=True,
+    # Use 'default' as the default queue name instead of 'celery'
+    task_default_queue='default',
+    task_default_exchange='default',
+    task_default_routing_key='default'
 )
 
 # Add system-wide polling task (for scheduled workflows)

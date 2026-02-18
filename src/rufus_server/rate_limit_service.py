@@ -167,7 +167,8 @@ class RateLimitService:
         await self._persist_tracking_record(
             identifier,
             rule.rule_name,
-            window_start
+            window_start,
+            rule.window_seconds
         )
 
         # Periodic cleanup
@@ -443,15 +444,16 @@ class RateLimitService:
         self,
         identifier: str,
         rule_name: str,
-        window_start: float
+        window_start: float,
+        window_seconds: int
     ) -> None:
         """Persist tracking record to database for durability."""
         try:
             query = """
                 INSERT INTO rate_limit_tracking
-                (identifier, rule_name, window_start, request_count)
-                VALUES ($1, $2, TO_TIMESTAMP($3), 1)
-                ON CONFLICT (identifier, rule_name, window_start)
+                (identifier, resource, window_start, window_end, request_count)
+                VALUES ($1, $2, TO_TIMESTAMP($3), TO_TIMESTAMP($3) + INTERVAL '1 second' * $4, 1)
+                ON CONFLICT (identifier, resource, window_start)
                 DO UPDATE SET
                     request_count = rate_limit_tracking.request_count + 1,
                     last_request = NOW()
@@ -461,7 +463,8 @@ class RateLimitService:
                     query,
                     identifier,
                     rule_name,
-                    window_start
+                    window_start,
+                    window_seconds
                 )
         except Exception:
             pass  # Fail silently, in-memory tracking is primary

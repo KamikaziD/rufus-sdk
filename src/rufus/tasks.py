@@ -124,6 +124,17 @@ def _sync_save_workflow(workflow_id: str, workflow):
     )
 
 
+def _sync_next_step(workflow, user_input: Dict[str, Any] = None):
+    """Execute workflow next_step synchronously"""
+    if user_input is None:
+        user_input = {}
+
+    # Use pg_executor to run async next_step in dedicated thread
+    return pg_executor.run_coroutine_sync(
+        workflow.next_step(user_input=user_input)
+    )
+
+
 @celery_app.task(bind=True) if celery_app else lambda f: f
 def execute_http_request(self, task_payload: Dict[str, Any]):
     """
@@ -329,7 +340,7 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
                 steps_run += 1
                 try:
                     # Pass empty input as this is an automated transition
-                    result, next_step = workflow.next_step(user_input={})
+                    result, next_step = _sync_next_step(workflow, user_input={})
                     _sync_save_workflow(workflow_id, workflow)
 
                     if workflow.status != "ACTIVE":
@@ -391,7 +402,7 @@ def trigger_scheduled_workflow(workflow_type: str, initial_data: Dict[str, Any] 
             while workflow.status == "ACTIVE" and steps_run < max_auto_steps:
                 steps_run += 1
                 try:
-                    result, next_step = workflow.next_step(user_input={})
+                    result, next_step = _sync_next_step(workflow, user_input={})
                     _sync_save_workflow(workflow.id, workflow)
 
                     if workflow.status != "ACTIVE":
@@ -551,7 +562,7 @@ def execute_independent_workflow(workflow_id: str):
         iterations += 1
         try:
             # Pass empty input as these are typically background tasks
-            result, next_step = workflow.next_step(user_input={})
+            result, next_step = _sync_next_step(workflow, user_input={})
             _sync_save_workflow(workflow_id, workflow)
 
             if workflow.status == "PENDING_ASYNC":

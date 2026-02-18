@@ -62,7 +62,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         """No cleanup needed for Celery (workers are separate processes)."""
         logger.info("CeleryExecutionProvider closed")
 
-    def execute_sync_step_function(self, func: Callable, state: BaseModel, context: StepContext) -> Dict[str, Any]:
+    async def execute_sync_step_function(self, func: Callable, state: BaseModel, context: StepContext) -> Dict[str, Any]:
         """
         Executes a synchronous step function directly in the current process.
 
@@ -72,25 +72,21 @@ class CeleryExecutionProvider(ExecutionProvider):
 
         # Ensure that the function itself is awaited if it's an async function
         if asyncio.iscoroutinefunction(func):
-            # Run async function synchronously
-            loop = asyncio.new_event_loop()
-            try:
-                result = loop.run_until_complete(func(state=state, context=context))
-            finally:
-                loop.close()
+            # Await async function
+            result = await func(state=state, context=context)
         else:
             result = func(state=state, context=context)
 
         # Ensure result is a dict
         return result if isinstance(result, dict) else {}
 
-    def dispatch_async_task(self,
+    async def dispatch_async_task(self,
                            func_path: str,
                            state_data: Dict[str, Any],
                            workflow_id: str,
                            current_step_index: int,
                            data_region: Optional[str] = None,
-                           **kwargs) -> str:
+                           **kwargs) -> Dict[str, Any]:
         """
         Dispatches an asynchronous task to Celery workers.
 
@@ -137,15 +133,15 @@ class CeleryExecutionProvider(ExecutionProvider):
         )
 
         logger.info(f"Dispatched async task {async_task.id} for workflow {workflow_id}")
-        return async_task.id
+        return {"_async_dispatch": True, "task_id": async_task.id}
 
-    def dispatch_parallel_tasks(self,
+    async def dispatch_parallel_tasks(self,
                                tasks: List[Any],
                                state_data: Dict[str, Any],
                                workflow_id: str,
                                current_step_index: int,
                                merge_function_path: Optional[str] = None,
-                               data_region: Optional[str] = None) -> str:
+                               data_region: Optional[str] = None) -> Dict[str, Any]:
         """
         Dispatches multiple tasks for parallel execution.
 
@@ -193,9 +189,9 @@ class CeleryExecutionProvider(ExecutionProvider):
         )
 
         logger.info(f"Dispatched parallel task group {workflow.id} for workflow {workflow_id}")
-        return workflow.id
+        return {"_async_dispatch": True, "task_id": workflow.id}
 
-    def dispatch_sub_workflow(self, child_id: str, parent_id: str):
+    async def dispatch_sub_workflow(self, child_id: str, parent_id: str):
         """
         Dispatches a sub-workflow for execution.
 
@@ -213,7 +209,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         )
 
         logger.info(f"Dispatched sub-workflow {child_id} for parent {parent_id}, task {task.id}")
-        return task.id
+        return {"_async_dispatch": True, "task_id": task.id}
 
     def report_child_status_to_parent(self,
                                      child_id: str,
