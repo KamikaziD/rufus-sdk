@@ -85,6 +85,23 @@ workflow_audit_log = Table(
     Index('ix_audit_event_type', 'event_type', 'timestamp'),
 )
 
+workflow_execution_logs = Table(
+    'workflow_execution_logs',
+    metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('workflow_id', String(36), nullable=False, index=True),
+    Column('execution_id', String(36)),
+    Column('step_name', String(200)),
+    Column('log_level', String(20), nullable=False),  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    Column('message', Text, nullable=False),
+    Column('metadata', Text),  # JSONB in PostgreSQL
+    Column('logged_at', DateTime, server_default=func.now(), nullable=False),
+
+    Index('ix_execution_logs_workflow', 'workflow_id'),
+    Index('ix_execution_logs_level', 'log_level'),
+    Index('ix_execution_logs_time', 'logged_at'),
+)
+
 workflow_metrics = Table(
     'workflow_metrics',
     metadata,
@@ -186,6 +203,7 @@ def get_core_tables() -> list:
     return [
         workflow_executions,
         workflow_audit_log,
+        workflow_execution_logs,
         workflow_metrics,
         workflow_heartbeats,
     ]

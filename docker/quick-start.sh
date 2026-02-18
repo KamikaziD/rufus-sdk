@@ -40,6 +40,13 @@ until docker-compose -f docker-compose.production.yml exec -T postgres pg_isread
 done
 echo "✅ PostgreSQL is ready"
 
+# Create database if it doesn't exist
+echo "🗄️  Creating database if needed..."
+docker-compose -f docker-compose.production.yml exec -T postgres psql -U rufus -d postgres -tc \
+    "SELECT 1 FROM pg_database WHERE datname = 'rufus_production'" | grep -q 1 || \
+    docker-compose -f docker-compose.production.yml exec -T postgres createdb -U rufus rufus_production
+echo "✅ Database ready"
+
 # Wait for Redis to be ready
 echo "⏳ Waiting for Redis..."
 until docker-compose -f docker-compose.production.yml exec -T redis redis-cli ping > /dev/null 2>&1; do

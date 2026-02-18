@@ -27,6 +27,7 @@ class MergeConflictBehavior(str, Enum):
 
 
 class StepContext(BaseModel):
+    """Context object passed to each step function, containing metadata and utilities."""
     workflow_id: str
     step_name: str
     validated_input: Optional[Any] = None
@@ -34,6 +35,7 @@ class StepContext(BaseModel):
 
 
 class WorkflowStep(BaseModel):
+    """Base model for a workflow step. Specific step types will extend this with additional fields."""
     name: str
     func: Optional[Callable] = None
     input_schema: Optional[Type[BaseModel]] = None
@@ -46,16 +48,19 @@ class WorkflowStep(BaseModel):
 
 
 class CompensatableStep(WorkflowStep):
+    """Workflow step that includes a compensation function for saga patterns."""
     compensate_func: Callable
 
 
 class AsyncWorkflowStep(WorkflowStep):
+    """Workflow step that executes asynchronously, allowing the workflow to pause and wait for an external event or callback."""
     func_path: str  # Path to the function for async execution
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
 
 
 class HttpWorkflowStep(WorkflowStep):
+    """Workflow step that makes an HTTP request to an external API."""
     http_config: Dict[str, Any]  # Configuration for HTTP request
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW

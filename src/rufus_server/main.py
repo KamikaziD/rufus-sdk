@@ -183,6 +183,7 @@ async def startup_event():
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
+    RUFUS_CONFIG_DIR = os.getenv("RUFUS_CONFIG_DIR", "config")  # Directory containing workflow YAML files
     try:
         with open(RUFUS_WORKFLOW_REGISTRY_PATH, "r") as f:
             workflow_registry_config = yaml.safe_load(f)
@@ -224,7 +225,8 @@ async def startup_event():
         observer=workflow_observer,
         workflow_registry={wf['type']: wf for wf in workflow_registry_config.get("workflows", [])},
         expression_evaluator_cls=SimpleExpressionEvaluator,
-        template_engine_cls=Jinja2TemplateEngine
+        template_engine_cls=Jinja2TemplateEngine,
+        config_dir=RUFUS_CONFIG_DIR
     )
 
     # Initialize Version Service

@@ -513,7 +513,8 @@ CREATE TABLE IF NOT EXISTS rate_limit_rules (
     window_seconds INT NOT NULL,
     scope VARCHAR(50) NOT NULL,
     is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_limit_active ON rate_limit_rules(is_active);
@@ -654,9 +655,42 @@ VALUES (
     'Default configuration for edge devices'
 ) ON CONFLICT DO NOTHING;
 
--- Grant permissions
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO rufus;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO rufus;
+-- ─────────────────────────────────────────────────────────────────────────
+-- Worker Nodes Table (for Celery worker registry)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS worker_nodes (
+    worker_id VARCHAR(100) PRIMARY KEY,
+    hostname VARCHAR(255),
+    region VARCHAR(50),
+    zone VARCHAR(50),
+    capabilities JSONB DEFAULT '{}',
+    status VARCHAR(20),  -- 'online', 'offline'
+    last_heartbeat TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_status ON worker_nodes(status);
+CREATE INDEX IF NOT EXISTS idx_worker_heartbeat ON worker_nodes(last_heartbeat);
+CREATE INDEX IF NOT EXISTS idx_worker_region ON worker_nodes(region);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Workflow Execution Logs Table (for debugging and audit)
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS workflow_execution_logs (
+    id SERIAL PRIMARY KEY,
+    workflow_id UUID NOT NULL,
+    execution_id UUID,
+    step_name VARCHAR(200),
+    log_level VARCHAR(20) NOT NULL,  -- 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+    message TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    logged_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_logs_workflow ON workflow_execution_logs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_execution_logs_level ON workflow_execution_logs(log_level);
+CREATE INDEX IF NOT EXISTS idx_execution_logs_time ON workflow_execution_logs(logged_at DESC);
 
 -- Output success message
 DO $$

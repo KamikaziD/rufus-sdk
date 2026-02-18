@@ -1,0 +1,131 @@
+# Example docker-compose for USER PROJECTS
+# Uses pre-built Rufus images from Docker Hub
+# Users mount their custom code as volumes
+
+# INSTRUCTIONS:
+# 1. Copy this file to your project directory
+# 2. Create your workflow code:
+#    - my_app/models.py (Pydantic state models)
+#    - my_app/steps.py (Step functions)
+#    - config/*.yaml (Workflow definitions)
+# 3. Update REGISTRY below to match where images are published
+# 4. Run: docker-compose up -d
+
+services:
+  # PostgreSQL - Your project database
+  postgres:
+    image: postgres:15-alpine
+    container_name: my-app-postgres
+    command: postgres -c max_connections=200 -c shared_buffers=256MB
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-my_app_db}
+      POSTGRES_USER: ${POSTGRES_USER:-myapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-myapp} -d ${POSTGRES_DB:-my_app_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Redis - Message broker
+  redis:
+    image: redis:7-alpine
+    container_name: my-app-redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Rufus Server - REST API (pre-built image)
+  rufus-server:
+    image: yourname/rufus-server:latest  # TODO: Change 'yourname' to your Docker Hub username
+    container_name: my-app-rufus-server
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount YOUR project code
+      - ./my_app:/app/my_app              # Your step functions and models
+      - ./config:/app/config              # Your workflow YAML files
+      # Optional: Mount additional dependencies
+      # - ./requirements.txt:/app/user_requirements.txt
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-myapp}:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/${POSTGRES_DB:-my_app_db}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      WORKFLOW_STORAGE: postgres
+      PYTHONPATH: /app:/app/my_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Rufus Worker - Executes workflows (pre-built image)
+  rufus-worker:
+    image: yourname/rufus-worker:latest  # TODO: Change 'yourname' to your Docker Hub username
+    volumes:
+      # Mount YOUR project code (same as server)
+      - ./my_app:/app/my_app
+      - ./config:/app/config
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-myapp}:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/${POSTGRES_DB:-my_app_db}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app:/app/my_app
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      WORKER_POOL: ${WORKER_POOL:-prefork}
+      WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      replicas: 3  # Scale workers as needed
+
+  # Flower - Monitoring UI (pre-built image)
+  flower:
+    image: yourname/rufus-flower:latest  # TODO: Change 'yourname' to your Docker Hub username
+    container_name: my-app-flower
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # Optional: Enable basic auth
+      # FLOWER_BASIC_AUTH: user:password
+    depends_on:
+      - redis
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge

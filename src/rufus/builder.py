@@ -25,11 +25,13 @@ class WorkflowBuilder:
     def __init__(self,
                  workflow_registry: Dict[str, Any],
                  expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
-                 template_engine_cls: Type['TemplateEngine'] # Use string literal
+                 template_engine_cls: Type['TemplateEngine'], # Use string literal
+                 config_dir: Optional[str] = None  # Directory containing workflow YAML files
                  ):
         self.workflow_registry = workflow_registry
         self.expression_evaluator_cls = expression_evaluator_cls
         self.template_engine_cls = template_engine_cls
+        self.config_dir = config_dir or os.getcwd()  # Default to current directory
         self._workflow_configs = {} # Cache for parsed workflow YAMLs if needed
         self._loaded_modules = set() # Cache for loaded step modules
         # self._marketplace_steps: Dict[str, Type['WorkflowStep']] = {} # Remove this line
@@ -402,18 +404,43 @@ class WorkflowBuilder:
             raise ValueError(
                 f"Workflow type '{workflow_type}' not found in registry.")
 
-        # Make a deep copy to avoid modifying the original registry entry
-        cloned_config_info = copy.deepcopy(config_info)
+        # Check cache first
+        if workflow_type in self._workflow_configs:
+            return self._workflow_configs[workflow_type]
+
+        # Load the actual workflow YAML file if config_file is specified
+        if 'config_file' in config_info:
+            config_file_path = os.path.join(self.config_dir, config_info['config_file'])
+            try:
+                with open(config_file_path, 'r') as f:
+                    workflow_config = yaml.safe_load(f)
+                    if not workflow_config:
+                        raise ValueError(f"Empty workflow config in {config_file_path}")
+
+                    # Merge registry metadata with loaded config
+                    # The loaded YAML takes precedence, but we preserve registry metadata
+                    merged_config = {**config_info, **workflow_config}
+
+            except FileNotFoundError:
+                raise ValueError(f"Workflow config file not found: {config_file_path}")
+            except yaml.YAMLError as e:
+                raise ValueError(f"Invalid YAML in {config_file_path}: {e}")
+        else:
+            # No config_file specified, use registry entry as-is
+            merged_config = copy.deepcopy(config_info)
 
         # Process environment variables
-        processed_config_info = self._apply_env_variables_to_dict(cloned_config_info)
-        
+        processed_config_info = self._apply_env_variables_to_dict(merged_config)
+
         # Process parameters using the template engine
         # Instantiate a temporary template engine with workflow-level parameters as context
         # Provide an empty context if no parameters are found, as Jinja2TemplateEngine requires one
         temp_engine = self.template_engine_cls({}) # Changed to pass empty dict as context
         template_params = processed_config_info.get("parameters", {})
         processed_config_info = self._apply_parameters_to_dict(processed_config_info, template_params, temp_engine)
+
+        # Cache the processed config
+        self._workflow_configs[workflow_type] = processed_config_info
 
         return processed_config_info
 

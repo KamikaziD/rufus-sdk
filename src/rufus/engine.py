@@ -17,7 +17,8 @@ class WorkflowEngine:
                  observer: 'WorkflowObserver', # Use string literal
                  workflow_registry: Dict[str, Any],
                  expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
-                 template_engine_cls: Type['TemplateEngine'] # Use string literal
+                 template_engine_cls: Type['TemplateEngine'], # Use string literal
+                 config_dir: Optional[str] = None  # Directory containing workflow YAML files
                  ):
         self.persistence: 'PersistenceProvider' = persistence
         self.executor: 'ExecutionProvider' = executor
@@ -25,13 +26,15 @@ class WorkflowEngine:
         self.workflow_registry = workflow_registry
         self.expression_evaluator_cls = expression_evaluator_cls
         self.template_engine_cls = template_engine_cls
+        self.config_dir = config_dir
 
         # Initialize WorkflowBuilder here, it needs access to the registry and other classes
         from rufus.builder import WorkflowBuilder # Local import to avoid circular dependency
         self.workflow_builder = WorkflowBuilder(
             workflow_registry=self.workflow_registry,
             expression_evaluator_cls=self.expression_evaluator_cls,
-            template_engine_cls=self.template_engine_cls
+            template_engine_cls=self.template_engine_cls,
+            config_dir=self.config_dir
         )
 
         # Do NOT call executor.initialize here, as __init__ cannot be async.
