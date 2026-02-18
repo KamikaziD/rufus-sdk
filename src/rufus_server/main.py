@@ -291,6 +291,7 @@ async def get_available_workflows():
             "type": wf_type,
             "description": processed_config.get("description", "No description provided."),
             "parameters": processed_config.get("parameters", {}),
+            "initial_data_example": processed_config.get("initial_data_example", {}),
         })
     return available_workflows
 
@@ -358,9 +359,17 @@ async def get_workflow_logs(
     step_name: Optional[str] = None,
     user: Optional[UserContext] = Depends(get_current_user)
 ):
-    """Get workflow execution logs."""
+    """Get workflow execution logs (PostgreSQL backend required)."""
     if workflow_engine is None:
         raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    # Check if using PostgreSQL
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(
+            status_code=501,
+            detail="Execution logs require PostgreSQL backend"
+        )
 
     # Build SQL query
     query = """
@@ -391,9 +400,49 @@ async def get_workflow_logs(
                 if log.get('logged_at'):
                     log['logged_at'] = log['logged_at'].isoformat()
 
-            return {"logs": logs, "count": len(logs)}
+            # Return array directly (not wrapped in object) for UI compatibility
+            return logs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch logs: {str(e)}")
+
+
+@app.get("/api/v1/workflow/{workflow_id}/current_step_info")
+async def get_current_step_info(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get current step information including input schema."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    try:
+        workflow = await workflow_engine.get_workflow(workflow_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if workflow.status == "COMPLETED" or workflow.current_step >= len(workflow.workflow_steps):
+        return {"name": "Workflow Complete", "required_input": [], "input_schema": None}
+
+    step = workflow.workflow_steps[workflow.current_step]
+    response = {
+        "name": step.name,
+        "type": type(step).__name__,
+        "required_input": getattr(step, "required_input", []) or []
+    }
+
+    # Add input schema for dynamic form rendering
+    if workflow.status == "WAITING_HUMAN":
+        from rufus_server.api_models import ResumeWorkflowRequest
+        response["input_schema"] = ResumeWorkflowRequest.model_json_schema()
+    elif hasattr(step, "input_model") and step.input_model:
+        try:
+            response["input_schema"] = step.input_model.model_json_schema()
+        except AttributeError:
+            response["input_schema"] = None
+    else:
+        response["input_schema"] = None
+
+    return response
 
 
 @app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse)
@@ -436,10 +485,18 @@ async def next_workflow_step(
 @app.get("/api/v1/workflows/executions")
 async def get_workflow_executions(
     status: Optional[str] = None,
+    exclude_status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0
 ):
-    """List workflow executions."""
+    """List workflow executions.
+
+    Args:
+        status: Filter by specific status (e.g., "ACTIVE", "FAILED")
+        exclude_status: Exclude specific status (e.g., "COMPLETED")
+        limit: Maximum number of results to return
+        offset: Number of results to skip
+    """
     if workflow_engine is None:
         raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
@@ -448,7 +505,164 @@ async def get_workflow_executions(
         filters['status'] = status
 
     workflow_list = await workflow_engine.persistence.list_workflows(**filters)
+
+    # Apply exclude_status filter if provided
+    if exclude_status:
+        workflow_list = [wf for wf in workflow_list if wf.get('status') != exclude_status]
+
     return workflow_list[offset:offset+limit]
+
+
+@app.get("/api/v1/metrics/summary")
+async def get_metrics_summary(hours: int = 24):
+    """Get aggregated metrics across workflows (PostgreSQL backend required)."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    # Check if using PostgreSQL
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(
+            status_code=501,
+            detail="Metrics require PostgreSQL backend"
+        )
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    workflow_type,
+                    COUNT(DISTINCT id) as total_executions,
+                    COUNT(DISTINCT CASE WHEN status = 'COMPLETED' THEN id END) as completed,
+                    COUNT(DISTINCT CASE WHEN status LIKE 'FAILED%' THEN id END) as failed,
+                    COUNT(DISTINCT CASE WHEN status LIKE 'PENDING%' OR status = 'ACTIVE' THEN id END) as pending,
+                    MAX(updated_at) as last_execution
+                FROM workflow_executions
+                WHERE created_at > NOW() - INTERVAL '1 hour' * $1
+                GROUP BY workflow_type
+                ORDER BY total_executions DESC
+            """, hours)
+
+            return [dict(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch metrics: {str(e)}")
+
+
+@app.get("/api/v1/workflow/{workflow_id}/metrics")
+async def get_workflow_metrics(
+    workflow_id: str,
+    limit: int = 500,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get performance metrics for a specific workflow (PostgreSQL backend required)."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(
+            status_code=501,
+            detail="Metrics require PostgreSQL backend"
+        )
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT step_name, metric_name, metric_value, unit, tags, recorded_at
+                FROM workflow_metrics
+                WHERE workflow_id = $1
+                ORDER BY recorded_at DESC
+                LIMIT $2
+            """, workflow_id, limit)
+
+            metrics = [dict(row) for row in rows]
+
+            # Convert datetime to ISO format
+            for metric in metrics:
+                if metric.get('recorded_at'):
+                    metric['recorded_at'] = metric['recorded_at'].isoformat()
+
+            return metrics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch metrics: {str(e)}")
+
+
+@app.get("/api/v1/workflow/{workflow_id}/audit")
+async def get_workflow_audit_log(
+    workflow_id: str,
+    limit: int = 100,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get audit trail for workflow (PostgreSQL backend required)."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(
+            status_code=501,
+            detail="Audit logs require PostgreSQL backend"
+        )
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT event_type, step_name, old_state, new_state, metadata, logged_at
+                FROM workflow_audit_log
+                WHERE workflow_id = $1
+                ORDER BY logged_at DESC
+                LIMIT $2
+            """, workflow_id, limit)
+
+            audit_logs = [dict(row) for row in rows]
+
+            # Convert datetime to ISO format
+            for log in audit_logs:
+                if log.get('logged_at'):
+                    log['logged_at'] = log['logged_at'].isoformat()
+
+            return audit_logs
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch audit log: {str(e)}")
+
+
+@app.get("/api/v1/admin/workers")
+async def get_registered_workers(
+    limit: int = 100,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """List registered worker nodes (PostgreSQL backend required)."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(
+            status_code=501,
+            detail="Worker registry requires PostgreSQL backend"
+        )
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT worker_id, hostname, region, zone, capabilities, status, last_heartbeat, updated_at
+                FROM worker_nodes
+                ORDER BY last_heartbeat DESC
+                LIMIT $1
+            """, limit)
+
+            workers = [dict(row) for row in rows]
+
+            # Convert datetime to ISO format
+            for worker in workers:
+                if worker.get('last_heartbeat'):
+                    worker['last_heartbeat'] = worker['last_heartbeat'].isoformat()
+                if worker.get('updated_at'):
+                    worker['updated_at'] = worker['updated_at'].isoformat()
+
+            return workers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch workers: {str(e)}")
 
 
 @app.post("/api/v1/workflow/{workflow_id}/retry")
@@ -470,8 +684,12 @@ async def retry_workflow(
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    if workflow_dict['status'] != 'FAILED':
-        raise HTTPException(status_code=400, detail="Only failed workflows can be retried")
+    # Allow retry for FAILED and FAILED_ROLLED_BACK workflows
+    if workflow_dict['status'] not in ['FAILED', 'FAILED_ROLLED_BACK', 'FAILED_CHILD_WORKFLOW']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only failed workflows can be retried (current status: {workflow_dict['status']})"
+        )
 
     # Reset to ACTIVE
     old_status = workflow_dict['status']
@@ -611,6 +829,25 @@ async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
     try:
         await pubsub.subscribe(channel)
         logger.info(f"WebSocket client subscribed to workflow {workflow_id}")
+
+        # Send initial workflow state immediately after connection
+        if workflow_engine is not None:
+            try:
+                workflow = await workflow_engine.get_workflow(workflow_id)
+                initial_state = {
+                    "id": str(workflow.id),
+                    "status": workflow.status,
+                    "current_step": workflow.current_step_name,
+                    "state": workflow.state.model_dump(),
+                    "workflow_type": workflow.workflow_type,
+                    "steps_config": [step.to_dict() for step in workflow.workflow_steps],
+                    "parent_execution_id": str(workflow.parent_execution_id) if workflow.parent_execution_id else None,
+                    "blocked_on_child_id": str(workflow.blocked_on_child_id) if workflow.blocked_on_child_id else None
+                }
+                await websocket.send_json(initial_state)
+                logger.info(f"Sent initial state for workflow {workflow_id}")
+            except Exception as e:
+                logger.error(f"Failed to send initial state for workflow {workflow_id}: {e}")
 
         # Stream events to browser
         async for message in pubsub.listen():

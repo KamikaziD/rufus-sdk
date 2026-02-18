@@ -125,6 +125,12 @@
                         <div class="card-body tab-content">
                             <!-- Log Tab -->
                             <div id="log-view" class="tab-pane active">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0;">Server Logs</h3>
+                                    <button class="button-secondary" onclick="fetchServerLogs()" style="padding: 5px 10px; font-size: 0.9em;">
+                                        <i class="fas fa-sync"></i> Refresh
+                                    </button>
+                                </div>
                                 <div id="log-output" class="output-box"></div>
                             </div>
                             <!-- State Tab -->

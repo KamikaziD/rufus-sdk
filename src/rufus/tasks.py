@@ -231,12 +231,34 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
     """
     Core engine helper to load a workflow, merge state from an async result,
     advance the workflow, and save it.
+
+    Args:
+        workflow_id: ID of workflow to resume
+        step_result: Result dict from async task (may contain error info)
+        next_step_index_or_name: Next step to execute
+        completed_step_index: Index of completed step (for auto-advance check)
     """
     _log_task_execution(workflow_id, "Resuming workflow from async task", level="DEBUG")
 
     workflow = _sync_load_workflow(workflow_id)
     if not workflow:
         logger.error(f"Error: Workflow {workflow_id} not found for async resumption!")
+        return
+
+    # Check if async task failed (indicated by error in result)
+    if isinstance(step_result, dict) and "error" in step_result:
+        logger.error(f"[ASYNC-TASK] Async task failed for workflow {workflow_id}: {step_result.get('error')}")
+        workflow.status = "FAILED"
+        # Store error metadata
+        if not hasattr(workflow, 'metadata') or workflow.metadata is None:
+            workflow.metadata = {}
+        workflow.metadata["async_task_error"] = step_result.get("error")
+        workflow.metadata["failed_at_step"] = workflow.current_step_name
+        _sync_save_workflow(workflow_id, workflow)
+
+        # Publish failure event
+        _publish_event_sync(event_publisher.publish_workflow_updated(workflow))
+        logger.error(f"[ASYNC-TASK] Workflow {workflow_id} marked as FAILED due to async task error")
         return
 
     # Generic state merging. The result of an async step is merged into the workflow state.
@@ -258,6 +280,9 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
         except StopIteration:
             logger.error(f"Error: Jump target step '{next_step_index_or_name}' not found for workflow {workflow_id}")
             workflow.status = "FAILED"
+            _sync_save_workflow(workflow_id, workflow)
+            _publish_event_sync(event_publisher.publish_workflow_updated(workflow))
+            return
     elif isinstance(next_step_index_or_name, int):  # Linear progression
         workflow.current_step = next_step_index_or_name
         next_step_index = next_step_index_or_name
@@ -480,9 +505,19 @@ def execute_sub_workflow(child_id: str, parent_id: str):
             # Notify parent of child failure
             parent = _sync_load_workflow(parent_id)
             if parent:
-                parent.status = "FAILED"
+                # Use FAILED_CHILD_WORKFLOW status to distinguish from parent failure
+                parent.status = "FAILED_CHILD_WORKFLOW"
+                # Store failure metadata for debugging
+                if not hasattr(parent, 'metadata') or parent.metadata is None:
+                    parent.metadata = {}
+                parent.metadata["failed_child_id"] = str(child_id)
+                parent.metadata["failed_child_status"] = child.status
                 parent.blocked_on_child_id = None
                 _sync_save_workflow(parent_id, parent)
+
+                # Publish workflow updated event
+                _publish_event_sync(event_publisher.publish_workflow_updated(parent))
+                logger.error(f"[SUB-WORKFLOW] Parent {parent_id} marked as FAILED_CHILD_WORKFLOW due to child {child_id} failure")
 
             return
 
@@ -563,6 +598,22 @@ def resume_parent_from_child(parent_id: str, child_id: str):
         logger.error("[SUB-WORKFLOW] Error: Could not load parent or child workflow")
         return
 
+    # Check child status before resuming parent
+    if child.status == "FAILED" or child.status == "FAILED_ROLLED_BACK":
+        logger.error(f"[SUB-WORKFLOW] Child {child_id} failed with status {child.status}, failing parent {parent_id}")
+        parent.status = "FAILED_CHILD_WORKFLOW"
+        # Store failure metadata
+        if not hasattr(parent, 'metadata') or parent.metadata is None:
+            parent.metadata = {}
+        parent.metadata["failed_child_id"] = str(child_id)
+        parent.metadata["failed_child_status"] = child.status
+        parent.blocked_on_child_id = None
+        _sync_save_workflow(parent_id, parent)
+
+        # Publish updated event
+        _publish_event_sync(event_publisher.publish_workflow_updated(parent))
+        return
+
     # Merge child state into parent
     if not hasattr(parent.state, 'sub_workflow_results') or parent.state.sub_workflow_results is None:
         parent.state.sub_workflow_results = {}
@@ -588,6 +639,8 @@ def resume_parent_from_child(parent_id: str, child_id: str):
     except Exception as e:
         parent.status = "FAILED"
         _sync_save_workflow(parent_id, parent)
+        # Publish workflow failed event
+        _publish_event_sync(event_publisher.publish_workflow_updated(parent))
         logger.error(f"[SUB-WORKFLOW] Error: Parent {parent_id} failed after child completion: {e}")
 
 

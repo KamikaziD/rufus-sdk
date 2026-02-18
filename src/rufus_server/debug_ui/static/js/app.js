@@ -45,8 +45,9 @@ function init() {
         requiredInputsViewTabButton: document.querySelector('.tab-button[data-tab="required-inputs-view"]'),
         requiredInputsViewTabPane: document.getElementById('required-inputs-view'),
         dynamicFormInputs: document.getElementById('dynamic-form-inputs'),
-        // New: Full State Pre element
-        fullStatePre: document.getElementById('full-state-pre'), 
+        // Log and State elements
+        logOutput: document.getElementById('log-output'),
+        fullStatePre: document.getElementById('full-state-pre'),
     };
 
     log('Initializing frontend...'); // Now log is called after dom is initialized

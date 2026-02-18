@@ -46,6 +46,23 @@ class WorkflowStep(BaseModel):
     # Placeholder for dynamic injection config
     dynamic_injection: Optional[Dict[str, Any]] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize step to dictionary for WebSocket/API responses."""
+        step_dict = {
+            "name": self.name,
+            "type": type(self).__name__,
+            "required_input": self.required_input,
+            "automate_next": self.automate_next,
+        }
+
+        if self.routes:
+            step_dict["routes"] = self.routes
+
+        if self.dynamic_injection:
+            step_dict["dynamic_injection"] = self.dynamic_injection
+
+        return step_dict
+
 
 class CompensatableStep(WorkflowStep):
     """Workflow step that includes a compensation function for saga patterns."""
