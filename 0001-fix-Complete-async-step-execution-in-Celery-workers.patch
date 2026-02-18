@@ -1,0 +1,636 @@
+From 561053a3fea0a5eacacbea290cabb00b46813193 Mon Sep 17 00:00:00 2001
+From: Detmar Ruhfus <detmar.ruhfus@aogroup.co.za>
+Date: Mon, 16 Feb 2026 20:24:26 +0200
+Subject: [PATCH] fix: Complete async step execution in Celery workers
+
+This fixes the critical bug where workflows with ASYNC steps failed with:
+'NoneType' object has no attribute 'workflow_builder'
+
+Root causes:
+1. Template engine import path was incorrect (template_engine vs templating)
+2. Celery workers lacked full provider initialization (only had persistence)
+3. SyncExecutor tried to access workflow_builder via _engine (which was None)
+4. Async step results weren't being merged into workflow state
+
+Changes:
+- src/rufus/celery_app.py: Fixed import path for Jinja2TemplateEngine
+- src/rufus/tasks.py: Added global providers and set_providers() function
+- src/rufus/implementations/execution/sync.py: Fixed WorkflowBuilder import
+- src/rufus/workflow.py: Added result merge for AsyncWorkflowStep
+- pyproject.toml: Bumped version to 0.3.7
+
+Docker improvements:
+- Added Dockerfile.rufus-server-local for local development
+- Added Dockerfile.rufus-worker-local for local development
+- Added Dockerfile.rufus-server-alembic with migration support
+- Added entrypoint-server.sh for Alembic migrations
+
+Testing:
+- Verified all providers initialize in worker processes
+- Tested ASYNC step execution with result merge
+- Confirmed workflow completes successfully through all steps
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+---
+ docker/Dockerfile.rufus-server-alembic        |  75 ++++++++++++
+ docker/Dockerfile.rufus-server-local          |  59 ++++++++++
+ docker/Dockerfile.rufus-worker-local          |  54 +++++++++
+ docker/entrypoint-server.sh                   |  28 +++++
+ pyproject.toml                                |   9 +-
+ ...ac861_add_workflow_execution_logs_table.py | 111 ++++++++++++++++++
+ src/rufus/celery_app.py                       |  33 +++++-
+ src/rufus/implementations/execution/sync.py   |  30 +++--
+ src/rufus/tasks.py                            |  42 ++++++-
+ src/rufus/workflow.py                         |   5 +
+ 10 files changed, 426 insertions(+), 20 deletions(-)
+ create mode 100644 docker/Dockerfile.rufus-server-alembic
+ create mode 100644 docker/Dockerfile.rufus-server-local
+ create mode 100644 docker/Dockerfile.rufus-worker-local
+ create mode 100644 docker/entrypoint-server.sh
+ create mode 100644 src/rufus/alembic/versions/441ed90ac861_add_workflow_execution_logs_table.py
+
+diff --git a/docker/Dockerfile.rufus-server-alembic b/docker/Dockerfile.rufus-server-alembic
+new file mode 100644
+index 0000000..945aa4f
+--- /dev/null
++++ b/docker/Dockerfile.rufus-server-alembic
+@@ -0,0 +1,75 @@
++# Production Rufus Server Dockerfile with Alembic Migrations
++# Installs rufus-sdk from PyPI and runs Alembic migrations on startup
++
++FROM python:3.11-slim
++
++LABEL maintainer="Rufus Team <team@rufus.dev>"
++LABEL description="Rufus Workflow Engine - REST API Server with Alembic Migrations"
++
++# Set working directory
++WORKDIR /app
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    gcc \
++    postgresql-client \
++    && rm -rf /var/lib/apt/lists/*
++
++# Install rufus-sdk from TestPyPI (TEMPORARY - for testing)
++# TODO: Switch to production PyPI once published
++
++# First install rufus-sdk core from TestPyPI
++RUN pip install --no-cache-dir \
++    --index-url https://test.pypi.org/simple/ \
++    --extra-index-url https://pypi.org/simple/ \
++    'rufus-sdk==0.3.6'
++
++# Then install extras from PyPI to avoid broken packages on TestPyPI
++RUN pip install --no-cache-dir \
++    fastapi>=0.100 \
++    uvicorn[standard]>=0.20 \
++    starlette>=0.27 \
++    slowapi>=0.1 \
++    asyncpg>=0.27 \
++    rich>=13.0 \
++    uvloop>=0.19 \
++    websockets>=12.0 \
++    psutil>=5.9 \
++    numpy>=1.24 \
++    celery[redis]>=5.3 \
++    redis>=5.0 \
++    psycopg2-binary>=2.9 \
++    prometheus-client>=0.19 \
++    alembic>=1.13
++
++# PRODUCTION VERSION (uncomment when published to PyPI):
++# RUN pip install --no-cache-dir 'rufus-sdk[all]'
++
++# Create directories for user code (will be mounted as volumes)
++RUN mkdir -p /app/config /app/user_code /app/src/rufus
++
++# Copy Alembic configuration and migrations
++COPY src/rufus/alembic /app/src/rufus/alembic
++COPY src/rufus/alembic.ini /app/src/rufus/alembic.ini
++
++# Copy entrypoint script
++COPY docker/entrypoint-server.sh /app/entrypoint.sh
++RUN chmod +x /app/entrypoint.sh
++
++# Set Python path to include user code directory
++ENV PYTHONPATH=/app:/app/user_code
++
++# Default environment variables (override in docker-compose)
++ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
++ENV CELERY_BROKER_URL=redis://redis:6379/0
++ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
++
++# Expose API port
++EXPOSE 8000
++
++# Health check
++HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
++    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5)" || exit 1
++
++# Use entrypoint script to run migrations then start server
++ENTRYPOINT ["/app/entrypoint.sh"]
+diff --git a/docker/Dockerfile.rufus-server-local b/docker/Dockerfile.rufus-server-local
+new file mode 100644
+index 0000000..087a9f1
+--- /dev/null
++++ b/docker/Dockerfile.rufus-server-local
+@@ -0,0 +1,59 @@
++# Development Rufus Server Dockerfile - Uses LOCAL source code
++# This builds from the current repo state, not TestPyPI
++# Use this for testing changes before publishing
++
++FROM python:3.11-slim
++
++LABEL maintainer="Rufus Team <team@rufus.dev>"
++LABEL description="Rufus Workflow Engine - REST API Server (Local Dev Build)"
++
++# Set working directory
++WORKDIR /app
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    gcc \
++    postgresql-client \
++    && rm -rf /var/lib/apt/lists/*
++
++# Copy entire source code
++COPY src /app/src
++COPY pyproject.toml /app/
++COPY README.md /app/
++
++# Install dependencies first (for better caching)
++RUN pip install --no-cache-dir \
++    pydantic PyYAML jinja2 typer click aiosqlite anyio orjson httpx \
++    cryptography sqlalchemy alembic python-dotenv typing-extensions \
++    annotated-types jsonschema croniter \
++    fastapi uvicorn[standard] starlette slowapi asyncpg \
++    rich uvloop websockets psutil numpy \
++    celery[redis] redis psycopg2-binary prometheus-client
++
++# Install rufus-sdk from local source
++RUN pip install -e .
++
++# Create directories for user code (will be mounted as volumes)
++RUN mkdir -p /app/config /app/user_code
++
++# Copy entrypoint script
++COPY docker/entrypoint-server.sh /app/entrypoint.sh
++RUN chmod +x /app/entrypoint.sh
++
++# Set Python path to include user code directory
++ENV PYTHONPATH=/app:/app/user_code
++
++# Default environment variables (override in docker-compose)
++ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
++ENV CELERY_BROKER_URL=redis://redis:6379/0
++ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
++
++# Expose API port
++EXPOSE 8000
++
++# Health check
++HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
++    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5)" || exit 1
++
++# Use entrypoint script to run migrations then start server
++ENTRYPOINT ["/app/entrypoint.sh"]
+diff --git a/docker/Dockerfile.rufus-worker-local b/docker/Dockerfile.rufus-worker-local
+new file mode 100644
+index 0000000..40236f1
+--- /dev/null
++++ b/docker/Dockerfile.rufus-worker-local
+@@ -0,0 +1,54 @@
++# Development Rufus Worker Dockerfile - Uses LOCAL source code
++# This builds from the current repo state, not TestPyPI
++# Use this for testing changes before publishing
++
++FROM python:3.11-slim
++
++LABEL maintainer="Rufus Team <team@rufus.dev>"
++LABEL description="Rufus Workflow Engine - Celery Worker (Local Dev Build)"
++
++# Set working directory
++WORKDIR /app
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    gcc \
++    postgresql-client \
++    && rm -rf /var/lib/apt/lists/*
++
++# Copy entire source code
++COPY src /app/src
++COPY pyproject.toml /app/
++COPY README.md /app/
++
++# Install dependencies first (for better caching)
++RUN pip install --no-cache-dir \
++    pydantic PyYAML jinja2 typer click aiosqlite anyio orjson httpx \
++    cryptography sqlalchemy alembic python-dotenv typing-extensions \
++    annotated-types jsonschema croniter \
++    fastapi uvicorn[standard] starlette slowapi asyncpg \
++    rich uvloop websockets psutil numpy \
++    celery[redis] redis psycopg2-binary prometheus-client
++
++# Install rufus-sdk from local source
++RUN pip install -e .
++
++# Create directories for user code (will be mounted as volumes)
++RUN mkdir -p /app/config /app/user_code
++
++# Set Python path
++ENV PYTHONPATH=/app:/app/user_code
++
++# Default environment variables
++ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
++ENV CELERY_BROKER_URL=redis://redis:6379/0
++ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
++ENV WORKER_CONCURRENCY=4
++ENV WORKER_POOL=prefork
++ENV WORKER_LOG_LEVEL=info
++
++# Default command: Start Celery worker
++CMD celery -A rufus.celery_app worker \
++    --loglevel=${WORKER_LOG_LEVEL} \
++    --concurrency=${WORKER_CONCURRENCY} \
++    --pool=${WORKER_POOL}
+diff --git a/docker/entrypoint-server.sh b/docker/entrypoint-server.sh
+new file mode 100644
+index 0000000..74918b5
+--- /dev/null
++++ b/docker/entrypoint-server.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -e
++
++echo "==================================="
++echo "  Rufus Server Initialization"
++echo "==================================="
++
++# Wait for database to be ready
++echo "Waiting for database..."
++sleep 5
++
++# Run Alembic migrations
++echo "Running database migrations with Alembic..."
++cd /app/src/rufus
++alembic upgrade head
++
++if [ $? -eq 0 ]; then
++    echo "✓ Database migrations completed successfully"
++else
++    echo "✗ Database migrations failed!"
++    exit 1
++fi
++
++cd /app
++
++# Start the server
++echo "Starting Rufus server..."
++exec uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+diff --git a/pyproject.toml b/pyproject.toml
+index 5ace0bb..79515b0 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [tool.poetry]
+ name = "rufus-sdk"
+-version = "0.3.5"
++version = "0.3.7"
+ description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
+ authors = ["Rufus Team <team@rufus.dev>"]
+ readme = "README.md"
+@@ -20,12 +20,17 @@ classifiers = [
+     "Programming Language :: Python :: 3.12",
+ ]
+ packages = [
+-    { include = "rufus", from = "src", exclude = ["examples", "examples/**/*"] },
++    { include = "rufus", from = "src" },
+     { include = "rufus_edge", from = "src" },
+     { include = "rufus_cli", from = "src" },
+     { include = "rufus_server", from = "src" },
+ ]
+ 
++exclude = [
++    "src/rufus/examples",
++    "src/rufus/examples/**/*",
++]
++
+ [tool.poetry.dependencies]
+ python = "^3.9"
+ 
+diff --git a/src/rufus/alembic/versions/441ed90ac861_add_workflow_execution_logs_table.py b/src/rufus/alembic/versions/441ed90ac861_add_workflow_execution_logs_table.py
+new file mode 100644
+index 0000000..92f8faa
+--- /dev/null
++++ b/src/rufus/alembic/versions/441ed90ac861_add_workflow_execution_logs_table.py
+@@ -0,0 +1,111 @@
++"""Add workflow_execution_logs table
++
++Revision ID: 441ed90ac861
++Revises: d08b401e4c86
++Create Date: 2026-02-16 16:49:32.310754
++
++"""
++from typing import Sequence, Union
++
++from alembic import op
++import sqlalchemy as sa
++
++
++# revision identifiers, used by Alembic.
++revision: str = '441ed90ac861'
++down_revision: Union[str, None] = 'd08b401e4c86'
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    # ### commands auto generated by Alembic - please adjust! ###
++    op.create_table('edge_devices',
++    sa.Column('id', sa.String(length=36), nullable=False),
++    sa.Column('device_id', sa.String(length=100), nullable=False),
++    sa.Column('device_type', sa.String(length=50), nullable=False),
++    sa.Column('device_name', sa.String(length=200), nullable=True),
++    sa.Column('merchant_id', sa.String(length=100), nullable=True),
++    sa.Column('location', sa.String(length=200), nullable=True),
++    sa.Column('api_key_hash', sa.String(length=64), nullable=False),
++    sa.Column('public_key', sa.Text(), nullable=True),
++    sa.Column('firmware_version', sa.String(length=50), nullable=True),
++    sa.Column('sdk_version', sa.String(length=50), nullable=True),
++    sa.Column('capabilities', sa.Text(), server_default='[]', nullable=True),
++    sa.Column('status', sa.String(length=50), server_default='online', nullable=True),
++    sa.Column('metadata', sa.Text(), server_default='{}', nullable=True),
++    sa.Column('last_heartbeat_at', sa.DateTime(), nullable=True),
++    sa.Column('last_sync_at', sa.DateTime(), nullable=True),
++    sa.Column('registered_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
++    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
++    sa.PrimaryKeyConstraint('id', name=op.f('pk_edge_devices'))
++    )
++    with op.batch_alter_table('edge_devices', schema=None) as batch_op:
++        batch_op.create_index('ix_device_heartbeat', ['last_heartbeat_at'], unique=False)
++        batch_op.create_index('ix_device_merchant', ['merchant_id'], unique=False)
++        batch_op.create_index('ix_device_status', ['status'], unique=False)
++        batch_op.create_index(batch_op.f('ix_edge_devices_device_id'), ['device_id'], unique=True)
++
++    op.create_table('workflow_execution_logs',
++    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
++    sa.Column('workflow_id', sa.String(length=36), nullable=False),
++    sa.Column('execution_id', sa.String(length=36), nullable=True),
++    sa.Column('step_name', sa.String(length=200), nullable=True),
++    sa.Column('log_level', sa.String(length=20), nullable=False),
++    sa.Column('message', sa.Text(), nullable=False),
++    sa.Column('metadata', sa.Text(), nullable=True),
++    sa.Column('logged_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
++    sa.PrimaryKeyConstraint('id', name=op.f('pk_workflow_execution_logs'))
++    )
++    with op.batch_alter_table('workflow_execution_logs', schema=None) as batch_op:
++        batch_op.create_index('ix_execution_logs_level', ['log_level'], unique=False)
++        batch_op.create_index('ix_execution_logs_time', ['logged_at'], unique=False)
++        batch_op.create_index('ix_execution_logs_workflow', ['workflow_id'], unique=False)
++        batch_op.create_index(batch_op.f('ix_workflow_execution_logs_workflow_id'), ['workflow_id'], unique=False)
++
++    op.create_table('device_commands',
++    sa.Column('id', sa.String(length=36), nullable=False),
++    sa.Column('device_id', sa.String(length=100), nullable=False),
++    sa.Column('command_type', sa.String(length=100), nullable=False),
++    sa.Column('command_data', sa.Text(), nullable=False),
++    sa.Column('status', sa.String(length=50), server_default='pending', nullable=True),
++    sa.Column('priority', sa.Integer(), server_default='5', nullable=True),
++    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
++    sa.Column('delivered_at', sa.DateTime(), nullable=True),
++    sa.Column('executed_at', sa.DateTime(), nullable=True),
++    sa.Column('result', sa.Text(), nullable=True),
++    sa.Column('error_message', sa.Text(), nullable=True),
++    sa.ForeignKeyConstraint(['device_id'], ['edge_devices.device_id'], name=op.f('fk_device_commands_device_id_edge_devices'), ondelete='CASCADE'),
++    sa.PrimaryKeyConstraint('id', name=op.f('pk_device_commands'))
++    )
++    with op.batch_alter_table('device_commands', schema=None) as batch_op:
++        batch_op.create_index('ix_command_created', ['created_at'], unique=False)
++        batch_op.create_index('ix_command_device_status', ['device_id', 'status'], unique=False)
++        batch_op.create_index(batch_op.f('ix_device_commands_device_id'), ['device_id'], unique=False)
++
++    # ### end Alembic commands ###
++
++
++def downgrade() -> None:
++    # ### commands auto generated by Alembic - please adjust! ###
++    with op.batch_alter_table('device_commands', schema=None) as batch_op:
++        batch_op.drop_index(batch_op.f('ix_device_commands_device_id'))
++        batch_op.drop_index('ix_command_device_status')
++        batch_op.drop_index('ix_command_created')
++
++    op.drop_table('device_commands')
++    with op.batch_alter_table('workflow_execution_logs', schema=None) as batch_op:
++        batch_op.drop_index(batch_op.f('ix_workflow_execution_logs_workflow_id'))
++        batch_op.drop_index('ix_execution_logs_workflow')
++        batch_op.drop_index('ix_execution_logs_time')
++        batch_op.drop_index('ix_execution_logs_level')
++
++    op.drop_table('workflow_execution_logs')
++    with op.batch_alter_table('edge_devices', schema=None) as batch_op:
++        batch_op.drop_index(batch_op.f('ix_edge_devices_device_id'))
++        batch_op.drop_index('ix_device_status')
++        batch_op.drop_index('ix_device_merchant')
++        batch_op.drop_index('ix_device_heartbeat')
++
++    op.drop_table('edge_devices')
++    # ### end Alembic commands ###
+diff --git a/src/rufus/celery_app.py b/src/rufus/celery_app.py
+index 40ebab0..39cddb5 100644
+--- a/src/rufus/celery_app.py
++++ b/src/rufus/celery_app.py
+@@ -79,11 +79,36 @@ def init_worker(**kwargs):
+ 
+                 _, provider = _init_persistence()
+ 
+-                # Inject into tasks module
++                # Create other required providers for workflow reconstruction
++                from rufus.implementations.execution.sync import SyncExecutor
++                from rufus.implementations.observability.logging import LoggingObserver
++                from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
++                from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
++                from rufus.builder import WorkflowBuilder
++
++                execution_provider = SyncExecutor()  # Use sync for now (can be made configurable)
++                observer = LoggingObserver()
++
++                # Create workflow builder (need to load registry)
++                # For now, create empty registry - tasks will use definition_snapshot from DB
++                workflow_builder = WorkflowBuilder(
++                    workflow_registry={},
++                    expression_evaluator_cls=SimpleExpressionEvaluator,
++                    template_engine_cls=Jinja2TemplateEngine
++                )
++
++                # Inject all providers into tasks module
+                 from rufus import tasks
+-                tasks.set_persistence_provider(provider)
+-
+-                logger.info(f"Initialized PostgreSQL persistence for worker")
++                tasks.set_providers(
++                    persistence=provider,
++                    execution=execution_provider,
++                    workflow_builder=workflow_builder,
++                    expression_evaluator_cls=SimpleExpressionEvaluator,
++                    template_engine_cls=Jinja2TemplateEngine,
++                    observer=observer
++                )
++
++                logger.info(f"Initialized all providers for worker")
+             elif db_url.startswith("sqlite"):
+                 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+                 from rufus.utils.postgres_executor import pg_executor
+diff --git a/src/rufus/implementations/execution/sync.py b/src/rufus/implementations/execution/sync.py
+index b358e63..d6caed4 100644
+--- a/src/rufus/implementations/execution/sync.py
++++ b/src/rufus/implementations/execution/sync.py
+@@ -32,8 +32,9 @@ class SyncExecutor(ExecutionProvider):
+ 
+     For production async workflows with distributed execution, use CeleryExecutor.
+     """
+-    def __init__(self):
+-        self._engine = None # Reference to the WorkflowEngine
++    def __init__(self, workflow_builder=None):
++        self._engine = None # Reference to the WorkflowEngine (legacy)
++        self._workflow_builder = workflow_builder  # Direct reference to WorkflowBuilder
+         self._thread_pool_executor = None
+         self._loop = None # To store the main event loop
+ 
+@@ -73,14 +74,21 @@ class SyncExecutor(ExecutionProvider):
+         For production async workflows, use CeleryExecutor or similar.
+         """
+         # Load the function dynamically using WorkflowBuilder
+-        func = self._engine.workflow_builder._import_from_string(func_path)
++        # Support both old engine-based and new builder-based initialization
++        if self._workflow_builder:
++            from rufus.builder import WorkflowBuilder
++            func = WorkflowBuilder._import_from_string(func_path)
++        elif self._engine and hasattr(self._engine, 'workflow_builder'):
++            func = self._engine.workflow_builder._import_from_string(func_path)
++        else:
++            # Fallback: import directly
++            from rufus.builder import WorkflowBuilder
++            func = WorkflowBuilder._import_from_string(func_path)
++
+         if not func:
+             raise ValueError(f"Function not found at path: {func_path}")
+ 
+-        # Reconstruct state for the task context
+-        workflow = await self._engine.get_workflow(workflow_id)
+-        state_model_class = self._engine.workflow_builder._import_from_string(workflow.state_model_path)
+-        state_instance = state_model_class(**state_data)
++        # Create minimal context for the task
+         context = StepContext(workflow_id=workflow_id, step_name=func.__name__, previous_step_result=kwargs.get('_previous_step_result'))
+ 
+         # Filter out internal parameters that shouldn't be passed to user functions
+@@ -104,7 +112,8 @@ class SyncExecutor(ExecutionProvider):
+         loop = self._loop # Get the event loop from the main thread
+ 
+         # Reconstruct function and context within the new thread
+-        func = self._engine.workflow_builder._import_from_string(func_path)
++        from rufus.builder import WorkflowBuilder
++        func = WorkflowBuilder._import_from_string(func_path)
+         context = StepContext(**context_data)
+ 
+         try:
+@@ -127,9 +136,8 @@ class SyncExecutor(ExecutionProvider):
+         if not self._thread_pool_executor:
+             raise RuntimeError("ThreadPoolExecutor not initialized. Call initialize() first.")
+ 
+-        # Get the state_model_path from the workflow before spawning threads
+-        workflow = await self._engine.get_workflow(workflow_id)
+-        state_model_path = workflow.state_model_path
++        # For now, use empty state_model_path - parallel tasks don't need it
++        state_model_path = ""
+ 
+         futures = []
+         for task in tasks:
+diff --git a/src/rufus/tasks.py b/src/rufus/tasks.py
+index 51ac79f..1257cdd 100644
+--- a/src/rufus/tasks.py
++++ b/src/rufus/tasks.py
+@@ -25,8 +25,32 @@ except ImportError:
+ from rufus.utils.postgres_executor import pg_executor
+ from rufus.events import event_publisher
+ 
+-# Global persistence provider (set by celery_app on worker init)
++# Global providers (set by celery_app on worker init)
+ _persistence_provider = None
++_execution_provider = None
++_workflow_builder = None
++_expression_evaluator_cls = None
++_template_engine_cls = None
++_workflow_observer = None
++
++
++def set_persistence_provider(provider):
++    """Set the global persistence provider for tasks"""
++    global _persistence_provider
++    _persistence_provider = provider
++
++
++def set_providers(persistence, execution, workflow_builder, expression_evaluator_cls, template_engine_cls, observer):
++    """Set all global providers for tasks"""
++    global _persistence_provider, _execution_provider, _workflow_builder
++    global _expression_evaluator_cls, _template_engine_cls, _workflow_observer
++
++    _persistence_provider = persistence
++    _execution_provider = execution
++    _workflow_builder = workflow_builder
++    _expression_evaluator_cls = expression_evaluator_cls
++    _template_engine_cls = template_engine_cls
++    _workflow_observer = observer
+ 
+ 
+ def _publish_event_sync(coro):
+@@ -58,6 +82,10 @@ def _sync_load_workflow(workflow_id: str):
+     """Load workflow synchronously from persistence provider"""
+     if not _persistence_provider:
+         raise RuntimeError("Persistence provider not initialized in Celery worker")
++    if not _execution_provider:
++        raise RuntimeError("Execution provider not initialized in Celery worker")
++    if not _workflow_builder:
++        raise RuntimeError("Workflow builder not initialized in Celery worker")
+ 
+     # Use pg_executor to run async load in dedicated thread
+     workflow_dict = pg_executor.run_coroutine_sync(
+@@ -70,8 +98,16 @@ def _sync_load_workflow(workflow_id: str):
+     # Import here to avoid circular import
+     from rufus.workflow import Workflow
+ 
+-    # Reconstruct Workflow object from dict
+-    return Workflow.from_dict(workflow_dict)
++    # Reconstruct Workflow object from dict with all required providers
++    return Workflow.from_dict(
++        workflow_dict,
++        persistence_provider=_persistence_provider,
++        execution_provider=_execution_provider,
++        workflow_builder=_workflow_builder,
++        expression_evaluator_cls=_expression_evaluator_cls,
++        template_engine_cls=_template_engine_cls,
++        workflow_observer=_workflow_observer
++    )
+ 
+ 
+ def _sync_save_workflow(workflow_id: str, workflow):
+diff --git a/src/rufus/workflow.py b/src/rufus/workflow.py
+index e518b6f..94374df 100644
+--- a/src/rufus/workflow.py
++++ b/src/rufus/workflow.py
+@@ -603,6 +603,11 @@ class Workflow:
+                     **user_input,  # Pass user_input as additional kwargs to the task
+                     _previous_step_result=_previous_step_result  # Pass previous result
+                 )
++                # Merge result into state if SyncExecutor returned immediately
++                # (for Celery, result would be {"_async_dispatch": True} and merge happens on resume)
++                if isinstance(result, dict) and "_async_dispatch" not in result:
++                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
++                    await self.persistence.save_workflow(self.id, self.to_dict())
+             elif isinstance(step, HttpWorkflowStep):
+                 # HttpWorkflowStep uses the ExecutionProvider
+                 result = await self.execution.dispatch_async_task(
+-- 
+2.45.1
+

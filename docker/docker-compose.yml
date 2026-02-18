@@ -66,6 +66,9 @@ services:
       # Server settings
       RUFUS_REGISTRATION_KEY: ${RUFUS_REGISTRATION_KEY:-demo-registration-key-2024}
 
+      # Encryption (CRITICAL: Use same key for all containers to decrypt workflows)
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+
       # Artifacts
       ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
 
