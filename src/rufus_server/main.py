@@ -350,6 +350,52 @@ async def get_workflow_status(
     )
 
 
+@app.get("/api/v1/workflow/{workflow_id}/logs")
+async def get_workflow_logs(
+    workflow_id: str,
+    limit: int = 100,
+    log_level: Optional[str] = None,
+    step_name: Optional[str] = None,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Get workflow execution logs."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    # Build SQL query
+    query = """
+        SELECT id, workflow_id, execution_id, step_name, log_level, message, metadata, logged_at
+        FROM workflow_execution_logs
+        WHERE workflow_id = $1
+    """
+    params = [workflow_id]
+
+    if log_level:
+        query += f" AND log_level = ${len(params) + 1}"
+        params.append(log_level)
+
+    if step_name:
+        query += f" AND step_name = ${len(params) + 1}"
+        params.append(step_name)
+
+    query += f" ORDER BY logged_at DESC LIMIT ${len(params) + 1}"
+    params.append(limit)
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            logs = [dict(row) for row in rows]
+
+            # Convert datetime to ISO format for JSON serialization
+            for log in logs:
+                if log.get('logged_at'):
+                    log['logged_at'] = log['logged_at'].isoformat()
+
+            return {"logs": logs, "count": len(logs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch logs: {str(e)}")
+
+
 @app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse)
 async def next_workflow_step(
     workflow_id: str,
