@@ -1,0 +1,273 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rufus-worker
+  namespace: default
+  labels:
+    app: rufus-worker
+    component: celery
+    managed-by: rufus-control-plane
+spec:
+  replicas: 5
+
+  # Rolling update strategy for zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Max 1 extra pod during update
+      maxUnavailable: 1  # Max 1 pod unavailable during update
+
+  selector:
+    matchLabels:
+      app: rufus-worker
+
+  template:
+    metadata:
+      labels:
+        app: rufus-worker
+        version: "1.0.0"  # Updated by control plane during deployments
+      annotations:
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+
+        # Force pod restart on config change
+        kubectl.kubernetes.io/restartedAt: ""
+
+    spec:
+      # Graceful shutdown - give workers 5 minutes to drain tasks
+      terminationGracePeriodSeconds: 300
+
+      # Anti-affinity: Spread workers across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - rufus-worker
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+      - name: worker
+        image: myregistry.io/rufus-worker:v1.0.0-latest  # Updated by control plane
+        imagePullPolicy: Always
+
+        env:
+        # Celery configuration
+        - name: CELERY_BROKER_URL
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: celery-broker-url
+
+        - name: CELERY_RESULT_BACKEND
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: celery-result-backend
+
+        # Control plane
+        - name: RUFUS_CONTROL_PLANE_URL
+          value: "http://control-plane:8000"
+
+        - name: RUFUS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: worker-api-key
+
+        - name: RUFUS_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rufus-secrets
+              key: encryption-key
+
+        # Worker configuration
+        - name: WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+
+        - name: WORKER_REGION
+          value: "us-east-1"
+
+        - name: WORKER_ZONE
+          value: "us-east-1a"
+
+        - name: WORKER_POOL
+          value: "default"
+
+        - name: WORKFLOWS_DIR
+          value: "/app/workflows"
+
+        # Worker tuning
+        - name: CELERY_WORKER_CONCURRENCY
+          value: "4"
+
+        - name: CELERY_WORKER_PREFETCH_MULTIPLIER
+          value: "4"
+
+        - name: CELERY_WORKER_MAX_TASKS_PER_CHILD
+          value: "1000"
+
+        # Python configuration
+        - name: PYTHONUNBUFFERED
+          value: "1"
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        # Startup probe (for slow-starting containers)
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 12  # 60 seconds max startup time
+
+        # Lifecycle hooks
+        lifecycle:
+          preStop:
+            exec:
+              # Graceful shutdown:
+              # 1. Sleep 15s to allow load balancer to drain connections
+              # 2. Send Celery shutdown signal
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  echo "PreStop: Initiating graceful shutdown"
+                  sleep 15
+                  echo "PreStop: Sending Celery shutdown signal"
+                  celery -A examples.celery_edge_worker.rufus_worker_edge control shutdown || true
+                  echo "PreStop: Complete"
+
+        # Volume mounts
+        volumeMounts:
+        - name: worker-data
+          mountPath: /var/lib/rufus
+
+        # Temporary storage for edge agent SQLite
+        - name: tmp
+          mountPath: /tmp
+
+      volumes:
+      - name: worker-data
+        emptyDir:
+          sizeLimit: 1Gi  # Limit SQLite database size
+
+      - name: tmp
+        emptyDir:
+          sizeLimit: 500Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rufus-worker
+  namespace: default
+  labels:
+    app: rufus-worker
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for worker discovery
+  selector:
+    app: rufus-worker
+  ports:
+  - name: health
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rufus-secrets
+  namespace: default
+type: Opaque
+stringData:
+  celery-broker-url: "redis://redis:6379/0"
+  celery-result-backend: "redis://redis:6379/0"
+  worker-api-key: "rsk_change_me_in_production"
+  encryption-key: "change_me_in_production"
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rufus-worker-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rufus-worker
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  # Scale based on CPU usage
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+  # Scale based on memory usage
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60

@@ -1,0 +1,319 @@
+name: Build and Deploy Rufus Worker
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'workflows/**'
+      - 'my_app/**'
+      - 'docker/Dockerfile.rufus-worker-production'
+      - '.github/workflows/deploy-worker.yml'
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: myregistry.io
+  IMAGE_NAME: rufus-worker
+
+jobs:
+  # ============================================================================
+  # Job 1: Build and Test
+  # ============================================================================
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      workflow_version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract workflow version
+        id: version
+        run: |
+          # Extract version from main workflow YAML
+          VERSION=$(yq '.workflow_version' workflows/payment_processing.yaml)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Generate image tag
+          SHORT_SHA=${GITHUB_SHA::8}
+          TAG="v${VERSION}-${SHORT_SHA}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          echo "Workflow version: $VERSION"
+          echo "Image tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.rufus-worker-production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            WORKFLOW_VERSION=${{ steps.version.outputs.version }}
+            BUILD_SHA=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests on new image..."
+
+          # Test 1: Verify workflows directory
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }} \
+            ls -la /app/workflows
+
+          # Test 2: Verify step functions are importable
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }} \
+            python -c "
+              from my_app.steps import validate_payment, check_fraud, process_payment
+              from my_app.models import PaymentState
+              print('✅ All step functions importable')
+            "
+
+          # Test 3: Verify workflow registry
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }} \
+            python -c "
+              import json
+              with open('/app/workflows/registry.json') as f:
+                  registry = json.load(f)
+              print(f'✅ Registry contains {len(registry[\"workflows\"])} workflows')
+            "
+
+          echo "✅ All smoke tests passed!"
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================================================
+  # Job 2: Deploy to Staging
+  # ============================================================================
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'staging'
+
+    environment:
+      name: staging
+      url: https://staging.rufus.example.com
+
+    steps:
+      - name: Trigger deployment via control plane API
+        run: |
+          echo "Deploying to staging..."
+
+          curl -X POST ${{ secrets.CONTROL_PLANE_URL_STAGING }}/api/v1/deployments \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN_STAGING }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }}",
+              "version": "${{ needs.build.outputs.workflow_version }}",
+              "commit_sha": "${{ github.sha }}",
+              "rollout_strategy": "rolling",
+              "canary_percentage": 50,
+              "health_check_delay": 180
+            }' \
+            -o deployment.json
+
+          # Extract deployment ID
+          DEPLOYMENT_ID=$(jq -r '.deployment_id' deployment.json)
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_ENV
+
+          echo "Deployment ID: $DEPLOYMENT_ID"
+
+      - name: Wait for deployment completion
+        run: |
+          echo "Waiting for deployment ${{ env.deployment_id }} to complete..."
+
+          MAX_WAIT=900  # 15 minutes
+          ELAPSED=0
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            # Check deployment status
+            STATUS=$(curl -s ${{ secrets.CONTROL_PLANE_URL_STAGING }}/api/v1/deployments/${{ env.deployment_id }} \
+              -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN_STAGING }}" \
+              | jq -r '.status')
+
+            echo "Status: $STATUS (${ELAPSED}s elapsed)"
+
+            if [ "$STATUS" == "completed" ]; then
+              echo "✅ Deployment completed successfully!"
+              exit 0
+            elif [ "$STATUS" == "failed" ] || [ "$STATUS" == "rolled_back" ]; then
+              echo "❌ Deployment failed!"
+              exit 1
+            fi
+
+            sleep 10
+            ELAPSED=$((ELAPSED + 10))
+          done
+
+          echo "❌ Deployment timed out after ${MAX_WAIT}s"
+          exit 1
+
+  # ============================================================================
+  # Job 3: Deploy to Production
+  # ============================================================================
+  deploy-production:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+
+    environment:
+      name: production
+      url: https://rufus.example.com
+
+    steps:
+      - name: Trigger canary deployment
+        run: |
+          echo "Deploying to production with canary strategy..."
+
+          curl -X POST ${{ secrets.CONTROL_PLANE_URL_PRODUCTION }}/api/v1/deployments \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN_PRODUCTION }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }}",
+              "version": "${{ needs.build.outputs.workflow_version }}",
+              "commit_sha": "${{ github.sha }}",
+              "rollout_strategy": "canary",
+              "canary_percentage": 20,
+              "health_check_delay": 300
+            }' \
+            -o deployment.json
+
+          DEPLOYMENT_ID=$(jq -r '.deployment_id' deployment.json)
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_ENV
+
+          echo "Deployment ID: $DEPLOYMENT_ID"
+
+      - name: Monitor deployment
+        run: |
+          echo "Monitoring deployment ${{ env.deployment_id }}..."
+
+          MAX_WAIT=1800  # 30 minutes
+          ELAPSED=0
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            RESPONSE=$(curl -s ${{ secrets.CONTROL_PLANE_URL_PRODUCTION }}/api/v1/deployments/${{ env.deployment_id }} \
+              -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN_PRODUCTION }}")
+
+            STATUS=$(echo $RESPONSE | jq -r '.status')
+            PROGRESS=$(echo $RESPONSE | jq -r '.rollout_progress')
+
+            echo "Status: $STATUS | Progress: $PROGRESS (${ELAPSED}s elapsed)"
+
+            if [ "$STATUS" == "completed" ]; then
+              echo "✅ Production deployment completed successfully!"
+              exit 0
+            elif [ "$STATUS" == "failed" ] || [ "$STATUS" == "rolled_back" ]; then
+              echo "❌ Production deployment failed!"
+              ERROR=$(echo $RESPONSE | jq -r '.error')
+              echo "Error: $ERROR"
+              exit 1
+            fi
+
+            sleep 15
+            ELAPSED=$((ELAPSED + 15))
+          done
+
+          echo "❌ Deployment timed out"
+          exit 1
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Rufus Worker Deployment",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Rufus Worker Deployment*\n*Status:* ${{ job.status }}\n*Version:* ${{ needs.build.outputs.workflow_version }}\n*Image:* ${{ needs.build.outputs.image_tag }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ============================================================================
+  # Job 4: Integration Tests
+  # ============================================================================
+  integration-tests:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest requests celery redis
+
+      - name: Run integration tests against staging
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL_STAGING }}
+          CELERY_BROKER_URL: ${{ secrets.CELERY_BROKER_URL_STAGING }}
+        run: |
+          pytest tests/integration/ -v --maxfail=5

@@ -1,0 +1,132 @@
+# Production Rufus Worker with Embedded Workflows
+# No hot-reload - workflows and code baked into immutable image
+
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Install additional production dependencies
+RUN pip install --no-cache-dir --user \
+    kubernetes \
+    prometheus-client \
+    sentry-sdk
+
+# ============================================================================
+# Production stage
+# ============================================================================
+FROM python:3.11-slim
+
+LABEL maintainer="ops@example.com"
+LABEL description="Rufus Edge Worker with Embedded Workflows"
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash rufus && \
+    mkdir -p /app /var/lib/rufus && \
+    chown -R rufus:rufus /app /var/lib/rufus
+
+USER rufus
+WORKDIR /app
+
+# ============================================================================
+# Copy Rufus SDK
+# ============================================================================
+COPY --chown=rufus:rufus src/rufus /app/src/rufus
+COPY --chown=rufus:rufus src/rufus_edge /app/src/rufus_edge
+COPY --chown=rufus:rufus src/rufus_cli /app/src/rufus_cli
+COPY --chown=rufus:rufus examples/celery_edge_worker /app/examples/celery_edge_worker
+
+# ============================================================================
+# Copy workflow definitions and step functions
+# KEY: These are baked into the image (immutable)
+# ============================================================================
+COPY --chown=rufus:rufus workflows/ /app/workflows/
+COPY --chown=rufus:rufus my_app/ /app/my_app/
+
+# Create workflow registry
+RUN python -c "
+import yaml
+import json
+from pathlib import Path
+
+# Auto-generate registry from workflows directory
+workflows_dir = Path('/app/workflows')
+registry = {'workflows': []}
+
+for yaml_file in workflows_dir.glob('*.yaml'):
+    with open(yaml_file) as f:
+        workflow_def = yaml.safe_load(f)
+
+    registry['workflows'].append({
+        'type': workflow_def['workflow_type'],
+        'description': workflow_def.get('description', ''),
+        'config_file': yaml_file.name,
+        'initial_state_model': workflow_def.get('initial_state_model'),
+        'version': workflow_def.get('workflow_version', '1.0.0')
+    })
+
+# Save registry
+with open('/app/workflows/registry.json', 'w') as f:
+    json.dump(registry, f, indent=2)
+
+print(f'✅ Generated registry with {len(registry[\"workflows\"])} workflows')
+"
+
+# ============================================================================
+# Environment configuration
+# ============================================================================
+ENV PYTHONPATH=/app
+ENV WORKFLOWS_DIR=/app/workflows
+ENV PYTHONUNBUFFERED=1
+
+# Worker metadata (injected at build time)
+ARG WORKFLOW_VERSION=unknown
+ARG BUILD_SHA=unknown
+ARG BUILD_DATE=unknown
+
+ENV WORKFLOW_VERSION=${WORKFLOW_VERSION}
+ENV BUILD_SHA=${BUILD_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+
+# Labels for tracking
+LABEL workflow.version="${WORKFLOW_VERSION}"
+LABEL workflow.build.sha="${BUILD_SHA}"
+LABEL workflow.build.date="${BUILD_DATE}"
+
+# ============================================================================
+# Health check
+# ============================================================================
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# ============================================================================
+# Entrypoint and command
+# ============================================================================
+COPY --chown=rufus:rufus docker/entrypoint-worker-production.sh /entrypoint.sh
+USER root
+RUN chmod +x /entrypoint.sh
+USER rufus
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default: Run Celery worker
+CMD ["celery", "-A", "examples.celery_edge_worker.rufus_worker_edge", "worker", "--loglevel=info", "--concurrency=4"]
