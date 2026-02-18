@@ -11,21 +11,21 @@ def _get_cipher_suite():
     global _cipher_suite
     if _cipher_suite:
         return _cipher_suite
-        
-    key = os.getenv("ENCRYPTION_KEY")
+
+    key = os.getenv("RUFUS_ENCRYPTION_KEY")
     if not key:
-        logger.warning("ENCRYPTION_KEY not set. Generating a temporary key for this session.")
+        logger.warning("RUFUS_ENCRYPTION_KEY not set. Generating a temporary key for this session.")
         # This is strictly for dev/testing. Data won't persist across restarts if key changes.
         key = Fernet.generate_key()
     elif isinstance(key, str):
         key = key.encode()
-        
+
     try:
         _cipher_suite = Fernet(key)
     except Exception as e:
-        logger.error(f"Invalid ENCRYPTION_KEY: {e}")
+        logger.error(f"Invalid RUFUS_ENCRYPTION_KEY: {e}")
         raise
-        
+
     return _cipher_suite
 
 def encrypt_string(data: str) -> bytes:

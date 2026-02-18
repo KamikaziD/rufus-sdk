@@ -54,8 +54,8 @@ services:
       DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # CRITICAL: Must match server ENCRYPTION_KEY to decrypt workflows
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # CRITICAL: Must match server RUFUS_ENCRYPTION_KEY to decrypt workflows
+      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
       WORKER_POOL: ${WORKER_POOL:-prefork}
       WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-info}
@@ -145,7 +145,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       WORKFLOW_STORAGE: postgres
       # CRITICAL: Set this to a persistent key to decrypt workflows across restarts
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
