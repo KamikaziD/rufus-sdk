@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir \
 # Create directories for user code (will be mounted as volumes)
 RUN mkdir -p /app/config /app/user_code
 
-# Copy database init script
+# Copy complete database initialization script
 COPY docker/init-db.sql /app/init-db.sql
 
 # Set Python path to include user code directory

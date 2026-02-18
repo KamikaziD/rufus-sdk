@@ -32,7 +32,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rufus_cloud}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      # Removed init-db.sql - using Alembic migrations instead
+      # - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
