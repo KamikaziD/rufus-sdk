@@ -1,0 +1,189 @@
+# Docker Compose for Rufus with GPU-enabled Celery Workers
+#
+# Usage:
+#   docker-compose -f docker-compose.gpu.yml up -d
+#
+# Prerequisites:
+#   - NVIDIA Docker runtime installed
+#   - NVIDIA GPU drivers installed on host
+#   - nvidia-docker2 package installed
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rufus-postgres
+    environment:
+      POSTGRES_DB: rufus_production
+      POSTGRES_USER: rufus
+      POSTGRES_PASSWORD: rufus_secret_2024
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rufus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Celery broker and result backend)
+  redis:
+    image: redis:7-alpine
+    container_name: rufus-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Rufus API Server
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rufus-server-local
+    container_name: rufus-server
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_production"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../config:/app/config
+      - ../examples:/app/examples
+
+  # CPU Workers (standard task processing)
+  cpu-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rufus-worker-local
+    environment:
+      DATABASE_URL: "postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_production"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+      WORKER_ID: "cpu-worker"
+      WORKER_REGION: "us-east-1"
+      WORKER_CONCURRENCY: "8"
+      WORKER_POOL: "prefork"
+      WORKER_LOG_LEVEL: "info"
+    command: >
+      celery -A rufus.celery_app worker
+        --loglevel=info
+        --concurrency=8
+        --pool=prefork
+        -Q default,us-east-1
+        -n cpu-worker@%h
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../config:/app/config
+      - ../examples:/app/examples
+    deploy:
+      replicas: 2
+
+  # GPU Worker (AI inference on NVIDIA GPU)
+  gpu-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rufus-worker-gpu
+    container_name: rufus-gpu-worker
+    runtime: nvidia  # CRITICAL: Requires nvidia-docker runtime
+    environment:
+      # GPU Configuration
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      CUDA_VISIBLE_DEVICES: "0"  # Use first GPU (change to "0,1" for multi-GPU)
+
+      # Database and Celery
+      DATABASE_URL: "postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_production"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+
+      # Worker Identity
+      WORKER_ID: "gpu-worker-01"
+      WORKER_REGION: "us-east-1"
+      WORKER_ZONE: "us-east-1a"
+
+      # GPU Capabilities (stored in worker_nodes table)
+      WORKER_CAPABILITIES: >-
+        {
+          "gpu": true,
+          "gpu_model": "NVIDIA GPU",
+          "cuda_version": "12.1",
+          "pytorch_version": "2.0.1",
+          "onnx_gpu": true,
+          "transformers": true,
+          "max_batch_size": 32,
+          "supports_fp16": true,
+          "supports_int8": true
+        }
+
+      # Worker Performance Tuning
+      WORKER_CONCURRENCY: "2"  # Adjust based on GPU memory
+      WORKER_POOL: "solo"  # Single-threaded for GPU safety
+      WORKER_LOG_LEVEL: "info"
+
+    command: >
+      celery -A rufus.celery_app worker
+        --loglevel=info
+        --concurrency=2
+        --pool=solo
+        -Q gpu-inference,gpu-training
+        -n gpu-worker-01@%h
+
+    depends_on:
+      - postgres
+      - redis
+
+    volumes:
+      - ../config:/app/config
+      - ../examples:/app/examples
+      - ../models:/app/models  # Mount local models directory
+      - gpu_cache:/root/.cache  # Cache for downloaded models
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # Request 1 GPU
+              capabilities: [gpu]
+
+  # Celery Flower (monitoring UI)
+  flower:
+    image: mher/flower:2.0
+    container_name: rufus-flower
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+      FLOWER_PORT: 5555
+    depends_on:
+      - redis
+    command: >
+      celery --broker=redis://redis:6379/0
+        flower
+        --port=5555
+        --basic_auth=admin:rufus2024
+
+volumes:
+  postgres_data:
+    driver: local
+  gpu_cache:
+    driver: local
+
+networks:
+  default:
+    name: rufus-network

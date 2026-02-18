@@ -1,0 +1,89 @@
+# GPU Worker with Ollama for Local LLM Inference
+# Runs Ollama server + Celery worker in the same container
+# Supports: Llama 2/3, Mistral, CodeLlama, Gemma, etc.
+
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+LABEL maintainer="Rufus Team <team@rufus.dev>"
+LABEL description="Rufus GPU Worker with Ollama for local LLM inference"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    gcc \
+    postgresql-client \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make python3.11 the default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Install Ollama
+RUN curl -fsSL https://ollama.com/install.sh | sh
+
+# Upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Copy source code
+COPY src /app/src
+COPY pyproject.toml /app/
+COPY README.md /app/
+
+# Install base dependencies
+RUN pip install --no-cache-dir \
+    pydantic PyYAML jinja2 typer click aiosqlite anyio orjson httpx \
+    cryptography sqlalchemy alembic python-dotenv typing-extensions \
+    annotated-types jsonschema croniter \
+    fastapi uvicorn[standard] starlette slowapi asyncpg \
+    rich uvloop websockets psutil numpy \
+    celery[redis] redis psycopg2-binary prometheus-client
+
+# Install Ollama Python client
+RUN pip install --no-cache-dir ollama
+
+# Install rufus-sdk from local source
+RUN pip install -e .
+
+# Create directories
+RUN mkdir -p /app/config /app/user_code /app/models /root/.ollama
+
+# Set Python path
+ENV PYTHONPATH=/app:/app/user_code
+
+# Environment variables
+ENV CUDA_VISIBLE_DEVICES=0
+ENV OLLAMA_HOST=0.0.0.0:11434
+ENV DATABASE_URL=postgresql://rufus:rufus_secret@postgres:5432/rufus_production
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# Worker configuration
+ENV WORKER_ID=ollama-gpu-worker-01
+ENV WORKER_REGION=us-east-1
+ENV WORKER_ZONE=us-east-1a
+ENV WORKER_CONCURRENCY=2
+ENV WORKER_POOL=solo
+ENV WORKER_LOG_LEVEL=info
+
+# GPU capabilities
+ENV WORKER_CAPABILITIES='{"gpu": true, "cuda_version": "12.1", "ollama": true, "llama": true, "mistral": true}'
+
+# Copy entrypoint script
+COPY docker/entrypoint-ollama-worker.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose Ollama API port
+EXPOSE 11434
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:11434/api/tags || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
