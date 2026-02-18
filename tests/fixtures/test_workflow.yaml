@@ -1,0 +1,20 @@
+workflow_type: "TestWorkflow"
+workflow_version: "1.0.0"
+initial_state_model: "pydantic.BaseModel"
+description: "Simple test workflow for endpoint testing"
+
+steps:
+  - name: "Step1"
+    type: "STANDARD"
+    function: "builtins.dict"
+    automate_next: false
+
+  - name: "Step2"
+    type: "STANDARD"
+    function: "builtins.dict"
+    automate_next: false
+
+  - name: "Step3"
+    type: "STANDARD"
+    function: "builtins.dict"
+    automate_next: false

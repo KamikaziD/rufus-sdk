@@ -21,6 +21,8 @@ import yaml
 import asyncio
 from typing import Optional, Any, Dict, List
 import logging
+from uuid import UUID
+import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
@@ -401,6 +403,192 @@ async def get_workflow_executions(
 
     workflow_list = await workflow_engine.persistence.list_workflows(**filters)
     return workflow_list[offset:offset+limit]
+
+
+@app.post("/api/v1/workflow/{workflow_id}/retry")
+async def retry_workflow(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Retry a failed workflow from the failed step."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    try:
+        workflow_uuid = UUID(workflow_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow ID format")
+
+    # Load workflow
+    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    if not workflow_dict:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if workflow_dict['status'] != 'FAILED':
+        raise HTTPException(status_code=400, detail="Only failed workflows can be retried")
+
+    # Reset to ACTIVE
+    old_status = workflow_dict['status']
+    workflow_dict['status'] = 'ACTIVE'
+    await workflow_engine.persistence.save_workflow(workflow_uuid, workflow_dict)
+
+    # Publish event
+    from rufus.events import event_publisher
+    await event_publisher._publish(
+        'workflow:persistence',
+        'workflow.status_changed',
+        {
+            "workflow_id": str(workflow_uuid),
+            "old_status": old_status,
+            "new_status": "ACTIVE",
+            "retried": True
+        }
+    )
+
+    # Dispatch async task to resume execution
+    from rufus.tasks import resume_from_async_task
+    resume_from_async_task.delay(str(workflow_uuid), {})
+
+    return {"status": "retry_initiated", "workflow_id": workflow_id}
+
+
+@app.post("/api/v1/workflow/{workflow_id}/rewind")
+async def rewind_workflow(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Rewind workflow to previous step for debugging/correction."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    try:
+        workflow_uuid = UUID(workflow_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow ID format")
+
+    # Load workflow
+    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    if not workflow_dict:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if workflow_dict['current_step'] == 0:
+        raise HTTPException(status_code=400, detail="Cannot rewind: already at first step")
+
+    # Decrement step
+    workflow_dict['current_step'] -= 1
+    old_status = workflow_dict['status']
+    workflow_dict['status'] = 'ACTIVE'
+
+    # Clear last step result
+    if workflow_dict.get('step_results'):
+        step_key = str(workflow_dict['current_step'] + 1)
+        workflow_dict['step_results'].pop(step_key, None)
+
+    await workflow_engine.persistence.save_workflow(workflow_uuid, workflow_dict)
+
+    # Publish event
+    from rufus.events import event_publisher
+    await event_publisher._publish(
+        'workflow:persistence',
+        'workflow.status_changed',
+        {
+            "workflow_id": str(workflow_uuid),
+            "old_status": old_status,
+            "new_status": "ACTIVE",
+            "current_step": workflow_dict['current_step'],
+            "rewound": True
+        }
+    )
+
+    return {
+        "status": "rewound",
+        "current_step": workflow_dict['current_step'],
+        "workflow_id": workflow_id
+    }
+
+
+@app.post("/api/v1/workflow/{workflow_id}/resume")
+async def resume_workflow(
+    workflow_id: str,
+    request_data: ResumeWorkflowRequest,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Resume a paused workflow with user input."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    try:
+        workflow_uuid = UUID(workflow_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow ID format")
+
+    # Load workflow
+    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    if not workflow_dict:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if workflow_dict['status'] != 'PAUSED':
+        raise HTTPException(status_code=400, detail="Only paused workflows can be resumed")
+
+    # Resume via Celery task
+    from rufus.tasks import resume_from_async_task
+    resume_from_async_task.delay(str(workflow_uuid), request_data.user_input or {})
+
+    # Publish event
+    from rufus.events import event_publisher
+    await event_publisher._publish(
+        'workflow:persistence',
+        'workflow.resume_requested',
+        {
+            "workflow_id": str(workflow_uuid),
+            "user_input": request_data.user_input
+        }
+    )
+
+    return {"status": "resume_initiated", "workflow_id": workflow_id}
+
+
+@app.websocket("/api/v1/workflow/{workflow_id}/subscribe")
+async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
+    """WebSocket endpoint for real-time workflow updates."""
+    await websocket.accept()
+
+    # Get Redis connection
+    redis_host = os.getenv("REDIS_HOST", "redis")
+    redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:6379/0")
+    redis_client = redis.from_url(redis_url, decode_responses=True)
+
+    # Subscribe to workflow events channel
+    pubsub = redis_client.pubsub()
+    channel = f"workflow:events:{workflow_id}"
+
+    try:
+        await pubsub.subscribe(channel)
+        logger.info(f"WebSocket client subscribed to workflow {workflow_id}")
+
+        # Stream events to browser
+        async for message in pubsub.listen():
+            if message['type'] == 'message':
+                try:
+                    # Parse and forward event
+                    event_data = json.loads(message['data'])
+                    await websocket.send_json(event_data)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse Redis message: {e}")
+                except Exception as e:
+                    logger.error(f"Failed to send WebSocket message: {e}")
+                    break
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket client disconnected from workflow {workflow_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for workflow {workflow_id}: {e}")
+    finally:
+        # Cleanup
+        try:
+            await pubsub.unsubscribe(channel)
+            await redis_client.close()
+        except:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

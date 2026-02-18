@@ -56,9 +56,10 @@ class WorkflowStatusResponse(BaseModel):
 
 class ResumeWorkflowRequest(BaseModel):
     """Request to resume a paused workflow (human-in-the-loop)."""
-    decision: str = Field(..., description="Decision made by human reviewer")
-    reviewer_id: str = Field(..., description="ID of the reviewer")
-    comments: Optional[str] = Field(None, description="Optional comments")
+    user_input: Dict[str, Any] = Field(default_factory=dict, description="User input data to resume the workflow")
+    decision: Optional[str] = Field(None, description="Decision made by human reviewer (deprecated, use user_input)")
+    reviewer_id: Optional[str] = Field(None, description="ID of the reviewer (deprecated, use user_input)")
+    comments: Optional[str] = Field(None, description="Optional comments (deprecated, use user_input)")
 
 
 class RetryWorkflowRequest(BaseModel):

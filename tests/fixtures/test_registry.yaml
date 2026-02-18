@@ -1,0 +1,5 @@
+workflows:
+  - type: "TestWorkflow"
+    description: "Simple test workflow"
+    config_file: "test_workflow.yaml"
+    initial_state_model: "pydantic.BaseModel"

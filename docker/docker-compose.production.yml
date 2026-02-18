@@ -140,6 +140,7 @@ services:
       DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       WORKFLOW_STORAGE: postgres
     ports:
       - "8000:8000"
