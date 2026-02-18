@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # Redis broker for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # PostgreSQL for Rufus control plane
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: rufus_cloud
+      POSTGRES_USER: rufus
+      POSTGRES_PASSWORD: rufus_secret_2024
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rufus"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Rufus control plane (server)
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rufus-server
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_cloud
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        cd /app/src/rufus &&
+        alembic upgrade head &&
+        cd /app &&
+        uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+      "
+
+  # Rufus Edge Worker (Standard)
+  worker-standard:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rufus-worker
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RUFUS_CONTROL_PLANE_URL: http://control-plane:8000
+      RUFUS_API_KEY: ${WORKER_API_KEY:-}  # Set after registration
+      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-changeme}
+      WORKER_GPU_ENABLED: "false"
+      WORKER_MEMORY_GB: "8"
+      WORKER_REGION: us-east-1
+      WORKER_ZONE: us-east-1a
+      WORKER_POOL: standard
+      WORKER_DB_PATH: /var/lib/rufus/worker_standard.db
+      CONFIG_POLL_INTERVAL: "60"
+      SYNC_INTERVAL: "30"
+      HEARTBEAT_INTERVAL: "60"
+    depends_on:
+      redis:
+        condition: service_healthy
+      control-plane:
+        condition: service_started
+    volumes:
+      - worker_standard_data:/var/lib/rufus
+    command: celery -A examples.celery_edge_worker.rufus_worker_edge worker --loglevel=info --hostname=worker-standard@%h
+
+  # Rufus Edge Worker (GPU)
+  worker-gpu:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rufus-worker-gpu
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RUFUS_CONTROL_PLANE_URL: http://control-plane:8000
+      RUFUS_API_KEY: ${WORKER_GPU_API_KEY:-}  # Set after registration
+      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-changeme}
+      WORKER_GPU_ENABLED: "true"
+      WORKER_MEMORY_GB: "64"
+      WORKER_REGION: us-east-1
+      WORKER_ZONE: us-east-1b
+      WORKER_POOL: gpu-inference
+      WORKER_DB_PATH: /var/lib/rufus/worker_gpu.db
+      CONFIG_POLL_INTERVAL: "60"
+      SYNC_INTERVAL: "30"
+      HEARTBEAT_INTERVAL: "60"
+    depends_on:
+      redis:
+        condition: service_healthy
+      control-plane:
+        condition: service_started
+    volumes:
+      - worker_gpu_data:/var/lib/rufus
+      - gpu_models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: celery -A examples.celery_edge_worker.rufus_worker_edge worker --loglevel=info --hostname=worker-gpu@%h -Q gpu,default
+
+  # Celery Flower (monitoring dashboard)
+  flower:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rufus-worker
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A examples.celery_edge_worker.rufus_worker_edge flower --port=5555
+
+volumes:
+  postgres_data:
+  worker_standard_data:
+  worker_gpu_data:
+  gpu_models:
