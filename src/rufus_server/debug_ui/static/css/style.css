@@ -526,3 +526,298 @@ button:active { transform: scale(0.98); }
 
 
 
+
+/* Enhanced Step Visualizer */
+#step-visualizer-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+#step-visualizer-list li .step-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+    color: var(--text-color-muted);
+}
+
+#step-visualizer-list li.completed .step-icon {
+    color: var(--success-color);
+}
+
+#step-visualizer-list li.current .step-icon {
+    color: var(--accent-color);
+}
+
+#step-visualizer-list li.current .step-icon.fa-spinner {
+    color: var(--warn-color);
+}
+
+#step-visualizer-list li .step-icon.error {
+    color: var(--error-color);
+}
+
+#step-visualizer-list li .step-content {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+#step-visualizer-list li .step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#step-visualizer-list li .step-status {
+    font-size: 0.75rem;
+    color: var(--text-color-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+#step-visualizer-list li .step-status.error {
+    color: var(--error-color);
+}
+
+#step-visualizer-list li.pending {
+    opacity: 0.6;
+}
+
+/* State Change Notification */
+.state-change-notification {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background-color: var(--accent-color);
+    color: white;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateX(100px);
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+.state-change-notification.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.state-change-notification i {
+    animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Status Badge Pulse Animation */
+.status-badge.status-pulse {
+    animation: badge-pulse 0.5s ease;
+}
+
+@keyframes badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+/* Enhanced Current Step Indicator */
+#step-visualizer-list li.current {
+    background: linear-gradient(90deg, 
+        color-mix(in srgb, var(--accent-color) 15%, transparent) 0%, 
+        color-mix(in srgb, var(--accent-color) 5%, transparent) 100%);
+    border-left-width: 4px;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-color) 20%, transparent);
+}
+
+/* Step transition animation */
+#step-visualizer-list li {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#step-visualizer-list li.completed {
+    animation: step-complete 0.5s ease;
+}
+
+@keyframes step-complete {
+    0% {
+        transform: translateX(-10px);
+        opacity: 0.7;
+    }
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* State Changes Tab */
+.empty-state {
+    text-align: center;
+    color: var(--text-color-muted);
+    padding: 2rem;
+    font-style: italic;
+}
+
+.state-change-entry {
+    background-color: var(--bg-color-control);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    animation: fade-in 0.3s ease;
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.state-change-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.state-change-header .timestamp {
+    font-size: 0.85rem;
+    color: var(--text-color-muted);
+}
+
+.state-change-header .change-count {
+    font-size: 0.75rem;
+    background-color: var(--accent-color);
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.state-change-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.state-change-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background-color: var(--bg-color);
+    border-radius: 4px;
+    font-family: var(--font-family-mono);
+    font-size: 0.85rem;
+}
+
+.state-change-item.added {
+    border-left: 3px solid var(--success-color);
+}
+
+.state-change-item.changed {
+    border-left: 3px solid var(--warn-color);
+}
+
+.state-change-item i {
+    color: var(--text-color-muted);
+    font-size: 0.9rem;
+}
+
+.state-change-item.added > i:first-child {
+    color: var(--success-color);
+}
+
+.state-change-item.changed > i:first-child {
+    color: var(--warn-color);
+}
+
+.state-change-item .change-path {
+    font-weight: 600;
+    color: var(--accent-color);
+    flex-shrink: 0;
+}
+
+.state-change-item .change-value {
+    color: var(--text-color);
+    word-break: break-word;
+}
+
+.state-change-item .change-value.old {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.state-change-item .change-value.new {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.state-change-item .fa-arrow-right {
+    color: var(--text-color-muted);
+    font-size: 0.7rem;
+}
+
+/* --- Skipped Steps --- */
+#step-visualizer-list li.skipped {
+    opacity: 0.55;
+}
+#step-visualizer-list li.skipped .step-icon {
+    color: var(--text-color-muted);
+}
+#step-visualizer-list li.skipped .step-status {
+    color: var(--text-color-muted);
+    font-style: italic;
+}
+
+/* --- Child / Sub-workflow Section --- */
+.child-workflow-section {
+    margin-top: 12px;
+    padding: 10px;
+    border-left: 3px solid var(--accent-color);
+    background: var(--bg-color-control);
+    border-radius: 4px;
+}
+.child-workflow-header {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: var(--text-color-muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.child-step-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.child-step-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 4px 0 4px 0.5rem;
+    font-size: 0.88em;
+    border-left: 2px solid var(--border-color);
+    margin-bottom: 4px;
+}
+.child-step-list li.completed { border-left-color: var(--success-color); }
+.child-step-list li.current   { border-left-color: var(--accent-color); }
+.child-step-list li.completed .step-icon { color: var(--success-color); }
+.child-step-list li.current   .step-icon { color: var(--accent-color); }
+.child-step-list li.pending   { opacity: 0.6; }

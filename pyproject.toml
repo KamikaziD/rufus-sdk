@@ -1,8 +1,9 @@
 [tool.poetry]
 name = "rufus-sdk"
-version = "0.3.23"
+version = "0.3.36"
 description = "Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers"
 authors = ["Rufus Team <team@rufus.dev>"]
+license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/KamikaziD/rufus-sdk"
 repository = "https://github.com/KamikaziD/rufus-sdk"
@@ -99,7 +100,7 @@ mypy = "^1.0"
 rufus = "rufus_cli.main:app"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=1.0.0,<2.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]

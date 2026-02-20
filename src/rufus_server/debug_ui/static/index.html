@@ -89,7 +89,8 @@
                     <div class="interaction-area">
                         <h3>Current Step: <span id="current-step-name">...</span></h3>
                         <div class="action-buttons">
-                            <button id="next-step-button" class="button-primary">Next Step <i class="fas fa-arrow-right"></i></button>
+                            <button id="next-step-button" class="button-primary" style="display: none;">Next Step <i class="fas fa-arrow-right"></i></button>
+                            <button id="new-workflow-button" class="button-primary" style="display: none;">Start New Workflow <i class="fas fa-plus"></i></button>
                             <button id="resume-button" class="button-primary" style="display: none;">Submit Review <i class="fas fa-check"></i></button>
                             <button id="retry-button" class="button-warn" style="display: none;">Retry Step <i class="fas fa-redo"></i></button>
                             <button id="check-status-button" class="button-secondary" style="display: none;">Check Status <i class="fas fa-sync"></i></button>
@@ -120,6 +121,7 @@
                         <div class="card-header tab-controls">
                             <button class="tab-button active" data-tab="log-view">Event Log</button>
                             <button class="tab-button" data-tab="full-state-view">Full State</button>
+                            <button class="tab-button" data-tab="state-changes-view">State Changes</button>
                             <button class="tab-button" data-tab="required-inputs-view" style="display: none;">Required Input</button>
                         </div>
                         <div class="card-body tab-content">
@@ -133,6 +135,12 @@
                             <!-- State Tab -->
                             <div id="full-state-view" class="tab-pane">
                                 <pre id="full-state-pre" class="output-box"></pre>
+                            </div>
+                            <!-- State Changes Tab -->
+                            <div id="state-changes-view" class="tab-pane">
+                                <div id="state-changes-list" class="output-box">
+                                    <p class="empty-state">No state changes yet. Changes will appear here as the workflow progresses.</p>
+                                </div>
                             </div>
                             <!-- Input Form Tab -->
                             <div id="required-inputs-view" class="tab-pane">

@@ -47,6 +47,7 @@ from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.execution.thread_pool import ThreadPoolExecutorProvider
 from rufus.implementations.execution.celery import CeleryExecutionProvider
 from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.observability.events import EventPublisherObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
@@ -211,8 +212,10 @@ async def startup_event():
 
     await persistence_provider.initialize()
 
-    # Workflow Observer (simple logging for now)
-    workflow_observer = LoggingObserver()
+    # Workflow Observer - use EventPublisherObserver for real-time updates
+    workflow_observer = EventPublisherObserver(persistence_provider=persistence_provider)
+    await workflow_observer.initialize()
+    logger.info("EventPublisherObserver initialized for real-time WebSocket updates")
 
     # Execution Provider
     execution_backend = os.getenv('WORKFLOW_EXECUTION_BACKEND', 'sync').lower()
@@ -268,6 +271,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     global persistence_provider, execution_provider, workflow_observer
+    if workflow_observer:
+        await workflow_observer.close()
     if persistence_provider:
         await persistence_provider.close()
     if execution_provider:
@@ -443,8 +448,16 @@ async def get_current_step_info(
 
     # Add input schema for dynamic form rendering
     if workflow.status == "WAITING_HUMAN":
-        from rufus_server.api_models import ResumeWorkflowRequest
-        response["input_schema"] = ResumeWorkflowRequest.model_json_schema()
+        # Show the schema of the step that will execute when the user submits
+        next_step_index = workflow.current_step + 1
+        if next_step_index < len(workflow.workflow_steps):
+            next_step = workflow.workflow_steps[next_step_index]
+            if hasattr(next_step, 'input_schema') and next_step.input_schema:
+                response["input_schema"] = next_step.input_schema.model_json_schema()
+            else:
+                response["input_schema"] = None
+        else:
+            response["input_schema"] = None
     elif hasattr(step, "input_model") and step.input_model:
         try:
             response["input_schema"] = step.input_model.model_json_schema()
@@ -691,7 +704,7 @@ async def retry_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -705,7 +718,7 @@ async def retry_workflow(
     # Reset to ACTIVE
     old_status = workflow_dict['status']
     workflow_dict['status'] = 'ACTIVE'
-    await workflow_engine.persistence.save_workflow(workflow_uuid, workflow_dict)
+    await workflow_engine.persistence.save_workflow(str(workflow_uuid), workflow_dict)
 
     # Publish event
     from rufus.events import event_publisher
@@ -722,7 +735,11 @@ async def retry_workflow(
 
     # Dispatch async task to resume execution
     from rufus.tasks import resume_from_async_task
-    current_step_index = workflow_dict.get('current_step', 0)
+    steps = workflow_dict.get('steps_config', [])
+    current_step_name = workflow_dict.get('current_step')
+    current_step_index = next(
+        (i for i, s in enumerate(steps) if s.get('name') == current_step_name), 0
+    )
     resume_from_async_task.delay({}, str(workflow_uuid), current_step_index)
 
     return {"status": "retry_initiated", "workflow_id": workflow_id}
@@ -743,24 +760,25 @@ async def rewind_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    if workflow_dict['current_step'] == 0:
+    steps = workflow_dict.get('steps_config', [])
+    current_step_name = workflow_dict.get('current_step')
+
+    current_index = next(
+        (i for i, s in enumerate(steps) if s.get('name') == current_step_name), None
+    )
+    if current_index is None or current_index == 0:
         raise HTTPException(status_code=400, detail="Cannot rewind: already at first step")
 
-    # Decrement step
-    workflow_dict['current_step'] -= 1
+    previous_step_name = steps[current_index - 1]['name']
     old_status = workflow_dict['status']
+    workflow_dict['current_step'] = previous_step_name
     workflow_dict['status'] = 'ACTIVE'
 
-    # Clear last step result
-    if workflow_dict.get('step_results'):
-        step_key = str(workflow_dict['current_step'] + 1)
-        workflow_dict['step_results'].pop(step_key, None)
-
-    await workflow_engine.persistence.save_workflow(workflow_uuid, workflow_dict)
+    await workflow_engine.persistence.save_workflow(str(workflow_uuid), workflow_dict)
 
     # Publish event
     from rufus.events import event_publisher
@@ -771,14 +789,14 @@ async def rewind_workflow(
             "workflow_id": str(workflow_uuid),
             "old_status": old_status,
             "new_status": "ACTIVE",
-            "current_step": workflow_dict['current_step'],
+            "current_step": previous_step_name,
             "rewound": True
         }
     )
 
     return {
         "status": "rewound",
-        "current_step": workflow_dict['current_step'],
+        "current_step": previous_step_name,
         "workflow_id": workflow_id
     }
 
@@ -799,16 +817,25 @@ async def resume_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(workflow_uuid)
+    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    if workflow_dict['status'] != 'PAUSED':
-        raise HTTPException(status_code=400, detail="Only paused workflows can be resumed")
+    if workflow_dict['status'] != 'WAITING_HUMAN':
+        raise HTTPException(status_code=400, detail="Only paused (WAITING_HUMAN) workflows can be resumed")
 
-    # Resume via Celery task
-    from rufus.tasks import resume_from_async_task
-    resume_from_async_task.delay(str(workflow_uuid), request_data.user_input or {})
+    workflow = await workflow_engine.get_workflow(workflow_id)
+    current_step_obj = workflow.workflow_steps[workflow.current_step] if workflow.workflow_steps else None
+    current_step_name = current_step_obj.name if current_step_obj else None
+
+    try:
+        result_dict, next_step_name = await workflow.next_step(
+            user_input=request_data.user_input or {}
+        )
+    except Exception as e:
+        workflow.status = "FAILED"
+        await workflow_engine.persistence.save_workflow(workflow_id, workflow.to_dict())
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Publish event
     from rufus.events import event_publisher
@@ -821,69 +848,276 @@ async def resume_workflow(
         }
     )
 
-    return {"status": "resume_initiated", "workflow_id": workflow_id}
+    return {
+        "status": workflow.status,
+        "workflow_id": workflow_id,
+        "current_step_name": current_step_name,
+        "next_step_name": next_step_name
+    }
 
 
-@app.websocket("/api/v1/workflow/{workflow_id}/subscribe")
-async def workflow_subscribe(websocket: WebSocket, workflow_id: str):
-    """WebSocket endpoint for real-time workflow updates."""
+@app.websocket("/api/v1/subscribe")
+async def subscribe(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time workflow updates.
+
+    Single persistent connection that supports subscribing to multiple workflows.
+
+    Client sends: {"action": "subscribe", "workflow_id": "xxx"}
+    Client sends: {"action": "unsubscribe", "workflow_id": "xxx"}
+
+    Implements ping/pong keepalive to detect half-open connections.
+    """
     await websocket.accept()
+    logger.warning(f"[WS] WebSocket connection accepted")
+
+    # Send connection handshake - connecting state
+    await websocket.send_json({"type": "handshake", "state": "connecting"})
+    logger.warning(f"[WS-HANDSHAKE] Sent 'connecting'")
 
     # Get Redis connection
     redis_host = os.getenv("REDIS_HOST", "redis")
     redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
 
-    # Subscribe to workflow events channel
+    # Track subscribed workflows
+    subscribed_workflows = set()
     pubsub = redis_client.pubsub()
-    channel = f"rufus:events:{workflow_id}"
+
+    # Ping/pong state
+    ping_interval = 15  # Send ping every 15 seconds
+    pong_timeout = 30   # Wait up to 30 seconds for pong
+    last_pong = asyncio.get_event_loop().time()
+    ping_task = None
+    redis_task = None
+    client_task = None
+
+    async def ping_pong_loop():
+        """Send periodic pings to keep connection alive and detect half-open connections."""
+        nonlocal last_pong
+        try:
+            while True:
+                await asyncio.sleep(ping_interval)
+
+                # Check if we've received a pong recently
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_pong > pong_timeout:
+                    logger.warning(f"[WS-PING] No pong received for {pong_timeout}s, closing connection")
+                    await websocket.close(code=1008, reason="Pong timeout")
+                    break
+
+                # Send ping
+                logger.debug(f"[WS-PING] Sending ping")
+                await websocket.send_json({"type": "ping", "timestamp": current_time})
+        except Exception as e:
+            logger.error(f"[WS-PING] Ping loop error: {e}")
+
+    async def listen_for_client_messages():
+        """Listen for subscribe/unsubscribe commands and pong responses from client."""
+        nonlocal last_pong
+        try:
+            while True:
+                # Receive message from WebSocket
+                message = await websocket.receive_json()
+                action = message.get('action') or message.get('type')
+
+                if action == 'pong':
+                    last_pong = asyncio.get_event_loop().time()
+                    logger.debug(f"[WS-PONG] Received pong")
+
+                elif action == 'subscribe':
+                    workflow_id = message.get('workflow_id')
+                    if not workflow_id:
+                        logger.warning(f"[WS] Subscribe message missing workflow_id")
+                        continue
+
+                    logger.info(f"[WS] Client subscribing to workflow {workflow_id}")
+
+                    # Add to subscribed set
+                    subscribed_workflows.add(workflow_id)
+
+                    # Subscribe to Redis channel
+                    channel = f"rufus:events:{workflow_id}"
+                    await pubsub.subscribe(channel)
+                    logger.info(f"[WS] Subscribed to Redis channel {channel}")
+
+                    # Send initial workflow state
+                    if workflow_engine is not None:
+                        try:
+                            workflow = await workflow_engine.get_workflow(workflow_id)
+                            initial_state = {
+                                "type": "initial_state",
+                                "workflow_id": workflow_id,
+                                "id": str(workflow.id),
+                                "status": workflow.status,
+                                "current_step": workflow.current_step_name,
+                                "state": workflow.state.model_dump(),
+                                "workflow_type": workflow.workflow_type,
+                                "steps_config": [step.to_dict() for step in workflow.workflow_steps],
+                                "parent_execution_id": str(workflow.parent_execution_id) if workflow.parent_execution_id else None,
+                                "blocked_on_child_id": str(workflow.blocked_on_child_id) if workflow.blocked_on_child_id else None,
+                                "skipped_steps": (getattr(workflow, 'metadata', None) or {}).get("skipped_steps", [])
+                            }
+                            await websocket.send_json(initial_state)
+                            logger.info(f"[WS] Sent initial state for workflow {workflow_id}")
+                        except Exception as e:
+                            logger.error(f"[WS] Failed to send initial state for workflow {workflow_id}: {e}")
+
+                    # Send subscription confirmation
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "workflow_id": workflow_id
+                    })
+
+                elif action == 'unsubscribe':
+                    workflow_id = message.get('workflow_id')
+                    if not workflow_id:
+                        logger.warning(f"[WS] Unsubscribe message missing workflow_id")
+                        continue
+
+                    logger.info(f"[WS] Client unsubscribing from workflow {workflow_id}")
+
+                    # Remove from subscribed set
+                    subscribed_workflows.discard(workflow_id)
+
+                    # Unsubscribe from Redis channel
+                    channel = f"rufus:events:{workflow_id}"
+                    await pubsub.unsubscribe(channel)
+                    logger.info(f"[WS] Unsubscribed from Redis channel {channel}")
+
+                    # Send unsubscription confirmation
+                    await websocket.send_json({
+                        "type": "unsubscribed",
+                        "workflow_id": workflow_id
+                    })
+
+                else:
+                    logger.debug(f"[WS] Received unknown message type: {action}")
+
+        except Exception as e:
+            logger.error(f"[WS] Client message listener error: {e}")
+
+    async def listen_for_redis_messages():
+        """Listen for Redis pub/sub messages and forward to WebSocket."""
+        try:
+            while True:
+                try:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+                    if message and message['type'] == 'message':
+                        try:
+                            channel = message['channel']
+                            workflow_id = channel.replace('rufus:events:', '')
+                            logger.info(f"[WS-REDIS] Received message for workflow {workflow_id}")
+                            event_data = json.loads(message['data'])
+                            event_data['workflow_id'] = workflow_id
+                            logger.info(f"[WS-REDIS] Event keys: {list(event_data.keys())}")
+                            await websocket.send_json(event_data)
+                            logger.info(f"[WS-REDIS] Successfully forwarded message to client")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"[WS-REDIS] Failed to parse message: {e}")
+                        except Exception as e:
+                            import traceback
+                            logger.error(f"[WS-REDIS] Failed to send message: {type(e).__name__}: {str(e)}")
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            break
+                except asyncio.CancelledError:
+                    raise  # Let cancellation propagate cleanly
+                except Exception as e:
+                    err_msg = str(e)
+                    if "connection not set" in err_msg or "not subscribed" in err_msg:
+                        # No channels subscribed yet — wait for client to subscribe
+                        await asyncio.sleep(0.1)
+                    else:
+                        logger.error(f"[WS-REDIS] Error in message loop: {e}")
+                        break
+        except asyncio.CancelledError:
+            pass  # Normal shutdown
+        except Exception as e:
+            logger.error(f"[WS-REDIS] Redis listener error: {e}")
 
     try:
-        await pubsub.subscribe(channel)
-        logger.info(f"WebSocket client subscribed to workflow {workflow_id}")
+        # Send connection handshake - connected state
+        await websocket.send_json({"type": "handshake", "state": "connected"})
+        logger.warning(f"[WS-HANDSHAKE] Sent 'connected'")
 
-        # Send initial workflow state immediately after connection
-        if workflow_engine is not None:
+        # Start ping/pong keepalive loop
+        ping_task = asyncio.create_task(ping_pong_loop())
+        logger.warning(f"[WS-PING] Started ping/pong loop")
+
+        # Start listening for client messages (subscribe/unsubscribe/pong)
+        client_task = asyncio.create_task(listen_for_client_messages())
+        logger.warning(f"[WS] Started client message listener")
+
+        # Start listening for Redis messages
+        redis_task = asyncio.create_task(listen_for_redis_messages())
+        logger.warning(f"[WS-REDIS] Started Redis message listener")
+
+        # Wait for any task to complete (or fail)
+        done, pending = await asyncio.wait(
+            [ping_task, client_task, redis_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        # Debug: which task completed?
+        for task in done:
+            task_name = "unknown"
+            if task == ping_task:
+                task_name = "ping_task"
+            elif task == client_task:
+                task_name = "client_task"
+            elif task == redis_task:
+                task_name = "redis_task"
+
+            logger.warning(f"[WS-DEBUG] Task completed: {task_name}")
+            if task.exception():
+                logger.error(f"[WS-DEBUG] Task exception: {task.exception()}")
+
+        logger.warning(f"[WS] Task completed, cleaning up...")
+
+        # Cancel any pending tasks
+        for task in pending:
+            task.cancel()
             try:
-                workflow = await workflow_engine.get_workflow(workflow_id)
-                initial_state = {
-                    "id": str(workflow.id),
-                    "status": workflow.status,
-                    "current_step": workflow.current_step_name,
-                    "state": workflow.state.model_dump(),
-                    "workflow_type": workflow.workflow_type,
-                    "steps_config": [step.to_dict() for step in workflow.workflow_steps],
-                    "parent_execution_id": str(workflow.parent_execution_id) if workflow.parent_execution_id else None,
-                    "blocked_on_child_id": str(workflow.blocked_on_child_id) if workflow.blocked_on_child_id else None
-                }
-                await websocket.send_json(initial_state)
-                logger.info(f"Sent initial state for workflow {workflow_id}")
-            except Exception as e:
-                logger.error(f"Failed to send initial state for workflow {workflow_id}: {e}")
+                await task
+            except asyncio.CancelledError:
+                pass
 
-        # Stream events to browser
-        async for message in pubsub.listen():
-            if message['type'] == 'message':
-                try:
-                    # Parse and forward event
-                    event_data = json.loads(message['data'])
-                    await websocket.send_json(event_data)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse Redis message: {e}")
-                except Exception as e:
-                    logger.error(f"Failed to send WebSocket message: {e}")
-                    break
     except WebSocketDisconnect:
-        logger.info(f"WebSocket client disconnected from workflow {workflow_id}")
+        logger.info(f"[WS] Client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error for workflow {workflow_id}: {e}")
+        logger.error(f"[WS] WebSocket error: {e}")
     finally:
-        # Cleanup
+        # Cancel tasks if still running
+        if ping_task and not ping_task.done():
+            ping_task.cancel()
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
+        if client_task and not client_task.done():
+            client_task.cancel()
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
+        if redis_task and not redis_task.done():
+            redis_task.cancel()
+            try:
+                await redis_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cleanup Redis
         try:
-            await pubsub.unsubscribe(channel)
+            # Unsubscribe from all channels
+            for workflow_id in subscribed_workflows:
+                channel = f"rufus:events:{workflow_id}"
+                await pubsub.unsubscribe(channel)
+
             await redis_client.close()
-        except:
-            pass
+            logger.info(f"[WS] Cleaned up Redis connection")
+        except Exception as e:
+            logger.error(f"[WS] Cleanup error: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

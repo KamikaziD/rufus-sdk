@@ -256,6 +256,13 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
         logger.error(f"Error: Workflow {workflow_id} not found for async resumption!")
         return
 
+    # Idempotency guard: reject stale/duplicate Celery callbacks
+    if workflow.status != "PENDING_ASYNC":
+        logger.warning(f"[ASYNC-TASK] Ignoring stale callback for {workflow_id} "
+                       f"(status={workflow.status}, expected PENDING_ASYNC). "
+                       f"Possible duplicate Celery delivery.")
+        return
+
     # Check if async task failed (indicated by error in result)
     if isinstance(step_result, dict) and "error" in step_result:
         logger.error(f"[ASYNC-TASK] Async task failed for workflow {workflow_id}: {step_result.get('error')}")
@@ -342,6 +349,10 @@ def resume_workflow_from_celery(workflow_id: str, step_result: Dict[str, Any], n
                     # Pass empty input as this is an automated transition
                     result, next_step = _sync_next_step(workflow, user_input={})
                     _sync_save_workflow(workflow_id, workflow)
+
+                    # Publish workflow state update after each step for real-time UI updates
+                    _publish_event_sync(event_publisher.publish_workflow_updated(workflow))
+                    logger.info(f"[AUTO-ADVANCE] Published workflow update after advancing to {workflow.current_step_name}")
 
                     if workflow.status != "ACTIVE":
                         # Hit a blocking state (PENDING_ASYNC, WAITING_HUMAN, COMPLETED, etc.)
@@ -436,10 +447,21 @@ def poll_scheduled_workflows():
 
 
 @celery_app.task if celery_app else lambda f: f
-def merge_and_resume_parallel_tasks(results, workflow_id: str, current_step_index: int, merge_function_path: str = None):
+def merge_and_resume_parallel_tasks(results, workflow_id: str, current_step_index: int,
+                                    merge_function_path: str = None,
+                                    merge_strategy: str = "SHALLOW",
+                                    merge_conflict_behavior: str = "PREFER_NEW"):
     """
     Merges the results of parallel tasks and resumes the workflow.
     If a merge_function_path is provided, it will be used to merge the results.
+
+    Args:
+        results: List of results from parallel tasks
+        workflow_id: Workflow UUID
+        current_step_index: Current step index
+        merge_function_path: Optional custom merge function path
+        merge_strategy: Strategy for merging (SHALLOW or DEEP)
+        merge_conflict_behavior: How to handle conflicts (PREFER_NEW, PREFER_OLD, RAISE_ERROR)
     """
     if merge_function_path:
         module_path, func_name = merge_function_path.rsplit('.', 1)
@@ -447,15 +469,73 @@ def merge_and_resume_parallel_tasks(results, workflow_id: str, current_step_inde
         merge_function = getattr(module, func_name)
         merged_results = merge_function(results)
     else:
-        # Default merge logic
+        # Default merge logic with strategy and conflict handling
         merged_results = {}
+
         for res in results:
-            if isinstance(res, dict):
-                merged_results.update(res)
+            if not isinstance(res, dict):
+                continue
+
+            if merge_strategy == "SHALLOW":
+                # Shallow merge - only top-level keys
+                for key, value in res.items():
+                    if key in merged_results:
+                        # Conflict detected
+                        if merge_conflict_behavior == "PREFER_NEW":
+                            merged_results[key] = value
+                        elif merge_conflict_behavior == "PREFER_OLD":
+                            pass  # Keep existing value
+                        elif merge_conflict_behavior == "RAISE_ERROR":
+                            raise ValueError(f"Merge conflict: key '{key}' exists in multiple parallel task results")
+                        else:
+                            # Default to PREFER_NEW
+                            merged_results[key] = value
+                    else:
+                        merged_results[key] = value
+            else:
+                # DEEP merge - recursively merge nested dicts
+                merged_results = _deep_merge(merged_results, res, merge_conflict_behavior)
 
     resume_workflow_from_celery(workflow_id, merged_results, current_step_index + 1, completed_step_index=current_step_index)
 
     return merged_results
+
+
+def _deep_merge(dict1: dict, dict2: dict, conflict_behavior: str = "PREFER_NEW") -> dict:
+    """
+    Deep merge two dictionaries recursively.
+
+    Args:
+        dict1: First dictionary (base)
+        dict2: Second dictionary (to merge in)
+        conflict_behavior: How to handle conflicts (PREFER_NEW, PREFER_OLD, RAISE_ERROR)
+
+    Returns:
+        Merged dictionary
+    """
+    result = dict1.copy()
+
+    for key, value in dict2.items():
+        if key in result:
+            # Conflict detected
+            if isinstance(result[key], dict) and isinstance(value, dict):
+                # Both are dicts - merge recursively
+                result[key] = _deep_merge(result[key], value, conflict_behavior)
+            else:
+                # Not both dicts - apply conflict behavior
+                if conflict_behavior == "PREFER_NEW":
+                    result[key] = value
+                elif conflict_behavior == "PREFER_OLD":
+                    pass  # Keep existing value
+                elif conflict_behavior == "RAISE_ERROR":
+                    raise ValueError(f"Deep merge conflict: key '{key}' exists with different types or values")
+                else:
+                    # Default to PREFER_NEW
+                    result[key] = value
+        else:
+            result[key] = value
+
+    return result
 
 
 @celery_app.task if celery_app else lambda f: f
@@ -463,7 +543,7 @@ def resume_from_async_task(result: dict, workflow_id: str, current_step_index: i
     """
     Resumes a workflow after a single async task completes.
     """
-    resume_workflow_from_celery(workflow_id, result, current_step_index + 1, completed_step_index=current_step_index)
+    resume_workflow_from_celery(workflow_id, result, int(current_step_index) + 1, completed_step_index=int(current_step_index))
     return result
 
 
@@ -490,7 +570,7 @@ def execute_sub_workflow(child_id: str, parent_id: str):
     while child.status == "ACTIVE" and iterations < max_iterations:
         iterations += 1
         try:
-            result, next_step = child.next_step(user_input={})
+            result, next_step = _sync_next_step(child, user_input={})
             _sync_save_workflow(child_id, child)
 
             if child.status == "PENDING_ASYNC":
@@ -509,27 +589,16 @@ def execute_sub_workflow(child_id: str, parent_id: str):
                 return
 
         except Exception as e:
-            child.status = "FAILED"
-            _sync_save_workflow(child_id, child)
-            logger.error(f"[SUB-WORKFLOW] Error: Child workflow {child_id} failed: {e}")
-
-            # Notify parent of child failure
-            parent = _sync_load_workflow(parent_id)
-            if parent:
-                # Use FAILED_CHILD_WORKFLOW status to distinguish from parent failure
-                parent.status = "FAILED_CHILD_WORKFLOW"
-                # Store failure metadata for debugging
-                if not hasattr(parent, 'metadata') or parent.metadata is None:
-                    parent.metadata = {}
-                parent.metadata["failed_child_id"] = str(child_id)
-                parent.metadata["failed_child_status"] = child.status
-                parent.blocked_on_child_id = None
-                _sync_save_workflow(parent_id, parent)
-
-                # Publish workflow updated event
-                _publish_event_sync(event_publisher.publish_workflow_updated(parent))
-                logger.error(f"[SUB-WORKFLOW] Parent {parent_id} marked as FAILED_CHILD_WORKFLOW due to child {child_id} failure")
-
+            logger.error(f"[SUB-WORKFLOW] Child {child_id} crashed: {e}", exc_info=True)
+            try:
+                child.status = "FAILED"
+                if not hasattr(child, 'metadata') or child.metadata is None:
+                    child.metadata = {}
+                child.metadata["error"] = str(e)
+                _sync_save_workflow(child_id, child)
+                resume_parent_from_child.delay(parent_id, child_id)
+            except Exception as inner_e:
+                logger.error(f"[SUB-WORKFLOW] Failed to notify parent {parent_id} of child failure: {inner_e}")
             return
 
     # Check if child completed
@@ -609,6 +678,13 @@ def resume_parent_from_child(parent_id: str, child_id: str):
         logger.error("[SUB-WORKFLOW] Error: Could not load parent or child workflow")
         return
 
+    # Idempotency guard: only resume if parent is still waiting on this sub-workflow
+    if parent.status != "PENDING_SUB_WORKFLOW":
+        logger.warning(f"[SUB-WORKFLOW] Ignoring stale resume_parent_from_child for {parent_id} "
+                       f"(status={parent.status}, expected PENDING_SUB_WORKFLOW). "
+                       f"Possible duplicate Celery delivery.")
+        return
+
     # Check child status before resuming parent
     if child.status == "FAILED" or child.status == "FAILED_ROLLED_BACK":
         logger.error(f"[SUB-WORKFLOW] Child {child_id} failed with status {child.status}, failing parent {parent_id}")
@@ -644,7 +720,7 @@ def resume_parent_from_child(parent_id: str, child_id: str):
 
     # Continue parent execution
     try:
-        result, next_step = parent.next_step(user_input={})
+        result, next_step = _sync_next_step(parent, user_input={})
         _sync_save_workflow(parent_id, parent)
         logger.info(f"[SUB-WORKFLOW] Parent {parent_id} advanced to step: {next_step}")
     except Exception as e:

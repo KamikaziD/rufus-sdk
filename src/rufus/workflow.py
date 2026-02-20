@@ -524,7 +524,7 @@ class Workflow:
 
     async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
         # Handle resumption from WAITING_HUMAN status
-        if self.status == "WAITING_HUMAN" and user_input:
+        if self.status == "WAITING_HUMAN":
             old_status = self.status
             self.status = "ACTIVE"
             self.current_step += 1  # Advance past the pause step
@@ -797,6 +797,7 @@ class Workflow:
             if self.current_step >= len(self.workflow_steps):
                 old_status = self.status
                 self.status = "COMPLETED"
+                await self.persistence.save_workflow(self.id, self.to_dict())
                 await self.observer.on_workflow_completed( # Changed to await
                     self.id, self.workflow_type, self.state)
                 final_completion_result = {"status": "Workflow completed"}
@@ -827,6 +828,16 @@ class Workflow:
             try:
                 target_index = next(i for i, s in enumerate(
                     self.workflow_steps) if s.name == e.target_step_name)
+                # Track any steps that were skipped over by this jump
+                skipped_names = [
+                    self.workflow_steps[i].name
+                    for i in range(step_index_before_jump + 1, target_index)
+                ]
+                if skipped_names:
+                    if not self.metadata:
+                        self.metadata = {}
+                    existing = self.metadata.get("skipped_steps", [])
+                    self.metadata["skipped_steps"] = existing + skipped_names
                 self.current_step = target_index  # Keep as index internally
                 await self.persistence.save_workflow( # Changed to await
                     self.id, self.to_dict())

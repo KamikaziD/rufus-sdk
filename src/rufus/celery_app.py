@@ -180,14 +180,16 @@ def init_worker(**kwargs):
                 _, provider = _init_persistence()
 
                 # Create other required providers for workflow reconstruction
-                from rufus.implementations.execution.sync import SyncExecutor
-                from rufus.implementations.observability.logging import LoggingObserver
+                from rufus.implementations.execution.celery import CeleryExecutionProvider
+                from rufus.implementations.observability.events import EventPublisherObserver
                 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
                 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
                 from rufus.builder import WorkflowBuilder
 
-                execution_provider = SyncExecutor()  # Use sync for now (can be made configurable)
-                observer = LoggingObserver()
+                execution_provider = CeleryExecutionProvider()
+                observer = EventPublisherObserver(persistence_provider=provider)
+                # Initialize observer for real-time event publishing
+                pg_executor.run_coroutine_sync(observer.initialize())
 
                 # Create workflow builder with actual registry if available
                 # This allows scheduled workflows and other tasks to create new workflows
@@ -222,6 +224,11 @@ def init_worker(**kwargs):
                         template_engine_cls=Jinja2TemplateEngine
                     )
                     logger.warning(f"Worker: Registry not found at {registry_path}, using empty registry")
+
+                # Give execution_provider direct access to workflow_builder so it can
+                # resolve task function paths in dispatch_async_task / dispatch_parallel_tasks
+                # without needing a WorkflowEngine reference (worker context has no engine)
+                execution_provider._workflow_builder = workflow_builder
 
                 # Inject all providers into tasks module
                 from rufus import tasks

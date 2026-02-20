@@ -98,7 +98,7 @@ class EventPublisher:
         if use_pubsub:
             workflow_id = payload.get("workflow_id") or payload.get("id")
             if workflow_id:
-                channel = f"workflow:events:{workflow_id}"
+                channel = f"rufus:events:{workflow_id}"  # Changed from workflow:events to rufus:events
                 pubsub_message = {
                     "event_type": event_type,
                     "timestamp": timestamp,
@@ -116,6 +116,29 @@ class EventPublisher:
     async def publish_workflow_updated(self, workflow: Any):
         payload = workflow.to_dict()
         await self._publish('workflow:persistence', 'workflow.updated', payload)
+
+        # Also publish full workflow state for UI (in the format UI expects)
+        workflow_dict = workflow.to_dict()
+        ui_payload = {
+            "id": workflow_dict.get("id"),
+            "status": workflow_dict.get("status"),
+            "current_step": workflow_dict.get("current_step", 0),
+            "state": workflow_dict.get("state", {}),
+            "workflow_type": workflow_dict.get("workflow_type"),
+            "steps_config": workflow_dict.get("steps_config", []),
+            "parent_execution_id": workflow_dict.get("parent_execution_id"),
+            "blocked_on_child_id": workflow_dict.get("blocked_on_child_id")
+        }
+
+        # Publish directly to the workflow's channel (bypassing _publish to avoid event envelope)
+        workflow_id = workflow_dict.get("id")
+        if workflow_id:
+            try:
+                redis_client = await self.get_redis()
+                channel = f"rufus:events:{workflow_id}"
+                await redis_client.publish(channel, json.dumps(ui_payload))
+            except Exception as e:
+                logger.error(f"Failed to publish full workflow state for {workflow_id}: {e}")
 
     async def publish_step_started(self, workflow_id: str, step_name: str, step_index: int):
         payload = {"workflow_id": workflow_id, "step_name": step_name, "step_index": step_index}
@@ -136,6 +159,28 @@ class EventPublisher:
     async def publish_workflow_completed(self, workflow: Any):
         payload = workflow.to_dict()
         await self._publish('workflow:persistence', 'workflow.completed', payload)
+
+        # Also publish full workflow state for UI
+        workflow_dict = workflow.to_dict()
+        ui_payload = {
+            "id": workflow_dict.get("id"),
+            "status": workflow_dict.get("status"),
+            "current_step": workflow_dict.get("current_step", 0),
+            "state": workflow_dict.get("state", {}),
+            "workflow_type": workflow_dict.get("workflow_type"),
+            "steps_config": workflow_dict.get("steps_config", []),
+            "parent_execution_id": workflow_dict.get("parent_execution_id"),
+            "blocked_on_child_id": workflow_dict.get("blocked_on_child_id")
+        }
+
+        workflow_id = workflow_dict.get("id")
+        if workflow_id:
+            try:
+                redis_client = await self.get_redis()
+                channel = f"rufus:events:{workflow_id}"
+                await redis_client.publish(channel, json.dumps(ui_payload))
+            except Exception as e:
+                logger.error(f"Failed to publish full workflow state for {workflow_id}: {e}")
 
     async def publish_workflow_failed(self, workflow: Any, error: str):
         payload = workflow.to_dict()

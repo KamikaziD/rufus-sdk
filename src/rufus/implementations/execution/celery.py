@@ -47,16 +47,28 @@ class CeleryExecutionProvider(ExecutionProvider):
         celery -A rufus.celery_app worker -Q us-east-1 --loglevel=info
     """
 
-    def __init__(self):
+    def __init__(self, workflow_builder=None):
         from rufus.celery_app import celery_app
         self.celery_app = celery_app
         self._engine = None
+        self._workflow_builder = workflow_builder  # Direct reference for worker context
         logger.info("CeleryExecutionProvider initialized")
 
     async def initialize(self, engine: Any):
         """Initializes the executor with a reference to the WorkflowEngine."""
         self._engine = engine
         logger.info("CeleryExecutionProvider ready")
+
+    def _get_workflow_builder(self):
+        """Returns workflow_builder from engine or direct reference (worker context)."""
+        if self._engine is not None:
+            return self._engine.workflow_builder
+        if self._workflow_builder is not None:
+            return self._workflow_builder
+        raise RuntimeError(
+            "CeleryExecutionProvider has no workflow_builder. "
+            "Call initialize(engine) or pass workflow_builder= to constructor."
+        )
 
     async def close(self):
         """No cleanup needed for Celery (workers are separate processes)."""
@@ -106,7 +118,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         from rufus.tasks import resume_from_async_task
 
         # Import the task function
-        func = self._engine.workflow_builder._import_from_string(func_path)
+        func = self._get_workflow_builder()._import_from_string(func_path)
         if not func:
             raise ValueError(f"Task function not found: {func_path}")
 
@@ -117,7 +129,12 @@ class CeleryExecutionProvider(ExecutionProvider):
                 f"Decorate with @celery_app.task"
             )
 
-        # Prepare task payload
+        # Strip internal engine params — NOT to be forwarded to user task functions
+        merge_strategy = kwargs.pop('merge_strategy', 'SHALLOW')
+        merge_conflict_behavior = kwargs.pop('merge_conflict_behavior', 'PREFER_NEW')
+        kwargs.pop('_previous_step_result', None)
+
+        # Prepare task payload — only user_input kwargs remain in **kwargs
         task_kwargs = {
             'state': state_data,
             'workflow_id': workflow_id,
@@ -141,7 +158,9 @@ class CeleryExecutionProvider(ExecutionProvider):
                                workflow_id: str,
                                current_step_index: int,
                                merge_function_path: Optional[str] = None,
-                               data_region: Optional[str] = None) -> Dict[str, Any]:
+                               data_region: Optional[str] = None,
+                               merge_strategy: str = "SHALLOW",
+                               merge_conflict_behavior: str = "PREFER_NEW") -> Dict[str, Any]:
         """
         Dispatches multiple tasks for parallel execution.
 
@@ -155,18 +174,20 @@ class CeleryExecutionProvider(ExecutionProvider):
             current_step_index: Current step index
             merge_function_path: Optional custom merge function
             data_region: Optional region for queue routing
+            merge_strategy: Strategy for merging results (SHALLOW or DEEP)
+            merge_conflict_behavior: How to handle conflicts (PREFER_NEW, PREFER_OLD, RAISE_ERROR)
 
         Returns:
             Celery group task ID
         """
-        from celery import group
+        from celery import chord
         from rufus.tasks import merge_and_resume_parallel_tasks
 
         # Build Celery task signatures
         celery_tasks = []
         for task_config in tasks:
-            func_path = task_config.function_path
-            func = self._engine.workflow_builder._import_from_string(func_path)
+            func_path = task_config.func_path
+            func = self._get_workflow_builder()._import_from_string(func_path)
 
             if not func or not hasattr(func, 'apply_async'):
                 raise ValueError(f"Invalid Celery task: {func_path}")
@@ -175,23 +196,23 @@ class CeleryExecutionProvider(ExecutionProvider):
             task_sig = func.s(state=state_data, workflow_id=workflow_id)
             celery_tasks.append(task_sig)
 
-        # Create Celery group and chain with merge callback
-        task_group = group(celery_tasks)
-
-        # Chain: parallel tasks → merge results → resume workflow
-        workflow = task_group.apply_async(
-            link=merge_and_resume_parallel_tasks.s(
-                workflow_id,
-                current_step_index,
-                merge_function_path
-            ),
-            queue=data_region if data_region else 'default'
+        # Create callback signature
+        callback = merge_and_resume_parallel_tasks.s(
+            workflow_id,
+            current_step_index,
+            merge_function_path,
+            merge_strategy,
+            merge_conflict_behavior
         )
+
+        # Use chord: parallel tasks → merge results → resume workflow
+        workflow = chord(celery_tasks, queue=data_region if data_region else 'default')(callback)
 
         logger.info(f"Dispatched parallel task group {workflow.id} for workflow {workflow_id}")
         return {"_async_dispatch": True, "task_id": workflow.id}
 
-    async def dispatch_sub_workflow(self, child_id: str, parent_id: str):
+    async def dispatch_sub_workflow(self, child_id: str, parent_id: str,
+                                     sub_workflow_type: str = None, initial_data: dict = None):
         """
         Dispatches a sub-workflow for execution.
 
@@ -201,6 +222,8 @@ class CeleryExecutionProvider(ExecutionProvider):
         Args:
             child_id: Child workflow UUID
             parent_id: Parent workflow UUID
+            sub_workflow_type: Ignored — child is already persisted by caller
+            initial_data: Ignored — child is already persisted by caller
         """
         from rufus.tasks import execute_sub_workflow
 
@@ -211,7 +234,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         logger.info(f"Dispatched sub-workflow {child_id} for parent {parent_id}, task {task.id}")
         return {"_async_dispatch": True, "task_id": task.id}
 
-    def report_child_status_to_parent(self,
+    async def report_child_status_to_parent(self,
                                      child_id: str,
                                      parent_id: str,
                                      child_new_status: str,

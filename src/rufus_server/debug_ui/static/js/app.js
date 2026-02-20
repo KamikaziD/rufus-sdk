@@ -2,12 +2,26 @@
 let currentWorkflow = null;
 let availableWorkflows = [];
 let workflowSocket = null;
+let subscribedWorkflows = new Set(); // Track which workflows we're subscribed to
 let currentStepInfoCache = null; // Cache for step info to avoid redundant fetches
+let cachedStepsConfig = null; // Cache steps_config from initial_state (rich format with correct type names)
+let cachedSkippedSteps = []; // Cache skipped_steps across Redis snapshots
+let currentChildWorkflow = null; // Track active child/sub-workflow subscription
+let previousState = null; // Track previous state for diff visualization
+let stateChangeHistory = []; // History of state changes
+let previousStep = null; // Track previous step index
 
 // Declare dom globally, but initialize its properties in init()
-let dom = {}; 
+let dom = {};
 
 const API_BASE_URL = '/api/v1'; // This remains global
+
+// Reconnection state
+let reconnectInterval = 1000;
+let reconnectTimer = null;
+const maxReconnectInterval = 30000;
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 5;
 
 // --- Initialization ---
 
@@ -38,6 +52,7 @@ function init() {
         currentStepName: document.getElementById('current-step-name'),
         actionButtons: document.querySelector('.action-buttons'),
         nextStepButton: document.getElementById('next-step-button'),
+        newWorkflowButton: document.getElementById('new-workflow-button'),
         checkStatusButton: document.getElementById('check-status-button'),
         resumeButton: document.getElementById('resume-button'),
         retryButton: document.getElementById('retry-button'),
@@ -48,6 +63,7 @@ function init() {
         // Log and State elements
         logOutput: document.getElementById('log-output'),
         fullStatePre: document.getElementById('full-state-pre'),
+        stateChangesList: document.getElementById('state-changes-list'),
     };
 
     log('Initializing frontend...'); // Now log is called after dom is initialized
@@ -55,6 +71,9 @@ function init() {
     applyInitialTheme();
     loadAvailableWorkflows();
     showTab('log-view'); // Default to showing the log view
+
+    // Connect to WebSocket on page load (single persistent connection)
+    initWebSocket();
 }
 
 document.addEventListener('DOMContentLoaded', init); // Simplified event listener, calls init directly
@@ -80,6 +99,7 @@ function setupEventListeners() {
 
     // Control Panel Buttons
     dom.nextStepButton.onclick = () => handleSubmissionAttempt(false);
+    if (dom.newWorkflowButton) dom.newWorkflowButton.onclick = resetUI;
     dom.resumeButton.onclick = () => handleSubmissionAttempt(true);
     dom.checkStatusButton.onclick = getWorkflowStatus;
     dom.retryButton.onclick = retryWorkflow;
@@ -134,10 +154,22 @@ function showTab(tabId) {
 
 
 function resetUI() {
-    disconnectWebSocket();
+    // Unsubscribe from current workflow (but keep WebSocket connection alive)
+    if (currentWorkflow) {
+        unsubscribeFromWorkflow(currentWorkflow.id);
+    }
+
+    // Unsubscribe from child workflow if active
+    if (currentChildWorkflow) {
+        unsubscribeFromWorkflow(currentChildWorkflow.id);
+        currentChildWorkflow = null;
+    }
+
     currentWorkflow = null;
     currentStepInfoCache = null; // Clear cache on reset
-    
+    cachedStepsConfig = null; // Clear steps config cache on reset
+    cachedSkippedSteps = []; // Clear skipped steps cache on reset
+
     // Show initial view, hide workflow view
     dom.initialView.style.display = 'flex';
     dom.workflowView.style.display = 'none';
@@ -148,6 +180,7 @@ function resetUI() {
     dom.fullStatePre.textContent = '';
     dom.visualizerList.innerHTML = '';
     dom.dynamicFormInputs.innerHTML = ''; // Clear form inputs in the tab
+    clearChildSteps();
 
     log('UI Reset. Ready to start a new workflow.');
 }
@@ -173,17 +206,28 @@ async function startWorkflow() {
         });
         const data = await response.json();
 
+        console.log('=== Workflow Start Response ===');
+        console.log('response.ok:', response.ok);
+        console.log('response.status:', response.status);
+        console.log('data:', data);
+        console.log('data.workflow_id:', data.workflow_id);
+        console.log('===============================');
+
         if (!response.ok) throw new Error(data.detail || 'Failed to start workflow');
 
         log('Workflow started successfully', data, 'success');
-        
+
         // Hide initial view, show workflow view
         dom.initialView.style.display = 'none';
         dom.workflowView.style.display = 'flex';
         dom.restartButtonHeader.style.display = 'inline-block';
 
-        // Connect WebSocket for real-time updates
-        connectWebSocket(data.workflow_id);
+        // Set currentWorkflow so incoming WS messages are accepted for this workflow
+        currentWorkflow = { id: data.workflow_id };
+
+        // Subscribe to workflow for real-time updates
+        console.log('Subscribing to workflow:', data.workflow_id);
+        subscribeToWorkflow(data.workflow_id);
         showTab('log-view'); // Always show log when starting a new workflow
 
     } catch (error) {
@@ -256,7 +300,7 @@ async function submitResume(inputData) {
         const response = await fetch(`${API_BASE_URL}/workflow/${currentWorkflow.id}/resume`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(inputData),
+            body: JSON.stringify({ user_input: inputData }),
         });
         if (!response.ok) {
             const data = await response.json();
@@ -332,13 +376,44 @@ async function retryWorkflow() {
 
 async function updateUI(workflowData) { // Make updateUI async
     if (!workflowData) return;
-    
-    currentWorkflow = workflowData;
-    const { id, status, state, steps_config, current_step } = currentWorkflow;
 
-    // 1. Update Status Display & Full State View
+    // Track state changes
+    const hasStateChanged = previousState && JSON.stringify(previousState) !== JSON.stringify(workflowData.state);
+    const hasStepChanged = previousStep !== null && previousStep !== workflowData.current_step;
+
+    if (hasStateChanged) {
+        recordStateChange(previousState, workflowData.state);
+    }
+
+    previousState = workflowData.state ? JSON.parse(JSON.stringify(workflowData.state)) : null;
+    previousStep = workflowData.current_step;
+
+    currentWorkflow = workflowData;
+    const { id, status, state, current_step } = currentWorkflow;
+
+    // If parent is no longer waiting for a child, unsubscribe from the child
+    if (currentChildWorkflow && status !== 'PENDING_SUB_WORKFLOW') {
+        unsubscribeFromWorkflow(currentChildWorkflow.id);
+        currentChildWorkflow = null;
+        clearChildSteps();
+    }
+
+    // Prefer live steps_config but fall back to cached initial_state version.
+    // The initial_state message uses Python class names (e.g. "CompensatableStep")
+    // while subsequent Redis snapshots use YAML type strings (e.g. "STANDARD").
+    // Caching the initial_state copy avoids badge text flickering and ensures
+    // correct step-name-to-index lookup in renderStepVisualizer.
+    const steps_config = (currentWorkflow.steps_config && currentWorkflow.steps_config.length > 0)
+        ? currentWorkflow.steps_config
+        : (cachedStepsConfig || []);
+
+    // Merge skipped_steps from live data and cache (deduplicated)
+    const liveSk = currentWorkflow.skipped_steps || [];
+    const skipped_steps = [...new Set([...liveSk, ...cachedSkippedSteps])];
+
+    // 1. Update Status Display & Full State View with animation
     const stateString = JSON.stringify(state, null, 2);
-    let statusHTML = `<div><span>ID:</span> ${id}</div><div><span>Status:</span> <span class="status-badge status-${status.replace(/\s+/g, '_')}">${status}</span></div>`;
+    let statusHTML = `<div><span>ID:</span> ${id}</div><div><span>Status:</span> <span class="status-badge status-${status.replace(/\s+/g, '_')} ${hasStepChanged ? 'status-pulse' : ''}">${status}</span></div>`;
 
     // Show additional info for sub-workflows
     if (currentWorkflow.parent_execution_id) {
@@ -355,10 +430,11 @@ async function updateUI(workflowData) { // Make updateUI async
     dom.fullStatePre.textContent = stateString;
 
     // 2. Render Step Visualizer
-    renderStepVisualizer(steps_config, current_step, status);
+    renderStepVisualizer(steps_config, current_step, status, skipped_steps);
 
     // 3. Reset and show/hide buttons based on status
     dom.nextStepButton.style.display = 'none';
+    if (dom.newWorkflowButton) dom.newWorkflowButton.style.display = 'none';
     dom.checkStatusButton.style.display = 'none';
     dom.resumeButton.style.display = 'none';
     dom.retryButton.style.display = 'none';
@@ -368,7 +444,7 @@ async function updateUI(workflowData) { // Make updateUI async
     // 4. Update UI based on status
     if (status === 'COMPLETED') {
         dom.currentStepName.innerHTML = `Workflow COMPLETED`;
-        disconnectWebSocket();
+        if (dom.newWorkflowButton) dom.newWorkflowButton.style.display = 'block';
         return;
     }
     if (status === 'FAILED') {
@@ -392,6 +468,13 @@ async function updateUI(workflowData) { // Make updateUI async
         dom.currentStepName.innerHTML = `Waiting for sub-workflow...`;
         dom.checkStatusButton.style.display = 'block';
         log(`Parent workflow paused, waiting for child workflow: ${childId}`, null, 'info');
+        // Auto-subscribe to child workflow if not already doing so
+        if (childId && childId !== 'unknown' &&
+            (!currentChildWorkflow || currentChildWorkflow.id !== childId)) {
+            currentChildWorkflow = { id: childId };
+            subscribeToWorkflow(childId);
+            log(`Auto-subscribing to child workflow: ${childId}`, null, 'info');
+        }
         return;
     }
 
@@ -400,25 +483,146 @@ async function updateUI(workflowData) { // Make updateUI async
     await fetchCurrentStepInfo(); // AWAIT this call
 }
 
-function renderStepVisualizer(steps = [], currentStepIndex, status) {
+function renderStepVisualizer(steps = [], currentStep, status, skippedSteps = []) {
+    // currentStep may be a string step name (from server) or a legacy integer index.
+    // Convert to an integer index so comparisons work correctly.
+    const currentStepIndex = typeof currentStep === 'number'
+        ? currentStep
+        : steps.findIndex(s => s.name === currentStep);
+
     dom.visualizerList.innerHTML = steps.map((step, index) => {
         let className = '';
-        if (status === 'COMPLETED') {
+        let icon = '';
+        let statusText = '';
+
+        if (status === 'COMPLETED' || index < currentStepIndex) {
             className = 'completed';
-        } else if (index < currentStepIndex) {
-            className = 'completed';
+            icon = '<i class="fas fa-check-circle step-icon"></i>';
+            statusText = '<span class="step-status">Completed</span>';
         } else if (index === currentStepIndex) {
             className = 'current';
+            if (status === 'PENDING_ASYNC') {
+                icon = '<i class="fas fa-spinner fa-spin step-icon"></i>';
+                statusText = '<span class="step-status">Running...</span>';
+            } else if (status === 'WAITING_HUMAN') {
+                icon = '<i class="fas fa-user-clock step-icon"></i>';
+                statusText = '<span class="step-status">Waiting</span>';
+            } else if (status === 'FAILED') {
+                icon = '<i class="fas fa-exclamation-circle step-icon error"></i>';
+                statusText = '<span class="step-status error">Failed</span>';
+            } else {
+                icon = '<i class="fas fa-play-circle step-icon"></i>';
+                statusText = '<span class="step-status">Active</span>';
+            }
+        } else if (skippedSteps.includes(step.name)) {
+            className = 'skipped';
+            icon = '<i class="fas fa-forward step-icon"></i>';
+            statusText = '<span class="step-status">Skipped</span>';
+        } else {
+            className = 'pending';
+            icon = '<i class="far fa-circle step-icon"></i>';
+            statusText = '<span class="step-status">Pending</span>';
         }
-        return `<li class="${className}"><span class="step-name">${step.name}</span><span class="step-type">${step.type}</span></li>`;
+
+        return `<li class="${className}" data-step-index="${index}">
+            ${icon}
+            <div class="step-content">
+                <div class="step-header">
+                    <span class="step-name">${step.name}</span>
+                    <span class="step-type">${step.type}</span>
+                </div>
+                ${statusText}
+            </div>
+        </li>`;
     }).join('');
 }
 
+function renderChildStepItems(steps = [], currentStep, status) {
+    const currentStepIndex = typeof currentStep === 'number'
+        ? currentStep
+        : steps.findIndex(s => s.name === currentStep);
+
+    return steps.map((step, index) => {
+        let className = '';
+        let icon = '';
+        let statusText = '';
+
+        if (status === 'COMPLETED' || index < currentStepIndex) {
+            className = 'completed';
+            icon = '<i class="fas fa-check-circle step-icon"></i>';
+            statusText = '<span class="step-status">Completed</span>';
+        } else if (index === currentStepIndex) {
+            className = 'current';
+            if (status === 'PENDING_ASYNC') {
+                icon = '<i class="fas fa-spinner fa-spin step-icon"></i>';
+                statusText = '<span class="step-status">Running...</span>';
+            } else if (status === 'FAILED') {
+                icon = '<i class="fas fa-exclamation-circle step-icon error"></i>';
+                statusText = '<span class="step-status error">Failed</span>';
+            } else {
+                icon = '<i class="fas fa-play-circle step-icon"></i>';
+                statusText = '<span class="step-status">Active</span>';
+            }
+        } else {
+            className = 'pending';
+            icon = '<i class="far fa-circle step-icon"></i>';
+            statusText = '<span class="step-status">Pending</span>';
+        }
+
+        return `<li class="${className}" data-step-index="${index}">
+            ${icon}
+            <div class="step-content">
+                <div class="step-header">
+                    <span class="step-name">${step.name}</span>
+                    <span class="step-type">${step.type || ''}</span>
+                </div>
+                ${statusText}
+            </div>
+        </li>`;
+    }).join('');
+}
+
+function renderChildSteps(childData) {
+    const childSteps = childData.steps_config || [];
+    const childCurrentStep = childData.current_step;
+    const childStatus = childData.status || 'ACTIVE';
+    const childType = childData.workflow_type || 'Child';
+
+    let container = document.getElementById('child-workflow-section');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'child-workflow-section';
+        container.className = 'child-workflow-section';
+        dom.visualizerList.parentElement.appendChild(container);
+    }
+
+    container.innerHTML = `
+        <div class="child-workflow-header">
+            <i class="fas fa-code-branch"></i> Sub-workflow: ${childType}
+            <span class="status-badge status-${childStatus.replace(/\s+/g, '_')}">${childStatus}</span>
+        </div>
+        <ul class="child-step-list">
+            ${renderChildStepItems(childSteps, childCurrentStep, childStatus)}
+        </ul>
+    `;
+}
+
+function clearChildSteps() {
+    const el = document.getElementById('child-workflow-section');
+    if (el) el.remove();
+}
+
 async function fetchCurrentStepInfo() {
+    // Guard: don't show action buttons if the workflow has already completed
+    if (!currentWorkflow || currentWorkflow.status === 'COMPLETED') return;
     try {
         const res = await fetch(`${API_BASE_URL}/workflow/${currentWorkflow.id}/current_step_info`);
         if (!res.ok) throw new Error((await res.json()).detail);
         currentStepInfoCache = await res.json(); // Cache the step info
+
+        // Re-check after the async gap — workflow may have completed while we were fetching
+        if (!currentWorkflow || currentWorkflow.status === 'COMPLETED') return;
+
         const stepInfo = currentStepInfoCache;
 
         dom.currentStepName.innerHTML = stepInfo.name;
@@ -609,115 +813,258 @@ window.rewindWorkflow = rewindWorkflow;
 
 async function loadWorkflow(workflowId) {
     log(`Loading workflow ${workflowId} from debug list...`, null, 'info');
-    
-    // Hide debug view, show workflow view
-    const initialView = document.getElementById('initial-view');
-    const workflowView = document.getElementById('workflow-view');
-    const debugView = document.getElementById('debug-view');
-    
-    initialView.style.display = 'none';
-    debugView.style.display = 'none';
-    workflowView.style.display = 'flex';
-    
-    // Connect WebSocket
-    connectWebSocket(workflowId);
-    
-    // Fetch full status to populate UI immediately
-    try {
-        const response = await fetch(`${API_BASE_URL}/workflow/${workflowId}/status`);
-        if (!response.ok) throw new Error('Failed to load workflow');
-        const data = await response.json();
-        
-        // Transform status response to match updateUI expectation if needed
-        // The status endpoint returns almost exactly what updateUI needs
-        // We might need to manually construct the object if fields differ slightly
-        // status endpoint: { workflow_id, status, current_step_name, state, ... }
-        // updateUI expects: { id, status, state, steps_config, current_step }
-        // Wait, status endpoint doesn't return steps_config! 
-        // We need the full initial state payload which the WebSocket sends on connect.
-        // Connecting the socket above should trigger the initial state send.
-        
-        // Let's rely on the WebSocket's initial message to populate the UI.
-        // But we should ensure the "Back/Restart" button is visible
-        document.getElementById('restart-button-header').style.display = 'inline-block';
-        
-        // Trigger log fetch manually since we might be on log-view already
-        // Set currentWorkflow tentatively so fetchServerLogs has an ID to work with
-        currentWorkflow = { id: workflowId }; 
-        fetchServerLogs();
 
-    } catch (error) {
-        log('Error loading workflow details', error, 'error');
+    // 1. Unsubscribe from any previously viewed workflow
+    if (currentWorkflow) {
+        unsubscribeFromWorkflow(currentWorkflow.id);
     }
+    if (currentChildWorkflow) {
+        unsubscribeFromWorkflow(currentChildWorkflow.id);
+        currentChildWorkflow = null;
+        clearChildSteps();
+    }
+
+    // 2. Clear all stale caches so previous workflow data can't bleed through
+    currentWorkflow = null;
+    currentStepInfoCache = null;
+    cachedStepsConfig = null;
+    cachedSkippedSteps = [];
+    previousState = null;
+    previousStep = null;
+    stateChangeHistory = [];
+
+    // 3. Clear UI content
+    dom.logOutput.innerHTML = '';
+    dom.fullStatePre.textContent = '';
+    dom.visualizerList.innerHTML = '';
+    dom.dynamicFormInputs.innerHTML = '';
+    dom.currentStepName.innerHTML = '...';
+    dom.statusDisplay.innerHTML = '';
+
+    // 4. Set currentWorkflow BEFORE subscribing so the WebSocket initial_state
+    //    message passes the `data.workflow_id === currentWorkflow.id` guard in onmessage
+    currentWorkflow = { id: workflowId };
+
+    // 5. Switch views
+    document.getElementById('initial-view').style.display = 'none';
+    document.getElementById('debug-view').style.display = 'none';
+    document.getElementById('workflow-view').style.display = 'flex';
+    document.getElementById('restart-button-header').style.display = 'inline-block';
+
+    showTab('log-view');
+
+    // 6. Subscribe — the server will push initial_state which drives updateUI()
+    subscribeToWorkflow(workflowId);
+
+    // 7. Also fetch server logs immediately (initial_state doesn't include them)
+    fetchServerLogs();
 }
 window.loadWorkflow = loadWorkflow;
 
 // --- WebSocket Communication ---
 
-let reconnectInterval = 1000;
-let maxReconnectInterval = 30000;
-let reconnectTimer = null;
-
-function connectWebSocket(workflowId) {
-    if (workflowSocket) {
-        // If already connected to the same ID, do nothing
-        if (workflowSocket.url.includes(workflowId) && workflowSocket.readyState === WebSocket.OPEN) return;
-        workflowSocket.close();
-    }
-
+/**
+ * Initialize WebSocket connection on page load.
+ * Single persistent connection for all workflow subscriptions.
+ */
+function initWebSocket() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}${API_BASE_URL}/workflow/${workflowId}/subscribe`;
-    
+    const wsUrl = `${wsProtocol}//${window.location.host}${API_BASE_URL}/subscribe`;
+
+    console.log('[WS-INIT] Connecting to WebSocket:', wsUrl);
     log(`Connecting to WebSocket: ${wsUrl}`, null, 'info');
+
     workflowSocket = new WebSocket(wsUrl);
 
     workflowSocket.onopen = () => {
+        console.log('[WS-INIT] WebSocket connection established');
         log('WebSocket connection established.', null, 'success');
         reconnectInterval = 1000; // Reset retry interval on success
+        reconnectAttempts = 0; // Reset attempt counter on success
         if (reconnectTimer) clearTimeout(reconnectTimer);
+
+        // Resubscribe to any workflows we were watching
+        subscribedWorkflows.forEach(workflowId => {
+            subscribeToWorkflow(workflowId);
+        });
     };
 
     workflowSocket.onerror = (error) => {
-        // log('WebSocket error.', error, 'error'); 
-        // Dont log error object directly as it usually contains no info in JS
-        console.error("WebSocket Error:", error);
+        console.error('[WS-ERROR] WebSocket error:', error);
     };
 
     workflowSocket.onclose = (event) => {
+        console.log('[WS-CLOSE] WebSocket closed:', event.code, event.reason);
+
         if (event.wasClean) {
             log(`WebSocket connection closed cleanly. Code=${event.code} Reason=${event.reason}`);
         } else {
-            log('WebSocket connection died. Reconnecting...', null, 'warn');
-            
-            // Retry logic
+            reconnectAttempts++;
+
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                log(`Max reconnection attempts (${maxReconnectAttempts}) reached. Please refresh the page.`, null, 'error');
+                console.error('[WS-ERROR] Max reconnection attempts reached. Stopping reconnection loop.');
+                return;
+            }
+
+            log(`WebSocket connection died. Reconnecting... (Attempt ${reconnectAttempts}/${maxReconnectAttempts})`, null, 'warn');
+
+            // Retry logic with exponential backoff
             reconnectTimer = setTimeout(() => {
                 log(`Attempting to reconnect (Interval: ${reconnectInterval}ms)...`, null, 'info');
-                connectWebSocket(workflowId);
-                
-                // Exponential backoff
+                initWebSocket();
+
                 reconnectInterval = Math.min(reconnectInterval * 2, maxReconnectInterval);
             }, reconnectInterval);
         }
     };
 
     workflowSocket.onmessage = (event) => {
+        console.log('[WS-MESSAGE] Received:', event.data.substring(0, 200));
+
         try {
             const data = JSON.parse(event.data);
-            log('Real-time update received', data, 'info');
-            updateUI(data);
+            console.log('[WS-MESSAGE] Type:', data.type, 'Workflow:', data.workflow_id);
+
+            // Handle handshake messages
+            if (data.type === 'handshake') {
+                console.log('[WS-HANDSHAKE]', data.state);
+                if (data.state === 'connecting') {
+                    log('WebSocket handshake: connecting...', null, 'info');
+                } else if (data.state === 'connected') {
+                    log('WebSocket handshake: connected!', null, 'success');
+                }
+                return;
+            }
+
+            // Handle ping messages - respond with pong
+            if (data.type === 'ping') {
+                console.log('[WS-PING] Received, sending pong...');
+                workflowSocket.send(JSON.stringify({
+                    type: 'pong',
+                    timestamp: data.timestamp
+                }));
+                return;
+            }
+
+            // Handle subscription confirmations
+            if (data.type === 'subscribed') {
+                console.log('[WS-SUB] Subscribed to workflow:', data.workflow_id);
+                log(`Subscribed to workflow ${data.workflow_id}`, null, 'success');
+                return;
+            }
+
+            if (data.type === 'unsubscribed') {
+                console.log('[WS-UNSUB] Unsubscribed from workflow:', data.workflow_id);
+                log(`Unsubscribed from workflow ${data.workflow_id}`, null, 'info');
+                return;
+            }
+
+            // Handle initial_state messages
+            if (data.type === 'initial_state') {
+                console.log('[WS-INITIAL] Initial state for workflow:', data.workflow_id);
+                // Cache the rich steps_config format (Python class names, full details)
+                // before subsequent Redis snapshots overwrite it with YAML type strings
+                if (currentWorkflow && data.workflow_id === currentWorkflow.id) {
+                    if (data.steps_config && data.steps_config.length > 0) {
+                        cachedStepsConfig = data.steps_config;
+                    }
+                    if (data.skipped_steps && data.skipped_steps.length > 0) {
+                        cachedSkippedSteps = data.skipped_steps;
+                    }
+                    log('Received initial workflow state', data, 'info');
+                    updateUI(data);
+                } else if (currentChildWorkflow && data.workflow_id === currentChildWorkflow.id) {
+                    // Initial state for child workflow
+                    currentChildWorkflow = { ...currentChildWorkflow, ...data };
+                    renderChildSteps(data);
+                }
+                return;
+            }
+
+            // Handle workflow updates
+            const workflowId = data.workflow_id || data.id;
+
+            // Skip raw observability events (event_type messages) — they carry step-level
+            // status ("COMPLETED" = step done) not workflow status, and lack the state
+            // shape that updateUI() requires. Log them for debugging only.
+            if (data.event_type) {
+                const evtStatus = data.new_status || data.status || '';
+                console.log(`[WS-EVENT] ${data.event_type} workflow:${workflowId} status:${evtStatus}`);
+                return;
+            }
+
+            // Full workflow state snapshots: {id, status, current_step, state, ...}
+            console.log('[WS-UPDATE] Workflow update:', workflowId, 'Status:', data.status);
+
+            // Route to parent or child handler
+            if (currentWorkflow && workflowId === currentWorkflow.id) {
+                log('Real-time update received', data, 'info');
+                updateUI(data);
+            } else if (currentChildWorkflow && workflowId === currentChildWorkflow.id) {
+                currentChildWorkflow = { ...currentChildWorkflow, ...data };
+                renderChildSteps(data);
+            } else {
+                console.log('[WS-UPDATE] Ignoring update for different workflow');
+            }
+
         } catch (e) {
+            console.error('[WS-ERROR] Failed to parse message:', e);
             log('Error processing WebSocket message', e, 'error');
         }
     };
 }
 
+/**
+ * Subscribe to a specific workflow's updates.
+ */
+function subscribeToWorkflow(workflowId) {
+    console.log('[WS-SUB] Subscribing to workflow:', workflowId);
+
+    if (!workflowSocket || workflowSocket.readyState !== WebSocket.OPEN) {
+        console.warn('[WS-SUB] WebSocket not ready, queueing subscription');
+        subscribedWorkflows.add(workflowId);
+        return;
+    }
+
+    subscribedWorkflows.add(workflowId);
+
+    workflowSocket.send(JSON.stringify({
+        action: 'subscribe',
+        workflow_id: workflowId
+    }));
+
+    log(`Subscribing to workflow ${workflowId}...`, null, 'info');
+}
+
+/**
+ * Unsubscribe from a specific workflow's updates.
+ */
+function unsubscribeFromWorkflow(workflowId) {
+    console.log('[WS-UNSUB] Unsubscribing from workflow:', workflowId);
+
+    subscribedWorkflows.delete(workflowId);
+
+    if (workflowSocket && workflowSocket.readyState === WebSocket.OPEN) {
+        workflowSocket.send(JSON.stringify({
+            action: 'unsubscribe',
+            workflow_id: workflowId
+        }));
+    }
+
+    log(`Unsubscribed from workflow ${workflowId}`, null, 'info');
+}
+
+/**
+ * Close WebSocket connection (for cleanup).
+ */
 function disconnectWebSocket() {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (workflowSocket) {
-        workflowSocket.onclose = null; // Disable reconnect logic
         workflowSocket.close();
         workflowSocket = null;
     }
+    subscribedWorkflows.clear();
 }
 
 // --- Utility Functions ---
@@ -797,4 +1144,111 @@ function log(message, data, level = 'info') {
     entry.innerHTML = `<span class="timestamp">${new Date().toLocaleTimeString()}</span> - ${message}`;
     logOutputElement.appendChild(entry);
     logOutputElement.scrollTop = logOutputElement.scrollHeight;
+}
+// --- State Change Tracking ---
+function recordStateChange(oldState, newState) {
+    const changes = findStateDifferences(oldState, newState);
+    if (changes.length > 0) {
+        const timestamp = new Date().toLocaleTimeString();
+        stateChangeHistory.push({ timestamp, changes });
+
+        // Show notification of state change
+        showStateChangeNotification(changes);
+
+        // Update state changes tab
+        updateStateChangesTab();
+
+        // Keep only last 50 changes
+        if (stateChangeHistory.length > 50) {
+            stateChangeHistory.shift();
+        }
+    }
+}
+
+function updateStateChangesTab() {
+    if (!dom.stateChangesList) return;
+
+    if (stateChangeHistory.length === 0) {
+        dom.stateChangesList.innerHTML = '<p class="empty-state">No state changes yet. Changes will appear here as the workflow progresses.</p>';
+        return;
+    }
+
+    const html = stateChangeHistory.slice().reverse().map(entry => `
+        <div class="state-change-entry">
+            <div class="state-change-header">
+                <span class="timestamp"><i class="fas fa-clock"></i> ${entry.timestamp}</span>
+                <span class="change-count">${entry.changes.length} change${entry.changes.length > 1 ? 's' : ''}</span>
+            </div>
+            <div class="state-change-details">
+                ${entry.changes.map(change => `
+                    <div class="state-change-item ${change.type}">
+                        <i class="fas ${change.type === 'added' ? 'fa-plus-circle' : 'fa-edit'}"></i>
+                        <span class="change-path">${change.path}</span>
+                        ${change.type === 'added'
+                            ? `<span class="change-value new">${formatValue(change.value)}</span>`
+                            : `<span class="change-value old">${formatValue(change.oldValue)}</span>
+                               <i class="fas fa-arrow-right"></i>
+                               <span class="change-value new">${formatValue(change.newValue)}</span>`
+                        }
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+
+    dom.stateChangesList.innerHTML = html;
+}
+
+function formatValue(value) {
+    if (value === null) return '<em>null</em>';
+    if (value === undefined) return '<em>undefined</em>';
+    if (typeof value === 'object') return JSON.stringify(value);
+    if (typeof value === 'string') return `"${value}"`;
+    return String(value);
+}
+
+function findStateDifferences(oldState, newState, path = '') {
+    const changes = [];
+    
+    if (!oldState || !newState) return changes;
+    
+    // Check for new or changed keys in newState
+    Object.keys(newState).forEach(key => {
+        const currentPath = path ? `${path}.${key}` : key;
+        const oldValue = oldState[key];
+        const newValue = newState[key];
+        
+        if (oldValue === undefined) {
+            changes.push({ path: currentPath, type: 'added', value: newValue });
+        } else if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
+                changes.push(...findStateDifferences(oldValue, newValue, currentPath));
+            } else {
+                changes.push({ path: currentPath, type: 'changed', oldValue, newValue });
+            }
+        }
+    });
+    
+    return changes;
+}
+
+function showStateChangeNotification(changes) {
+    // Create a notification element
+    const notification = document.createElement('div');
+    notification.className = 'state-change-notification';
+    notification.innerHTML = `
+        <i class="fas fa-sync-alt"></i>
+        <span>State Updated: ${changes.length} change${changes.length > 1 ? 's' : ''}</span>
+    `;
+    
+    dom.statusDisplay.appendChild(notification);
+    
+    // Animate in
+    setTimeout(() => notification.classList.add('show'), 10);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+    }, 2000);
 }
