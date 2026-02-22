@@ -265,6 +265,22 @@ async def startup_event():
     from rufus_server.rate_limit_service import RateLimitService
     rate_limit_service = RateLimitService(persistence_provider)
 
+    # Load custom user routers (RUFUS_CUSTOM_ROUTERS=my_app.routes.router,my_app.webhooks.router)
+    custom_routers_env = os.getenv("RUFUS_CUSTOM_ROUTERS", "").strip()
+    if custom_routers_env:
+        for router_path in custom_routers_env.split(","):
+            router_path = router_path.strip()
+            if not router_path:
+                continue
+            try:
+                module_path, _, attr_name = router_path.rpartition(".")
+                module = importlib.import_module(module_path)
+                router_obj = getattr(module, attr_name)
+                app.include_router(router_obj)
+                logger.info(f"Mounted custom router: {router_path}")
+            except Exception as e:
+                logger.error(f"Failed to mount custom router '{router_path}': {e}")
+
     print("Rufus Edge Control Plane started.")
 
 
