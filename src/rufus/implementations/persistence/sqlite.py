@@ -181,6 +181,48 @@ AFTER UPDATE ON tasks
 BEGIN
     UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE task_id = NEW.task_id;
 END;
+
+-- ===================================================================
+-- Edge-Specific Tables (new deployments)
+-- SyncManager and ConfigManager still use tasks table (legacy support)
+-- ===================================================================
+
+CREATE TABLE IF NOT EXISTS saf_pending_transactions (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT NOT NULL,
+    idempotency_key TEXT UNIQUE NOT NULL,
+    workflow_id TEXT,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    card_token TEXT NOT NULL,
+    card_last_four TEXT,
+    encrypted_payload TEXT,
+    encryption_key_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending_sync',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    queued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    synced_at TEXT,
+    sync_attempts INTEGER NOT NULL DEFAULT 0,
+    last_sync_error TEXT,
+    metadata TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_saf_status ON saf_pending_transactions(status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_saf_idempotency ON saf_pending_transactions(idempotency_key);
+
+CREATE TABLE IF NOT EXISTS device_config_cache (
+    device_id TEXT PRIMARY KEY,
+    config_version TEXT NOT NULL,
+    config_data TEXT NOT NULL,
+    etag TEXT,
+    cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_poll_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS edge_sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

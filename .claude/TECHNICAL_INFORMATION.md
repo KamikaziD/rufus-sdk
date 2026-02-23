@@ -849,6 +849,10 @@ Run: `python tests/benchmarks/workflow_performance.py`
 
 ## §9 Database Schema Management
 
+> **Schema governance update (v0.4.2+):** `src/rufus/db_schema/database.py` now covers
+> all 33 cloud PostgreSQL tables. `migrations/schema.yaml` is deprecated — do not add
+> new tables there. See §16 for the complete table inventory and edge vs cloud separation.
+
 ### Alembic Migration Commands
 
 ```bash
@@ -1378,3 +1382,150 @@ steps:
 - `GET /api/v1/workflow/{id}/status` — 404, 503
 - `POST /api/v1/workflow/{id}/next` — 404, 409, 422, 503
 - `POST /api/v1/workflow/{id}/resume` — 400, 404, 422, 503
+
+---
+
+## §16 — Database Schema Reference
+
+### Schema Governance
+
+| Layer | Tool | Target | Tables |
+|-------|------|--------|--------|
+| PostgreSQL — all 33 cloud tables | **Alembic** (`alembic upgrade head`) | PostgreSQL only | See inventory below |
+| PostgreSQL — extensions bootstrap | `docker/init-db.sql` (init script) | PostgreSQL only | N/A — extensions only |
+| Edge SQLite — core workflow (7) | `sqlite.py` `SQLITE_SCHEMA` | SQLite only | workflow_executions, workflow_audit_log, workflow_execution_logs, workflow_metrics, workflow_heartbeats, tasks, compensation_log |
+| Edge SQLite — edge-specific (3) | `sqlite.py` `SQLITE_SCHEMA` (appended) | SQLite only | saf_pending_transactions, device_config_cache, edge_sync_state |
+
+`database.py` is the **single source of truth** for all 33 PostgreSQL tables.
+`sqlite.py:SQLITE_SCHEMA` is the single source of truth for the 10 edge SQLite tables.
+`edge_database.py` documents the edge schema (constants + SQL strings, no Alembic).
+
+### Complete Table Inventory
+
+#### Core Workflow Tables (7) — shared by PostgreSQL and SQLite
+| Table | Notes |
+|-------|-------|
+| `workflow_executions` | Main workflow state |
+| `workflow_audit_log` | Event compliance log |
+| `workflow_execution_logs` | Debug / structured logs |
+| `workflow_metrics` | Performance metrics |
+| `workflow_heartbeats` | Zombie detection |
+| `tasks` | Async task queue; also used by SyncManager (SAF_Sync) and ConfigManager (CONFIG_CACHE) |
+| `compensation_log` | Saga rollback history |
+
+#### Scheduling (1) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `scheduled_workflows` | Cron-based workflow triggers; referenced in `postgres.py:register_scheduled_workflow` |
+
+#### Edge Device Management — Cloud Side (2) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `edge_devices` | Device registry |
+| `device_commands` | Per-device command queue; expanded with batch/broadcast/retry columns in migration a1b2c3d4e5f6 |
+
+#### Workers (1) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `worker_nodes` | Celery fleet registry; added in migration d08b401e4c86 |
+
+#### Command Infrastructure (6) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `command_broadcasts` | Fleet-wide command fans |
+| `command_batches` | Atomic multi-command sequences per device |
+| `command_templates` | Reusable command blueprints |
+| `command_schedules` | One-time and recurring command scheduling |
+| `schedule_executions` | Per-execution records for schedules |
+| `command_versions` | Schema versioning per command type |
+| `command_changelog` | Breaking-change history |
+
+#### Audit & Compliance (2) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `command_audit_log` | Compliance audit trail; has TSVECTOR generated column (PostgreSQL ≥ 12 only) |
+| `audit_retention_policies` | PCI DSS retention rules; default: 7 years |
+
+#### Authorization & RBAC (5) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `authorization_roles` | Role definitions; seeded with admin/operator/viewer/approver |
+| `role_assignments` | User↔role mapping |
+| `authorization_policies` | Command-level access rules |
+| `command_approvals` | Multi-party approval requests |
+| `approval_responses` | Per-approver responses |
+
+#### Webhooks & Rate Limiting (4) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `webhook_registrations` | Outbound webhook subscriptions |
+| `webhook_deliveries` | Per-delivery attempt records |
+| `rate_limit_rules` | API rate limit configuration |
+| `rate_limit_tracking` | Sliding-window counters |
+
+#### Edge Config & SAF — Cloud Side (4) — PostgreSQL only
+| Table | Notes |
+|-------|-------|
+| `device_configs` | Configuration versions; `etag` field enables If-None-Match push |
+| `saf_transactions` | SAF transaction records synced from edge; `device_id` has no FK (device may not be registered at sync time) |
+| `device_assignments` | Policy-to-device assignments |
+| `policies` | Fraud rules and configuration policies |
+
+#### Edge-Specific SQLite Tables (3) — SQLite (edge) only
+| Table | Notes |
+|-------|-------|
+| `saf_pending_transactions` | Proper SAF outbox queue (future replacement for tasks hack) |
+| `device_config_cache` | ETag-keyed config cache (future replacement for tasks hack) |
+| `edge_sync_state` | Sync cursor / progress key-value store |
+
+### Edge vs Cloud Schema (ASCII Diagram)
+
+```
+CLOUD (PostgreSQL)                    EDGE (SQLite)
+══════════════════════════════════    ═══════════════════════════════════
+database.py  ─►  Alembic migration   sqlite.py SQLITE_SCHEMA
+33 tables                            10 tables
+  ├── Core Workflow (7)                 ├── Core Workflow (7)  ◄── shared
+  ├── Scheduling (1)                    └── Edge-Specific (3) ◄── new
+  ├── Edge Device Mgmt (2+1 worker)
+  ├── Command Infrastructure (7)
+  ├── Audit & Compliance (2)
+  ├── Authorization / RBAC (5)
+  ├── Webhooks & Rate Limiting (4)
+  └── Edge Config & SAF (4)
+```
+
+### Known Compatibility Notes
+
+1. **tasks hack** — `SyncManager` (sync_manager.py) uses `step_name='SAF_Sync'` and `ConfigManager` uses `step_name='CONFIG_CACHE'` in the `tasks` table. The new `saf_pending_transactions` and `device_config_cache` tables exist but are not yet wired up. Future work.
+
+2. **TSVECTOR limitation** — `command_audit_log.searchable_text` is a PostgreSQL-only GENERATED column. It is not modelable in SQLAlchemy's generic dialect and is applied via `op.execute(ALTER TABLE...)` in the migration. This column does not exist on SQLite.
+
+3. **`command_id` vs `id`** — `device_commands` has both `id` (UUID PK) and `command_id` (human-readable VARCHAR(100), UNIQUE). The API uses `command_id` for user-facing references; internal joins use `id`.
+
+4. **`saf_transactions.device_id`** — No FK constraint on this column. Edge devices may sync transactions before registering with the cloud. The service layer handles the lookup independently.
+
+5. **`scheduled_workflows` SQLite** — `postgres.py:register_scheduled_workflow` has a full implementation. `sqlite.py:register_scheduled_workflow` logs a warning (not implemented). The table is PostgreSQL-only.
+
+6. **`migrations/schema.yaml`** — Legacy file, not used by Alembic. Deprecated. Do not add new tables there.
+
+### Running Migrations
+
+```bash
+# Fresh deployment
+alembic upgrade head
+
+# Check current version
+alembic current
+
+# Rollback one revision
+alembic downgrade -1
+
+# Generate new migration after editing database.py
+alembic revision --autogenerate -m "description_of_change"
+```
+
+From Docker Compose:
+```bash
+docker-compose run --rm rufus-server alembic upgrade head
+```
