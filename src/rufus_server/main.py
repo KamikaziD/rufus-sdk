@@ -60,7 +60,6 @@ from rufus_server.api_models import (
 )
 
 # --- FastAPI App Setup ---
-from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -70,7 +69,23 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Rufus Edge Control Plane",
     description="Cloud control plane for Rufus Edge fintech devices",
-    version="0.1.0"
+    version="0.4.0",
+    openapi_tags=[
+        {"name": "Health",           "description": "Service health check"},
+        {"name": "Workflows",        "description": "Workflow registry, execution, and lifecycle control"},
+        {"name": "Devices",          "description": "Edge device registration, management, and communication"},
+        {"name": "Commands",         "description": "Device command versioning, validation, and execution"},
+        {"name": "Policies",         "description": "Policy management and rollout control"},
+        {"name": "Webhooks",         "description": "Webhook registration and event delivery"},
+        {"name": "Broadcasts",       "description": "Mass message broadcasts and notifications"},
+        {"name": "Batch Operations", "description": "Batch job creation and management"},
+        {"name": "Scheduling",       "description": "Scheduled task and automation management"},
+        {"name": "Configuration",    "description": "Template and configuration management"},
+        {"name": "Audit",            "description": "Audit logs and compliance queries"},
+        {"name": "Authorization",    "description": "Authorization checks and approval workflows"},
+        {"name": "Rate Limiting",    "description": "Rate limit status, quotas, and admin configuration"},
+        {"name": "Monitoring",       "description": "Metrics, worker status, and system monitoring"},
+    ]
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -99,19 +114,9 @@ version_service = None  # Command version service
 webhook_service = None  # Webhook notification service
 
 
-# --- User Context ---
-class UserContext(BaseModel):
-    user_id: str
-    org_id: Optional[str] = None
-
-
-async def get_current_user(
-    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
-    x_org_id: Optional[str] = Header(None, alias="X-Org-ID")
-) -> Optional[UserContext]:
-    if x_user_id:
-        return UserContext(user_id=x_user_id, org_id=x_org_id)
-    return None
+# --- Auth / RBAC ---
+from rufus_server.auth import get_current_user, AuthUser as UserContext  # noqa: F401 (UserContext alias keeps existing type annotations valid)
+from rufus_server.auth.loader import load_auth_provider, set_auth_provider
 
 
 # --- Rate Limiting Dependency ---
@@ -265,6 +270,11 @@ async def startup_event():
     from rufus_server.rate_limit_service import RateLimitService
     rate_limit_service = RateLimitService(persistence_provider)
 
+    # Initialize Auth Provider
+    auth_provider = await load_auth_provider()
+    set_auth_provider(auth_provider)
+    logger.info("Auth provider: %s", os.getenv("RUFUS_AUTH_PROVIDER", "disabled"))
+
     # Load custom user routers (RUFUS_CUSTOM_ROUTERS=my_app.routes.router,my_app.webhooks.router)
     custom_routers_env = os.getenv("RUFUS_CUSTOM_ROUTERS", "").strip()
     if custom_routers_env:
@@ -287,6 +297,10 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     global persistence_provider, execution_provider, workflow_observer
+    from rufus_server.auth.loader import get_auth_provider
+    auth_provider = get_auth_provider()
+    if auth_provider:
+        await auth_provider.close()
     if workflow_observer:
         await workflow_observer.close()
     if persistence_provider:
@@ -300,7 +314,7 @@ async def shutdown_event():
 # Health Check
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "rufus-edge-control-plane"}
@@ -310,7 +324,7 @@ async def health_check():
 # Workflow Management APIs
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/v1/workflows")
+@app.get("/api/v1/workflows", tags=["Workflows"])
 async def get_available_workflows():
     """Returns a list of available workflows from the registry."""
     if workflow_engine is None:
@@ -328,7 +342,7 @@ async def get_available_workflows():
     return available_workflows
 
 
-@app.post("/api/v1/workflow/start", response_model=WorkflowStartResponse)
+@app.post("/api/v1/workflow/start", response_model=WorkflowStartResponse, tags=["Workflows"])
 @limiter.limit("100/minute")
 async def start_workflow(
     request: Request,
@@ -361,7 +375,7 @@ async def start_workflow(
     )
 
 
-@app.get("/api/v1/workflow/{workflow_id}/status", response_model=WorkflowStatusResponse)
+@app.get("/api/v1/workflow/{workflow_id}/status", response_model=WorkflowStatusResponse, tags=["Workflows"])
 async def get_workflow_status(
     workflow_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -383,7 +397,7 @@ async def get_workflow_status(
     )
 
 
-@app.get("/api/v1/workflow/{workflow_id}/logs")
+@app.get("/api/v1/workflow/{workflow_id}/logs", tags=["Workflows"])
 async def get_workflow_logs(
     workflow_id: str,
     limit: int = 100,
@@ -438,7 +452,7 @@ async def get_workflow_logs(
         raise HTTPException(status_code=500, detail=f"Failed to fetch logs: {str(e)}")
 
 
-@app.get("/api/v1/workflow/{workflow_id}/current_step_info")
+@app.get("/api/v1/workflow/{workflow_id}/current_step_info", tags=["Workflows"])
 async def get_current_step_info(
     workflow_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -485,7 +499,7 @@ async def get_current_step_info(
     return response
 
 
-@app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse)
+@app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse, tags=["Workflows"])
 async def next_workflow_step(
     workflow_id: str,
     request_data: WorkflowStepRequest,
@@ -522,7 +536,7 @@ async def next_workflow_step(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/workflows/executions")
+@app.get("/api/v1/workflows/executions", tags=["Workflows"])
 async def get_workflow_executions(
     status: Optional[str] = None,
     exclude_status: Optional[str] = None,
@@ -553,7 +567,7 @@ async def get_workflow_executions(
     return workflow_list[offset:offset+limit]
 
 
-@app.get("/api/v1/metrics/summary")
+@app.get("/api/v1/metrics/summary", tags=["Monitoring"])
 async def get_metrics_summary(hours: int = 24):
     """Get aggregated metrics across workflows (PostgreSQL backend required)."""
     if workflow_engine is None:
@@ -588,7 +602,7 @@ async def get_metrics_summary(hours: int = 24):
         raise HTTPException(status_code=500, detail=f"Failed to fetch metrics: {str(e)}")
 
 
-@app.get("/api/v1/workflow/{workflow_id}/metrics")
+@app.get("/api/v1/workflow/{workflow_id}/metrics", tags=["Workflows"])
 async def get_workflow_metrics(
     workflow_id: str,
     limit: int = 500,
@@ -627,7 +641,7 @@ async def get_workflow_metrics(
         raise HTTPException(status_code=500, detail=f"Failed to fetch metrics: {str(e)}")
 
 
-@app.get("/api/v1/workflow/{workflow_id}/audit")
+@app.get("/api/v1/workflow/{workflow_id}/audit", tags=["Workflows"])
 async def get_workflow_audit_log(
     workflow_id: str,
     limit: int = 100,
@@ -666,7 +680,7 @@ async def get_workflow_audit_log(
         raise HTTPException(status_code=500, detail=f"Failed to fetch audit log: {str(e)}")
 
 
-@app.get("/api/v1/admin/workers")
+@app.get("/api/v1/admin/workers", tags=["Monitoring"])
 async def get_registered_workers(
     limit: int = 100,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -705,7 +719,7 @@ async def get_registered_workers(
         raise HTTPException(status_code=500, detail=f"Failed to fetch workers: {str(e)}")
 
 
-@app.post("/api/v1/workflow/{workflow_id}/retry")
+@app.post("/api/v1/workflow/{workflow_id}/retry", tags=["Workflows"])
 async def retry_workflow(
     workflow_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -761,7 +775,7 @@ async def retry_workflow(
     return {"status": "retry_initiated", "workflow_id": workflow_id}
 
 
-@app.post("/api/v1/workflow/{workflow_id}/rewind")
+@app.post("/api/v1/workflow/{workflow_id}/rewind", tags=["Workflows"])
 async def rewind_workflow(
     workflow_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -817,7 +831,7 @@ async def rewind_workflow(
     }
 
 
-@app.post("/api/v1/workflow/{workflow_id}/resume")
+@app.post("/api/v1/workflow/{workflow_id}/resume", tags=["Workflows"])
 async def resume_workflow(
     workflow_id: str,
     request_data: ResumeWorkflowRequest,
@@ -1140,7 +1154,7 @@ async def subscribe(websocket: WebSocket):
 # Device Management APIs (TODO: Implement)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.post("/api/v1/devices/register", response_model=DeviceRegistrationResponse)
+@app.post("/api/v1/devices/register", response_model=DeviceRegistrationResponse, tags=["Devices"])
 async def register_device(
     request_data: DeviceRegistrationRequest,
     x_registration_key: str = Header(..., alias="X-Registration-Key")
@@ -1172,7 +1186,7 @@ async def register_device(
         raise HTTPException(status_code=500, detail=f"Registration failed: {e}")
 
 
-@app.get("/api/v1/devices")
+@app.get("/api/v1/devices", tags=["Devices"])
 async def list_devices(
     status: Optional[str] = None,
     limit: int = 100,
@@ -1225,7 +1239,7 @@ async def list_devices(
     }
 
 
-@app.get("/api/v1/devices/{device_id}")
+@app.get("/api/v1/devices/{device_id}", tags=["Devices"])
 async def get_device(
     device_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1241,7 +1255,7 @@ async def get_device(
     return device
 
 
-@app.delete("/api/v1/devices/{device_id}")
+@app.delete("/api/v1/devices/{device_id}", tags=["Devices"])
 async def delete_device(
     device_id: str,
     x_registration_key: str = Header(..., alias="X-Registration-Key")
@@ -1264,7 +1278,7 @@ async def delete_device(
         raise HTTPException(status_code=500, detail=f"Deletion failed: {e}")
 
 
-@app.get("/api/v1/devices/{device_id}/config")
+@app.get("/api/v1/devices/{device_id}/config", tags=["Devices"])
 async def get_device_config(
     device_id: str,
     if_none_match: Optional[str] = Header(None, alias="If-None-Match"),
@@ -1320,7 +1334,7 @@ async def get_device_config(
     )
 
 
-@app.post("/api/v1/devices/{device_id}/heartbeat", response_model=DeviceHeartbeatResponse)
+@app.post("/api/v1/devices/{device_id}/heartbeat", response_model=DeviceHeartbeatResponse, tags=["Devices"])
 async def device_heartbeat(
     device_id: str,
     request_data: DeviceHeartbeatRequest,
@@ -1348,7 +1362,7 @@ async def device_heartbeat(
     return DeviceHeartbeatResponse(**result)
 
 
-@app.post("/api/v1/devices/{device_id}/sync", response_model=SyncResponse)
+@app.post("/api/v1/devices/{device_id}/sync", response_model=SyncResponse, tags=["Devices"])
 async def sync_device_transactions(
     device_id: str,
     request_data: SyncRequest,
@@ -1432,7 +1446,7 @@ else:
 # Policy Engine APIs
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.post("/api/v1/policies", response_model=Policy)
+@app.post("/api/v1/policies", response_model=Policy, tags=["Policies"])
 async def create_policy(
     policy: Policy,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1447,7 +1461,7 @@ async def create_policy(
     return policy
 
 
-@app.get("/api/v1/policies", response_model=List[Policy])
+@app.get("/api/v1/policies", response_model=List[Policy], tags=["Policies"])
 async def list_policies(
     status: Optional[PolicyStatus] = None,
 ):
@@ -1463,7 +1477,7 @@ async def list_policies(
     return policies
 
 
-@app.get("/api/v1/policies/{policy_id}", response_model=Policy)
+@app.get("/api/v1/policies/{policy_id}", response_model=Policy, tags=["Policies"])
 async def get_policy(policy_id: str):
     """Get a specific policy by ID."""
     if policy_evaluator is None:
@@ -1482,7 +1496,7 @@ async def get_policy(policy_id: str):
     return policy
 
 
-@app.put("/api/v1/policies/{policy_id}/status")
+@app.put("/api/v1/policies/{policy_id}/status", tags=["Policies"])
 async def update_policy_status(
     policy_id: str,
     new_status: PolicyStatus,
@@ -1509,7 +1523,7 @@ async def update_policy_status(
     return {"status": "updated", "new_status": new_status}
 
 
-@app.post("/api/v1/update-check", response_model=UpdateInstruction)
+@app.post("/api/v1/update-check", response_model=UpdateInstruction, tags=["Devices"])
 @limiter.limit("60/minute")
 async def check_for_update(
     request: Request,
@@ -1611,7 +1625,7 @@ async def check_for_update(
     )
 
 
-@app.post("/api/v1/devices/{device_id}/update-status")
+@app.post("/api/v1/devices/{device_id}/update-status", tags=["Devices"])
 async def report_update_status(
     device_id: str,
     status: AssignmentStatus,
@@ -1640,7 +1654,7 @@ async def report_update_status(
     return {"status": "recorded", "assignment_status": status}
 
 
-@app.get("/api/v1/devices/{device_id}/assignment")
+@app.get("/api/v1/devices/{device_id}/assignment", tags=["Devices"])
 async def get_device_assignment(
     device_id: str,
     x_api_key: str = Header(..., alias="X-API-Key")
@@ -1653,7 +1667,7 @@ async def get_device_assignment(
     return assignment
 
 
-@app.get("/api/v1/artifacts/{artifact_name}")
+@app.get("/api/v1/artifacts/{artifact_name}", tags=["Devices"])
 async def download_artifact(artifact_name: str):
     """
     Download artifact file for edge devices.
@@ -1701,7 +1715,7 @@ from rufus_server.command_types import (
 websocket_connections: Dict[str, WebSocket] = {}
 
 
-@app.post("/api/v1/devices/{device_id}/commands")
+@app.post("/api/v1/devices/{device_id}/commands", tags=["Devices"])
 async def send_device_command(
     device_id: str,
     command: DeviceCommand,
@@ -1785,7 +1799,7 @@ async def send_device_command(
     }
 
 
-@app.post("/api/v1/devices/{device_id}/commands/{command_id}/status")
+@app.post("/api/v1/devices/{device_id}/commands/{command_id}/status", tags=["Devices"])
 async def update_command_status(
     device_id: str,
     command_id: str,
@@ -1889,7 +1903,7 @@ async def device_websocket(websocket: WebSocket, device_id: str):
         logger.info(f"WebSocket cleanup: {device_id}")
 
 
-@app.get("/api/v1/devices/{device_id}/connection")
+@app.get("/api/v1/devices/{device_id}/connection", tags=["Devices"])
 async def get_device_connection_status(
     device_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1909,7 +1923,7 @@ async def get_device_connection_status(
 # Command Version Management
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/v1/commands/versions")
+@app.get("/api/v1/commands/versions", tags=["Commands"])
 async def list_command_versions(
     command_type: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -1939,7 +1953,7 @@ async def list_command_versions(
     }
 
 
-@app.get("/api/v1/commands/versions/{version_id}")
+@app.get("/api/v1/commands/versions/{version_id}", tags=["Commands"])
 async def get_command_version(
     version_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1956,7 +1970,7 @@ async def get_command_version(
     return version.dict()
 
 
-@app.get("/api/v1/commands/{command_type}/versions")
+@app.get("/api/v1/commands/{command_type}/versions", tags=["Commands"])
 async def list_command_type_versions(
     command_type: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1974,7 +1988,7 @@ async def list_command_type_versions(
     }
 
 
-@app.get("/api/v1/commands/{command_type}/versions/latest")
+@app.get("/api/v1/commands/{command_type}/versions/latest", tags=["Commands"])
 async def get_latest_command_version(
     command_type: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -1991,7 +2005,7 @@ async def get_latest_command_version(
     return version.dict()
 
 
-@app.post("/api/v1/commands/{command_type}/validate")
+@app.post("/api/v1/commands/{command_type}/validate", tags=["Commands"])
 async def validate_command_data(
     command_type: str,
     request_body: Dict[str, Any],
@@ -2025,7 +2039,7 @@ async def validate_command_data(
     }
 
 
-@app.get("/api/v1/commands/{command_type}/changelog")
+@app.get("/api/v1/commands/{command_type}/changelog", tags=["Commands"])
 async def get_command_changelog(
     command_type: str,
     from_version: Optional[str] = None,
@@ -2055,7 +2069,7 @@ async def get_command_changelog(
 
 # Admin-only endpoints
 
-@app.post("/api/v1/admin/commands/versions")
+@app.post("/api/v1/admin/commands/versions", tags=["Commands"])
 async def create_command_version(
     version_data: Dict[str, Any],
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2094,7 +2108,7 @@ async def create_command_version(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.put("/api/v1/admin/commands/versions/{version_id}")
+@app.put("/api/v1/admin/commands/versions/{version_id}", tags=["Commands"])
 async def update_command_version(
     version_id: str,
     updates: Dict[str, Any],
@@ -2125,7 +2139,7 @@ async def update_command_version(
     }
 
 
-@app.post("/api/v1/admin/commands/versions/{version_id}/deprecate")
+@app.post("/api/v1/admin/commands/versions/{version_id}/deprecate", tags=["Commands"])
 async def deprecate_command_version(
     version_id: str,
     reason_data: Dict[str, str],
@@ -2160,7 +2174,7 @@ async def deprecate_command_version(
 # Webhook Notifications
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.post("/api/v1/webhooks")
+@app.post("/api/v1/webhooks", tags=["Webhooks"])
 async def create_webhook(
     webhook_data: Dict[str, Any],
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2196,7 +2210,7 @@ async def create_webhook(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/api/v1/webhooks")
+@app.get("/api/v1/webhooks", tags=["Webhooks"])
 async def list_webhooks(
     is_active: Optional[bool] = None,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2213,7 +2227,7 @@ async def list_webhooks(
     }
 
 
-@app.get("/api/v1/webhooks/{webhook_id}")
+@app.get("/api/v1/webhooks/{webhook_id}", tags=["Webhooks"])
 async def get_webhook(
     webhook_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2230,7 +2244,7 @@ async def get_webhook(
     return webhook.dict()
 
 
-@app.put("/api/v1/webhooks/{webhook_id}")
+@app.put("/api/v1/webhooks/{webhook_id}", tags=["Webhooks"])
 async def update_webhook(
     webhook_id: str,
     updates: Dict[str, Any],
@@ -2255,7 +2269,7 @@ async def update_webhook(
     }
 
 
-@app.delete("/api/v1/webhooks/{webhook_id}")
+@app.delete("/api/v1/webhooks/{webhook_id}", tags=["Webhooks"])
 async def delete_webhook(
     webhook_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2274,7 +2288,7 @@ async def delete_webhook(
     }
 
 
-@app.get("/api/v1/webhooks/{webhook_id}/deliveries")
+@app.get("/api/v1/webhooks/{webhook_id}/deliveries", tags=["Webhooks"])
 async def get_webhook_deliveries(
     webhook_id: str,
     status: Optional[str] = None,
@@ -2307,7 +2321,7 @@ async def get_webhook_deliveries(
     }
 
 
-@app.post("/api/v1/webhooks/test")
+@app.post("/api/v1/webhooks/test", tags=["Webhooks"])
 async def test_webhook(
     test_data: Dict[str, Any],
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2360,7 +2374,7 @@ async def test_webhook(
         raise HTTPException(status_code=500, detail=f"Webhook test failed: {str(e)}")
 
 
-@app.get("/api/v1/rollout/status")
+@app.get("/api/v1/rollout/status", tags=["Policies"])
 async def get_rollout_status(policy_id: Optional[str] = None):
     """Get rollout status across all devices."""
     if not device_assignments:
@@ -2408,7 +2422,7 @@ authorization_service = None
 rate_limit_service = None
 
 
-@app.post("/api/v1/broadcasts")
+@app.post("/api/v1/broadcasts", tags=["Broadcasts"])
 async def create_broadcast(
     broadcast_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2478,7 +2492,7 @@ async def create_broadcast(
     }
 
 
-@app.get("/api/v1/broadcasts/{broadcast_id}")
+@app.get("/api/v1/broadcasts/{broadcast_id}", tags=["Broadcasts"])
 async def get_broadcast_status(
     broadcast_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2498,7 +2512,7 @@ async def get_broadcast_status(
     return progress.dict()
 
 
-@app.get("/api/v1/broadcasts")
+@app.get("/api/v1/broadcasts", tags=["Broadcasts"])
 async def list_broadcasts(
     status: Optional[str] = None,
     limit: int = 50,
@@ -2519,7 +2533,7 @@ async def list_broadcasts(
     }
 
 
-@app.delete("/api/v1/broadcasts/{broadcast_id}")
+@app.delete("/api/v1/broadcasts/{broadcast_id}", tags=["Broadcasts"])
 async def cancel_broadcast(
     broadcast_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2550,7 +2564,7 @@ async def cancel_broadcast(
 # Template Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v1/templates")
+@app.post("/api/v1/templates", tags=["Configuration"])
 async def create_template(
     template_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2594,7 +2608,7 @@ async def create_template(
     }
 
 
-@app.get("/api/v1/templates/{template_name}")
+@app.get("/api/v1/templates/{template_name}", tags=["Configuration"])
 async def get_template(
     template_name: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2614,7 +2628,7 @@ async def get_template(
     return template.dict()
 
 
-@app.get("/api/v1/templates")
+@app.get("/api/v1/templates", tags=["Configuration"])
 async def list_templates(
     active_only: bool = True,
     tag: Optional[str] = None,
@@ -2636,7 +2650,7 @@ async def list_templates(
     }
 
 
-@app.delete("/api/v1/templates/{template_name}")
+@app.delete("/api/v1/templates/{template_name}", tags=["Configuration"])
 async def delete_template(
     template_name: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2663,7 +2677,7 @@ async def delete_template(
     }
 
 
-@app.post("/api/v1/templates/{template_name}/apply")
+@app.post("/api/v1/templates/{template_name}/apply", tags=["Configuration"])
 async def apply_template(
     template_name: str,
     apply_data: dict,
@@ -2737,7 +2751,7 @@ async def apply_template(
 # Command Batch Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v1/batches")
+@app.post("/api/v1/batches", tags=["Batch Operations"])
 async def create_batch(
     batch_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2799,7 +2813,7 @@ async def create_batch(
     }
 
 
-@app.get("/api/v1/batches/{batch_id}")
+@app.get("/api/v1/batches/{batch_id}", tags=["Batch Operations"])
 async def get_batch_progress(
     batch_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2835,7 +2849,7 @@ async def get_batch_progress(
     }
 
 
-@app.get("/api/v1/batches")
+@app.get("/api/v1/batches", tags=["Batch Operations"])
 async def list_batches(
     device_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -2861,7 +2875,7 @@ async def list_batches(
     }
 
 
-@app.delete("/api/v1/batches/{batch_id}")
+@app.delete("/api/v1/batches/{batch_id}", tags=["Batch Operations"])
 async def cancel_batch(
     batch_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2892,7 +2906,7 @@ async def cancel_batch(
 # Command Schedule Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v1/schedules")
+@app.post("/api/v1/schedules", tags=["Scheduling"])
 async def create_schedule(
     schedule_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -2989,7 +3003,7 @@ async def create_schedule(
     }
 
 
-@app.get("/api/v1/schedules/{schedule_id}")
+@app.get("/api/v1/schedules/{schedule_id}", tags=["Scheduling"])
 async def get_schedule(
     schedule_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3036,7 +3050,7 @@ async def get_schedule(
     }
 
 
-@app.get("/api/v1/schedules")
+@app.get("/api/v1/schedules", tags=["Scheduling"])
 async def list_schedules(
     device_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -3072,7 +3086,7 @@ async def list_schedules(
     }
 
 
-@app.post("/api/v1/schedules/{schedule_id}/pause")
+@app.post("/api/v1/schedules/{schedule_id}/pause", tags=["Scheduling"])
 async def pause_schedule(
     schedule_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3107,7 +3121,7 @@ async def pause_schedule(
     }
 
 
-@app.post("/api/v1/schedules/{schedule_id}/resume")
+@app.post("/api/v1/schedules/{schedule_id}/resume", tags=["Scheduling"])
 async def resume_schedule(
     schedule_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3142,7 +3156,7 @@ async def resume_schedule(
     }
 
 
-@app.delete("/api/v1/schedules/{schedule_id}")
+@app.delete("/api/v1/schedules/{schedule_id}", tags=["Scheduling"])
 async def cancel_schedule(
     schedule_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3181,7 +3195,7 @@ async def cancel_schedule(
 # Command Audit Log Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v1/audit/query")
+@app.post("/api/v1/audit/query", tags=["Audit"])
 async def query_audit_logs(
     query_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3248,7 +3262,7 @@ async def query_audit_logs(
     }
 
 
-@app.post("/api/v1/audit/export")
+@app.post("/api/v1/audit/export", tags=["Audit"])
 async def export_audit_logs(
     export_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3315,7 +3329,7 @@ async def export_audit_logs(
     )
 
 
-@app.get("/api/v1/audit/stats")
+@app.get("/api/v1/audit/stats", tags=["Audit"])
 async def get_audit_stats(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
@@ -3408,7 +3422,7 @@ async def get_audit_stats(
 # Command Authorization Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v1/authorization/check")
+@app.post("/api/v1/authorization/check", tags=["Authorization"])
 async def check_authorization(
     check_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3451,7 +3465,7 @@ async def check_authorization(
     }
 
 
-@app.post("/api/v1/approvals")
+@app.post("/api/v1/approvals", tags=["Authorization"])
 async def request_approval(
     approval_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3491,7 +3505,7 @@ async def request_approval(
     }
 
 
-@app.get("/api/v1/approvals/{approval_id}")
+@app.get("/api/v1/approvals/{approval_id}", tags=["Authorization"])
 async def get_approval(
     approval_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3528,7 +3542,7 @@ async def get_approval(
     }
 
 
-@app.get("/api/v1/approvals")
+@app.get("/api/v1/approvals", tags=["Authorization"])
 async def list_approvals(
     user_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -3554,7 +3568,7 @@ async def list_approvals(
     }
 
 
-@app.post("/api/v1/approvals/{approval_id}/approve")
+@app.post("/api/v1/approvals/{approval_id}/approve", tags=["Authorization"])
 async def approve_command(
     approval_id: str,
     approval_data: dict,
@@ -3599,7 +3613,7 @@ async def approve_command(
     }
 
 
-@app.post("/api/v1/approvals/{approval_id}/reject")
+@app.post("/api/v1/approvals/{approval_id}/reject", tags=["Authorization"])
 async def reject_command(
     approval_id: str,
     rejection_data: dict,
@@ -3644,7 +3658,7 @@ async def reject_command(
     }
 
 
-@app.delete("/api/v1/approvals/{approval_id}")
+@app.delete("/api/v1/approvals/{approval_id}", tags=["Authorization"])
 async def cancel_approval(
     approval_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3680,7 +3694,7 @@ async def cancel_approval(
 # Rate Limiting Endpoints
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/v1/rate-limits/status")
+@app.get("/api/v1/rate-limits/status", tags=["Rate Limiting"])
 async def get_rate_limit_status(
     request: Request,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3716,7 +3730,7 @@ async def get_rate_limit_status(
     }
 
 
-@app.get("/api/v1/admin/rate-limits")
+@app.get("/api/v1/admin/rate-limits", tags=["Rate Limiting"])
 async def list_rate_limits(
     is_active: Optional[bool] = None,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3753,7 +3767,7 @@ async def list_rate_limits(
     }
 
 
-@app.put("/api/v1/admin/rate-limits/{rule_name}")
+@app.put("/api/v1/admin/rate-limits/{rule_name}", tags=["Rate Limiting"])
 async def update_rate_limit(
     rule_name: str,
     update_data: dict,
@@ -3797,7 +3811,7 @@ async def update_rate_limit(
     }
 
 
-@app.post("/api/v1/admin/rate-limits")
+@app.post("/api/v1/admin/rate-limits", tags=["Rate Limiting"])
 async def create_rate_limit(
     rule_data: dict,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -3848,7 +3862,7 @@ async def create_rate_limit(
     }
 
 
-@app.delete("/api/v1/admin/rate-limits/{rule_name}")
+@app.delete("/api/v1/admin/rate-limits/{rule_name}", tags=["Rate Limiting"])
 async def delete_rate_limit(
     rule_name: str,
     user: Optional[UserContext] = Depends(get_current_user)
