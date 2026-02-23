@@ -69,7 +69,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Rufus Edge Control Plane",
     description="Cloud control plane for Rufus Edge fintech devices",
-    version="0.4.0",
+    version="0.4.2",
     openapi_tags=[
         {"name": "Health",           "description": "Service health check"},
         {"name": "Workflows",        "description": "Workflow registry, execution, and lifecycle control"},

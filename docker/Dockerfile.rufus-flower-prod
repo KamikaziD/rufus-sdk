@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    'rufus-sdk==0.4.1'
+    'rufus-sdk==0.4.2'
 
 # Then install extras from PyPI to avoid broken packages on TestPyPI
 RUN pip install --no-cache-dir \
