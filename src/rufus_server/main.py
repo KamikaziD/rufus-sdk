@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # --- Import Rufus SDK Components ---
 from rufus.engine import WorkflowEngine
-from rufus.models import WorkflowJumpDirective, WorkflowPauseDirective
+from rufus.models import WorkflowJumpDirective, WorkflowPauseDirective, WorkflowFailedException, SagaWorkflowException
 from rufus.workflow import Workflow
 from rufus.builder import WorkflowBuilder
 from rufus.providers.persistence import PersistenceProvider
@@ -139,8 +139,9 @@ def rate_limit_check(resource_pattern: str):
         if not rate_limit_service:
             return None  # Rate limiting not initialized
 
-        # Get identifier (user or IP)
-        identifier = f"user:{user.user_id}" if user else f"ip:{request.client.host}"
+        # Get identifier (user or IP); request.client may be None in test/proxy contexts
+        client_host = request.client.host if request.client else "unknown"
+        identifier = f"user:{user.user_id}" if user else f"ip:{client_host}"
         scope = "user" if user else "ip"
 
         # Check limit
@@ -324,6 +325,14 @@ async def health_check():
 # Workflow Management APIs
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _get_workflow_or_404(workflow_id: str):
+    """Load a workflow by ID, raising 404 if not found."""
+    try:
+        return await workflow_engine.get_workflow(workflow_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.get("/api/v1/workflows", tags=["Workflows"])
 async def get_available_workflows():
     """Returns a list of available workflows from the registry."""
@@ -342,7 +351,15 @@ async def get_available_workflows():
     return available_workflows
 
 
-@app.post("/api/v1/workflow/start", response_model=WorkflowStartResponse, tags=["Workflows"])
+@app.post(
+    "/api/v1/workflow/start",
+    response_model=WorkflowStartResponse,
+    tags=["Workflows"],
+    responses={
+        400: {"description": "Unknown workflow type or invalid initial data"},
+        503: {"description": "Workflow engine not initialized"},
+    },
+)
 @limiter.limit("100/minute")
 async def start_workflow(
     request: Request,
@@ -375,7 +392,15 @@ async def start_workflow(
     )
 
 
-@app.get("/api/v1/workflow/{workflow_id}/status", response_model=WorkflowStatusResponse, tags=["Workflows"])
+@app.get(
+    "/api/v1/workflow/{workflow_id}/status",
+    response_model=WorkflowStatusResponse,
+    tags=["Workflows"],
+    responses={
+        404: {"description": "Workflow ID not found"},
+        503: {"description": "Workflow engine not initialized"},
+    },
+)
 async def get_workflow_status(
     workflow_id: str,
     user: Optional[UserContext] = Depends(get_current_user)
@@ -384,7 +409,7 @@ async def get_workflow_status(
     if workflow_engine is None:
         raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
-    workflow = await workflow_engine.get_workflow(workflow_id)
+    workflow = await _get_workflow_or_404(workflow_id)
 
     return WorkflowStatusResponse(
         workflow_id=workflow.id,
@@ -499,7 +524,17 @@ async def get_current_step_info(
     return response
 
 
-@app.post("/api/v1/workflow/{workflow_id}/next", response_model=WorkflowStepResponse, tags=["Workflows"])
+@app.post(
+    "/api/v1/workflow/{workflow_id}/next",
+    response_model=WorkflowStepResponse,
+    tags=["Workflows"],
+    responses={
+        404: {"description": "Workflow ID not found"},
+        409: {"description": "Workflow is in a non-advanceable state"},
+        422: {"description": "Step execution failed"},
+        503: {"description": "Workflow engine not initialized"},
+    },
+)
 async def next_workflow_step(
     workflow_id: str,
     request_data: WorkflowStepRequest,
@@ -509,7 +544,7 @@ async def next_workflow_step(
     if workflow_engine is None:
         raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
-    workflow = await workflow_engine.get_workflow(workflow_id)
+    workflow = await _get_workflow_or_404(workflow_id)
 
     if workflow.status in ["PENDING_ASYNC", "WAITING_HUMAN", "COMPLETED", "FAILED"]:
         raise HTTPException(
@@ -530,10 +565,16 @@ async def next_workflow_step(
             state=workflow.state.model_dump(),
             result=result_dict
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except WorkflowFailedException as e:
+        raise HTTPException(status_code=422, detail=f"Step '{e.step_name}' failed: {e.original_exception}")
+    except SagaWorkflowException as e:
+        raise HTTPException(status_code=409, detail=f"Saga rollback triggered by step '{e.step_name}': {e.original_exception}")
     except Exception as e:
         workflow.status = "FAILED"
         await workflow_engine.persistence.save_workflow(workflow_id, workflow.to_dict())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected error executing step: {e}")
 
 
 @app.get("/api/v1/workflows/executions", tags=["Workflows"])
@@ -831,7 +872,16 @@ async def rewind_workflow(
     }
 
 
-@app.post("/api/v1/workflow/{workflow_id}/resume", tags=["Workflows"])
+@app.post(
+    "/api/v1/workflow/{workflow_id}/resume",
+    tags=["Workflows"],
+    responses={
+        400: {"description": "Workflow is not in WAITING_HUMAN state"},
+        404: {"description": "Workflow ID not found"},
+        422: {"description": "Step execution failed after resume"},
+        503: {"description": "Workflow engine not initialized"},
+    },
+)
 async def resume_workflow(
     workflow_id: str,
     request_data: ResumeWorkflowRequest,
@@ -854,7 +904,7 @@ async def resume_workflow(
     if workflow_dict['status'] != 'WAITING_HUMAN':
         raise HTTPException(status_code=400, detail="Only paused (WAITING_HUMAN) workflows can be resumed")
 
-    workflow = await workflow_engine.get_workflow(workflow_id)
+    workflow = await _get_workflow_or_404(workflow_id)
     current_step_obj = workflow.workflow_steps[workflow.current_step] if workflow.workflow_steps else None
     current_step_name = current_step_obj.name if current_step_obj else None
 
@@ -862,10 +912,16 @@ async def resume_workflow(
         result_dict, next_step_name = await workflow.next_step(
             user_input=request_data.user_input or {}
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except WorkflowFailedException as e:
+        raise HTTPException(status_code=422, detail=f"Step '{e.step_name}' failed: {e.original_exception}")
+    except SagaWorkflowException as e:
+        raise HTTPException(status_code=409, detail=f"Saga rollback triggered by step '{e.step_name}': {e.original_exception}")
     except Exception as e:
         workflow.status = "FAILED"
         await workflow_engine.persistence.save_workflow(workflow_id, workflow.to_dict())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected error executing step: {e}")
 
     # Publish event
     from rufus.events import event_publisher

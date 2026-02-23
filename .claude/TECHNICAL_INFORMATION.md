@@ -1355,3 +1355,26 @@ steps:
       insert_after: "Process_Data"
       audit_injection: true
 ```
+
+---
+
+## §15 — Workflow API Error Reference
+
+| Status | Condition | Example `detail` |
+|--------|-----------|------------------|
+| 400 | Invalid workflow type / bad input | `"Workflow type 'Foo' not found in registry."` |
+| 400 | UUID format invalid in retry/rewind/resume | `"Invalid workflow ID format"` |
+| 404 | Workflow ID not found | `"Workflow with ID abc... not found."` |
+| 409 | Saga rollback occurred | `"Saga rollback triggered by step 'charge_card': ..."` |
+| 409 | Workflow in non-advanceable state | `"Workflow is in 'COMPLETED' state. Cannot advance."` |
+| 422 | Step execution failure | `"Step 'validate_kyc' failed: ..."` |
+| 501 | Feature requires PostgreSQL backend | `"Audit logs require PostgreSQL backend"` |
+| 503 | Engine not initialized | `"Workflow Engine not initialized."` |
+| 500 | Unexpected / DB error | `"Unexpected error executing step: ..."` |
+
+### Endpoints with documented error contracts (Swagger `responses=`)
+
+- `POST /api/v1/workflow/start` — 400, 503
+- `GET /api/v1/workflow/{id}/status` — 404, 503
+- `POST /api/v1/workflow/{id}/next` — 404, 409, 422, 503
+- `POST /api/v1/workflow/{id}/resume` — 400, 404, 422, 503
