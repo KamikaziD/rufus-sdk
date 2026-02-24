@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.1] - 2026-02-24
+
+### Documentation
+- **README.md** — full rewrite with new positioning: self-hosting insight, 3-role architecture diagram (Device Runtime / Cloud Worker / Control Plane), Docker Compose quick-start using published images, horizontal edge framing (robotics, MedTech, drones, industrial IoT alongside fintech)
+- **`docs/explanation/self-hosting.md`** — new file explaining how Rufus orchestrates itself; covers the three-role model, what self-hosting means for reliability and architecture, and the recursive pattern in practice
+- **`docs/explanation/architecture.md`** — added "Three Roles, One Runtime" section with ASCII diagram and self-hosting prose
+- **`docs/reference/configuration/database-schema.md`** — complete rewrite documenting all 33 cloud tables (by group) and 10 edge tables; added schema governance table, extending-schema instructions, and cascade behavior reference
+- **`docs/reference/configuration/configuration.md`** — added `RUFUS_ENCRYPTION_KEY` (marked required) and `RUFUS_CUSTOM_ROUTERS` with usage examples
+- **`docs/appendices/changelog.md`** — added v0.4.0, v0.4.1, v0.4.2, v0.5.0 entries (were missing entirely)
+- **`docs/appendices/migration-notes.md`** — added v0.4.0/0.4.1/0.4.2/v0.5.0 upgrade guides and updated compatibility matrix to include all versions from 0.4.x onward
+- **`docs/appendices/roadmap.md`** — updated timeline (v0.5.0 current), moved v0.4.x features to completed, added new roadmap items (OpenTelemetry, GPU inference step type, mTLS, HSM)
+- **`docs/advanced/extending-rufus.md`** — added "Extending the Database Schema" section (custom tables via shared `metadata`) and "Custom API Routes (RUFUS_CUSTOM_ROUTERS)" section
+- **`docs/advanced/security.md`** — added "Fintech & PCI-DSS Patterns" section: `RUFUS_ENCRYPTION_KEY` setup/rotation, card tokenization, transaction signing, device authentication, offline floor limit pattern, PCI audit trail query
+- **`docs/tutorials/edge-deployment.md`** — fixed broken code: `SyncExecutor()` → `SyncExecutionProvider()`
+- **`docs/index.md`** — updated to v0.5.0, new self-hosting intro paragraph, added self-hosting link
+- **`docs/README.md`** — removed stale `v0.9.0` version claim
+- **`docs/FEATURES_AND_CAPABILITIES.md`** — removed `Pre-release v0.9.0`; updated to Stable v0.5.0 with v0.4.x/v0.5.0 version history
+- **`docs/OUTSTANDING_FEATURES.md`** — removed pre-release framing; updated current release to v0.5.0 stable
+
+---
+
 ## [0.5.0] - 2026-02-24
 
 ### Changed
