@@ -7,6 +7,11 @@ workflows:
     config_file: "config_rollout_workflow.yaml"
     initial_state_model: "rufus_server.steps.config_rollout_steps.ConfigRolloutState"
 
+  - type: "PolicyRollout"
+    description: "Durable policy creation with saga compensation"
+    config_file: "policy_rollout_workflow.yaml"
+    initial_state_model: "rufus_server.steps.policy_rollout_steps.PolicyRolloutState"
+
   - type: "PaymentAuthorization"
     description: "Payment authorization with offline fallback"
     config_file: "payment_workflow.yaml"

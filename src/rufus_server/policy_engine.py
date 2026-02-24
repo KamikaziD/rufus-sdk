@@ -255,7 +255,19 @@ class DeviceAssignment(BaseModel):
 
 
 # ============================================================================
-# Policy Evaluator
+# PolicyEvaluator — Read/Evaluate Path (DIRECT CALLS — no workflow overhead)
+# ============================================================================
+# These operations stay as direct function calls:
+#   - get_active_policies()        hot path: evaluate_condition(), evaluate_all()
+#   - evaluate_condition()         called ~1k/sec on /api/v1/update-check
+#   - evaluate_policy()            inline evaluation, no side effects
+#   - get_assignment()             read-only
+#   - should_deploy_canary()       read-only, random sampling
+#
+# These operations go through the PolicyRollout workflow:
+#   - add_policy()                 durable write + saga compensation
+#   - remove_policy()              durable delete + audit trail
+#   - status updates               durable state machine transition
 # ============================================================================
 
 class PolicyEvaluator:

@@ -457,16 +457,29 @@ steps:
 
 ### Structure
 
+Two modes are supported: **static task list** (tasks enumerated in YAML) and **dynamic fan-out** (one function called once per item in a state list at runtime).
+
 ```yaml
 type: "PARALLEL"
+
+# ── Static task list ──────────────────────────────────────────────────────────
 tasks:
-  - name: string              # Required
-    function_path: string     # Required
+  - name: string              # Required (static mode)
+    function_path: string     # Required (static mode)
+
+# ── Dynamic fan-out (alternative to tasks list) ───────────────────────────────
+iterate_over: string          # Optional: dot-notation path to a state list
+task_function: string         # Optional: function called once per item
+item_var_name: string         # Optional: kwarg name for each item (default: "item")
+
+# ── Shared options ────────────────────────────────────────────────────────────
 merge_strategy: string        # Optional
 merge_conflict_behavior: string  # Optional
 allow_partial_success: boolean   # Optional
-timeout_seconds: int        # Optional
+timeout_seconds: int          # Optional
 ```
+
+When both `iterate_over` and `task_function` are set, the static `tasks` list is ignored and tasks are generated at runtime — one per item in the resolved list.
 
 ### Fields
 
@@ -474,9 +487,9 @@ timeout_seconds: int        # Optional
 
 **Type:** `list[dict]`
 
-**Required:** Yes
+**Required:** Yes (static mode) / ignored (dynamic fan-out mode)
 
-List of parallel tasks.
+List of parallel tasks. Used when the task set is fixed at workflow design time.
 
 #### `tasks[].name`
 
@@ -493,6 +506,32 @@ Unique task name.
 **Required:** Yes
 
 Python import path to task function.
+
+#### `iterate_over`
+
+**Type:** `string`
+
+**Required:** No
+
+Dot-notation path into workflow state pointing to a list (e.g. `"device_ids"` or `"order.line_items"`). When set alongside `task_function`, enables dynamic fan-out: one task per item in the list.
+
+#### `task_function`
+
+**Type:** `string`
+
+**Required:** No (required when `iterate_over` is set)
+
+Python import path to the function called for each item. The function receives the item as a kwarg named by `item_var_name`.
+
+#### `item_var_name`
+
+**Type:** `string`
+
+**Required:** No
+
+**Default:** `"item"`
+
+Name of the kwarg passed to `task_function` for each item. For example, `item_var_name: "device_id"` means the function is called as `task_function(state, context, device_id=item)`.
 
 #### `merge_strategy`
 
@@ -532,7 +571,9 @@ If true, workflow continues even if some tasks fail.
 
 Maximum time for all tasks to complete.
 
-### Example
+### Examples
+
+**Static task list:**
 
 ```yaml
 steps:
@@ -546,6 +587,26 @@ steps:
     merge_strategy: "DEEP"
     allow_partial_success: false
     timeout_seconds: 60
+```
+
+**Dynamic fan-out** — push config to every device in `state.device_ids`:
+
+```yaml
+steps:
+  - name: "Push_To_Fleet"
+    type: "PARALLEL"
+    iterate_over: "device_ids"      # list of device IDs in workflow state
+    task_function: "steps.push_to_device"
+    item_var_name: "device_id"
+    merge_strategy: "SHALLOW"
+    allow_partial_success: true
+```
+
+```python
+def push_to_device(state: dict, context: StepContext, device_id: str = "", **_) -> dict:
+    """Called once per item — device_id is the current list element."""
+    push_config_update(device_id, state["config_data"])
+    return {"pushed": device_id}
 ```
 
 ---

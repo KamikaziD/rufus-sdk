@@ -79,13 +79,19 @@ Here is an example of the self-hosting pattern at work:
 
 **Device configuration rollout** — when a new fraud rule set needs to be pushed to 10,000 devices:
 
-1. An operator creates a `ConfigRollout` workflow via the control plane API
-2. The `ConfigRollout` workflow has steps: `validate_config`, `stage_rollout`, `push_to_fleet`, `verify_acknowledgement`
-3. Each device receives the new config via ETag-based push (the control plane's `push_to_fleet` step calls the device's `/config` endpoint)
-4. If `push_to_fleet` fails halfway through a batch, the saga compensation step (`rollback_staged_config`) runs automatically
-5. The entire rollout is auditable via `workflow_audit_log` — same table used by device-side workflows
+1. An operator calls `POST /api/v1/config/rollout` on the control plane
+2. The `ConfigRollout` workflow runs with five steps:
+   - `Validate_Config` — rejects malformed config before anything is written
+   - `Create_Config_Version` — persists the new config to the database (compensatable)
+   - `Broadcast_To_Fleet` — sends an `update_config` command to all matching devices (compensatable)
+   - `Monitor_Broadcast` — a **LOOP/WHILE** step that polls broadcast progress until all devices acknowledge or a timeout is reached
+   - `Finalize_Rollout` — evaluates the failure rate against the circuit-breaker threshold; raises if exceeded (triggering saga compensation)
+3. If `Finalize_Rollout` raises (too many device failures), saga compensation runs in reverse: broadcast is cancelled, config version is deactivated, and the previous version is restored
+4. The entire rollout is auditable via `workflow_audit_log` — same table used by device-side workflows
 
 **That `ConfigRollout` workflow is a Rufus workflow.** It runs on the control plane with PostgreSQL + Celery, but it is defined in YAML exactly like the payment workflow running on the device.
+
+Similarly, `PolicyRollout` wraps the fraud-rule write path in the same pattern: `Validate_Policy` → `Persist_Policy` (compensatable: deletes from DB + in-memory cache on rollback) → `Finalize_Policy_Rollout`. High-stakes policy writes get durable persistence and automatic compensation; read and evaluate operations remain direct calls on the hot path.
 
 ---
 

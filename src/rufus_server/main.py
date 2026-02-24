@@ -278,6 +278,10 @@ async def startup_event():
     global policy_evaluator
     policy_evaluator = PolicyEvaluator()
 
+    # Wire services into PolicyRollout step module
+    from rufus_server.steps.policy_rollout_steps import init_services as init_policy_rollout_services
+    init_policy_rollout_services(persistence_provider, policy_evaluator)
+
     # Initialize Rate Limit Service
     from rufus_server.rate_limit_service import RateLimitService
     rate_limit_service = RateLimitService(persistence_provider)
@@ -1588,6 +1592,54 @@ async def update_policy_status(
     policy.updated_at = datetime.utcnow()
 
     return {"status": "updated", "new_status": new_status}
+
+
+@app.post("/api/v1/policies/rollout", tags=["Policies"],
+          responses={
+              200: {"description": "Policy created successfully"},
+              409: {"description": "Saga compensation triggered — policy rolled back"},
+              422: {"description": "Workflow failed without compensation"},
+          })
+async def create_policy_rollout(
+    policy: Policy,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Create a new deployment policy via durable workflow with saga compensation."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    policy_data = policy.model_dump(mode="json")
+    if user:
+        policy_data["created_by"] = user.user_id
+
+    try:
+        workflow = await workflow_engine.start_workflow(
+            workflow_type="PolicyRollout",
+            initial_data={"policy_data": policy_data, "created_by": policy_data.get("created_by")},
+            owner_id=user.user_id if user else None,
+        )
+        await workflow.enable_saga_mode()
+        result, _ = await workflow.next_step(user_input={})
+    except WorkflowFailedException as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Policy rollout failed: {exc.original_exception}"
+        )
+    except SagaWorkflowException as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Policy rollout compensated (saga): {exc.original_exception}"
+        )
+
+    final = await workflow_engine.get_workflow(workflow.id)
+    state = final.state
+    return {
+        "workflow_id": str(workflow.id),
+        "policy_id": state.policy_id,
+        "policy_name": state.policy_name,
+        "rollout_outcome": state.rollout_outcome,
+        "completed_at": state.completed_at,
+    }
 
 
 @app.post("/api/v1/update-check", response_model=UpdateInstruction, tags=["Devices"])

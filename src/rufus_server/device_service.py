@@ -18,6 +18,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# DeviceService — Mixed: Some ops stay direct, some go through workflows
+# ============================================================================
+# Direct calls (no workflow overhead):
+#   - register_device()            idempotent registration, no compensation needed
+#   - update_heartbeat()           high-frequency, no rollback semantics
+#   - get_device_status()          read-only
+#   - get_active_config()          read-only
+#   - get_device_commands()        read-only polling
+#   - complete_command()           single-step idempotent ack
+#
+# Called FROM workflows (ConfigRollout uses these):
+#   - create_config()              ConfigRollout.Create_Config_Version step
+# ============================================================================
+
 class DeviceService:
     """
     Service layer for device management operations.

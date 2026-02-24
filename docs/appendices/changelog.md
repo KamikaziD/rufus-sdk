@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.2] - 2026-02-24
+
+### Added
+- **PolicyRollout workflow** — durable policy creation with saga compensation: `Validate_Policy` → `Persist_Policy` (compensatable: DELETE + in-memory cache eviction) → `Finalize_Policy_Rollout`; endpoint at `POST /api/v1/policies/rollout`
+- `src/rufus_server/steps/policy_rollout_steps.py` — step functions + `PolicyRolloutState` model + `init_services()` injection
+- `config/policy_rollout_workflow.yaml` — YAML definition registered in `workflow_registry.yaml`
+
+### Fixed
+- **`TECHNICAL_INFORMATION.md §4`** — LOOP YAML examples corrected from deprecated `loop_config: items/condition` syntax to actual fields: `mode:`, `iterate_over:`, `item_var_name:`, `while_condition:`, `loop_body:`
+- **`docs/reference/configuration/yaml-schema.md`** — PARALLEL section now documents dynamic fan-out fields (`iterate_over`, `task_function`, `item_var_name`) with examples
+- **`docs/explanation/parallel-execution.md`** — added "Pattern 4: Dynamic Fan-Out" section with YAML + Python examples and a static-vs-dynamic comparison table
+- **`docs/explanation/self-hosting.md`** — corrected ConfigRollout step names (were wrong); added LOOP/WHILE monitoring step explanation; added PolicyRollout description
+
+### Added (boundary comments)
+- `policy_engine.py` — block comment on `PolicyEvaluator` documenting which methods stay as direct calls vs. go through workflows
+- `device_service.py` — block comment on `DeviceService` documenting direct vs. workflow-orchestrated methods
+
+---
+
 ## [0.5.1] - 2026-02-24
 
 ### Documentation

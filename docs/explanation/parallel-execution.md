@@ -381,6 +381,45 @@ with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
 
 **Behavior**: Best-effort notifications, workflow continues even if some fail.
 
+### Pattern 4: Dynamic Fan-Out (Runtime-Generated Tasks)
+
+The patterns above have a fixed task list defined in YAML at design time. **Dynamic fan-out** generates tasks at runtime from a list in workflow state — useful when you don't know the target set until the workflow is running.
+
+```yaml
+- name: "Push_Config_To_Fleet"
+  type: "PARALLEL"
+  iterate_over: "device_ids"       # dot-notation path to a list in state
+  task_function: "steps.push_to_device"  # called once per item
+  item_var_name: "device_id"       # kwarg name for each item (default: "item")
+  merge_strategy: "SHALLOW"
+  allow_partial_success: true
+```
+
+```python
+def push_to_device(state: FleetState, context: StepContext, device_id: str = "", **_) -> dict:
+    """Called once per device in state.device_ids."""
+    push_config_update(device_id, state.config_data)
+    return {"pushed": device_id}
+```
+
+**How it works**: When the PARALLEL step executes, Rufus reads `state.device_ids`, creates one task per element, and dispatches them all concurrently. If `state.device_ids` has 500 items, 500 tasks run in parallel.
+
+**When to use dynamic fan-out vs. static tasks:**
+
+| | Static tasks | Dynamic fan-out |
+|---|---|---|
+| **Task set** | Fixed at design time in YAML | Determined at runtime from state |
+| **Use case** | Calling 2–5 known services | Processing N items from a list |
+| **Examples** | Validate credit + inventory + address | Push config to fleet, process order items, notify user list |
+
+**State requirement**: The `iterate_over` list must be populated in state before the PARALLEL step runs. Set it in an earlier STANDARD step:
+
+```python
+async def load_target_devices(state: FleetState, context: StepContext, **_) -> dict:
+    devices = await fetch_online_devices()
+    return {"device_ids": [d.id for d in devices]}
+```
+
 ## Race Conditions and State Mutations
 
 **WARNING**: Parallel tasks share the same workflow state. Modifying state in parallel tasks creates race conditions:

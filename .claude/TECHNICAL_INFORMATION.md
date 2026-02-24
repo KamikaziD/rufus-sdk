@@ -201,31 +201,46 @@ def refund_payment(state: OrderState, context: StepContext):
 ### Loop Steps
 
 ```yaml
-# Basic loop over collection
+# ITERATE mode — loop body called once per item in a state list
 - name: "Process_Batch"
   type: "LOOP"
-  loop_config:
-    items: "{{state.user_ids}}"
-    item_var: "current_user_id"
-    max_iterations: 100
-  function: "steps.process_user"
+  mode: "ITERATE"
+  iterate_over: "user_ids"        # dot-notation path into state (e.g. "user_ids" or "order.items")
+  item_var_name: "current_user_id"  # kwarg name passed to each loop_body step
+  max_iterations: 100
   automate_next: true
+  loop_body:
+    - name: "Process_User"
+      type: "STANDARD"
+      function: "steps.process_user"
 
-# Conditional loop
+# WHILE mode — loop body repeats until a state field becomes False
 - name: "Poll_Until_Ready"
   type: "LOOP"
-  loop_config:
-    condition: "state.status != 'ready'"
-    max_iterations: 10
-    delay_seconds: 5
-  function: "steps.check_status"
+  mode: "WHILE"
+  while_condition: "keep_polling"  # name of a boolean state field; loop exits when False
+  max_iterations: 10
+  loop_body:
+    - name: "Check_Status"
+      type: "STANDARD"
+      function: "steps.check_status"
 ```
 
-Loop step function (receives `item_var` as parameter):
+**ITERATE** — body function receives the current item as a kwarg:
 ```python
-def process_user(state: MyState, context: StepContext, current_user_id: str) -> dict:
+async def process_user(state: MyState, context: StepContext, current_user_id: str = "", **_) -> dict:
     result = process_single_user(current_user_id)
     return {"processed_count": state.processed_count + 1}
+```
+
+**WHILE** — body function sets the condition field to `False` to stop the loop:
+```python
+async def check_status(state: MyState, context: StepContext, **_) -> dict:
+    status = check_external_service()
+    return {
+        "keep_polling": status != "ready",
+        "service_status": status,
+    }
 ```
 
 ### Fire-and-Forget Steps
@@ -290,12 +305,15 @@ steps:
 
   - name: "Reserve_Inventory"
     type: "LOOP"
-    loop_config:
-      items: "{{state.order_items}}"
-      item_var: "item"
-      max_iterations: 50
-    function: "steps.reserve_item"
+    mode: "ITERATE"
+    iterate_over: "order_items"
+    item_var_name: "item"
+    max_iterations: 50
     automate_next: true
+    loop_body:
+      - name: "Reserve_Item"
+        type: "STANDARD"
+        function: "steps.reserve_item"
 
   - name: "Send_SMS_Notification"
     type: "FIRE_AND_FORGET"
