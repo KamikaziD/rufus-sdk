@@ -570,7 +570,7 @@ async def main():
     builder = WorkflowBuilder(
         registry_path=None,
         persistence_provider=persistence,
-        execution_provider=SyncExecutor(),
+        execution_provider=SyncExecutionProvider(),
         observer=LoggingObserver(),
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,

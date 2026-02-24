@@ -6,11 +6,112 @@ Version-to-version migration guides for upgrading Rufus SDK.
 
 ## Table of Contents
 
+- [Upgrading to 0.5.0](#upgrading-to-050)
+- [Upgrading to 0.4.2](#upgrading-to-042)
+- [Upgrading to 0.4.1](#upgrading-to-041)
+- [Upgrading to 0.4.0](#upgrading-to-040)
 - [Upgrading to 0.3.0](#upgrading-to-030)
 - [Upgrading to 0.1.2](#upgrading-to-012)
 - [Upgrading to 0.1.1](#upgrading-to-011)
 - [Future Migrations](#future-migrations)
 - [Breaking Changes Policy](#breaking-changes-policy)
+
+---
+
+## Upgrading to 0.5.0
+
+**From:** 0.4.x
+**Date:** 2026-02-24
+
+### Summary
+
+v0.5.0 consolidates all PostgreSQL tables under Alembic management. No Python API changes.
+
+### Database Schema (IMPORTANT)
+
+**Run the new migration:**
+
+```bash
+cd src/rufus
+alembic upgrade head
+```
+
+This creates 27 previously-unmanaged tables and adds 13 columns to `device_commands` (retry fields, batch/broadcast links). The migration is safe to run on existing databases.
+
+**`init-db.sql` no longer creates tables.** It only installs PostgreSQL extensions (`uuid-ossp`, `pg_trgm`). If you used `init-db.sql` as your schema setup script, switch to running `alembic upgrade head` instead.
+
+**New edge tables (SQLite)** — three new tables are created automatically when `SQLitePersistenceProvider` starts: `saf_pending_transactions`, `device_config_cache`, `edge_sync_state`. No manual action required.
+
+### Breaking Changes
+
+**None.** Python API unchanged.
+
+### Action Required
+
+1. Run `alembic upgrade head` on your PostgreSQL database
+2. If using `init-db.sql` as a setup script, replace it with `alembic upgrade head`
+3. Set `RUFUS_ENCRYPTION_KEY` if not already set (required for workflow decryption)
+
+---
+
+## Upgrading to 0.4.2
+
+**From:** 0.4.1 or earlier
+**Date:** 2026-02-23
+
+### Summary
+
+Bug fix release. No breaking changes.
+
+### Breaking Changes
+
+**None.**
+
+### Optional Actions
+
+- Add `RUFUS_CUSTOM_ROUTERS` env var to mount custom API routes (introduced in v0.4.0)
+
+---
+
+## Upgrading to 0.4.1
+
+**From:** 0.4.0 or earlier
+**Date:** 2026-02-23
+
+### Summary
+
+Swagger UI is now grouped by tag (14 groups). No breaking changes.
+
+### Breaking Changes
+
+**None.**
+
+### Notes
+
+Swagger UI at `/docs` now shows routes grouped by functional area (Workflows, Devices, Commands, etc.) for easier navigation.
+
+---
+
+## Upgrading to 0.4.0
+
+**From:** 0.3.x
+**Date:** 2026-02-23
+
+### Summary
+
+Adds `RUFUS_CUSTOM_ROUTERS` for user-defined API extensions. No breaking changes.
+
+### Breaking Changes
+
+**None.**
+
+### New Feature
+
+```bash
+export RUFUS_CUSTOM_ROUTERS="myapp.api.custom_router"
+```
+
+Mount additional FastAPI routers on startup without modifying core server code.
 
 ---
 
@@ -372,12 +473,17 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 
 | Rufus Version | Python | PostgreSQL | SQLite | Redis | Celery |
 |---------------|--------|------------|--------|-------|--------|
+| 0.5.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
+| 0.4.2         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
+| 0.4.1         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
+| 0.4.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.3.0         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.1.2         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
-| 0.1.1         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.1.0         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
 
 **Note:** Rufus SDK is tested against these versions. Older versions may work but are not officially supported.
+
+**Last Updated:** 2026-02-24
 
 ---
 

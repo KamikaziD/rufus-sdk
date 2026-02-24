@@ -1,9 +1,8 @@
 # Rufus Outstanding Features & Roadmap
 
-**Last Updated:** 2026-02-02
-**Current Version:** 0.9.0 (Pre-release)
-**Next Release:** 1.0.0 (Production-ready)
-**Target Date:** Q2 2026
+**Last Updated:** 2026-02-24
+**Current Version:** 0.5.0 (Stable)
+**Next Planned Release:** 0.6.0 (OpenTelemetry + Prometheus)
 
 This document tracks planned features, in-progress work, and the project roadmap for Rufus SDK.
 
@@ -21,20 +20,24 @@ This document tracks planned features, in-progress work, and the project roadmap
 
 ## Version Status
 
-### Current Release: v0.9.0 (Pre-release)
+### Current Release: v0.5.0 (Stable)
 
-**Status:** Production-capable for most workloads, API may change in minor releases.
+**Status:** Production-capable for most workloads, API may change in minor pre-1.0 releases.
 
 **Release Highlights:**
-- ✅ Core workflow orchestration complete
-- ✅ 8 step types implemented
+- ✅ Core workflow orchestration complete (9 step types)
 - ✅ 21 CLI commands
 - ✅ SQLite + PostgreSQL + Redis persistence
-- ✅ Multiple execution providers
+- ✅ Multiple execution providers (Sync, ThreadPool, Celery, PostgresExecutor)
 - ✅ Saga pattern with compensation
 - ✅ Zombie workflow recovery
 - ✅ Workflow versioning & snapshots
-- ✅ Performance optimizations (Phase 1)
+- ✅ Performance optimizations (uvloop, orjson, connection pooling, import cache)
+- ✅ 33-table PostgreSQL schema under Alembic management
+- ✅ 10-table SQLite edge schema (auto-created)
+- ✅ OpenAPI tags / grouped Swagger UI (14 tag groups, 86 endpoints)
+- ✅ RUFUS_CUSTOM_ROUTERS for user-defined API extensions
+- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`
 
 **What's Missing for 1.0:**
 - Enhanced monitoring & observability

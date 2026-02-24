@@ -1,200 +1,282 @@
-# Rufus - Python Workflow Engine for Fintech Edge Devices
+# Rufus — Workflow Runtime for Autonomous Edge Systems
 
-**Stop fighting with Temporal's infrastructure. Stop limiting yourself to Airflow's batch-only world.**
+**The runtime that keeps working when the network doesn't.**
 
-Rufus is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides offline-first architecture, store-and-forward, and production-grade reliability features.
+Rufus is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device also powers the cloud control plane that manages that device — three roles, one runtime, no magic paths.
 
-```bash
-pip install rufus-sdk[all]  # SQLite included, zero setup
+```
+DEVICE RUNTIME        CLOUD WORKER          CONTROL PLANE
+SQLite / WAL   │  PostgreSQL        │  PostgreSQL
+SyncExecution  │  CeleryExecution   │  CeleryExecution
+Offline-first  │  Horizontal scale  │  Policy & fleet mgmt
 ```
 
 ---
 
-## Why Rufus?
+## The Self-Hosting Insight
 
-| Feature | Rufus | Temporal | Airflow | AWS Step Functions |
-|---------|-------|----------|---------|-------------------|
-| **Setup** | 30 seconds (pip install) | 2-4 hours (cluster) | 1-2 hours (server) | 30 min (AWS setup) |
-| **Edge Deployment** | ✅ SQLite, offline-first | ❌ Requires server | ❌ Requires server | ❌ Cloud only |
-| **Network Overhead** | 0-2 calls/step | 4 calls/step | 3 calls/step | N/A (cloud) |
-| **Store-and-Forward** | ✅ Built-in for fintech | ❌ Not designed for | ❌ Not designed for | ❌ Not applicable |
-| **Language** | Python-native | Polyglot | Python | JSON DSL |
-| **Cost** | Free | Infrastructure | Infrastructure | Pay-per-execution |
+Rufus orchestrates itself: the same SDK running on a POS terminal also powers the control plane managing that terminal. Configuration rollout, audit aggregation, and policy enforcement are themselves Rufus workflows — battle-tested by their own use. There are no magic paths, no special cases, no separate orchestration tier.
 
 ---
 
-## Quick Start (30 Seconds)
+## Built for Anywhere the Network Is Unreliable
 
-### 1. Install
+- **Robotics & drones** — deterministic mission plans, air-gapped from ground control
+- **Surgical devices & medical wearables** — sterile procedure logs without cloud dependency
+- **Industrial IoT & factory automation** — local ML inference, no connectivity required
+- **Fleet intelligence & field operations** — resilient mobile data collection
+- **POS terminals, ATMs, mobile readers** — offline payments with store-and-forward
+- **Autonomous vehicles** — edge-computed decision workflows
+
+---
+
+## Three Pillars
+
+### 1. Air-Gapped Brain
+SQLite WAL, offline-first architecture, resume-from-disk without any cloud check-in. Workflows survive network loss, process restarts, and hardware reboots.
+
+### 2. Three Roles / One Runtime
+Device Runtime → Cloud Worker → Control Plane. Same SDK, same YAML, same step functions. Only the persistence and execution backends differ.
+
+### 3. Unbrickable Fleet
+ETag-based config push for hot-deploy without firmware updates. Definition snapshots protect running workflows from YAML changes. Heartbeat-based crash recovery detects and marks zombie workflows automatically.
+
+---
+
+## Quick Start — Docker Compose (30 seconds)
 
 ```bash
-# Install from PyPI (recommended)
-pip install rufus-sdk[all]
-
-# Or install from source for development
 git clone https://github.com/KamikaziD/rufus-sdk.git
-cd rufus-sdk
-pip install -e .
+cd rufus-sdk/docker
+cp .env.example .env   # Set RUFUS_ENCRYPTION_KEY
+docker compose up -d
 ```
 
-### 2. Run Your First Workflow
+Or use the published images directly:
 
-```bash
-# Run the SQLite task manager demo (zero setup)
-python examples/sqlite_task_manager/simple_demo.py
+```yaml
+# docker-compose.yml
+services:
+  rufus-server:
+    image: ruhfuskdev/rufus-server:0.5.0
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on: [postgres, redis]
+
+  rufus-worker:
+    image: ruhfuskdev/rufus-worker:0.5.0
+    env_file: .env
+    volumes:
+      - ./my_workflows:/app/workflows
+    depends_on: [postgres, redis]
+
+  rufus-flower:
+    image: ruhfuskdev/rufus-flower:0.5.0
+    ports: ["5555:5555"]
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: rufus
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: rufus_cloud
+
+  redis:
+    image: redis:7-alpine
 ```
 
-**What Just Happened?**
-- ✅ Created embedded SQLite database (no server needed)
-- ✅ Ran multi-step workflow with state persistence
-- ✅ Demonstrated workflow lifecycle (create → execute → complete)
-- ✅ All in-memory, **under 1 second**
+API at `http://localhost:8000` · Swagger UI (grouped) at `http://localhost:8000/docs` · Flower at `http://localhost:5555`
 
-### 3. Explore Examples
+---
+
+## 5-Minute Tutorial
 
 ```bash
-# Loan application with parallel risk checks
-python examples/loan_application/run_loan_workflow.py
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.0
+```
 
-# Payment terminal with offline support (fintech edge)
+```python
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.builder import WorkflowBuilder
+
+def validate_payment(state, context, **_):
+    return {"validated": True}
+
+def process_charge(state, context, **_):
+    print(f"Charging ${state.amount}")
+    return {"charged": True, "txn_id": "txn_abc123"}
+
+builder = WorkflowBuilder(
+    persistence_provider=SQLitePersistenceProvider(db_path=":memory:"),
+    execution_provider=SyncExecutionProvider(),
+)
+builder.register_workflow_inline("Payment", steps=[
+    {"name": "Validate", "type": "STANDARD", "function": validate_payment},
+    {"name": "Charge",   "type": "STANDARD", "function": process_charge},
+])
+
+workflow = builder.create_workflow("Payment", {"amount": 49.99})
+workflow.start()
+print(workflow.status)   # COMPLETED
+```
+
+Or run a complete example:
+
+```bash
 python examples/payment_terminal/terminal_simulator.py
-
-# Healthcare wearable with vital monitoring
+python examples/loan_application/run_loan_workflow.py
 python examples/healthcare_wearable/device_simulator.py
+```
+
+---
+
+## Architecture
+
+### Three Roles, One SDK
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                         Rufus SDK (Core)                       │
+│         WorkflowBuilder · Workflow · Providers · Steps         │
+└─────────────┬──────────────────┬──────────────────┬───────────┘
+              │                  │                  │
+   ┌──────────▼──────┐  ┌───────▼────────┐  ┌─────▼──────────┐
+   │  Device Runtime  │  │  Cloud Worker  │  │ Control Plane  │
+   │  SQLite / WAL    │  │  PostgreSQL    │  │  PostgreSQL    │
+   │  SyncExecution   │  │  Celery        │  │  Celery        │
+   │  Offline-first   │  │  Distributed   │  │  Fleet mgmt    │
+   └──────────────────┘  └────────────────┘  └────────────────┘
+```
+
+### Cloud Control Plane ↔ Edge Device
+
+```
+CLOUD (PostgreSQL)                EDGE (SQLite)
+├── Device Registry API           ├── RufusEdgeAgent
+├── Config Server (ETag)  <──>    ├── SyncManager (SAF)
+├── Transaction Sync API          ├── ConfigManager
+└── Settlement Gateway            └── Local Workflows
+```
+
+### Step Types (9 built-in)
+
+| Type | Description |
+|------|-------------|
+| `STANDARD` | Synchronous function execution |
+| `ASYNC` | Long-running task via Celery or thread pool |
+| `DECISION` | Conditional branching with `WorkflowJumpDirective` |
+| `PARALLEL` | Concurrent tasks with configurable merge strategy |
+| `HTTP` | Call external services — Go, Rust, Node.js (polyglot) |
+| `LOOP` | Iterate over collections or poll until condition |
+| `FIRE_AND_FORGET` | Non-blocking async for notifications/audit |
+| `CRON_SCHEDULE` | Scheduled recurring execution |
+| `HUMAN_IN_LOOP` | Pause workflow for manual approval |
+
+### Provider Pattern
+
+```python
+builder = WorkflowBuilder(
+    persistence_provider=SQLitePersistenceProvider("device.db"),    # or PostgreSQL
+    execution_provider=CeleryExecutionProvider(broker_url="..."),   # or Sync
+    observer=LoggingObserver(),
+)
 ```
 
 ---
 
 ## Key Features
 
-### 🏦 Fintech Edge Architecture
+### Offline-First Architecture
+- SQLite with WAL mode — data survives restarts and power loss
+- Store-and-Forward (SAF) queues transactions when offline; syncs on reconnect
+- Workflows resume from exactly where they stopped, no cloud check-in required
+- ETag-based config push — hot-deploy fraud rules or workflow updates without firmware
 
-**Built for POS terminals, ATMs, mobile readers, and kiosks:**
+### Production Reliability
+- **Saga Pattern** — automatic compensation (rollback) on any step failure
+- **Zombie Recovery** — heartbeat-based detection of crashed workers, auto-recovery
+- **Workflow Versioning** — YAML definition snapshots protect running workflows from updates
+- **Idempotent Operations** — safe retries without duplicate effects
 
-- **Offline-First** - SQLite + Store-and-Forward queues transactions when offline
-- **ETag-Based Config Push** - Hot-deploy fraud rules without firmware updates
-- **Transaction Compensation** - Saga pattern for automatic payment rollback
-- **Zombie Recovery** - Heartbeat-based detection of crashed workers
-- **Workflow Versioning** - Definition snapshots protect running workflows from YAML changes
+### Distributed Execution
+- Celery workers with Redis broker for horizontal scaling
+- Parallel step execution across multiple workers
+- Sub-workflow hierarchies with parent status bubbling
+- Human-in-the-loop with resume from any step
 
-**Architecture:**
+### Observability
+- Grouped Swagger UI at `/docs` (14 tag groups, 86 endpoints)
+- Flower monitoring at port 5555
+- Audit log table captures every workflow event
+- CLI metrics: `rufus metrics`, `rufus logs <id>`
 
-```
-CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
-├── Device Registry API                    ├── RufusEdgeAgent
-├── Config Server (ETag)         <─────>   ├── SyncManager (SAF)
-├── Transaction Sync API                   ├── ConfigManager
-└── Settlement Gateway                     └── Local Workflows
-```
-
-### 🚀 Production-Grade Workflow Engine
-
-- **Saga Pattern** - Automatic compensation (rollback) on failure
-- **Parallel Execution** - Run credit check + fraud detection simultaneously
-- **Human-in-the-Loop** - Pause workflows for manual approval
-- **Sub-Workflows** - Hierarchical composition with status bubbling
-- **HTTP Steps** - Polyglot workflows (call Go/Rust/Node.js services)
-- **LOOP/CRON Steps** - Continuous monitoring and scheduled workflows
-- **Decision Steps** - Declarative routing with condition evaluation
-
-### ⚡ Performance Optimizations
-
-- **uvloop** - 2-4x faster async I/O operations
-- **orjson** - 3-5x faster JSON serialization
-- **Import Caching** - 162x speedup for step function imports
-- **Optimized PostgreSQL Pool** - Tuned for high concurrency (10-50 connections)
-
-**Benchmark Results:**
-```
-Serialization: 2,453,971 ops/sec (orjson)
-Import Caching: 162x speedup
-Async Latency: 5.5µs p50, 12.7µs p99 (uvloop)
-Workflow Throughput: 703,633 workflows/sec (simplified)
-```
+### Performance
+- uvloop — 2–4× faster async I/O
+- orjson — 3–5× faster JSON serialization
+- 162× import cache speedup
+- Tunable PostgreSQL connection pool (default: min=10, max=50)
 
 ---
 
 ## Use Cases
 
-### 1. **Fintech - Payment Terminal (Offline Support)**
+### Fintech — Offline Payment Terminal
 
 ```yaml
-# Payment workflow with automatic compensation
 steps:
   - name: "Reserve_Inventory"
     type: "STANDARD"
     function: "inventory.reserve"
-    compensate_function: "inventory.release"  # Auto-rollback on failure
+    compensate_function: "inventory.release"   # Auto-rollback on failure
 
   - name: "Charge_Payment"
     type: "STANDARD"
     function: "payments.charge"
-    compensate_function: "payments.refund"  # Auto-refund on failure
+    compensate_function: "payments.refund"
 ```
 
-**Example:** [`examples/payment_terminal/`](examples/payment_terminal/)
-
----
-
-### 2. **Business Automation - Loan Application (Parallel Execution)**
+### Autonomous Systems — Parallel Sensor Fusion
 
 ```yaml
-# Parallel risk assessment
-- name: "Risk_Assessment"
+- name: "Sensor_Fusion"
   type: "PARALLEL"
   tasks:
-    - name: "Credit_Check"
-      function: "credit.check_bureau"
-    - name: "Fraud_Detection"
-      function: "fraud.run_ml_model"
-
-# Conditional routing
-- name: "Route_Application"
-  type: "DECISION"
-  routes:
-    - condition: "state.credit_score > 700"
-      target: "Fast_Track_Approval"
-    - default: "Manual_Underwriting"
+    - name: "GPS_Fix"
+      function: "sensors.gps_reading"
+    - name: "LiDAR_Scan"
+      function: "sensors.lidar_sweep"
+    - name: "Camera_Frame"
+      function: "sensors.camera_capture"
+  merge_strategy: "SHALLOW"
 ```
 
-**Example:** [`examples/loan_application/`](examples/loan_application/)
-
----
-
-### 3. **Healthcare IoT - Wearable Device (Continuous Monitoring)**
+### MedTech — Sterile Procedure Log (Air-Gapped)
 
 ```yaml
-# Continuous vital monitoring
-- name: "Process_Vital_Stream"
+- name: "Log_Procedure_Step"
   type: "LOOP"
   mode: "ITERATE"
-  iterate_over: "state.vital_readings"
+  iterate_over: "state.procedure_checklist"
   loop_body:
-    - name: "Analyze_Reading"
+    - name: "Record_Step"
       type: "STANDARD"
-      function: "health.analyze_vital"
-    - name: "Check_Anomaly"
+      function: "audit.record_step"
+    - name: "Verify_Complete"
       type: "DECISION"
       routes:
-        - condition: "state.heart_rate > 120 or state.heart_rate < 50"
-          target: "Trigger_Alert"
+        - condition: "state.step_verified == False"
+          target: "Alert_Surgeon"
 ```
 
-**Example:** [`examples/healthcare_wearable/`](examples/healthcare_wearable/)
-
----
-
-### 4. **Polyglot Integration - Multi-Language Pipeline**
+### Polyglot — Multi-Language Pipeline
 
 ```yaml
-# Orchestrate Go/Rust/Node.js services from Python
 steps:
-  # Python: Validation
   - name: "Validate"
     type: "STANDARD"
     function: "steps.validate"
 
-  # Go: High-performance processing
   - name: "Process_Go"
     type: "HTTP"
     http_config:
@@ -202,98 +284,72 @@ steps:
       method: "POST"
       body: "{{state.validated_data}}"
 
-  # Rust: ML inference
   - name: "Predict_Rust"
     type: "HTTP"
     http_config:
       url: "http://rust-ml:8080/predict"
       body: "{{state.features}}"
-
-  # Node.js: Notifications
-  - name: "Notify_Node"
-    type: "HTTP"
-    http_config:
-      url: "http://notification:3000/send"
-      body: "{{state.result}}"
 ```
 
 ---
 
 ## Documentation
 
-Rufus follows the [Diátaxis](https://diataxis.fr/) framework for comprehensive, organized documentation:
+Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 
-### 📖 **Getting Started**
+### Getting Started
 
-| Document | Description | Time |
-|----------|-------------|------|
-| [Getting Started Tutorial](docs/tutorials/getting-started.md) | 5-minute quickstart | ⭐ 5 min |
-| [Example Learning Path](examples/README.md) | 8 progressive examples (beginner → expert) | ⭐-⭐⭐⭐⭐ |
+| Document | Description |
+|----------|-------------|
+| [Getting Started Tutorial](docs/tutorials/getting-started.md) | First workflow in 5 minutes |
+| [Edge Device Deployment](docs/tutorials/edge-deployment.md) | Deploy to real hardware |
+| [Example Learning Path](examples/README.md) | 8 progressive examples |
 
-### 🛠️ **How-To Guides** (Task-Oriented)
+### How-To Guides
 
 | Guide | Use When |
 |-------|----------|
-| [Installation](docs/how-to-guides/installation.md) | Setting up SQLite, PostgreSQL, or Docker |
-| [Create Workflow](docs/how-to-guides/create-workflow.md) | Building your first workflow from scratch |
-| [Decision Steps](docs/how-to-guides/decision-steps.md) | Adding conditional branching |
-| [HTTP Steps](docs/how-to-guides/http-steps.md) | Calling external services (polyglot) |
-| [Human-in-the-Loop](docs/how-to-guides/human-in-loop.md) | Adding manual approval steps |
-| [Saga Mode](docs/how-to-guides/saga-mode.md) | Implementing compensation/rollback |
-| [Testing](docs/how-to-guides/testing.md) | Testing workflows with TestHarness |
-| [Deployment](docs/how-to-guides/deployment.md) | Deploying to Docker/Kubernetes |
-| [Troubleshooting](docs/how-to-guides/troubleshooting.md) | Common issues and solutions |
+| [Installation](docs/how-to-guides/installation.md) | SQLite, PostgreSQL, or Docker setup |
+| [Create Workflow](docs/how-to-guides/create-workflow.md) | Build a workflow from scratch |
+| [Saga Mode](docs/how-to-guides/saga-mode.md) | Compensation and rollback |
+| [Human-in-the-Loop](docs/how-to-guides/human-in-loop.md) | Manual approval steps |
+| [Deployment](docs/how-to-guides/deployment.md) | Docker / Kubernetes |
 
-[**All How-To Guides →**](docs/how-to-guides/)
-
-### 💡 **Explanation** (Understanding-Oriented)
-
-| Topic | Learn About |
-|-------|-------------|
-| [Architecture](docs/explanation/architecture.md) | System design and components |
-| [Provider Pattern](docs/explanation/provider-pattern.md) | Pluggable persistence/execution |
-| [Workflow Lifecycle](docs/explanation/workflow-lifecycle.md) | Creation → execution → completion |
-| [Saga Pattern](docs/explanation/saga-pattern.md) | Distributed transaction compensation |
-| [Zombie Recovery](docs/explanation/zombie-recovery.md) | Handling worker crashes |
-| [Workflow Versioning](docs/explanation/workflow-versioning.md) | Definition snapshots for safe deployments |
-| [Edge Architecture](docs/explanation/edge-architecture.md) | Fintech edge device design |
-| [Confucius Heritage](docs/explanation/confucius-heritage.md) | Feature provenance and evolution |
-
-[**All Explanations →**](docs/explanation/)
-
-### 📚 **Reference** (Information-Oriented)
+### Reference
 
 | Reference | Contains |
 |-----------|----------|
-| [API Reference](docs/reference/api/) | WorkflowBuilder, Workflow, Providers, StepContext, Directives |
-| [YAML Schema](docs/reference/configuration/yaml-schema.md) | Complete workflow YAML specification |
-| [Step Types](docs/reference/configuration/step-types.md) | All 9 step types with configurations |
-| [CLI Commands](docs/reference/configuration/cli-commands.md) | All 26 rufus CLI commands |
-| [Database Schema](docs/reference/configuration/database-schema.md) | PostgreSQL/SQLite table schemas |
+| [YAML Schema](docs/reference/configuration/yaml-schema.md) | Complete workflow YAML spec |
+| [Step Types](docs/reference/configuration/step-types.md) | All 9 step types |
+| [Database Schema](docs/reference/configuration/database-schema.md) | 33 cloud + 10 edge tables |
+| [Configuration](docs/reference/configuration/configuration.md) | All environment variables |
+| [CLI Commands](docs/reference/configuration/cli-commands.md) | All 26 CLI commands |
 
-[**All Reference Docs →**](docs/reference/)
+### Explanation
 
-### ⚠️ **Advanced Topics** (Expert-Level)
+| Topic | Learn About |
+|-------|-------------|
+| [Architecture](docs/explanation/architecture.md) | System design and three roles |
+| [Self-Hosting](docs/explanation/self-hosting.md) | Rufus orchestrates itself |
+| [Zombie Recovery](docs/explanation/zombie-recovery.md) | Worker crash handling |
+| [Workflow Versioning](docs/explanation/workflow-versioning.md) | YAML snapshots |
+| [Performance](docs/explanation/performance.md) | uvloop, orjson, pooling |
+
+### Advanced Topics
 
 | Topic | Read Before |
 |-------|-------------|
-| [Executor Portability](docs/advanced/executor-portability.md) | ⚠️ CRITICAL: Stateless step functions |
-| [Dynamic Injection](docs/advanced/dynamic-injection.md) | ⚠️ CAUTION: Non-determinism pitfalls |
+| [Executor Portability](docs/advanced/executor-portability.md) | CRITICAL: Stateless step functions |
 | [Custom Providers](docs/advanced/custom-providers.md) | Building custom persistence/execution |
-| [Security](docs/advanced/security.md) | PCI-DSS compliance, encryption, RBAC |
-| [Resource Management](docs/advanced/resource-management.md) | Connection pooling, memory management |
+| [Extending Rufus](docs/advanced/extending-rufus.md) | Custom tables, custom routers |
+| [Security](docs/advanced/security.md) | PCI-DSS, encryption, device auth |
 
-[**All Advanced Topics →**](docs/advanced/)
+### Appendices
 
-### 📚 **Appendices**
-
-- [Glossary](docs/appendices/glossary.md) - 50+ term definitions
-- [Changelog](docs/appendices/changelog.md) - Version history (v0.1.0 → v0.3.1)
-- [Roadmap](docs/appendices/roadmap.md) - Development plans through 2026
-- [Migration Notes](docs/appendices/migration-notes.md) - Upgrade guides
-- [Contributing](docs/appendices/contributing.md) - Contribution guidelines
-
-[**All Appendices →**](docs/appendices/)
+- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.5.0
+- [Roadmap](docs/appendices/roadmap.md)
+- [Migration Notes](docs/appendices/migration-notes.md)
+- [Glossary](docs/appendices/glossary.md)
 
 ---
 
@@ -303,117 +359,62 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework for comprehensive,
 # Configuration
 rufus config show                # Show current configuration
 rufus config set-persistence     # Choose database (SQLite/PostgreSQL)
-rufus config set-execution       # Choose executor (sync/thread_pool)
+rufus config set-execution       # Choose executor (sync/thread_pool/celery)
 
-# Workflow Management
-rufus list                       # List all workflows
+# Workflow management
+rufus list                       # List workflows
 rufus start <workflow-type>      # Start a workflow
-rufus show <workflow-id>         # Show workflow details
+rufus show <workflow-id>         # Show details + state
 rufus resume <workflow-id>       # Resume paused workflow
 rufus cancel <workflow-id>       # Cancel running workflow
 rufus logs <workflow-id>         # View execution logs
 
-# Database Management
-cd src/rufus
+# Database
 alembic upgrade head             # Apply migrations (PostgreSQL)
-alembic current                  # Show current version
-rufus db init                    # Initialize SQLite (auto-creates schema)
+rufus db init                    # Initialize SQLite schema
 
-# Zombie Recovery
+# Zombie recovery
 rufus scan-zombies --fix         # Detect and recover crashed workflows
-rufus zombie-daemon              # Run continuous monitoring
-
-# Validation
-rufus validate workflow.yaml     # Validate YAML syntax
+rufus zombie-daemon              # Continuous monitoring daemon
 ```
-
----
-
-## Architecture
-
-### Core Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Your Application                         │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │         WorkflowBuilder (YAML Loader)                 │  │
-│  └────────────────────┬─────────────────────────────────┘  │
-│                       │                                     │
-│  ┌────────────────────▼─────────────────────────────────┐  │
-│  │         Workflow (Orchestration Engine)              │  │
-│  │  - State management (Pydantic validation)            │  │
-│  │  - Step execution (sync/async/parallel)              │  │
-│  │  - Directives (pause, jump, sub-workflow)            │  │
-│  │  - Saga compensation (rollback)                      │  │
-│  └────────┬──────────────┬────────────────┬─────────────┘  │
-│           │              │                │                 │
-│     ┌─────▼─────┐  ┌────▼────┐    ┌─────▼──────┐         │
-│     │Persistence│  │Execution│    │Observability│         │
-│     │ Provider  │  │ Provider│    │  Provider   │         │
-│     └─────┬─────┘  └────┬────┘    └─────┬──────┘         │
-└───────────┼─────────────┼───────────────┼────────────────┘
-            │             │               │
-     ┌──────▼──────┐ ┌───▼────┐    ┌────▼─────┐
-     │  Database   │ │Workers │    │  Logs    │
-     │(SQLite/PG)  │ │(Celery)│    │ (Metrics)│
-     └─────────────┘ └────────┘    └──────────┘
-```
-
-### Provider Pattern (Pluggable)
-
-- **PersistenceProvider** - SQLite, PostgreSQL, Redis, Memory
-- **ExecutionProvider** - Sync, Thread Pool, Celery
-- **WorkflowObserver** - Logging, Metrics, Real-time events
 
 ---
 
 ## Testing
 
-Run the full test suite:
-
 ```bash
-# Unit tests
 pytest tests/sdk/ -v
 
 # Integration tests (requires Docker)
 cd tests/integration
 docker compose up -d
 pytest test_celery_execution.py -v
-
-# Benchmarks
-python tests/benchmarks/workflow_performance.py
 ```
 
 ---
 
 ## Contributing
 
-We welcome contributions! See [Contributing Guide](docs/appendices/contributing.md) for:
-- Code of conduct
-- Development setup
-- Coding standards (PEP 8, type hints, 100 char lines)
-- Testing requirements (80% coverage)
-- Pull request process
+See [Contributing Guide](docs/appendices/contributing.md) for code of conduct, development setup, coding standards (PEP 8, type hints), testing requirements, and PR process.
 
 ---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details.
+MIT License — See [LICENSE](LICENSE) file for details.
 
 ---
 
-## Support
+## Distribution
 
-- 📖 [Documentation](docs/index.md)
-- 💬 [GitHub Discussions](https://github.com/KamikaziD/rufus-sdk/discussions)
-- 🐛 [Report Issues](https://github.com/KamikaziD/rufus-sdk/issues)
+**Docker Hub:** `ruhfuskdev/rufus-server:0.5.0` · `ruhfuskdev/rufus-worker:0.5.0` · `ruhfuskdev/rufus-flower:0.5.0`
+
+**TestPyPI:**
+```bash
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.0
+```
 
 ---
 
-**Current Version:** v0.3.1 (Documentation Release)
-**Next Release:** v0.9.1 (March 2026) - Bug fixes and polish
-**Stability Release:** v1.0.0 (Q2 2026) - Production ready
-
-Built with ❤️ for fintech edge computing
+**Current Version:** v0.5.0
+**Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

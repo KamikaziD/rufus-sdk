@@ -2,9 +2,9 @@
 
 Rufus SDK development roadmap with planned features, priorities, and timelines.
 
-**Last Updated:** 2026-02-13
-**Current Version:** 0.3.0
-**Next Major Release:** 1.0.0 (Q2 2026)
+**Last Updated:** 2026-02-24
+**Current Version:** 0.5.0
+**Next Major Release:** 1.0.0
 
 ---
 
@@ -24,17 +24,21 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 ## Release Timeline
 
 ```
-2026-02 ━━ v0.3.0 (Current)
+2026-02 ━━ v0.3.0 (Documentation release)
    │
-2026-03 ━━ v0.9.1 (Bug Fixes & Polish)
+2026-02 ━━ v0.4.0 (RUFUS_CUSTOM_ROUTERS)
    │
-2026-04 ━━ v0.9.2 (Ecosystem Expansion)
+2026-02 ━━ v0.4.1 (OpenAPI tags, grouped Swagger UI)
    │
-2026 Q2 ━━ v1.0.0 (Production Release) ⭐
+2026-02 ━━ v0.4.2 (25 endpoint tests, error handling)
    │
-2026 Q3 ━━ v1.1.0 (Advanced Features)
+2026-02 ━━ v0.5.0 (Current ⭐ — 33-table schema consolidation)
    │
-2026 Q4 ━━ v1.2.0 (Enterprise & Scale)
+        ━━ v0.6.0 (OpenTelemetry, Prometheus metrics)
+   │
+        ━━ v0.7.0 (GPU inference step type, mTLS, HSM integration)
+   │
+        ━━ v1.0.0 (Stable API guarantee)
 ```
 
 ---
@@ -375,7 +379,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 
 ## Feature Status
 
-### Completed (v0.3.0 and earlier)
+### Completed (v0.5.0 and earlier)
 
 #### Core SDK
 - ✅ Workflow orchestration engine
@@ -409,6 +413,8 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 - ✅ Workflow heartbeats
 - ✅ Zombie detection & recovery
 - ✅ Debug UI (web interface)
+- ✅ OpenAPI tags / grouped Swagger UI (14 tag groups, 86 endpoints) — v0.4.1
+- ✅ RUFUS_CUSTOM_ROUTERS for user-defined API extensions — v0.4.0
 
 #### CLI
 - ✅ 21 commands across 5 categories
@@ -416,6 +422,11 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 - ✅ Rich terminal output
 - ✅ JSON output mode
 - ✅ Zombie scanning & recovery daemon
+
+#### Database & Schema
+- ✅ 33-table PostgreSQL schema under Alembic management — v0.5.0
+- ✅ 10-table SQLite edge schema (auto-created) — v0.5.0
+- ✅ Edge-specific tables: saf_pending_transactions, device_config_cache, edge_sync_state — v0.5.0
 
 #### Documentation
 - ✅ Quickstart guide
@@ -549,5 +560,4 @@ See `contributing.md` for details on how to help.
 
 **Note:** This roadmap is a living document and may change based on community feedback, technical constraints, and strategic priorities. Features may be added, removed, or rescheduled.
 
-**Last Updated:** 2026-02-13
-**Next Review:** 2026-03-01 (monthly updates)
+**Last Updated:** 2026-02-24

@@ -236,6 +236,63 @@ pytest tests/
 
 ---
 
+### Security
+
+#### `RUFUS_ENCRYPTION_KEY`
+
+**Type:** `string`
+
+**Required:** **YES — workflows cannot be decrypted without this key**
+
+**Description:** Fernet symmetric encryption key for workflow state encryption. Must be set before starting the server or workers. All nodes in a cluster must share the same key.
+
+**Generate a key:**
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Example:**
+
+```bash
+export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
+```
+
+**Key rotation:** Deploy the new key, then gradually re-encrypt existing workflows. See [Security](../advanced/security.md) for the rotation procedure.
+
+---
+
+### Server Extensions
+
+#### `RUFUS_CUSTOM_ROUTERS`
+
+**Type:** `string`
+
+**Default:** `""` (empty — no custom routers)
+
+**Description:** Comma-separated dotted paths to FastAPI `APIRouter` objects. Routers are imported and mounted on server startup, enabling user-defined API extensions without modifying core server code.
+
+**Example:**
+
+```bash
+export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
+```
+
+**Router definition:**
+
+```python
+# myapp/routers/payments.py
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/api/v1/payments", tags=["Payments"])
+
+@router.get("/summary")
+async def payment_summary():
+    return {"total_today": 42}
+```
+
+---
+
 ## CLI Configuration File
 
 **Location:** `~/.rufus/config.yaml` (or `$RUFUS_CONFIG_PATH`)

@@ -2,6 +2,43 @@
 
 Rufus SDK is built on a layered architecture that separates concerns while remaining flexible enough to adapt to different deployment scenarios—from embedded edge devices to large-scale cloud deployments.
 
+## Three Roles, One Runtime
+
+The central architectural insight: **the same SDK powers all three deployment roles.** Only the persistence and execution backends differ.
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                         Rufus SDK (Core)                       │
+│         WorkflowBuilder · Workflow · Providers · Steps         │
+└─────────────┬──────────────────┬──────────────────┬───────────┘
+              │                  │                  │
+   ┌──────────▼──────┐  ┌───────▼────────┐  ┌─────▼──────────┐
+   │  Device Runtime  │  │  Cloud Worker  │  │ Control Plane  │
+   │                  │  │                │  │                │
+   │  SQLite / WAL    │  │  PostgreSQL    │  │  PostgreSQL    │
+   │  SyncExecution   │  │  Celery        │  │  Celery        │
+   │  Offline-first   │  │  Horizontal    │  │  Fleet mgmt    │
+   └──────────────────┘  └────────────────┘  └────────────────┘
+```
+
+**Device Runtime** — runs on POS terminals, ATMs, drones, surgical devices. SQLite in WAL mode, SyncExecutionProvider, operates indefinitely without network. Reconnects and syncs via Store-and-Forward.
+
+**Cloud Worker** — distributed Celery workers processing ASYNC and PARALLEL steps. PostgreSQL for state, Redis for broker. Scales horizontally; used for the heavy computation and long-running tasks that don't need to run on-device.
+
+**Control Plane** — FastAPI server with the full device management API (86 endpoints). Uses PostgreSQL + Celery for its own workflow steps. Configuration rollout, audit aggregation, and policy enforcement are themselves Rufus workflows — the self-hosting model.
+
+### The Self-Hosting Insight
+
+There is no separate orchestration tier. The control plane that manages edge devices runs on the same SDK as those devices. This means:
+
+- **No magic paths** — everything is a Rufus workflow or a provider implementation
+- **Battle-tested** — the control plane validates the SDK by running it in production
+- **Consistent semantics** — saga rollback, zombie recovery, and versioning work identically on device and cloud
+
+See [Self-Hosting](self-hosting.md) for a full explanation.
+
+---
+
 ## High-Level Overview
 
 ```

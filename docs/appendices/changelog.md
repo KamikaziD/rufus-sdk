@@ -9,9 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.5.0] - 2026-02-24
+
+### Changed
+- Database schema consolidation: `src/rufus/db_schema/database.py` is now the single source of truth for all **33 PostgreSQL tables** (previously only ~7 were Alembic-managed)
+- `docker/init-db.sql` stripped to PostgreSQL extensions only (`uuid-ossp`, `pg_trgm`); all schema creation and seed data migrated to Alembic
+
 ### Added
-- Appendices documentation (glossary, changelog, roadmap, migration notes, contributing)
-- Planning documents archive
+- 27 previously-unmanaged tables now under Alembic management:
+  - Core workflow: `tasks`, `compensation_log`, `scheduled_workflows`
+  - Edge device: `worker_nodes`, expanded `device_commands` (+13 columns: `command_id`, retry fields, batch/broadcast links)
+  - Commands & broadcasting: `command_broadcasts`, `command_batches`, `command_templates`, `command_schedules`, `schedule_executions`
+  - Audit: `command_audit_log`, `audit_retention_policies`
+  - Authorization / RBAC: `authorization_roles`, `role_assignments`, `authorization_policies`, `command_approvals`, `approval_responses`
+  - Versioning: `command_versions`, `command_changelog`
+  - Webhooks & rate limiting: `webhook_registrations`, `webhook_deliveries`, `rate_limit_rules`, `rate_limit_tracking`
+  - Edge config & SAF: `device_configs`, `saf_transactions`, `device_assignments`, `policies`
+- 3 new edge-specific SQLite tables: `saf_pending_transactions`, `device_config_cache`, `edge_sync_state`
+- `src/rufus/db_schema/edge_database.py` — edge SQLite schema constants and documentation
+- Helper functions: `get_core_tables()`, `get_cloud_only_tables()`, `get_edge_device_tables()`
+- Alembic migration `a1b2c3d4e5f6` — creates all missing tables, TSVECTOR column, seed data (roles, policies, rate limits, command versions)
+- `TECHNICAL_INFORMATION.md` §16: schema reference and table inventory
+- Docker Hub images (linux/amd64 + linux/arm64): `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`, `ruhfuskdev/rufus-flower:0.5.0`
+
+---
+
+## [0.4.2] - 2026-02-23
+
+### Added
+- 25 endpoint tests covering all major API routes
+- OpenAPI `responses=` annotations on key route decorators
+
+### Fixed
+- `_get_workflow_or_404` helper added; fixed bare `get_workflow()` calls in `get_workflow_status` and `next_workflow_step`
+- Exception-to-status mapping: `ValueError`→400, `WorkflowFailedException`→422, `SagaWorkflowException`→409
+- `rate_limit_check` crash when Redis client is `None` in test environments
+
+---
+
+## [0.4.1] - 2026-02-23
+
+### Added
+- OpenAPI tags on all 86 route decorators across 14 tag groups:
+  Health, Workflows, Devices, Commands, Policies, Webhooks, Broadcasts,
+  Batch Operations, Scheduling, Configuration, Audit, Authorization,
+  Rate Limiting, Monitoring
+- Grouped, navigable Swagger UI at `/docs`
+
+### Changed
+- API version bumped to `0.4.0` in FastAPI constructor
+
+---
+
+## [0.4.0] - 2026-02-23
+
+### Added
+- `RUFUS_CUSTOM_ROUTERS` environment variable: comma-separated dotted paths to FastAPI `APIRouter` objects, mounted on server startup without modifying core server code
 
 ---
 
@@ -296,4 +351,4 @@ No security issues reported to date.
 
 **Note:** Pre-1.0 versions (0.x) may include minor API changes. See `migration-notes.md` for version-to-version upgrade guides.
 
-**Last Updated:** 2026-02-13
+**Last Updated:** 2026-02-24

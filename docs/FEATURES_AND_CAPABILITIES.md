@@ -1,7 +1,7 @@
 # Rufus Features & Capabilities
 
-**Last Updated:** 2026-02-02
-**Version:** 0.9.0 (Pre-release)
+**Last Updated:** 2026-02-24
+**Version:** 0.5.0 (Stable)
 
 This document provides a comprehensive catalog of all Rufus SDK features, their implementation status, stability, and links to documentation and examples.
 
@@ -358,19 +358,40 @@ workflow.enable_saga_mode()
 
 ## Version History
 
-### v0.9.0 (Current - Pre-release)
+### v0.5.0 (Current — Stable)
+- ✅ 33-table PostgreSQL schema under Alembic management
+- ✅ 10-table SQLite edge schema (auto-created)
+- ✅ Database schema consolidation (`database.py` as single source of truth)
+- ✅ Edge-specific tables: `saf_pending_transactions`, `device_config_cache`, `edge_sync_state`
+- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`, `ruhfuskdev/rufus-flower:0.5.0`
+
+### v0.4.2
+- ✅ 25 endpoint tests covering all major API routes
+- ✅ Error handling: 404/422/409 responses
+- ✅ `_get_workflow_or_404` helper; proper exception-to-status mapping
+- ✅ `rate_limit_check` crash fix for test environments
+
+### v0.4.1
+- ✅ OpenAPI tags on all 86 route decorators (14 tag groups)
+- ✅ Grouped Swagger UI at `/docs`
+
+### v0.4.0
+- ✅ `RUFUS_CUSTOM_ROUTERS` environment variable for user-defined API extensions
+
+### v0.3.0
 - ✅ Core SDK complete
 - ✅ 21 CLI commands
 - ✅ SQLite auto-initialization
 - ✅ Zombie recovery
 - ✅ Workflow versioning
-- ✅ Performance optimizations
+- ✅ Performance optimizations (uvloop, orjson, connection pooling, import caching)
 
-### v1.0.0 (Target: Q2 2026)
-- Enhanced monitoring
-- Web UI (separate project)
-- Production deployment templates
-- Additional persistence providers
+### v1.0.0 (Planned)
+- OpenTelemetry integration
+- Prometheus metrics endpoint
+- GPU inference step type
+- mTLS device authentication
+- HSM integration for PCI-DSS
 
 ---
 
@@ -393,5 +414,5 @@ To request a new feature:
 
 ---
 
-**Last Updated:** 2026-02-02
+**Last Updated:** 2026-02-24
 **Maintained By:** Rufus SDK Team

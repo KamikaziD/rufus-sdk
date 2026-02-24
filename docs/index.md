@@ -1,6 +1,10 @@
 # Rufus SDK Documentation
 
-**Rufus** is a Python-native workflow engine for fintech edge devices - POS terminals, ATMs, mobile readers, and kiosks. This documentation helps you learn, build, reference, and understand Rufus workflows.
+**Rufus** is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device (POS terminal, ATM, drone, surgical device) also powers the cloud control plane that manages that device — three roles, one runtime, no magic paths.
+
+**The self-hosting insight:** Rufus orchestrates itself. Configuration rollout, audit aggregation, and policy enforcement on the control plane are themselves Rufus workflows, battle-tested by their own use.
+
+**Built for:** Robotics, drones, surgical devices, industrial IoT, fleet intelligence, POS terminals, ATMs — anywhere the network is unreliable, absent, or a safety risk.
 
 ## Documentation Structure
 
@@ -112,7 +116,8 @@ Context, background, and design decisions:
 - **[Zombie Workflow Recovery](explanation/zombie-recovery.md)** - Handling worker crashes
 - **[Workflow Versioning](explanation/workflow-versioning.md)** - Definition snapshots
 
-### Fintech & Edge
+### Fintech, Edge & Self-Hosting
+- **[Self-Hosting](explanation/self-hosting.md)** - Rufus orchestrates itself
 - **[Edge Fintech Architecture](explanation/edge-architecture.md)** - POS terminals, ATMs
 - **[Store-and-Forward](explanation/store-and-forward.md)** - Offline transaction handling
 - **[Performance Model](explanation/performance.md)** - Throughput, latency, optimization
@@ -174,5 +179,5 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/) for s
 - **Reference** provides technical accuracy
 - **Explanation** builds understanding
 
-**Last Updated:** 2026-02-13
-**Rufus Version:** 0.3.0
+**Last Updated:** 2026-02-24
+**Rufus Version:** 0.5.0

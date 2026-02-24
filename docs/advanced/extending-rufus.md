@@ -1,6 +1,84 @@
 # Advanced: Extending Rufus
 
-Guide to adding new capabilities to Rufus: custom step types, observers, plugins, and contributing back to the project.
+Guide to adding new capabilities to Rufus: custom step types, observers, custom database tables, custom API routes, plugins, and contributing back to the project.
+
+---
+
+## Extending the Database Schema
+
+Rufus's PostgreSQL schema is defined in `src/rufus/db_schema/database.py` using SQLAlchemy. All 33 cloud tables share a single `metadata` object, which means you can add your own tables and have them managed by Alembic alongside the core tables.
+
+### Adding Custom Tables
+
+```python
+# myapp/schema.py
+from rufus.db_schema.database import metadata
+from sqlalchemy import Table, Column, String, Integer, DateTime, Text, func
+
+# Define your table using the shared metadata
+payment_events = Table(
+    "payment_events", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("device_id", String(100), nullable=False),
+    Column("amount_cents", Integer, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("pan_token", String(200)),     # Never store raw PANs
+    Column("result", String(20)),
+    Column("occurred_at", DateTime(timezone=True), server_default=func.now()),
+    Column("raw_response", Text),
+)
+```
+
+Then generate and apply the migration:
+
+```bash
+cd src/rufus
+alembic revision --autogenerate -m "add_payment_events"
+# Always review the generated file before applying
+alembic upgrade head
+```
+
+**Note:** Alembic auto-generate has a ~15% false-positive rate. Always review the generated migration before applying it.
+
+### Edge SQLite Schema
+
+For edge-device tables, add them to `SQLITE_SCHEMA` in `src/rufus/implementations/persistence/sqlite.py`. These tables are auto-created by `CREATE TABLE IF NOT EXISTS` on first startup — no Alembic needed.
+
+---
+
+## Custom API Routes (RUFUS_CUSTOM_ROUTERS)
+
+Mount additional FastAPI routers on the Rufus server without modifying core server code:
+
+### Step 1: Define your router
+
+```python
+# myapp/routers/payments.py
+from fastapi import APIRouter, Depends
+from typing import Optional
+
+router = APIRouter(prefix="/api/v1/payments", tags=["Payments"])
+
+@router.get("/summary")
+async def payment_summary(device_id: Optional[str] = None):
+    # Query your custom payment_events table here
+    return {"total_today": 42, "device_id": device_id}
+
+@router.post("/void/{txn_id}")
+async def void_transaction(txn_id: str):
+    return {"voided": True, "txn_id": txn_id}
+```
+
+### Step 2: Set the environment variable
+
+```bash
+export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router"
+
+# Multiple routers (comma-separated)
+export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
+```
+
+The routers are imported at server startup and mounted on the FastAPI app. They appear automatically in the Swagger UI at `/docs`.
 
 ---
 

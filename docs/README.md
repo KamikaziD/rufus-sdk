@@ -136,24 +136,26 @@ All examples are located in [../examples/](../examples/)
 
 ## 🗺️ Documentation Roadmap
 
-### ✅ Available Now (v0.9.0)
+### ✅ Available Now (v0.5.0)
 - Quickstart Guide
 - Usage Guide
 - YAML Reference
 - CLI Reference
 - API Reference
 - Features & Capabilities catalog
-- Outstanding Features roadmap
+- Changelog (v0.1.0 → v0.5.0)
+- Migration notes (v0.4.x → v0.5.0)
 - Working examples (6 examples)
+- Diátaxis-structured documentation
 
-### 🚧 In Progress (v0.9.1)
+### 🚧 In Progress
 - Advanced Guide (comprehensive)
 - Testing Guide
 - Deployment Guide
 - Performance Tuning Guide
 - Troubleshooting Guide
 
-### 📋 Planned (v1.0)
+### 📋 Planned
 - Architecture documentation
 - Step-by-step specialized guides
 - Video tutorials
@@ -268,9 +270,8 @@ Historical documentation archived for reference:
 
 ---
 
-**Last Updated:** 2026-02-02
-**Documentation Version:** 0.9.0
-**Next Review:** 2026-03-01
+**Last Updated:** 2026-02-24
+**Documentation Version:** 0.5.0
 
 ---
 

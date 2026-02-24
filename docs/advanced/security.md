@@ -517,6 +517,120 @@ bandit -r src/
 
 ---
 
+## Fintech & PCI-DSS Patterns
+
+This section covers security patterns specific to payment applications on Rufus edge devices.
+
+### RUFUS_ENCRYPTION_KEY Setup
+
+All workflow state is encrypted at rest using a Fernet key. **This key must be set before starting the server or any worker.**
+
+```bash
+# Generate key
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# Set in environment (or .env file)
+export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
+```
+
+**Key rotation procedure:**
+
+1. Generate a new key
+2. Deploy the new key alongside the old key (dual-key mode)
+3. Run a migration job to re-encrypt existing workflow states
+4. Remove the old key from all environments
+5. Verify all workflows decrypt correctly before removing old key
+
+### Card Tokenization Pattern
+
+Never store PANs (Primary Account Numbers) in workflow state. Store a token reference instead.
+
+```python
+class PaymentState(BaseModel):
+    # OK: opaque token (safe to store)
+    card_token: str           # e.g., "tok_1a2b3c4d5e6f"
+
+    # OK: last 4 digits (safe to store under PCI-DSS)
+    card_last_four: str       # e.g., "4242"
+
+    # OK: card brand (safe to store)
+    card_brand: str           # e.g., "Visa"
+
+    # NEVER: raw PAN
+    # card_number: str        # NEVER store this
+
+def tokenize_card(state, context, card_number: str, **_):
+    """Call tokenization service immediately; never persist card_number."""
+    token = call_tokenization_service(card_number)
+    return {
+        "card_token": token,
+        "card_last_four": card_number[-4:],
+        "card_brand": detect_brand(card_number),
+    }
+```
+
+### Transaction Signing
+
+For high-value transactions, add a cryptographic signature to the workflow state:
+
+```python
+import hmac
+import hashlib
+
+def sign_transaction(state, context, **_):
+    """Add HMAC signature to transaction before sending to acquirer."""
+    signing_key = os.environ["TRANSACTION_SIGNING_KEY"].encode()
+    payload = f"{state.card_token}:{state.amount_cents}:{state.merchant_id}"
+    signature = hmac.new(signing_key, payload.encode(), hashlib.sha256).hexdigest()
+    return {"transaction_signature": signature}
+```
+
+### Device Authentication
+
+Edge devices authenticate to the control plane using device-specific API keys stored in `edge_devices.api_key`. For higher assurance, rotate device keys on every sync using a challenge-response pattern:
+
+```python
+def refresh_device_token(state, context, **_):
+    """Rotate device API key on each successful sync."""
+    new_key = secrets.token_urlsafe(32)
+    # Update in control plane DB + return to device
+    return {"new_api_key": new_key, "key_rotated_at": datetime.utcnow().isoformat()}
+```
+
+### PCI Audit Trail
+
+The `command_audit_log` table (cloud) and `workflow_audit_log` table (edge and cloud) together provide the audit trail required for PCI-DSS compliance. Every workflow event — start, step execution, compensation, completion, failure — is recorded with timestamp and step name.
+
+To query for a device's transaction audit trail:
+
+```sql
+SELECT w.id, w.workflow_type, w.status, a.event_type, a.step_name, a.timestamp
+FROM workflow_executions w
+JOIN workflow_audit_log a ON a.workflow_id = w.id
+WHERE w.owner_id = 'device-001'
+  AND w.created_at >= NOW() - INTERVAL '30 days'
+ORDER BY a.timestamp;
+```
+
+### Offline Floor Limit Pattern
+
+When the device has no network, approve transactions below the floor limit without cloud authorization:
+
+```python
+OFFLINE_FLOOR_LIMIT_CENTS = 5000  # $50
+
+def authorize_payment(state, context, **_):
+    """Authorize offline if below floor limit; route online otherwise."""
+    if state.amount_cents <= OFFLINE_FLOOR_LIMIT_CENTS and not context.network_available:
+        return {"authorized": True, "auth_mode": "OFFLINE_FLOOR"}
+    # Fall through to online authorization step
+    raise WorkflowJumpDirective(target_step="Online_Authorize")
+```
+
+This pattern is safe because Store-and-Forward will sync the transaction when connectivity returns, and the acquirer can dispute any offline approvals that fail fraud checks.
+
+---
+
 ## Summary
 
 **Security Principles:**
@@ -526,5 +640,11 @@ bandit -r src/
 4. **Log all security events** (audit trail)
 5. **Implement access control** (RBAC)
 6. **Regular security scanning** (dependencies, code)
+
+**For fintech applications:**
+- Set `RUFUS_ENCRYPTION_KEY` before starting any server or worker
+- Never store PANs in workflow state — tokenize immediately and store the token
+- Use `workflow_audit_log` and `command_audit_log` for PCI-DSS compliance audit trail
+- Rotate device API keys on each sync for forward secrecy
 
 **For PCI-DSS compliance**, consult with a Qualified Security Assessor (QSA).
