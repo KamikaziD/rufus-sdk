@@ -14,6 +14,22 @@ from rufus.models import (
     MergeStrategy, MergeConflictBehavior, JavaScriptWorkflowStep
 )
 
+
+def _resolve_state_path(state_dict: dict, path: str):
+    """Resolve a dot-notation path against a state dict.
+
+    Example: 'devices.active' -> state_dict['devices']['active']
+    """
+    current = state_dict
+    for key in path.split('.'):
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            current = getattr(current, key, None)
+        if current is None:
+            return None
+    return current
+
 # Use string literal type hints for providers to avoid circular import issues
 # from rufus.providers.persistence import PersistenceProvider
 # from rufus.providers.execution import ExecutionProvider
@@ -261,12 +277,63 @@ class Workflow:
             metadata=metadata
         )
 
-    def _execute_loop_step(self, step: LoopStep, state: BaseModel, context: StepContext) -> Dict[str, Any]:
-        """Placeholder for loop step execution logic."""
-        # The actual loop logic would go here, iterating over items or evaluating conditions.
-        # For now, it's a stub to allow the test to pass.
-        print(f"[LOOP] Executing loop step: {step.name}")
-        return {"loop_executed": True, "step_name": step.name}
+    async def _execute_loop_step(self, step: LoopStep, state: BaseModel, context: StepContext) -> Dict[str, Any]:
+        """Execute a LOOP step in either ITERATE or WHILE mode."""
+        print(f"[LOOP] Executing loop step: {step.name}, mode={step.mode}")
+
+        if step.mode == "ITERATE":
+            items = _resolve_state_path(self.state.model_dump(), step.iterate_over) if step.iterate_over else []
+            if not isinstance(items, list):
+                raise ValueError(
+                    f"LOOP step '{step.name}': iterate_over '{step.iterate_over}' "
+                    f"did not resolve to a list (got {type(items).__name__})"
+                )
+            results = []
+            for i, item in enumerate(items):
+                if i >= step.max_iterations:
+                    break
+                loop_context = StepContext(
+                    workflow_id=context.workflow_id,
+                    step_name=context.step_name,
+                    loop_item=item,
+                    loop_index=i,
+                )
+                step_result = {}
+                for body_step in step.loop_body:
+                    step_result = await self.execution.execute_sync_step_function(
+                        body_step.func, self.state, loop_context
+                    )
+                    if step_result:
+                        self._apply_merge_strategy(
+                            self.state, step_result,
+                            MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW
+                        )
+                results.append(step_result or {})
+            return {
+                "loop_results": results,
+                "loop_iterations": min(len(items), step.max_iterations),
+            }
+
+        elif step.mode == "WHILE":
+            iteration = 0
+            while (
+                self.expression_evaluator_cls(self.state.model_dump()).evaluate(step.while_condition)
+                and iteration < step.max_iterations
+            ):
+                for body_step in step.loop_body:
+                    step_result = await self.execution.execute_sync_step_function(
+                        body_step.func, self.state, context
+                    )
+                    if step_result:
+                        self._apply_merge_strategy(
+                            self.state, step_result,
+                            MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW
+                        )
+                iteration += 1
+            return {"loop_iterations": iteration}
+
+        else:
+            raise ValueError(f"LOOP step '{step.name}': unknown mode '{step.mode}'. Must be ITERATE or WHILE.")
 
     async def _execute_saga_rollback(self):
         """Compensate all completed steps in reverse order"""
@@ -625,14 +692,32 @@ class Workflow:
                 )
 
             elif isinstance(step, ParallelWorkflowStep):
+                # Resolve dynamic fan-out at runtime if iterate_over is configured
+                if step.iterate_over and step.task_function:
+                    items = _resolve_state_path(self.state.model_dump(), step.iterate_over)
+                    if not isinstance(items, list):
+                        raise ValueError(
+                            f"PARALLEL step '{step.name}': iterate_over '{step.iterate_over}' "
+                            f"did not resolve to a list (got {type(items).__name__})"
+                        )
+                    resolved_tasks = [
+                        ParallelExecutionTask(
+                            name=f"{step.name}_{i}",
+                            func_path=step.task_function,
+                            kwargs={step.item_var_name: item},
+                        )
+                        for i, item in enumerate(items)
+                    ]
+                else:
+                    resolved_tasks = step.tasks
+
                 result = await self.execution.dispatch_parallel_tasks(
-                    tasks=step.tasks,
+                    tasks=resolved_tasks,
                     state_data=self.state.model_dump(),
                     workflow_id=self.id,
                     current_step_index=self.current_step,
                     merge_function_path=step.merge_function_path,
                     data_region=self.data_region,
-                    # Pass merge strategy and conflict behavior to the async task handler
                     merge_strategy=step.merge_strategy.value,
                     merge_conflict_behavior=step.merge_conflict_behavior.value
                 )
@@ -736,7 +821,7 @@ class Workflow:
 
             elif isinstance(step, LoopStep):
                 # Loop step logic directly in WorkflowEngine
-                result = self._execute_loop_step(step, self.state, context)
+                result = await self._execute_loop_step(step, self.state, context)
 
             elif isinstance(step, CronScheduleWorkflowStep):
                 # Register schedule using ExecutionProvider

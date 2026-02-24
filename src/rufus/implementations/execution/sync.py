@@ -107,7 +107,7 @@ class SyncExecutor(ExecutionProvider):
         return task_result if isinstance(task_result, dict) else {}
 
 
-    def _run_task_in_thread(self, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any], state_model_path: str):
+    def _run_task_in_thread(self, func_path: str, state_data: Dict[str, Any], context_data: Dict[str, Any], state_model_path: str, task_kwargs: Optional[Dict[str, Any]] = None):
         """Helper to run a step function in a separate thread."""
         loop = self._loop # Get the event loop from the main thread
 
@@ -115,15 +115,16 @@ class SyncExecutor(ExecutionProvider):
         from rufus.builder import WorkflowBuilder
         func = WorkflowBuilder._import_from_string(func_path)
         context = StepContext(**context_data)
+        extra_kwargs = task_kwargs or {}
 
         try:
             # For parallel tasks, pass state_data as a dict (not a Pydantic model)
             # The parallel task functions expect state: dict parameter
             if asyncio.iscoroutinefunction(func):
                 # Run async function in the main event loop
-                result = asyncio.run_coroutine_threadsafe(func(state_data, context), loop).result()
+                result = asyncio.run_coroutine_threadsafe(func(state_data, context, **extra_kwargs), loop).result()
             else:
-                result = func(state_data, context)
+                result = func(state_data, context, **extra_kwargs)
             return {"result": result if isinstance(result, dict) else {}}
         except Exception as e:
             return {"error": str(e), "traceback": traceback.format_exc()}
@@ -147,7 +148,10 @@ class SyncExecutor(ExecutionProvider):
                 "validated_input": None, # Parallel tasks don't usually take user_input directly
                 "previous_step_result": None
             }
-            future = self._thread_pool_executor.submit(self._run_task_in_thread, task.func_path, state_data, context_data, state_model_path)
+            future = self._thread_pool_executor.submit(
+                self._run_task_in_thread, task.func_path, state_data, context_data,
+                state_model_path, task.kwargs if task.kwargs else None
+            )
             futures.append((task.name, future))
 
         results_map = {}

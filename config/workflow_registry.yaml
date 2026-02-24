@@ -2,6 +2,11 @@
 # Register all available workflows for the fintech edge platform
 
 workflows:
+  - type: "ConfigRollout"
+    description: "Fleet-wide config push with progressive rollout and saga compensation"
+    config_file: "config_rollout_workflow.yaml"
+    initial_state_model: "rufus_server.steps.config_rollout_steps.ConfigRolloutState"
+
   - type: "PaymentAuthorization"
     description: "Payment authorization with offline fallback"
     config_file: "payment_workflow.yaml"

@@ -192,8 +192,8 @@ class CeleryExecutionProvider(ExecutionProvider):
             if not func or not hasattr(func, 'apply_async'):
                 raise ValueError(f"Invalid Celery task: {func_path}")
 
-            # Create task signature
-            task_sig = func.s(state=state_data, workflow_id=workflow_id)
+            # Create task signature — include per-task kwargs for dynamic fan-out
+            task_sig = func.s(state=state_data, workflow_id=workflow_id, **task_config.kwargs)
             celery_tasks.append(task_sig)
 
         # Create callback signature

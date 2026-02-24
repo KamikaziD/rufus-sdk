@@ -1,0 +1,38 @@
+workflow_type: "ConfigRollout"
+workflow_version: "1.0.0"
+description: "Fleet-wide config push with progressive rollout and saga compensation"
+initial_state_model_path: "rufus_server.steps.config_rollout_steps.ConfigRolloutState"
+saga_enabled: true
+
+steps:
+  - name: "Validate_Config"
+    type: "STANDARD"
+    function: "rufus_server.steps.config_rollout_steps.validate_config"
+    automate_next: true
+
+  - name: "Create_Config_Version"
+    type: "STANDARD"
+    function: "rufus_server.steps.config_rollout_steps.create_config_version"
+    compensate_function: "rufus_server.steps.config_rollout_steps.compensate_create_config"
+    automate_next: true
+
+  - name: "Broadcast_To_Fleet"
+    type: "STANDARD"
+    function: "rufus_server.steps.config_rollout_steps.broadcast_to_fleet"
+    compensate_function: "rufus_server.steps.config_rollout_steps.compensate_broadcast"
+    automate_next: true
+
+  - name: "Monitor_Broadcast"
+    type: "LOOP"
+    mode: "WHILE"
+    while_condition: "keep_monitoring"
+    max_iterations: 30
+    automate_next: true
+    loop_body:
+      - name: "Poll_Status"
+        type: "STANDARD"
+        function: "rufus_server.steps.config_rollout_steps.poll_broadcast_status"
+
+  - name: "Finalize_Rollout"
+    type: "STANDARD"
+    function: "rufus_server.steps.config_rollout_steps.finalize_rollout"

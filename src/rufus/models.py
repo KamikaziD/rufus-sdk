@@ -32,6 +32,8 @@ class StepContext(BaseModel):
     step_name: str
     validated_input: Optional[Any] = None
     previous_step_result: Optional[Dict[str, Any]] = None
+    loop_item: Optional[Any] = None    # Current item in an ITERATE loop
+    loop_index: Optional[int] = None   # Current index in an ITERATE loop
 
 
 class WorkflowStep(BaseModel):
@@ -265,10 +267,15 @@ class AIInferenceWorkflowStep(WorkflowStep):
 class ParallelExecutionTask(BaseModel):
     name: str
     func_path: str  # Path to the function for parallel execution
+    kwargs: Dict[str, Any] = Field(default_factory=dict)  # Per-task kwargs (used for dynamic fan-out)
 
 
 class ParallelWorkflowStep(WorkflowStep):
-    tasks: List[ParallelExecutionTask]
+    tasks: List[ParallelExecutionTask] = Field(default_factory=list)
+    # Dynamic fan-out: iterate over a state list and call task_function once per item
+    iterate_over: Optional[str] = None       # Dot-notation state path to a list
+    task_function: Optional[str] = None      # Function called for each item
+    item_var_name: str = "item"              # Kwarg name passed to the function per item
     merge_function_path: Optional[str] = None
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW

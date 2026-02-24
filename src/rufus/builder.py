@@ -208,12 +208,15 @@ class WorkflowBuilder:
                 for task_config in config.get("tasks", []):
                     tasks.append(ParallelExecutionTask(
                         name=task_config["name"], func_path=task_config["function"]))
-                
+
                 merge_function_path = config.get("merge_function_path")
                 step = ParallelWorkflowStep(
                     name=config["name"],
                     tasks=tasks,
-                    merge_function_path=merge_function_path, # Pass the path string directly
+                    iterate_over=config.get("iterate_over"),
+                    task_function=config.get("task_function"),
+                    item_var_name=config.get("item_var_name", "item"),
+                    merge_function_path=merge_function_path,
                     automate_next=automate_next,
                     merge_strategy=merge_strategy,
                     merge_conflict_behavior=merge_conflict_behavior

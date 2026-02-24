@@ -94,6 +94,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # --- Device Service ---
 from rufus_server.device_service import DeviceService
 
+# --- Broadcast Service ---
+from rufus_server.broadcast_service import BroadcastService
+
 # --- Policy Engine ---
 from rufus_server.policy_engine import (
     Policy, PolicyRule, PolicyStatus, RolloutConfig, RolloutStrategy,
@@ -112,6 +115,7 @@ policy_evaluator: Optional[PolicyEvaluator] = None
 device_assignments: Dict[str, DeviceAssignment] = {}  # In-memory for now
 version_service = None  # Command version service
 webhook_service = None  # Webhook notification service
+broadcast_service: Optional[BroadcastService] = None
 
 
 # --- Auth / RBAC ---
@@ -189,7 +193,7 @@ async def add_rate_limit_headers(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
-    global rate_limit_service, version_service, webhook_service
+    global rate_limit_service, version_service, webhook_service, broadcast_service
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -262,6 +266,13 @@ async def startup_event():
     # Initialize Device Service (with version and webhook services)
     global device_service
     device_service = DeviceService(persistence_provider, version_service, webhook_service)
+
+    # Initialize Broadcast Service
+    broadcast_service = BroadcastService(persistence_provider, device_service)
+
+    # Wire services into ConfigRollout step module
+    from rufus_server.steps.config_rollout_steps import init_services as init_rollout_services
+    init_rollout_services(persistence_provider, broadcast_service, device_service)
 
     # Initialize Policy Engine
     global policy_evaluator
@@ -2613,6 +2624,69 @@ async def cancel_broadcast(
         "broadcast_id": broadcast_id,
         "status": "cancelled",
         "message": "Broadcast cancelled successfully"
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Config Rollout Endpoint
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/config/rollout", tags=["Configuration"],
+          responses={
+              200: {"description": "Rollout completed successfully"},
+              409: {"description": "Saga compensation triggered — previous config restored"},
+              422: {"description": "Workflow failed without compensation"},
+          })
+async def start_config_rollout(
+    request_body: dict,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """
+    Trigger a fleet-wide config push.
+
+    Runs the ConfigRollout workflow: validate → create config version →
+    broadcast to devices → monitor progress (LOOP/WHILE) → finalize.
+
+    Saga compensation automatically restores the previous config if broadcast fails.
+    """
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    # Inject created_by from auth context
+    if user and "created_by" not in request_body:
+        request_body["created_by"] = user.user_id
+
+    try:
+        workflow = await workflow_engine.start_workflow(
+            workflow_type="ConfigRollout",
+            initial_data=request_body,
+            owner_id=user.user_id if user else None,
+        )
+        # Enable saga compensation before running steps
+        await workflow.enable_saga_mode()
+        # Drive to completion — automate_next chains all steps in one call
+        result, _ = await workflow.next_step(user_input={})
+    except WorkflowFailedException as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Config rollout failed: {exc.original_exception}"
+        )
+    except SagaWorkflowException as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Config rollout compensated (saga): {exc.original_exception}"
+        )
+
+    # Reload final workflow state
+    final = await workflow_engine.get_workflow(workflow.id)
+    state = final.state
+
+    return {
+        "workflow_id": workflow.id,
+        "status": final.status,
+        "rollout_outcome": getattr(state, "rollout_outcome", None),
+        "broadcast_id": getattr(state, "broadcast_id", None),
+        "new_config_etag": getattr(state, "new_config_etag", None),
     }
 
 
