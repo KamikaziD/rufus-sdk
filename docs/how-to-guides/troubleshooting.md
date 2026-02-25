@@ -259,6 +259,58 @@ celery -A rufus.celery_app worker --loglevel=debug
 # Watch for task received messages
 ```
 
+### Workflow stuck in PENDING_SUB_WORKFLOW or PENDING_ASYNC with silent workers
+
+**Problem:** Workflow never completes a parallel or sub-workflow step; workers appear idle; no errors logged.
+
+**Cause:** `data_region` is set on a `StartSubWorkflowDirective` or step, routing tasks to a named queue (e.g. `onsite-london`) that no worker is consuming.
+
+**Diagnose:**
+
+```bash
+# Check Redis for unexpected queue names
+docker exec <redis-container> redis-cli keys "*"
+# Look for queue names other than "default", "high_priority", "low_priority"
+
+# Check queue depths
+docker exec <redis-container> redis-cli llen onsite-london
+# Non-zero = tasks stuck there
+```
+
+**Solution:** Either remove `data_region` (routes to `default`) or start a worker listening to that queue:
+
+```bash
+celery -A rufus.celery_app worker -Q onsite-london
+```
+
+Flush the orphaned queue before retrying:
+
+```bash
+docker exec <redis-container> redis-cli del onsite-london
+```
+
+### Parallel task function raises TypeError before queuing
+
+**Problem:** Celery raises `TypeError: missing required argument: 'context'` when dispatching a PARALLEL step, before any task executes.
+
+**Cause:** Parallel task functions passed to Celery must use a plain signature matching `func.s(state=..., workflow_id=...)`. Celery calls `check_arguments` eagerly when building chord signatures — if `context` is a required positional parameter, it fails immediately.
+
+**Wrong:**
+
+```python
+async def my_parallel_task(state, context: StepContext, *args, **kwargs):
+    ...
+```
+
+**Correct:**
+
+```python
+def my_parallel_task(state: dict, workflow_id: str):
+    ...
+```
+
+**Verification:** Worker logs show "task received" and "task succeeded"; no `TypeError` before queuing.
+
 ## Performance issues
 
 ### Slow workflow execution
@@ -412,6 +464,43 @@ export TESTING=true
 
 ## Deployment issues
 
+### Template variables not rendering in FIRE_AND_FORGET steps
+
+**Problem:** Template like `{{ state.recipient }}` renders as empty string or raises `UndefinedError`.
+
+**Cause:** The Jinja2 template context is the workflow state as a flat dict (`state.model_dump()`), not wrapped under a `state` key. There is no `state.` prefix available inside templates.
+
+**Wrong:**
+
+```yaml
+message_template: "Hello {{ state.recipient }}, your amount is {{ state.amount }}"
+```
+
+**Correct:**
+
+```yaml
+message_template: "Hello {{ recipient }}, your amount is {{ amount }}"
+```
+
+### Docker image runs wrong version after version bump
+
+**Problem:** Docker image is tagged `0.5.x` but `python -c "import rufus; print(rufus.__version__)"` inside the container prints the previous version.
+
+**Cause:** Docker reused the cached `pip install rufus-sdk==<old>` layer because the Dockerfile was not updated before building.
+
+**Solution:** (1) Update the version pin in all three Dockerfiles as part of the version bump step. (2) Always build with `--no-cache` after a version bump:
+
+```bash
+docker build --no-cache -f docker/Dockerfile.rufus-server-prod -t ruhfuskdev/rufus-server:0.5.x .
+```
+
+**Verify:**
+
+```bash
+docker run --rm ruhfuskdev/rufus-server:0.5.x python -c "import rufus; print(rufus.__version__)"
+# Must print the new version
+```
+
 ### Docker container fails to start
 
 **Problem:** Container exits immediately.
@@ -425,18 +514,21 @@ docker logs rufus-server
 **Common issues:**
 
 1. Missing database migrations:
+
    ```bash
    # Add to docker-entrypoint.sh
    cd /app/src/rufus && alembic upgrade head
    ```
 
 2. Database connection failed:
+
    ```bash
    # Check DATABASE_URL is correct
    docker run --rm rufus:latest env | grep DATABASE_URL
    ```
 
 3. Missing dependencies:
+
    ```dockerfile
    # Ensure all dependencies in requirements.txt
    RUN pip install -r requirements.txt

@@ -588,6 +588,78 @@ async def test_with_factory():
     )
 ```
 
+## Common testing pitfalls
+
+### Step functions registered by dotted path must be at module level
+
+**Problem:** `AttributeError: module 'tests.sdk.my_test' has no attribute 'task_a'` when using a function as a PARALLEL task or STANDARD step.
+
+**Cause:** `WorkflowBuilder` resolves function paths via `importlib`. Functions defined inside a test function or class method are not importable by dotted path.
+
+**Wrong:**
+
+```python
+def test_parallel():
+    def task_a(state, context, **_):   # ❌ local scope, not importable
+        return {"a_done": True}
+    builder.register_workflow_inline("Test", steps=[
+        {"name": "A", "type": "STANDARD", "function": task_a}
+    ])
+```
+
+**Correct:**
+
+```python
+def task_a(state, context, **_):       # ✅ module level
+    return {"a_done": True}
+
+def test_parallel():
+    builder.register_workflow_inline("Test", steps=[
+        {"name": "A", "type": "STANDARD", "function": task_a}
+    ])
+```
+
+### `next_step()` always requires `user_input`
+
+**Problem:** `TypeError: next_step() missing 1 required positional argument: 'user_input'`
+
+**Solution:** Always pass `user_input={}` even when no input is needed:
+
+```python
+# ❌ Missing required argument
+await workflow.next_step()
+
+# ✅ Correct
+await workflow.next_step(user_input={})
+
+# ✅ For HUMAN_IN_LOOP steps, pass actual input
+await workflow.next_step(user_input={"approved": True})
+```
+
+### Patch at the import location, not the source
+
+**Problem:** Mock has no effect — the real function still runs.
+
+**Cause:** `unittest.mock.patch` must target the name as it is bound in the module under test, not where it was originally defined.
+
+**Wrong:**
+
+```python
+# Patches the source — celery.py already has its own binding, unaffected
+with patch("rufus.utils.postgres_executor.pg_executor") as mock:
+    ...
+```
+
+**Correct:**
+
+```python
+# Patches the binding in the module being tested
+with patch("rufus.implementations.execution.celery.pg_executor") as mock:
+    ...
+```
+
+**Rule:** If `celery.py` does `from rufus.utils.postgres_executor import pg_executor`, patch `rufus.implementations.execution.celery.pg_executor`.
+
 ## Best practices
 
 1. **Use TestHarness for unit tests** - Fast, deterministic, in-memory
