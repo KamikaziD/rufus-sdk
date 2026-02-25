@@ -276,6 +276,12 @@ class ParallelWorkflowStep(WorkflowStep):
     iterate_over: Optional[str] = None       # Dot-notation state path to a list
     task_function: Optional[str] = None      # Function called for each item
     item_var_name: str = "item"              # Kwarg name passed to the function per item
+    batch_size: int = Field(
+        default=0,
+        ge=0,
+        description="Process iterate_over list in chunks of this size (0 = all at once). "
+                    "Only supported with SyncExecutor/ThreadPoolExecutor."
+    )
     merge_function_path: Optional[str] = None
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW

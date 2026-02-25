@@ -711,20 +711,55 @@ class Workflow:
                 else:
                     resolved_tasks = step.tasks
 
-                result = await self.execution.dispatch_parallel_tasks(
-                    tasks=resolved_tasks,
-                    state_data=self.state.model_dump(),
-                    workflow_id=self.id,
-                    current_step_index=self.current_step,
-                    merge_function_path=step.merge_function_path,
-                    data_region=self.data_region,
-                    merge_strategy=step.merge_strategy.value,
-                    merge_conflict_behavior=step.merge_conflict_behavior.value
-                )
-                # Apply merge strategy if parallel tasks return results synchronously (e.g., in SyncExecutor)
-                if isinstance(result, dict) and "_sync_parallel_result" in result:
-                    merged_result = result["_sync_parallel_result"]
-                    self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
+                use_batching = step.batch_size > 0 and step.iterate_over and resolved_tasks
+                if use_batching:
+                    try:
+                        from rufus.implementations.execution.celery import CeleryExecutionProvider
+                        is_celery = isinstance(self.execution, CeleryExecutionProvider)
+                    except ImportError:
+                        is_celery = False
+
+                    if is_celery:
+                        logger.warning(
+                            f"PARALLEL step '{step.name}': batch_size is not supported with "
+                            "CeleryExecutionProvider — dispatching all tasks at once."
+                        )
+                        use_batching = False
+
+                if use_batching:
+                    for chunk_start in range(0, len(resolved_tasks), step.batch_size):
+                        chunk = resolved_tasks[chunk_start: chunk_start + step.batch_size]
+                        batch_result = await self.execution.dispatch_parallel_tasks(
+                            tasks=chunk,
+                            state_data=self.state.model_dump(),
+                            workflow_id=self.id,
+                            current_step_index=self.current_step,
+                            merge_function_path=step.merge_function_path,
+                            data_region=self.data_region,
+                            merge_strategy=step.merge_strategy.value,
+                            merge_conflict_behavior=step.merge_conflict_behavior.value
+                        )
+                        if isinstance(batch_result, dict) and "_sync_parallel_result" in batch_result:
+                            self._apply_merge_strategy(
+                                self.state, batch_result["_sync_parallel_result"],
+                                step.merge_strategy, step.merge_conflict_behavior
+                            )
+                    result = {}  # merges already applied per batch above
+                else:
+                    result = await self.execution.dispatch_parallel_tasks(
+                        tasks=resolved_tasks,
+                        state_data=self.state.model_dump(),
+                        workflow_id=self.id,
+                        current_step_index=self.current_step,
+                        merge_function_path=step.merge_function_path,
+                        data_region=self.data_region,
+                        merge_strategy=step.merge_strategy.value,
+                        merge_conflict_behavior=step.merge_conflict_behavior.value
+                    )
+                    # Apply merge strategy if parallel tasks return results synchronously (e.g., in SyncExecutor)
+                    if isinstance(result, dict) and "_sync_parallel_result" in result:
+                        merged_result = result["_sync_parallel_result"]
+                        self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
 
             elif isinstance(step, JavaScriptWorkflowStep):
                 # JavaScript steps execute synchronously in a sandboxed V8 environment

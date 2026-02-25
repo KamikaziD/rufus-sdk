@@ -420,6 +420,42 @@ async def load_target_devices(state: FleetState, context: StepContext, **_) -> d
     return {"device_ids": [d.id for d in devices]}
 ```
 
+### Pattern 5: Batching Large Lists (`batch_size`)
+
+When `iterate_over` resolves to a large list (hundreds or thousands of items), dispatching all tasks simultaneously can overwhelm the target system. The `batch_size` field splits the list into sequential chunks:
+
+```yaml
+- name: "Push_To_Fleet"
+  type: "PARALLEL"
+  iterate_over: "device_ids"       # 1000 items in state
+  task_function: "steps.push_to_device"
+  item_var_name: "device_id"
+  batch_size: 50                   # dispatch 50 at a time; 20 batches total
+  merge_strategy: "SHALLOW"
+  allow_partial_success: true
+```
+
+**How it works**: Rufus splits the list into chunks of `batch_size`, dispatches each chunk in parallel, waits for completion, merges results into state, then moves on to the next chunk. State is updated after every batch — if a batch fails, earlier batches' results are already persisted.
+
+**When to use `batch_size`:**
+
+| Scenario | Recommended `batch_size` |
+|---|---|
+| Push config to 1 000+ devices | 50–200 |
+| Bulk-notify a large user list | 100–500 |
+| Process large order line-item sets | 10–50 |
+| Fewer than ~50 total items | 0 (all at once, default) |
+
+**Executor compatibility:**
+
+| Executor | `batch_size` support |
+|---|---|
+| `SyncExecutor` | ✅ Full support |
+| `ThreadPoolExecutor` | ✅ Full support |
+| `CeleryExecutionProvider` | ⚠️ Ignored — warning logged; all items dispatched at once |
+
+For Celery-based batching, pre-chunk the list in a STANDARD step and start one sub-workflow per chunk via `StartSubWorkflowDirective`.
+
 ## Race Conditions and State Mutations
 
 **WARNING**: Parallel tasks share the same workflow state. Modifying state in parallel tasks creates race conditions:

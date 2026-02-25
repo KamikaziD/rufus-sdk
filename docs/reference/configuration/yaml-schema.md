@@ -471,6 +471,7 @@ tasks:
 iterate_over: string          # Optional: dot-notation path to a state list
 task_function: string         # Optional: function called once per item
 item_var_name: string         # Optional: kwarg name for each item (default: "item")
+batch_size: int               # Optional: chunk size for iterate_over lists (0 = all at once)
 
 # ── Shared options ────────────────────────────────────────────────────────────
 merge_strategy: string        # Optional
@@ -532,6 +533,29 @@ Python import path to the function called for each item. The function receives t
 **Default:** `"item"`
 
 Name of the kwarg passed to `task_function` for each item. For example, `item_var_name: "device_id"` means the function is called as `task_function(state, context, device_id=item)`.
+
+#### `batch_size`
+
+**Type:** `int`
+
+**Required:** No
+
+**Default:** `0` (all at once)
+
+When set to a positive integer, the `iterate_over` list is split into chunks of this size and each chunk is dispatched sequentially. Useful when dispatching hundreds or thousands of items would overwhelm the target system.
+
+```yaml
+- name: "Push_To_Fleet"
+  type: "PARALLEL"
+  iterate_over: "device_ids"       # list of 1000 items in state
+  task_function: "steps.push_to_device"
+  item_var_name: "device_id"
+  batch_size: 50                   # 20 sequential batches of 50
+  merge_strategy: "SHALLOW"
+  allow_partial_success: true
+```
+
+> **Executor compatibility:** `batch_size` is only supported with `SyncExecutor` and `ThreadPoolExecutor`. When using `CeleryExecutionProvider`, `batch_size` is ignored with a warning logged — Celery's async dispatch model cannot iterate batches synchronously. For Celery-based batching, pre-chunk the list in a STANDARD step and use a sub-workflow per chunk.
 
 #### `merge_strategy`
 
@@ -598,6 +622,7 @@ steps:
     iterate_over: "device_ids"      # list of device IDs in workflow state
     task_function: "steps.push_to_device"
     item_var_name: "device_id"
+    batch_size: 50                  # optional: process 50 at a time
     merge_strategy: "SHALLOW"
     allow_partial_success: true
 ```

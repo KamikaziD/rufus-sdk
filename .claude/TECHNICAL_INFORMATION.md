@@ -144,6 +144,7 @@ def trigger_child(state: MyState, context: StepContext):
 ### Parallel Execution YAML Config
 
 ```yaml
+# Static task list
 - name: "Parallel_Tasks"
   type: "PARALLEL"
   tasks:
@@ -155,7 +156,19 @@ def trigger_child(state: MyState, context: StepContext):
   merge_conflict_behavior: "PREFER_NEW"  # or PREFER_OLD, RAISE_ERROR
   allow_partial_success: true
   timeout_seconds: 300
+
+# Dynamic fan-out (one task per item in a state list)
+- name: "Push_To_Fleet"
+  type: "PARALLEL"
+  iterate_over: "device_ids"       # dot-notation path to a list in state
+  task_function: "steps.push_to_device"  # called once per item
+  item_var_name: "device_id"       # kwarg name for each item (default: "item")
+  batch_size: 50                   # optional: process 50 at a time (0 = all at once)
+  merge_strategy: "SHALLOW"
+  allow_partial_success: true
 ```
+
+> **`batch_size`** — when set to a positive integer, the `iterate_over` list is split into sequential chunks. Supported by `SyncExecutor`/`ThreadPoolExecutor` only; ignored with a warning on `CeleryExecutionProvider`.
 
 ---
 

@@ -1,3 +1,20 @@
+# PARALLEL Step Batching (`batch_size`)
+
+## Tasks
+- [x] Add `batch_size: int = 0` field to `ParallelWorkflowStep` (`src/rufus/models.py`)
+- [x] Implement sequential batch dispatch loop in PARALLEL handler (`src/rufus/workflow.py` ~line 714)
+  - Celery guard: logs warning and falls back to single dispatch if `CeleryExecutionProvider` detected
+- [x] Write `tests/sdk/test_parallel_batching.py` (4 tests — all pass)
+- [x] Update `docs/reference/configuration/yaml-schema.md` — added `batch_size` field + description
+- [x] Update `docs/explanation/parallel-execution.md` — added "Pattern 5: Batching Large Lists" section
+- [x] Update `.claude/TECHNICAL_INFORMATION.md` §4 — added dynamic fan-out example with `batch_size`
+
+## Review
+- 4/4 new tests pass; 120 pre-existing passing tests still pass
+- 15 pre-existing failures in `test_javascript.py` (missing `rufus.javascript` module) — unrelated
+
+---
+
 # Phase 2 Dogfooding — PolicyRollout Workflow
 
 ## Tasks
