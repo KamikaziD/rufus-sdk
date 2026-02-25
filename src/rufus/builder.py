@@ -157,7 +157,7 @@ class WorkflowBuilder:
         from rufus.models import (
             WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
-            MergeStrategy, MergeConflictBehavior, JavaScriptWorkflowStep, JavaScriptConfig,
+            MergeStrategy, MergeConflictBehavior,
             AIInferenceWorkflowStep, AIInferenceConfig
         )
 
@@ -248,20 +248,6 @@ class WorkflowBuilder:
                     merge_conflict_behavior=merge_conflict_behavior
                 )
 
-            elif step_type_str == "JAVASCRIPT":
-                # Get the JavaScript configuration dictionary from the step configuration
-                js_config_dict = config.get("js_config", {})
-                js_config = JavaScriptConfig(**js_config_dict)
-                step = JavaScriptWorkflowStep(
-                    name=config["name"],
-                    js_config=js_config,
-                    required_input=config.get("required_input", []),
-                    input_schema=input_schema,
-                    automate_next=automate_next,
-                    merge_strategy=merge_strategy,
-                    merge_conflict_behavior=merge_conflict_behavior
-                )
-
             elif step_type_str == "AI_INFERENCE":
                 # Get the AI inference configuration dictionary from the step configuration
                 ai_config_dict = config.get("ai_config", {})
@@ -301,7 +287,7 @@ class WorkflowBuilder:
                     automate_next=automate_next
                 )
 
-            elif step_type_str == "CRON_SCHEDULER":
+            elif step_type_str == "CRON_SCHEDULE":
                 step = CronScheduleWorkflowStep(
                     name=config["name"],
                     target_workflow_type=config["target_workflow_type"],
@@ -321,7 +307,7 @@ class WorkflowBuilder:
 
                 # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
                 # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
-                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "JAVASCRIPT", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULER", "PARALLEL"] and \
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULE", "PARALLEL"] and \
                    "." not in step_type_str and step_type_str not in cls._marketplace_steps:
                     raise ValueError(f"Unknown step type: '{step_type_str}'")
 

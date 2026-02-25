@@ -86,7 +86,7 @@ workflows:
   - type: "OrderProcessing"
     description: "E-commerce order processing workflow"
     config_file: "order_processing.yaml"
-    initial_state_model: "my_app.models.OrderState"
+    initial_state_model_path: "my_app.models.OrderState"
     requires:
       - rufus-payment-gateway
       - rufus-inventory
@@ -109,11 +109,12 @@ requires:
 ### Top-Level Structure
 
 ```yaml
-workflow_type: string         # Required
-workflow_version: string      # Optional
-initial_state_model: string   # Required
-description: string           # Optional
-steps: list[dict]             # Required
+workflow_type: string              # Required
+workflow_version: string           # Optional
+initial_state_model_path: string   # Required
+description: string                # Optional
+saga_enabled: bool                 # Optional (default: false)
+steps: list[dict]                  # Required
 ```
 
 ### Fields
@@ -134,7 +135,23 @@ Must match registry entry.
 
 Semantic version (e.g., "1.0.0").
 
-#### `initial_state_model`
+#### `saga_enabled`
+
+**Type:** `bool`
+
+**Required:** No
+
+**Default:** `false`
+
+When `true`, enables Saga compensation mode. On step failure, compensation functions
+(`compensate_function` in each step) are executed in reverse order and the workflow
+status becomes `FAILED_ROLLED_BACK`. Requires `CompensatableStep` entries.
+
+```yaml
+saga_enabled: true
+```
+
+#### `initial_state_model_path`
 
 **Type:** `string`
 
@@ -163,7 +180,7 @@ List of workflow steps.
 ```yaml
 workflow_type: "OrderProcessing"
 workflow_version: "1.5.0"
-initial_state_model: "my_app.models.OrderState"
+initial_state_model_path: "my_app.models.OrderState"
 description: "Process customer orders with payment and fulfillment"
 
 steps:
@@ -185,9 +202,10 @@ All step types support these fields:
 |-------|------|----------|-------------|
 | `name` | `string` | Yes | Unique step identifier |
 | `type` | `string` | Yes | Step type (see [Step Types](step-types.md)) |
+| `description` | `string` | No | Human-readable step description (informational only) |
 | `function` | `string` | Conditional | Python import path to step function |
 | `compensate_function` | `string` | No | Python import path to compensation function |
-| `input_model` | `string` | No | Python import path to input Pydantic model |
+| `input_model` | `string` | No | Python import path to input Pydantic model. **Note:** In YAML this key is `input_model`; at runtime the builder resolves the class and stores it on the step as `step.input_schema`. |
 | `required_input` | `list[string]` | No | List of required input keys (legacy) |
 | `automate_next` | `boolean` | No | Auto-execute next step (default: false) |
 | `dependencies` | `list[string]` | No | List of prerequisite step names |

@@ -58,7 +58,7 @@ def step_function(state: BaseModel, context: StepContext, **user_input) -> dict:
 ```yaml
 workflow_type: "MyWorkflow"
 workflow_version: "1.0.0"
-initial_state_model: "my_app.state_models.MyWorkflowState"
+initial_state_model_path: "my_app.state_models.MyWorkflowState"
 description: "My custom workflow"
 
 steps:
@@ -95,7 +95,7 @@ workflows:
   - type: "MyWorkflow"
     description: "My custom workflow"
     config_file: "my_workflow.yaml"
-    initial_state_model: "my_app.state_models.MyWorkflowState"
+    initial_state_model_path: "my_app.state_models.MyWorkflowState"
 ```
 
 ---
@@ -153,7 +153,7 @@ def trigger_child(state: MyState, context: StepContext):
     - name: "task2"
       function_path: "my_app.tasks.task2"
   merge_strategy: "SHALLOW"  # or DEEP
-  merge_conflict_behavior: "PREFER_NEW"  # or PREFER_OLD, RAISE_ERROR
+  merge_conflict_behavior: "PREFER_NEW"  # or PREFER_EXISTING, RAISE_ERROR
   allow_partial_success: true
   timeout_seconds: 300
 
@@ -308,7 +308,7 @@ Common expressions:
 
 ```yaml
 workflow_type: "OrderProcessing"
-initial_state_model: "models.OrderState"
+initial_state_model_path: "models.OrderState"
 
 steps:
   - name: "Validate_Order"
@@ -1223,7 +1223,7 @@ print(f"Workflow version: {workflow.workflow_version}")
 ```yaml
 workflow_type: "OrderProcessing"
 workflow_version: "1.5.0"  # Explicit version
-initial_state_model: "my_app.models.OrderState"
+initial_state_model_path: "my_app.models.OrderState"
 steps:
   - name: "Validate_Order"
     ...

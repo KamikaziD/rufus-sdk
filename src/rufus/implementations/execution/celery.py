@@ -14,6 +14,7 @@ Key features:
 from typing import Dict, Any, List, Optional, Callable
 from rufus.providers.execution import ExecutionProvider
 from rufus.models import BaseModel, StepContext
+from rufus.utils.postgres_executor import pg_executor
 import logging
 
 logger = logging.getLogger(__name__)
@@ -291,8 +292,8 @@ class CeleryExecutionProvider(ExecutionProvider):
         """
         Registers a workflow to be scheduled for execution.
 
-        Schedules are managed by Celery Beat. This method registers a new
-        scheduled workflow in the database for polling.
+        Inserts a row into the `scheduled_workflows` DB table. Celery Beat
+        then polls this table via `poll_scheduled_workflows` every minute.
 
         Args:
             schedule_name: Unique schedule identifier
@@ -300,7 +301,48 @@ class CeleryExecutionProvider(ExecutionProvider):
             cron_expression: Cron schedule (e.g., "0 0 * * *")
             initial_data: Initial workflow state data
         """
-        # TODO: Implement scheduled workflow registration
-        # This requires database table for scheduled_workflows
-        logger.warning(f"register_scheduled_workflow not yet implemented: {schedule_name}")
-        raise NotImplementedError("Scheduled workflows require database migration")
+        import json
+        from datetime import datetime, timezone
+        from rufus import tasks
+
+        provider = tasks._persistence_provider
+        if provider is None:
+            raise RuntimeError(
+                "Persistence provider not initialized — cannot register scheduled workflow."
+            )
+
+        try:
+            from croniter import croniter
+            next_run = croniter(cron_expression, datetime.now(timezone.utc)).get_next(datetime)
+        except Exception as e:
+            raise ValueError(f"Invalid cron expression '{cron_expression}': {e}") from e
+
+        async def _insert():
+            async with provider.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO scheduled_workflows
+                        (id, schedule_name, workflow_type, cron_expression,
+                         initial_data, enabled, next_run_at, run_count, created_at, updated_at)
+                    VALUES
+                        (gen_random_uuid(), $1, $2, $3, $4, true, $5, 0, now(), now())
+                    ON CONFLICT (schedule_name) DO UPDATE SET
+                        workflow_type   = EXCLUDED.workflow_type,
+                        cron_expression = EXCLUDED.cron_expression,
+                        initial_data    = EXCLUDED.initial_data,
+                        enabled         = true,
+                        next_run_at     = EXCLUDED.next_run_at,
+                        updated_at      = now()
+                    """,
+                    schedule_name,
+                    workflow_type,
+                    cron_expression,
+                    json.dumps(initial_data),
+                    next_run,
+                )
+
+        pg_executor.run_coroutine_sync(_insert())
+        logger.info(
+            f"[SCHEDULER] Registered schedule '{schedule_name}' "
+            f"({workflow_type}) next_run_at={next_run.isoformat()}"
+        )

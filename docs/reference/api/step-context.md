@@ -9,134 +9,141 @@
 ## Class Definition
 
 ```python
-@dataclass
-class StepContext:
-    workflow_id: UUID
+class StepContext(BaseModel):
+    workflow_id: str
     step_name: str
-    previous_step_result: Optional[dict] = None
-    loop_state: Optional[LoopState] = None
-    parent_workflow_id: Optional[UUID] = None
-    metadata: dict = field(default_factory=dict)
+    validated_input: Optional[Any] = None
+    previous_step_result: Optional[Dict[str, Any]] = None
+    loop_item: Optional[Any] = None    # Current item in a LOOP ITERATE step
+    loop_index: Optional[int] = None   # Current index in a LOOP ITERATE step
 ```
+
+`StepContext` is a **Pydantic `BaseModel`** (not a dataclass). All fields are read-only from
+within step functions; do not mutate the context.
 
 ## Fields
 
 ### `workflow_id`
 
-**Type:** `UUID`
+**Type:** `str`
 
-Unique identifier of the workflow instance.
+Unique identifier (UUID as string) of the workflow instance.
 
 **Example:**
 
 ```python
-def my_step(state: MyState, context: StepContext):
+def my_step(state: MyState, context: StepContext, **_):
     print(f"Workflow ID: {context.workflow_id}")
+    return {}
 ```
+
+---
 
 ### `step_name`
 
 **Type:** `str`
 
-Name of the current step being executed.
+Name of the current step being executed (matches the `name:` field in YAML).
 
 **Example:**
 
 ```python
-def my_step(state: MyState, context: StepContext):
+def my_step(state: MyState, context: StepContext, **_):
     print(f"Current step: {context.step_name}")
+    return {}
 ```
+
+---
+
+### `validated_input`
+
+**Type:** `Optional[Any]`
+**Default:** `None`
+
+The validated user input for this step (resolved from the step's `input_schema`). Present
+only when the step defines `input_model:` in YAML and the caller provides matching data.
+
+**Example:**
+
+```python
+class ApprovalInput(BaseModel):
+    approved: bool
+    reason: str
+
+def approval_step(state: OrderState, context: StepContext, **user_input):
+    # context.validated_input is an ApprovalInput instance when input_model is set
+    if context.validated_input:
+        print(f"Approved: {context.validated_input.approved}")
+    return {"approved": context.validated_input.approved}
+```
+
+---
 
 ### `previous_step_result`
 
-**Type:** `Optional[dict]`
-
-Result dictionary from the previous step execution.
-
+**Type:** `Optional[Dict[str, Any]]`
 **Default:** `None`
+
+Result dictionary returned by the immediately preceding step. `None` for the first step.
 
 **Example:**
 
 ```python
-def process_order(state: OrderState, context: StepContext):
-    # Access previous step's result
+def process_order(state: OrderState, context: StepContext, **_):
     if context.previous_step_result:
-        validation_status = context.previous_step_result.get("validated")
-        if not validation_status:
+        validated = context.previous_step_result.get("validated")
+        if not validated:
             raise ValueError("Order not validated")
-
     return {"processed": True}
 ```
 
-### `loop_state`
+---
 
-**Type:** `Optional[LoopState]`
+### `loop_item`
 
-Loop iteration state for LOOP step types.
-
+**Type:** `Optional[Any]`
 **Default:** `None`
 
-**Fields:**
-- `current_iteration` (int) - Current iteration number (0-indexed)
-- `current_item` (Any) - Current item in ITERATE mode
-- `total_iterations` (int) - Total iterations
+The current item from the list being iterated in a `LOOP` step with `mode: ITERATE`.
+`None` outside of LOOP steps or in `mode: WHILE` loops.
 
 **Example:**
 
 ```python
-def process_item(state: MyState, context: StepContext):
-    if context.loop_state:
-        item = context.loop_state.current_item
-        iteration = context.loop_state.current_iteration
-        total = context.loop_state.total_iterations
-
-        print(f"Processing item {iteration + 1}/{total}: {item}")
-
-        return {"item_id": item["id"], "processed": True}
+def process_device(state: RolloutState, context: StepContext, **_):
+    device_id = context.loop_item        # e.g. "device-001"
+    index = context.loop_index           # e.g. 0, 1, 2, ...
+    print(f"Processing device {index}: {device_id}")
+    return {"last_processed": device_id}
 ```
 
-### `parent_workflow_id`
+---
 
-**Type:** `Optional[UUID]`
+### `loop_index`
 
-Identifier of parent workflow (if this is a sub-workflow).
-
+**Type:** `Optional[int]`
 **Default:** `None`
 
-**Example:**
-
-```python
-def child_step(state: ChildState, context: StepContext):
-    if context.parent_workflow_id:
-        print(f"Running as child of {context.parent_workflow_id}")
-
-    return {"child_result": "completed"}
-```
-
-### `metadata`
-
-**Type:** `dict`
-
-Additional metadata dictionary for custom extensions.
-
-**Default:** `{}`
+Zero-based index of the current iteration in a `LOOP ITERATE` step.
+`None` outside of LOOP steps.
 
 **Example:**
 
 ```python
-def custom_step(state: MyState, context: StepContext):
-    # Store custom metadata
-    context.metadata["custom_flag"] = True
-    context.metadata["tenant_id"] = state.tenant_id
-
-    return {"status": "processed"}
+def summarise_item(state: BatchState, context: StepContext, **_):
+    # context.loop_index == 0 → first item
+    if context.loop_index == 0:
+        state.results = []          # Reset accumulator on first pass
+    return {"current_index": context.loop_index}
 ```
+
+---
 
 ## Usage in Step Functions
 
 ### Function Signature
 
-All step functions receive `state` and `context`:
+All step functions must accept `state`, `context`, and `**user_input`:
 
 ```python
 def step_function(
@@ -148,113 +155,49 @@ def step_function(
     Args:
         state: Workflow state (Pydantic model)
         context: Step execution context
-        **user_input: Additional validated inputs
+        **user_input: Additional validated inputs from the caller
 
     Returns:
-        dict: Result data merged into workflow state
+        dict: Keys merged into workflow state
     """
-    pass
+    ...
 ```
 
 ### Common Patterns
 
-#### Accessing Previous Results
+#### Using Previous Step Results
 
 ```python
-def sequential_step(state: MyState, context: StepContext):
-    # Chain step results
-    previous_output = context.previous_step_result.get("output_key")
-
-    new_result = process(previous_output)
-
-    return {"next_output": new_result}
+def enrich_order(state: OrderState, context: StepContext, **_):
+    prev = context.previous_step_result or {}
+    score = prev.get("fraud_score", 0)
+    return {"enriched": True, "risk_level": "high" if score > 0.8 else "low"}
 ```
 
-#### Loop Processing
+#### Processing LOOP Items
 
 ```python
-def loop_body_step(state: MyState, context: StepContext):
-    # Process current loop item
-    item = context.loop_state.current_item
-
-    # Track progress
-    progress = (context.loop_state.current_iteration + 1) / context.loop_state.total_iterations
-    print(f"Progress: {progress:.1%}")
-
-    return {"item_result": process_item(item)}
-```
-
-#### Sub-Workflow Context
-
-```python
-def parent_aware_step(state: ChildState, context: StepContext):
-    # Different behavior for top-level vs child workflows
-    if context.parent_workflow_id:
-        # Running as child
-        return {"mode": "child", "parent": str(context.parent_workflow_id)}
-    else:
-        # Running as top-level workflow
-        return {"mode": "standalone"}
+def send_config(state: RolloutState, context: StepContext, **_):
+    device_id = context.loop_item
+    idx = context.loop_index
+    total = len(state.devices)
+    print(f"[{idx + 1}/{total}] Sending config to {device_id}")
+    # ... push config ...
+    return {"configured": device_id}
 ```
 
 #### Logging with Context
 
 ```python
-def logged_step(state: MyState, context: StepContext):
+import logging
+logger = logging.getLogger(__name__)
+
+def logged_step(state: MyState, context: StepContext, **_):
     logger.info(
-        f"Executing {context.step_name} in workflow {context.workflow_id}"
+        "Executing step=%s workflow=%s", context.step_name, context.workflow_id
     )
-
     result = perform_operation(state)
-
-    logger.info(f"Completed {context.step_name}")
-
     return result
-```
-
-## LoopState Details
-
-### Class Definition
-
-```python
-@dataclass
-class LoopState:
-    current_iteration: int
-    current_item: Any
-    total_iterations: int
-```
-
-### Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `current_iteration` | `int` | Current iteration number (0-indexed) |
-| `current_item` | `Any` | Current item being processed (ITERATE mode) |
-| `total_iterations` | `int` | Total number of iterations |
-
-### Example
-
-```python
-def process_batch(state: BatchState, context: StepContext):
-    if not context.loop_state:
-        raise ValueError("Expected loop_state but none provided")
-
-    item = context.loop_state.current_item
-    iteration = context.loop_state.current_iteration
-
-    # First iteration setup
-    if iteration == 0:
-        state.batch_results = []
-
-    # Process item
-    result = process_single_item(item)
-    state.batch_results.append(result)
-
-    # Last iteration cleanup
-    if iteration == context.loop_state.total_iterations - 1:
-        return {"batch_complete": True, "total_processed": len(state.batch_results)}
-
-    return {"item_processed": True}
 ```
 
 ## Related Types

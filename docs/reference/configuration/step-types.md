@@ -143,7 +143,7 @@ tasks:
 ### Merge Conflict Behaviors
 
 - `PREFER_NEW`: New values overwrite old
-- `PREFER_OLD`: Keep existing values
+- `PREFER_EXISTING`: Keep existing values
 - `RAISE_ERROR`: Fail on conflicts
 
 ### Example
@@ -304,7 +304,7 @@ Iterate over collections or execute until condition.
 
 - **ITERATE**: Execute loop_body for each item in list
 - **WHILE**: Execute loop_body while condition is true
-- Current item/iteration available in `context.loop_state`
+- Current item available as `context.loop_item`; index as `context.loop_index`
 - Stops at max_iterations (safety limit)
 - Loop body steps execute in order per iteration
 
@@ -410,6 +410,60 @@ Pause for human input or approval.
 
 ---
 
+## AI_INFERENCE
+
+Run AI/ML model inference as a workflow step. Supports TensorFlow Lite, ONNX Runtime,
+and custom inference providers.
+
+### Configuration
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"AI_INFERENCE"` | Yes | Step type identifier |
+| `ai_config` | `dict` | Yes | Inference configuration (see below) |
+| `automate_next` | `boolean` | No | Auto-execute next step |
+
+### `ai_config` Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model_name` | `string` | Yes | Unique name matching a loaded model |
+| `runtime` | `string` | Yes | `"tflite"`, `"onnx"`, or `"custom"` |
+| `input_source` | `string` | Yes | State path to input data (e.g., `"state.sensor_data"`) |
+| `output_key` | `string` | No | State key for inference result (default: `"inference_result"`) |
+| `preprocessing` | `string` | No | `"normalize"`, `"resize"`, `"none"` |
+| `postprocessing` | `string` | No | `"softmax"`, `"threshold"`, `"argmax"`, `"none"` |
+| `threshold` | `float` | No | Threshold for binary classification decisions |
+| `timeout_ms` | `int` | No | Max inference time in ms (default: 5000) |
+| `fallback_on_error` | `string` | No | `"skip"`, `"fail"`, `"default"` |
+
+### Example
+
+```yaml
+- name: "Detect_Anomaly"
+  type: "AI_INFERENCE"
+  ai_config:
+    model_name: "anomaly_detector"
+    model_path: "models/anomaly_detector.tflite"
+    runtime: "tflite"
+    input_source: "state.sensor_readings"
+    preprocessing: "normalize"
+    output_key: "anomaly_result"
+    postprocessing: "threshold"
+    postprocessing_params:
+      threshold: 0.7
+    threshold: 0.7
+  automate_next: true
+```
+
+### Use Cases
+
+- Edge device anomaly detection (TFLite on POS terminals, IoT sensors)
+- Fraud scoring inline with payment workflow
+- Document classification before routing decisions
+
+---
+
 ## Step Type Comparison
 
 | Type | Execution | Pauses Workflow | Supports Compensation | Use Case |
@@ -423,6 +477,7 @@ Pause for human input or approval.
 | `FIRE_AND_FORGET` | Async | No | No | Background jobs |
 | `CRON_SCHEDULE` | Scheduled | No | No | Recurring workflows |
 | `HUMAN_IN_LOOP` | Manual | Yes | No | Approvals |
+| `AI_INFERENCE` | Sync | No | No | On-device ML inference |
 
 ---
 

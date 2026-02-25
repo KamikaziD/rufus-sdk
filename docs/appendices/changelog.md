@@ -11,6 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.3] - 2026-02-25
+
+### Added
+- **PARALLEL `batch_size` field** — sequential chunking of large `iterate_over` lists; supported by `SyncExecutor` and `ThreadPoolExecutorProvider`. Set `batch_size: 0` (default) to disable batching.
+- **PARALLEL `allow_partial_success` field** — when `true`, the parallel step succeeds even if some tasks fail; failed errors are logged but do not raise.
+- **CRON_SCHEDULE polling engine** — `tasks.poll_scheduled_workflows` (Celery Beat) now queries the `scheduled_workflows` DB table and triggers due workflows; `CeleryExecutionProvider.register_scheduled_workflow` inserts schedule rows into the DB.
+- **Admin auth on 8 server endpoints** — `POST/PUT/POST /api/v1/admin/commands/versions/...`, `DELETE /api/v1/webhooks/{id}`, and 4 `/api/v1/admin/rate-limits` routes now enforce `require_admin` (role `"admin"` required); `auth/dependencies.py` exports `require_admin`.
+- **WebSocket device authentication** — `GET /api/v1/devices/{device_id}/ws` now validates `?api_key=` query parameter against the `edge_devices` table before accepting the connection.
+- **New test files** — `test_fire_and_forget.py`, `test_cron_schedule.py`, `test_expression_evaluator.py`, `test_template_engine.py`, `test_thread_pool_executor.py` (32 tests total).
+
+### Changed
+- **Step type `CRON_SCHEDULER` renamed to `CRON_SCHEDULE`** — aligns YAML key with `CronScheduleWorkflowStep` class name; update any existing YAML files.
+- **CLI `celery` executor** — `NotImplementedError` replaced with `ValueError` and a helpful message.
+- **CLI `redis` persistence** — dead import removed; raises `ValueError` with clear message.
+
+### Removed
+- **JavaScript step type removed** — `JavaScriptConfig`, `JavaScriptWorkflowStep`, and the `JAVASCRIPT` builder branch have been deleted. Will return in v0.6 once the runtime is ready. Remove `type: JAVASCRIPT` steps from any existing workflows.
+
+### Fixed
+- `initial_state_model:` → `initial_state_model_path:` throughout all documentation YAML examples.
+- `PREFER_OLD` → `PREFER_EXISTING` in all docs (correct enum value).
+- `context.loop_state.current_item` → `context.loop_item` and `context.loop_state.current_iteration` → `context.loop_index` in all docs.
+- `step-context.md` rewritten to reflect actual Pydantic `BaseModel` with correct field names.
+- All 6 `MergeStrategy` enum values documented (`SHALLOW`, `DEEP`, `REPLACE`, `APPEND`, `OVERWRITE_EXISTING`, `PRESERVE_EXISTING`).
+- `AI_INFERENCE` step type added to `step-types.md` documentation.
+- `description` common step field added to `yaml-schema.md`.
+- `input_model` (YAML) vs `input_schema` (Python) clarification added.
+- `saga_enabled` top-level workflow field documented in `yaml-schema.md`.
+
+---
+
 ## [0.5.2] - 2026-02-24
 
 ### Added

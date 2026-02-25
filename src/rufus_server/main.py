@@ -119,7 +119,7 @@ broadcast_service: Optional[BroadcastService] = None
 
 
 # --- Auth / RBAC ---
-from rufus_server.auth import get_current_user, AuthUser as UserContext  # noqa: F401 (UserContext alias keeps existing type annotations valid)
+from rufus_server.auth import get_current_user, require_admin, AuthUser as UserContext  # noqa: F401 (UserContext alias keeps existing type annotations valid)
 from rufus_server.auth.loader import load_auth_provider, set_auth_provider
 
 
@@ -1967,11 +1967,27 @@ async def device_websocket(websocket: WebSocket, device_id: str):
     4. Server can push commands instantly
     5. Device reports command results
     """
-    # Accept connection
-    await websocket.accept()
+    # Authenticate device via API key in query params before accepting
+    api_key = websocket.query_params.get("api_key")
+    if not api_key:
+        await websocket.close(code=4003)
+        logger.warning(f"WebSocket rejected (no api_key): {device_id}")
+        return
 
-    # TODO: Authenticate device (check API key from query params)
-    # For demo, we'll accept all connections
+    if device_service is not None:
+        try:
+            device = await device_service.get_device(device_id)
+            if device is None or getattr(device, "api_key", None) != api_key:
+                await websocket.close(code=4003)
+                logger.warning(f"WebSocket rejected (invalid api_key): {device_id}")
+                return
+        except Exception as e:
+            logger.error(f"WebSocket auth error for {device_id}: {e}")
+            await websocket.close(code=4003)
+            return
+
+    # Accept connection after successful auth
+    await websocket.accept()
 
     # Register connection
     websocket_connections[device_id] = websocket
@@ -2191,7 +2207,7 @@ async def get_command_changelog(
 @app.post("/api/v1/admin/commands/versions", tags=["Commands"])
 async def create_command_version(
     version_data: Dict[str, Any],
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Create new command version (admin only).
@@ -2206,10 +2222,6 @@ async def create_command_version(
     """
     if version_service is None:
         raise HTTPException(status_code=503, detail="Version service not initialized")
-
-    # TODO: Add admin check
-    # if not user or not user.is_admin:
-    #     raise HTTPException(status_code=403, detail="Admin access required")
 
     from rufus_server.version_service import CommandVersion
 
@@ -2231,7 +2243,7 @@ async def create_command_version(
 async def update_command_version(
     version_id: str,
     updates: Dict[str, Any],
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Update command version (admin only).
@@ -2244,8 +2256,6 @@ async def update_command_version(
     """
     if version_service is None:
         raise HTTPException(status_code=503, detail="Version service not initialized")
-
-    # TODO: Add admin check
 
     success = await version_service.update_version(version_id, updates)
 
@@ -2262,7 +2272,7 @@ async def update_command_version(
 async def deprecate_command_version(
     version_id: str,
     reason_data: Dict[str, str],
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Deprecate command version (admin only).
@@ -2273,8 +2283,6 @@ async def deprecate_command_version(
     """
     if version_service is None:
         raise HTTPException(status_code=503, detail="Version service not initialized")
-
-    # TODO: Add admin check
 
     reason = reason_data.get("reason", "No reason provided")
     success = await version_service.deprecate_version(version_id, reason)
@@ -2391,13 +2399,11 @@ async def update_webhook(
 @app.delete("/api/v1/webhooks/{webhook_id}", tags=["Webhooks"])
 async def delete_webhook(
     webhook_id: str,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """Delete webhook registration."""
     if webhook_service is None:
         raise HTTPException(status_code=503, detail="Webhook service not initialized")
-
-    # TODO: Add admin check
 
     success = await webhook_service.delete_webhook(webhook_id)
 
@@ -3915,7 +3921,7 @@ async def get_rate_limit_status(
 @app.get("/api/v1/admin/rate-limits", tags=["Rate Limiting"])
 async def list_rate_limits(
     is_active: Optional[bool] = None,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     List all rate limit rules.
@@ -3924,10 +3930,6 @@ async def list_rate_limits(
     """
     if not rate_limit_service:
         raise HTTPException(status_code=503, detail="Rate limiting not initialized")
-
-    # TODO: Add admin check in production
-    # if not user or not user.is_admin:
-    #     raise HTTPException(status_code=403, detail="Admin access required")
 
     rules = await rate_limit_service.get_rules(is_active=is_active)
 
@@ -3953,7 +3955,7 @@ async def list_rate_limits(
 async def update_rate_limit(
     rule_name: str,
     update_data: dict,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Update an existing rate limit rule.
@@ -3971,10 +3973,6 @@ async def update_rate_limit(
     """
     if not rate_limit_service:
         raise HTTPException(status_code=503, detail="Rate limiting not initialized")
-
-    # TODO: Add admin check in production
-    # if not user or not user.is_admin:
-    #     raise HTTPException(status_code=403, detail="Admin access required")
 
     success = await rate_limit_service.update_rule(
         rule_name=rule_name,
@@ -3996,7 +3994,7 @@ async def update_rate_limit(
 @app.post("/api/v1/admin/rate-limits", tags=["Rate Limiting"])
 async def create_rate_limit(
     rule_data: dict,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Create a new rate limit rule.
@@ -4017,10 +4015,6 @@ async def create_rate_limit(
     """
     if not rate_limit_service:
         raise HTTPException(status_code=503, detail="Rate limiting not initialized")
-
-    # TODO: Add admin check in production
-    # if not user or not user.is_admin:
-    #     raise HTTPException(status_code=403, detail="Admin access required")
 
     success = await rate_limit_service.create_rule(
         rule_name=rule_data["rule_name"],
@@ -4047,7 +4041,7 @@ async def create_rate_limit(
 @app.delete("/api/v1/admin/rate-limits/{rule_name}", tags=["Rate Limiting"])
 async def delete_rate_limit(
     rule_name: str,
-    user: Optional[UserContext] = Depends(get_current_user)
+    user: UserContext = Depends(require_admin)
 ):
     """
     Deactivate a rate limit rule (soft delete).
@@ -4056,10 +4050,6 @@ async def delete_rate_limit(
     """
     if not rate_limit_service:
         raise HTTPException(status_code=503, detail="Rate limiting not initialized")
-
-    # TODO: Add admin check in production
-    # if not user or not user.is_admin:
-    #     raise HTTPException(status_code=403, detail="Admin access required")
 
     success = await rate_limit_service.delete_rule(rule_name)
 

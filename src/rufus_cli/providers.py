@@ -59,9 +59,9 @@ async def create_persistence_provider(config: Config) -> PersistenceProvider:
         )
 
     elif provider_type == "redis":
-        from rufus.implementations.persistence.redis import RedisPersistenceProvider
-        # Redis config would be added to Config if needed
-        provider = RedisPersistenceProvider()
+        raise ValueError(
+            "Redis persistence is not yet available. Use 'sqlite' or 'postgres'."
+        )
 
     else:
         raise ValueError(f"Unknown persistence provider: {provider_type}")
@@ -92,10 +92,10 @@ def create_execution_provider(config: Config) -> ExecutionProvider:
         return SyncExecutor()
 
     elif provider_type == "celery":
-        from rufus.implementations.execution.celery import CeleryExecutor
-        # Celery app would be configured here
-        # For CLI, we might not use Celery, but keeping for completeness
-        raise NotImplementedError("Celery executor not yet configured for CLI")
+        raise ValueError(
+            "Celery execution is not supported in the CLI. "
+            "Use the rufus-server API for distributed execution."
+        )
 
     elif provider_type == "thread_pool":
         from rufus.implementations.execution.thread_pool import ThreadPoolExecutorProvider

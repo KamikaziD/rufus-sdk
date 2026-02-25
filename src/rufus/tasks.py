@@ -439,11 +439,98 @@ def trigger_scheduled_workflow(workflow_type: str, initial_data: Dict[str, Any] 
 @celery_app.task if celery_app else lambda f: f
 def poll_scheduled_workflows():
     """
-    Periodic task to check DB for scheduled workflows that are due.
-    Registered in Celery Beat to run every minute.
+    Periodic Celery Beat task — fires every 60 seconds.
+
+    Queries `scheduled_workflows` for rows where `next_run_at <= now()`
+    and `enabled = true`, triggers each due workflow, then advances
+    `next_run_at` to the next occurrence using croniter.
     """
-    # TODO: Implement scheduled workflow polling
-    logger.info("[SCHEDULER] poll_scheduled_workflows not yet implemented")
+    import json
+    from datetime import datetime, timezone
+
+    if not _persistence_provider:
+        logger.warning("[SCHEDULER] poll_scheduled_workflows: persistence provider not initialized")
+        return
+
+    # Only supported for PostgreSQL (cloud deployments with the scheduled_workflows table)
+    if not hasattr(_persistence_provider, "pool"):
+        logger.debug("[SCHEDULER] poll_scheduled_workflows: non-PostgreSQL backend, skipping")
+        return
+
+    async def _poll():
+        now = datetime.now(timezone.utc)
+        async with _persistence_provider.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, schedule_name, workflow_type, cron_expression, initial_data
+                FROM   scheduled_workflows
+                WHERE  enabled = true
+                AND    next_run_at <= $1
+                """,
+                now,
+            )
+
+        if not rows:
+            return
+
+        try:
+            from croniter import croniter
+        except ImportError:
+            logger.error("[SCHEDULER] croniter package is required for CRON_SCHEDULE support")
+            return
+
+        for row in rows:
+            schedule_name = row["schedule_name"]
+            workflow_type = row["workflow_type"]
+            cron_expr = row["cron_expression"]
+            raw_data = row["initial_data"]
+
+            try:
+                initial_data = json.loads(raw_data) if raw_data else {}
+            except (json.JSONDecodeError, TypeError):
+                initial_data = {}
+
+            logger.info(
+                f"[SCHEDULER] Triggering due schedule '{schedule_name}' → {workflow_type}"
+            )
+
+            # Dispatch workflow creation asynchronously so Beat task returns quickly
+            try:
+                trigger_scheduled_workflow.delay(workflow_type, initial_data)
+            except Exception as e:
+                logger.error(
+                    f"[SCHEDULER] Failed to dispatch '{schedule_name}': {e}"
+                )
+
+            # Advance next_run_at for the next occurrence
+            try:
+                next_run = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+            except Exception as e:
+                logger.error(
+                    f"[SCHEDULER] Bad cron '{cron_expr}' for '{schedule_name}': {e}"
+                )
+                continue
+
+            async with _persistence_provider.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE scheduled_workflows
+                    SET    next_run_at = $1,
+                           last_run_at = now(),
+                           run_count   = run_count + 1,
+                           updated_at  = now()
+                    WHERE  schedule_name = $2
+                    """,
+                    next_run,
+                    schedule_name,
+                )
+
+    try:
+        pg_executor.run_coroutine_sync(_poll())
+    except Exception as e:
+        logger.error(f"[SCHEDULER] poll_scheduled_workflows failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 @celery_app.task if celery_app else lambda f: f

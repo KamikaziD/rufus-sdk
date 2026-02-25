@@ -58,20 +58,20 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:0.5.0
+    image: ruhfuskdev/rufus-server:0.5.4
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:0.5.0
+    image: ruhfuskdev/rufus-worker:0.5.4
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:0.5.0
+    image: ruhfuskdev/rufus-flower:0.5.4
     ports: ["5555:5555"]
 
   postgres:
@@ -92,7 +92,7 @@ API at `http://localhost:8000` · Swagger UI (grouped) at `http://localhost:8000
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.0
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.4
 ```
 
 ```python
@@ -346,7 +346,7 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 
 ### Appendices
 
-- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.5.0
+- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.5.4
 - [Roadmap](docs/appendices/roadmap.md)
 - [Migration Notes](docs/appendices/migration-notes.md)
 - [Glossary](docs/appendices/glossary.md)
@@ -407,14 +407,14 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:0.5.0` · `ruhfuskdev/rufus-worker:0.5.0` · `ruhfuskdev/rufus-flower:0.5.0`
+**Docker Hub:** `ruhfuskdev/rufus-server:0.5.4` · `ruhfuskdev/rufus-worker:0.5.4` · `ruhfuskdev/rufus-flower:0.5.4`
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.0
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.5.4
 ```
 
 ---
 
-**Current Version:** v0.5.0
+**Current Version:** v0.5.4
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

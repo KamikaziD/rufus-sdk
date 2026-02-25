@@ -85,73 +85,6 @@ class HttpWorkflowStep(WorkflowStep):
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
 
 
-class JavaScriptConfig(BaseModel):
-    """Configuration for JavaScript/TypeScript step execution."""
-
-    # Script source (one required)
-    script_path: Optional[str] = Field(
-        None,
-        description="Path to .js or .ts file (relative to config_dir or absolute)"
-    )
-    code: Optional[str] = Field(
-        None,
-        description="Inline JavaScript code (for simple scripts)"
-    )
-
-    # Execution limits
-    timeout_ms: int = Field(
-        5000,
-        ge=100,
-        le=300000,
-        description="Maximum execution time in milliseconds"
-    )
-    memory_limit_mb: int = Field(
-        128,
-        ge=16,
-        le=1024,
-        description="Maximum V8 heap size in megabytes"
-    )
-
-    # TypeScript options
-    typescript: bool = Field(
-        False,
-        description="Force TypeScript transpilation (auto-detected from .ts extension)"
-    )
-    tsconfig_path: Optional[str] = Field(
-        None,
-        description="Path to tsconfig.json for TypeScript options"
-    )
-
-    # Output configuration
-    output_key: Optional[str] = Field(
-        None,
-        description="Key to store result in state (default: merge at root)"
-    )
-
-    # Advanced options
-    strict_mode: bool = Field(
-        True,
-        description="Execute in JavaScript strict mode"
-    )
-
-    model_config = {"extra": "forbid"}
-
-    def model_post_init(self, __context: Any) -> None:
-        """Validate that either script_path or code is provided, but not both."""
-        if not self.script_path and not self.code:
-            raise ValueError("Either 'script_path' or 'code' must be provided")
-        if self.script_path and self.code:
-            raise ValueError("Cannot specify both 'script_path' and 'code'")
-
-
-class JavaScriptWorkflowStep(WorkflowStep):
-    """Workflow step that executes JavaScript/TypeScript code in a sandboxed V8 environment."""
-
-    js_config: JavaScriptConfig
-    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
-    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
-
-
 class AIInferenceConfig(BaseModel):
     """Configuration for AI/ML inference step execution."""
 
@@ -281,6 +214,11 @@ class ParallelWorkflowStep(WorkflowStep):
         ge=0,
         description="Process iterate_over list in chunks of this size (0 = all at once). "
                     "Only supported with SyncExecutor/ThreadPoolExecutor."
+    )
+    allow_partial_success: bool = Field(
+        default=False,
+        description="If True, the parallel step succeeds even if some tasks fail. "
+                    "Failed task errors are logged but do not raise an exception."
     )
     merge_function_path: Optional[str] = None
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW

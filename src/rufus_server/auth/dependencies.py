@@ -47,3 +47,10 @@ def require_scope(*scopes: str):
             raise HTTPException(status_code=403, detail='Insufficient scope')
         return user
     return _check
+
+
+async def require_admin(user: Optional[AuthUser] = Depends(get_current_user)) -> AuthUser:
+    """Dependency that requires the current user to have the 'admin' role."""
+    if user is None or "admin" not in user.roles:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user

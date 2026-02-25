@@ -162,7 +162,7 @@ Later task overwrites earlier task:
 
 **When to use**: Tasks have priority order, later tasks are more authoritative.
 
-### PREFER_OLD
+### PREFER_EXISTING
 
 Earlier task wins:
 

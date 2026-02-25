@@ -484,7 +484,7 @@ def test_build_steps_from_config(monkeypatch, mock_providers):
     assert isinstance(steps[0].loop_body[0], WorkflowStep)
 
     # 7. CronScheduleWorkflowStep
-    config_cron = {"name": "StepG", "type": "CRON_SCHEDULER", "target_workflow_type": "ScheduledWF", "schedule": "0 0 * * *"}
+    config_cron = {"name": "StepG", "type": "CRON_SCHEDULE", "target_workflow_type": "ScheduledWF", "schedule": "0 0 * * *"}
     steps = WorkflowBuilder._build_steps_from_config([config_cron])
     assert len(steps) == 1
     assert isinstance(steps[0], CronScheduleWorkflowStep)

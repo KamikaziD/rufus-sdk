@@ -1,7 +1,7 @@
 # Rufus Features & Capabilities
 
 **Last Updated:** 2026-02-24
-**Version:** 0.5.0 (Stable)
+**Version:** 0.5.3 (Stable)
 
 This document provides a comprehensive catalog of all Rufus SDK features, their implementation status, stability, and links to documentation and examples.
 
@@ -18,9 +18,9 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 | **PARALLEL** | ✅ Implemented | **Stable** | `examples/loan_application/` | [USAGE_GUIDE.md](../USAGE_GUIDE.md#parallel-execution) |
 | **DECISION** | ✅ Implemented | **Stable** | `examples/loan_application/` | [USAGE_GUIDE.md](../USAGE_GUIDE.md#decision-steps) |
 | **LOOP** | ✅ Implemented | **Beta** | See usage guide | [USAGE_GUIDE.md](../USAGE_GUIDE.md#loop-steps) |
-| **HTTP** | ✅ Implemented | **Stable** | `examples/javascript_steps/` | [USAGE_GUIDE.md](../USAGE_GUIDE.md#http-steps) |
+| **HTTP** | ✅ Implemented | **Stable** | `examples/quickstart/` | [USAGE_GUIDE.md](../USAGE_GUIDE.md#http-steps) |
 | **FIRE_AND_FORGET** | ✅ Implemented | **Beta** | See usage guide | [USAGE_GUIDE.md](../USAGE_GUIDE.md#fire-and-forget) |
-| **CRON_SCHEDULER** | ✅ Implemented | **Beta** | See usage guide | [USAGE_GUIDE.md](../USAGE_GUIDE.md#cron-scheduler) |
+| **CRON_SCHEDULE** | ✅ Implemented | **Beta** | See usage guide | [USAGE_GUIDE.md](../USAGE_GUIDE.md#cron-schedule) |
 
 **Legend:**
 - ✅ **Stable** - Production-ready, fully tested, API stable
@@ -267,9 +267,15 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 ```
 
 **Features:**
-- Merge strategies: SHALLOW, DEEP
-- Conflict resolution: PREFER_NEW, PREFER_OLD, RAISE_ERROR
-- Partial success handling
+- Merge strategies: `SHALLOW`, `DEEP`, `REPLACE`, `APPEND`, `OVERWRITE_EXISTING`, `PRESERVE_EXISTING`
+  - `SHALLOW` — merge top-level keys; existing keys are overwritten
+  - `DEEP` — recursive merge for nested dicts
+  - `REPLACE` — entire state replaced by result
+  - `APPEND` — result items appended to list; falls back to SHALLOW for non-lists
+  - `OVERWRITE_EXISTING` — existing keys overwritten, new keys added
+  - `PRESERVE_EXISTING` — only new keys added; existing keys kept
+- Conflict resolution: `PREFER_NEW`, `PREFER_EXISTING`, `RAISE_ERROR`
+- Partial success handling (`allow_partial_success: true`)
 
 **Best Practices:**
 - Use for independent operations
