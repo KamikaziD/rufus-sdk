@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    'rufus-sdk==0.6.0' \
-    'rufus-sdk-server==0.6.0'
+    'rufus-sdk==0.6.1' \
+    'rufus-sdk-server==0.6.1'
 
 # Step 2: Install all optional dependencies from PyPI (avoids TestPyPI broken packages)
 RUN pip install --no-cache-dir \
@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     'uvloop>=0.19'
 
 # PRODUCTION VERSION (uncomment when published to PyPI):
-# RUN pip install --no-cache-dir 'rufus-sdk[postgres,performance,cli]==0.6.0' 'rufus-sdk-server[server,auth]==0.6.0'
+# RUN pip install --no-cache-dir 'rufus-sdk[postgres,performance,cli]==0.6.1' 'rufus-sdk-server[server,auth]==0.6.1'
 
 # Create directories for user code (will be mounted as volumes)
 RUN mkdir -p /app/config /app/user_code

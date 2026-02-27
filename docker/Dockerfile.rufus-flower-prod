@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    'rufus-sdk==0.6.0' \
-    'rufus-sdk-server==0.6.0'
+    'rufus-sdk==0.6.1' \
+    'rufus-sdk-server==0.6.1'
 
 # Step 2: Install optional dependencies from PyPI (avoids TestPyPI broken packages)
 RUN pip install --no-cache-dir \
@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir \
     'flower>=2.0'
 
 # PRODUCTION VERSION (uncomment when published to PyPI):
-# RUN pip install --no-cache-dir 'rufus-sdk[performance]==0.6.0' 'rufus-sdk-server[celery]==0.6.0' flower>=2.0
+# RUN pip install --no-cache-dir 'rufus-sdk[performance]==0.6.1' 'rufus-sdk-server[celery]==0.6.1' flower>=2.0
 
 # Default environment variables (override in docker-compose)
 ENV CELERY_BROKER_URL=redis://redis:6379/0

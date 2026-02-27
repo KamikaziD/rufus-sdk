@@ -1,6 +1,6 @@
 [project]
 name = "rufus-sdk-edge"
-version = "0.6.0"
+version = "0.6.1"
 description = "Rufus edge agent for offline-first fintech devices (POS, ATM, kiosks)"
 authors = [{name = "Rufus Team", email = "team@rufus.dev"}]
 license = {text = "MIT"}

@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-VERSION="${1:-0.6.0}"
+VERSION="${1:-0.6.1}"
 REGISTRY="${2:-yourname}"  # Change to your Docker Hub username
 PUSH="${3:-false}"
 
