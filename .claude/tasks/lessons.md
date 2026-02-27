@@ -62,6 +62,12 @@ build-backend = "hatchling.build"
 Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchling reads the latter.
 **Verification:** `python -m build --wheel` from the sub-package dir succeeds; `unzip -l dist/*.whl | grep "\.py"` shows only the intended package files
 
+## Pattern: Use git (not gh) for GitHub Releases
+**Context:** Creating a GitHub release as part of the version bump / release chore
+**Anti-Pattern:** `gh release create v0.6.1 ...` — the `gh` CLI returns `401 Unauthorized / Bad credentials` in this environment; it does not have a valid GitHub token configured
+**Correction:** Create GitHub releases via the GitHub web UI at https://github.com/KamikaziD/rufus-sdk/releases/new, or use the raw GitHub API with `curl` if a token is available. Never use `gh release create`.
+**Verification:** Release appears at https://github.com/KamikaziD/rufus-sdk/releases without a 401 error
+
 ## Pattern: data_region Routes Sub-Workflow Tasks to Orphan Queue
 **Context:** `StartSubWorkflowDirective(data_region="onsite-london")` in user step function
 **Anti-Pattern:** Setting `data_region` to a named region without a worker listening to that queue — child workflow inherits `data_region`, all its async/parallel tasks dispatch to that queue (e.g., `onsite-london`), workers only consume `default`
