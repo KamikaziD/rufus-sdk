@@ -331,9 +331,9 @@ def run(
             typer.echo(f"Final State: {workflow.state.model_dump()}")
 
             if workflow.status == "COMPLETED":
-                typer.echo(f"Successfully completed workflow {workflow.id}", fg=typer.colors.GREEN)
+                typer.secho(f"Successfully completed workflow {workflow.id}", fg=typer.colors.GREEN)
             else:
-                typer.echo(f"Workflow {workflow.id} finished with status {workflow.status}", fg=typer.colors.RED, err=True)
+                typer.secho(f"Workflow {workflow.id} finished with status {workflow.status}", fg=typer.colors.RED, err=True)
                 raise typer.Exit(code=1)
         
         except Exception as e:
@@ -416,19 +416,19 @@ def scan_zombies(
 
                 if summary['zombies_found'] > 0:
                     if fix:
-                        typer.echo(
+                        typer.secho(
                             f"✓ Marked {summary['zombies_recovered']} zombie workflows as FAILED_WORKER_CRASH",
                             fg=typer.colors.GREEN,
                             bold=True
                         )
                     else:
-                        typer.echo(
+                        typer.secho(
                             f"⚠ Found {summary['zombies_found']} zombie workflows. Run with --fix to recover them.",
                             fg=typer.colors.YELLOW,
                             bold=True
                         )
                 else:
-                    typer.echo(
+                    typer.secho(
                         "✓ No zombie workflows found",
                         fg=typer.colors.GREEN,
                         bold=True
@@ -497,7 +497,7 @@ def zombie_daemon(
             )
 
         except KeyboardInterrupt:
-            typer.echo("\n\nStopping zombie scanner daemon...", fg=typer.colors.YELLOW)
+            typer.secho("\n\nStopping zombie scanner daemon...", fg=typer.colors.YELLOW)
             scanner.stop_daemon()
         except Exception as e:
             typer.echo(f"Error in zombie daemon: {e}", err=True)

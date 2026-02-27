@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus-sdk"
-version = "0.5.4"
+version = "0.6.0"
 description = "Offline-first workflow engine for edge devices - saga compensation, store-and-forward, fleet config rollout"
 authors = ["Rufus Team <team@rufus.dev>"]
 license = "MIT"
@@ -22,9 +22,7 @@ classifiers = [
 ]
 packages = [
     { include = "rufus", from = "src" },
-    { include = "rufus_edge", from = "src" },
     { include = "rufus_cli", from = "src" },
-    { include = "rufus_server", from = "src" },
 ]
 
 exclude = [
@@ -56,40 +54,17 @@ jsonschema = "^4.17,<5.0"
 # Workflow scheduling
 croniter = ">=2.0"
 
-# Celery distributed execution (optional)
-celery = {version = "^5.3", optional = true}
-redis = {version = "^5.0", optional = true}
-psycopg2-binary = {version = "^2.9", optional = true}
-prometheus-client = {version = "^0.19", optional = true}
-
-# Edge device support (optional but recommended)
-websockets = {version = "^12.0", optional = true}
-psutil = {version = "^5.9", optional = true}
-numpy = {version = "^1.24", optional = true}
-
-# Server dependencies (optional)
-fastapi = {version = ">=0.100", optional = true}
-uvicorn = {version = ">=0.20", optional = true}
-starlette = {version = ">=0.27", optional = true}
-slowapi = {version = ">=0.1", optional = true}
+# PostgreSQL support (optional)
 asyncpg = {version = ">=0.27", optional = true}
-
-# Auth / RBAC (optional — required for keycloak, jwt providers)
-python-jose = {version = ">=3.3", extras = ["cryptography"], optional = true}
 
 # CLI and performance (optional)
 rich = {version = ">=13.0", optional = true}
 uvloop = {version = ">=0.19", optional = true}
 
 [tool.poetry.extras]
-server = ["fastapi", "uvicorn", "starlette", "slowapi"]
 postgres = ["asyncpg"]
 cli = ["rich"]
 performance = ["uvloop"]
-edge = ["websockets", "psutil", "numpy"]
-celery = ["celery", "redis", "psycopg2-binary", "prometheus-client"]
-auth = ["python-jose"]
-all = ["fastapi", "uvicorn", "starlette", "slowapi", "asyncpg", "rich", "uvloop", "websockets", "psutil", "numpy", "celery", "redis", "psycopg2-binary", "prometheus-client", "python-jose"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0"

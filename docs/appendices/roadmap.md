@@ -2,8 +2,8 @@
 
 Rufus SDK development roadmap with planned features, priorities, and timelines.
 
-**Last Updated:** 2026-02-24
-**Current Version:** 0.5.0
+**Last Updated:** 2026-02-27
+**Current Version:** 0.6.0
 **Next Major Release:** 1.0.0
 
 ---
@@ -32,11 +32,13 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
    │
 2026-02 ━━ v0.4.2 (25 endpoint tests, error handling)
    │
-2026-02 ━━ v0.5.0 (Current ⭐ — 33-table schema consolidation)
+2026-02 ━━ v0.5.0 (33-table schema consolidation)
    │
-        ━━ v0.6.0 (OpenTelemetry, Prometheus metrics)
+2026-02 ━━ v0.6.0 (Current ⭐ — package split: rufus-sdk-edge + rufus-sdk-server)
    │
-        ━━ v0.7.0 (GPU inference step type, mTLS, HSM integration)
+        ━━ v0.7.0 (OpenTelemetry, Prometheus metrics)
+   │
+        ━━ v0.8.0 (GPU inference step type, mTLS, HSM integration)
    │
         ━━ v1.0.0 (Stable API guarantee)
 ```
@@ -379,7 +381,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 
 ## Feature Status
 
-### Completed (v0.5.0 and earlier)
+### Completed (v0.6.0 and earlier)
 
 #### Core SDK
 - ✅ Workflow orchestration engine

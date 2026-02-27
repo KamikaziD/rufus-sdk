@@ -65,7 +65,7 @@ rufus config set-persistence
 ```
 
 **Interactive Prompts:**
-1. Select provider (memory, sqlite, postgres, redis)
+1. Select provider (memory, sqlite, postgres)
 2. Provider-specific configuration (db path, connection URL, etc.)
 
 **Providers:**
@@ -75,7 +75,8 @@ rufus config set-persistence
 | `memory` | In-memory (testing only, data lost on exit) |
 | `sqlite` | SQLite database (development/production) |
 | `postgres` | PostgreSQL database (production) |
-| `redis` | Redis-based persistence |
+
+> **Note:** `redis` is listed in the config schema but is not available in the CLI (raises an error). Use `memory`, `sqlite`, or `postgres`.
 
 ---
 
@@ -98,7 +99,8 @@ rufus config set-execution
 |----------|-------------|
 | `sync` | Synchronous execution (single-threaded) |
 | `thread_pool` | Thread-based parallel execution |
-| `celery` | Distributed Celery execution |
+
+> **Note:** `celery` is not supported in the CLI (requires rufus-server and a running broker). Use `sync` or `thread_pool` for local execution.
 
 ---
 
@@ -198,6 +200,7 @@ rufus start <workflow-type> [OPTIONS]
 | `--data-file` | path | Path to JSON file with initial data |
 | `--config` | path | Path to workflow YAML file |
 | `--auto` | flag | Auto-execute all steps |
+| `--interactive`, `-i` | flag | Interactive mode (prompt at HITL steps) |
 | `--dry-run` | flag | Validate only, don't execute |
 
 **Examples:**
@@ -333,8 +336,8 @@ rufus logs <workflow-id> [OPTIONS]
 |--------|------|---------|-------------|
 | `--step` | string | - | Filter by step name |
 | `--level` | string | - | Filter by log level |
-| `--limit`, `-n` | int | 100 | Maximum log entries |
-| `--follow`, `-f` | flag | - | Follow logs (real-time) |
+| `--limit`, `-n` | int | 50 | Maximum log entries |
+| `--follow`, `-f` | flag | - | Follow logs *(not yet implemented — shows latest logs only)* |
 | `--json` | flag | - | JSON output |
 
 **Log Levels:**
@@ -411,6 +414,44 @@ rufus cancel <workflow-id> [OPTIONS]
 rufus cancel wf_abc123
 rufus cancel wf_abc123 --reason "Duplicate order" --force
 ```
+
+---
+
+### `rufus interactive run`
+
+Run a workflow interactively, pausing at each Human-in-the-Loop step to collect user input via terminal prompts.
+
+**Syntax:**
+
+```bash
+rufus interactive run <workflow-type> [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `workflow-type` | string | Yes | Workflow type from registry |
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `--data`, `-d` | string | Initial workflow data as JSON string |
+| `--data-file` | path | Initial workflow data from JSON file |
+| `--config` | path | Workflow YAML config file |
+
+**Examples:**
+
+```bash
+rufus interactive run OrderProcessing --config workflows/order.yaml
+rufus interactive run Approval --data '{"request_id": "123"}'
+```
+
+**Behavior:**
+- Auto-executes STANDARD steps without prompting
+- Pauses at `WAITING_HUMAN` steps and collects field-by-field input
+- Displays step names, status, and progress as the workflow advances
 
 ---
 
@@ -606,12 +647,12 @@ rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
 
 ### `rufus validate`
 
-Validate workflow YAML syntax.
+Validate workflow YAML syntax and structure.
 
 **Syntax:**
 
 ```bash
-rufus validate <yaml-file>
+rufus validate <yaml-file> [OPTIONS]
 ```
 
 **Arguments:**
@@ -620,10 +661,23 @@ rufus validate <yaml-file>
 |----------|------|----------|-------------|
 | `yaml-file` | path | Yes | Path to workflow YAML file |
 
-**Example:**
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `--strict` | flag | Also validate function imports and state model |
+| `--json` | flag | Output results as JSON |
+| `--graph` | flag | Generate step dependency graph |
+| `--graph-format` | string | Graph format: `mermaid` (default), `dot`, or `text` |
+
+**Examples:**
 
 ```bash
 rufus validate config/my_workflow.yaml
+rufus validate config/my_workflow.yaml --strict
+rufus validate config/my_workflow.yaml --graph
+rufus validate config/my_workflow.yaml --graph --graph-format dot
+rufus validate config/my_workflow.yaml --json
 ```
 
 ---
@@ -649,7 +703,6 @@ rufus run <yaml-file> [OPTIONS]
 | Option | Type | Description |
 |--------|------|-------------|
 | `--data`, `-d` | string | Initial data as JSON string |
-| `--registry` | path | Custom registry file path |
 
 **Example:**
 

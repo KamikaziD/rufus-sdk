@@ -3,6 +3,7 @@ Tests for validation and run commands.
 """
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
 from rufus_cli.main import app
@@ -260,7 +261,37 @@ class TestWorkflowValidator:
 class TestRunCommand:
     """Tests for 'rufus run' command."""
 
-    @pytest.mark.skip(reason="Requires full workflow integration")
-    def test_run_simple_workflow(self):
-        """Test running a simple workflow."""
-        pass
+    def test_run_simple_workflow(self, cli_runner, tmp_path):
+        """Test running a simple workflow that completes immediately."""
+        yaml_content = (
+            'workflow_type: "SimpleTest"\n'
+            'initial_state_model: "pydantic.BaseModel"\n'
+            'steps:\n'
+            '  - name: "Step_1"\n'
+            '    type: "STANDARD"\n'
+            '    function: "pydantic.BaseModel"\n'
+        )
+        yaml_file = tmp_path / "simple_workflow.yaml"
+        yaml_file.write_text(yaml_content)
+
+        # Mock state and workflow that is already COMPLETED on start
+        mock_state = MagicMock()
+        mock_state.model_dump.return_value = {}
+        mock_workflow = MagicMock()
+        mock_workflow.id = "test-workflow-id"
+        mock_workflow.status = "COMPLETED"
+        mock_workflow.state = mock_state
+
+        # Mock engine — use spec=[] on observer/executor so hasattr("close") is False
+        mock_persistence = AsyncMock()
+        mock_engine = MagicMock()
+        mock_engine.persistence = mock_persistence
+        mock_engine.observer = MagicMock(spec=[])
+        mock_engine.executor = MagicMock(spec=[])
+        mock_engine.start_workflow = AsyncMock(return_value=mock_workflow)
+
+        with patch("rufus_cli.main.get_configured_engine", new=AsyncMock(return_value=mock_engine)):
+            result = cli_runner.invoke(app, ["run", str(yaml_file), "--data", "{}"])
+
+        assert result.exit_code == 0
+        assert "Successfully completed" in result.stdout

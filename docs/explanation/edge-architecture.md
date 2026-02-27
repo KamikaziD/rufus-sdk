@@ -423,20 +423,36 @@ def validate_config(config, expected_checksum):
     return config
 ```
 
+## Package Footprint
+
+As of v0.6.0, Rufus ships as three separate wheels. Edge devices install only `rufus-sdk-edge`,
+which pulls in the `rufus-sdk` core but never installs the 10 MB cloud control plane.
+
+| Scenario | Install command | Disk | RAM |
+|----------|----------------|------|-----|
+| Minimal (offline payment, no AI) | `pip install rufus-sdk-edge` | ~15–20 MB | ~50 MB |
+| With monitoring + WebSocket | `pip install 'rufus-sdk-edge[edge]'` | ~30–35 MB | ~65 MB |
+| With ONNX fraud scoring | `pip install 'rufus-sdk-edge[edge]' && pip install onnxruntime` | ~80–600 MB* | ~115–165 MB |
+| With TFLite | `pip install 'rufus-sdk-edge[edge]' && pip install tflite-runtime` | ~50–250 MB* | ~85–115 MB |
+
+\* Varies by model size. Model files are downloaded separately.
+
+> For full footprint details, included/excluded files, and hardware requirements,
+> see [Edge Device Package Footprint](../reference/configuration/edge-footprint.md).
+
 ## Deployment
 
 ### Edge Agent Installation
 
 ```bash
-# Install Rufus Edge Agent
-pip install rufus-edge
+# Install Rufus Edge SDK (edge device — no cloud code included)
+pip install 'rufus-sdk-edge[edge]'
 
-# Generate device credentials
-rufus-edge register --device-type POS --location "Store-123"
-# Outputs: device_id, device_secret
+# Optional: add ONNX inference for on-device ML
+pip install onnxruntime>=1.16.0
 
-# Start agent
-rufus-edge start --device-id POS-12345 --secret <device-secret>
+# Run your edge agent
+python edge_agent.py
 ```
 
 ### Cloud Server Setup

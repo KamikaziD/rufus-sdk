@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] - 2026-02-27
+
+### Added
+- **Package split** — `rufus-sdk` (9.3 MB monolithic) divided into three targeted distribution wheels published to TestPyPI:
+  - `rufus-sdk` — core engine (`rufus/`) + CLI (`rufus_cli/`); ~185 KB wheel
+  - `rufus-sdk-edge` — edge agent (`rufus_edge/`) only; ~250 KB wheel — edge devices no longer pull 9+ MB of cloud control plane code
+  - `rufus-sdk-server` — cloud control plane (`rufus_server/`) only; ~9.5 MB wheel
+- **Sub-package `pyproject.toml` files** — `packages/rufus-sdk-edge/pyproject.toml` and `packages/rufus-sdk-server/pyproject.toml` (hatchling build backend with `force-include` for out-of-tree source)
+- **`tests/test_package_versions.py`** — version drift guard; asserts all four `__version__` strings are equal across `rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`
+- **`__version__`** added to `rufus_server/__init__.py` and `rufus_cli/__init__.py` (previously empty)
+
+### Changed
+- **Root `pyproject.toml`** — packages trimmed to `[rufus, rufus_cli]`; extras `server`, `celery`, `auth`, `edge`, `all` moved to their respective sub-packages; optional deps slimmed accordingly
+- **`rufus_edge.__version__`** corrected from stale `"0.5.0"` to `"0.6.0"`
+- **Docker production images** updated to two-step install pattern: Step 1 installs `rufus-sdk` + `rufus-sdk-server` (no extras) from TestPyPI; Step 2 installs actual optional deps (fastapi, celery, etc.) from PyPI to avoid broken TestPyPI stubs
+- **`docker/build-production-images.sh`** default `VERSION` updated from `0.3.5` → `0.6.0`
+- **Docs** — `installation.md`, `edge-architecture.md`, `edge-deployment.md`, `edge-footprint.md`, `CLI_QUICK_REFERENCE.md`, `CLAUDE.md` updated for three-package install model
+
+### Fixed
+- `rufus_edge.__version__` was `"0.5.0"` (stale since v0.3.x); now correctly `"0.6.0"`
+
+---
+
 ## [0.5.3] - 2026-02-25
 
 ### Added

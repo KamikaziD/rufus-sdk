@@ -60,9 +60,21 @@ CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
 ### Setup
 
 ```bash
-pip install -r requirements.txt
-# For PostgreSQL: pip install asyncpg
+# Full dev install (all three packages from source)
+pip install -e ".[postgres,performance,cli]"
+pip install -e "packages/rufus-sdk-edge[edge]"
+pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+
 # For Redis/Celery: docker run -d --name redis-server -p 6379:6379 redis
+```
+
+**PyPI install by role:**
+```bash
+# Edge device only (~15 MB installed)
+pip install 'rufus-sdk-edge[edge]'
+
+# Cloud server (API + workers)
+pip install 'rufus-sdk[postgres,performance]' 'rufus-sdk-server[server,celery,auth]'
 ```
 
 ### Testing
@@ -92,12 +104,13 @@ rufus config path               # Show config file location
 ```bash
 rufus list [--status ACTIVE] [--type OrderProcessing] [--limit 10]
 rufus show <workflow-id> [--state] [--logs]
-rufus start <workflow-type> [--data '{"field": "value"}']
-rufus resume <workflow-id> [--input '{"approval": true}']
+rufus start <workflow-type> [--data '{"field": "value"}'] [--data-file data.json] [--config wf.yaml] [--auto] [--interactive/-i] [--dry-run]
+rufus resume <workflow-id> [--input '{"approval": true}'] [--input-file input.json] [--auto]
 rufus retry <workflow-id> [--from-step StepName]
 rufus cancel <workflow-id> [--force] [--reason "User cancelled"]
-rufus logs <workflow-id> [--step StepName] [--level ERROR] [--limit 100]
+rufus logs <workflow-id> [--step StepName] [--level ERROR] [--limit 50]
 rufus metrics [--workflow-id <id>] [--type execution_time]
+rufus interactive run <workflow-type> [--data '{}'] [--config wf.yaml]
 ```
 
 **Database Management:**
@@ -109,10 +122,16 @@ rufus db stats                             # Show database statistics
 rufus db validate                          # Validate schema definition
 ```
 
+**Validate & Run (local):**
+```bash
+rufus validate <workflow.yaml> [--strict] [--json] [--graph] [--graph-format mermaid|dot|text]
+rufus run <workflow.yaml> [--data '{}']
+```
+
 **Zombie Workflow Recovery:**
 ```bash
-rufus scan-zombies [--fix] [--threshold 120]   # Scan for zombie workflows
-rufus zombie-daemon [--interval 60]            # Run scanner as daemon
+rufus scan-zombies --db <URL> [--fix] [--threshold 120]   # Scan for zombie workflows (--db required)
+rufus zombie-daemon --db <URL> [--interval 60]            # Run scanner as daemon (--db required)
 ```
 
 **Alternative subcommand syntax:** `rufus workflow list`, `rufus workflow start <type>`, etc.

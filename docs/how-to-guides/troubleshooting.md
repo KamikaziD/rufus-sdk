@@ -484,20 +484,20 @@ message_template: "Hello {{ recipient }}, your amount is {{ amount }}"
 
 ### Docker image runs wrong version after version bump
 
-**Problem:** Docker image is tagged `0.5.x` but `python -c "import rufus; print(rufus.__version__)"` inside the container prints the previous version.
+**Problem:** Docker image is tagged `0.6.x` but `python -c "import rufus; print(rufus.__version__)"` inside the container prints the previous version.
 
 **Cause:** Docker reused the cached `pip install rufus-sdk==<old>` layer because the Dockerfile was not updated before building.
 
 **Solution:** (1) Update the version pin in all three Dockerfiles as part of the version bump step. (2) Always build with `--no-cache` after a version bump:
 
 ```bash
-docker build --no-cache -f docker/Dockerfile.rufus-server-prod -t ruhfuskdev/rufus-server:0.5.x .
+docker build --no-cache -f docker/Dockerfile.rufus-server-prod -t ruhfuskdev/rufus-server:0.6.x .
 ```
 
 **Verify:**
 
 ```bash
-docker run --rm ruhfuskdev/rufus-server:0.5.x python -c "import rufus; print(rufus.__version__)"
+docker run --rm ruhfuskdev/rufus-server:0.6.x python -c "import rufus; print(rufus.__version__)"
 # Must print the new version
 ```
 

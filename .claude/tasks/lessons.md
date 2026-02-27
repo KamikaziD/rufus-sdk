@@ -18,11 +18,49 @@
 **Correction:** (1) Update the version pin in all three Dockerfiles as part of the version bump step, *before* building. (2) Always pass `--no-cache` to the Docker build after a version bump so the pip install layer is forced to re-run
 **Verification:** `docker run --rm ruhfuskdev/rufus-server:0.5.2 python -c "import rufus; print(rufus.__version__)"` must print the new version
 
-## Pattern: Dockerfiles Are a Third Canonical Version Location
-**Context:** Version bump flow for this project
-**Anti-Pattern:** Treating `pyproject.toml` and `src/rufus/__init__.py` as the only two files to update — the three production Dockerfiles (`Dockerfile.rufus-*-prod`) each pin `rufus-sdk==<version>` and must be updated in the same commit
-**Correction:** Version bump checklist: (1) `pyproject.toml`, (2) `src/rufus/__init__.py`, (3) all three Dockerfiles — then commit, tag, build with `--no-cache`, push
-**Verification:** `grep rufus-sdk docker/Dockerfile.rufus-*-prod` shows the new version in all three files before building
+## Pattern: All Version Locations Must Be Updated Together
+**Context:** Version bump flow for this project (v0.6.0+)
+**Anti-Pattern:** Missing any of the canonical version locations — now there are more: root `pyproject.toml`, both sub-package `pyproject.toml` files (`packages/rufus-sdk-edge/`, `packages/rufus-sdk-server/`), all four `__init__.py` files (`rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`), and all three Dockerfiles.
+**Correction:** Full version bump checklist: (1) root `pyproject.toml`, (2) `packages/rufus-sdk-edge/pyproject.toml`, (3) `packages/rufus-sdk-server/pyproject.toml`, (4) all four `__init__.py` files, (5) all three Dockerfiles — then commit, build with `--no-cache`, push. Run `pytest tests/test_package_versions.py` to catch drift.
+**Verification:** `pytest tests/test_package_versions.py -v` passes; `grep version packages/*/pyproject.toml pyproject.toml` shows consistent version in all three pyproject files; `grep rufus-sdk docker/Dockerfile.rufus-*-prod` shows new version in all Dockerfiles
+
+## Pattern: Step Functions Used as Dotted-Path Tasks Must Be Module-Level
+**Context:** Writing tests for `ThreadPoolExecutor` and `PARALLEL` steps using `WorkflowBuilder` dotted-path function references
+**Anti-Pattern:** Defining `task_a` and `task_b` inside the test function body, then registering them as `"test_module.task_a"` — `importlib` cannot import names that only exist in a local function scope, crashes with `AttributeError: module has no attribute 'task_a'`
+**Correction:** Move any function referenced by dotted path to module level in the test file (outside all functions/classes)
+**Verification:** `importlib.import_module("tests.sdk.test_thread_pool_executor"); getattr(mod, "task_a")` succeeds without AttributeError
+
+## Pattern: Jinja2 Template Context Is a Flat Dict (model_dump()), Not Nested Under "state"
+**Context:** Writing FIRE_AND_FORGET tests with templates like `{{ state.recipient }}`
+**Anti-Pattern:** `{{ state.recipient }}` or `{{ state.amount }}` — the template engine receives `state.model_dump()` (a flat dict), not an object with a `state` attribute
+**Correction:** Use `{{ recipient }}` and `{{ amount }}` directly (top-level keys); there is no `state.` prefix in templates
+**Verification:** `Jinja2TemplateEngine().render("Hello {{ recipient }}", context={"recipient": "Alice"})` returns `"Hello Alice"`
+
+## Pattern: Mock Patch Path Must Match the Module That Owns the Binding
+**Context:** Patching `pg_executor` in `celery.py` tests
+**Anti-Pattern:** `patch("rufus.utils.postgres_executor.pg_executor")` alone — this patches the source module but `celery.py` already has its own binding via `from rufus.utils.postgres_executor import pg_executor`; the celery module sees the old object
+**Correction:** Patch where it is used: `patch("rufus.implementations.execution.celery.pg_executor")` — this replaces the binding in the module under test
+**Verification:** Mock's `assert_called_once` passes; no `AttributeError: module ... does not have the attribute`
+
+## Pattern: workflow.next_step() Always Requires user_input Argument
+**Context:** Writing new SDK tests that call `next_step()` directly
+**Anti-Pattern:** `await wf.next_step()` — `user_input` is a required positional argument; omitting it raises `TypeError: next_step() missing 1 required positional argument`
+**Correction:** Always pass `await wf.next_step(user_input={})` even when no input is needed; use a populated dict for HUMAN_IN_LOOP steps
+**Verification:** Test runs without TypeError
+
+## Pattern: Poetry 2.x and Hatchling Both Reject ../../ Paths in packages= — Use force-include
+**Context:** Mono-repo sub-packages (`packages/rufus-sdk-edge/`) whose source lives in `../../src/rufus_edge`
+**Anti-Pattern:** `packages = [{ include = "rufus_edge", from = "../../src" }]` (Poetry) or `packages = ["../../src/rufus_edge"]` (Hatchling) — both raise `ValueError: path must be relative` because build backends refuse to traverse outside the project root for security
+**Correction:** Use Hatchling as build backend with `[tool.hatch.build.targets.wheel.force-include]` — `force-include` resolves paths via `os.path.normpath(root / source)`, which correctly handles `../../` without the relative-path validation:
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel.force-include]
+"../../src/rufus_edge" = "rufus_edge"
+```
+Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchling reads the latter.
+**Verification:** `python -m build --wheel` from the sub-package dir succeeds; `unzip -l dist/*.whl | grep "\.py"` shows only the intended package files
 
 ## Pattern: data_region Routes Sub-Workflow Tasks to Orphan Queue
 **Context:** `StartSubWorkflowDirective(data_region="onsite-london")` in user step function

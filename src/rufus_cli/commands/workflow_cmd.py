@@ -610,6 +610,9 @@ def view_logs(
         persistence, execution, observer = await create_providers(config)
         formatter = Formatter()
 
+        if follow:
+            formatter.print_warning("--follow is not yet implemented; showing latest logs")
+
         try:
             # Verify workflow exists
             workflow_data = await persistence.load_workflow(workflow_id)

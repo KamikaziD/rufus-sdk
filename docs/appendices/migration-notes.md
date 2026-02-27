@@ -6,6 +6,7 @@ Version-to-version migration guides for upgrading Rufus SDK.
 
 ## Table of Contents
 
+- [Upgrading to 0.6.0](#upgrading-to-060)
 - [Upgrading to 0.5.0](#upgrading-to-050)
 - [Upgrading to 0.4.2](#upgrading-to-042)
 - [Upgrading to 0.4.1](#upgrading-to-041)
@@ -15,6 +16,56 @@ Version-to-version migration guides for upgrading Rufus SDK.
 - [Upgrading to 0.1.1](#upgrading-to-011)
 - [Future Migrations](#future-migrations)
 - [Breaking Changes Policy](#breaking-changes-policy)
+
+---
+
+## Upgrading to 0.6.0
+
+**From:** 0.5.x
+**Date:** 2026-02-27
+
+### Summary
+
+v0.6.0 splits the monolithic `rufus-sdk` wheel into three separate packages. **No Python import changes are required** — the package names (`rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`) are unchanged. Only the `pip install` command changes depending on your deployment target.
+
+### Install Command Changes
+
+**Before (0.5.x):**
+```bash
+pip install 'rufus-sdk==0.5.4'                    # installs everything — 9.3 MB
+```
+
+**After (0.6.0+):**
+```bash
+# Edge device — installs only core + edge agent (~500 KB total)
+pip install 'rufus-sdk==0.6.0' 'rufus-sdk-edge[edge]==0.6.0'
+
+# Cloud server — installs core + server package
+pip install 'rufus-sdk==0.6.0' 'rufus-sdk-server[server,auth]==0.6.0'
+
+# Celery worker
+pip install 'rufus-sdk==0.6.0' 'rufus-sdk-server[celery]==0.6.0'
+
+# Dev (all packages from source)
+pip install -e ".[postgres,performance,cli]"
+pip install -e "packages/rufus-sdk-edge[edge]"
+pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+```
+
+### Breaking Changes
+
+**None for existing code.** All Python imports (`from rufus import ...`, `from rufus_edge import ...`, etc.) continue to work unchanged.
+
+**Docker Compose / deployment scripts** must be updated if they reference the old monolithic extras:
+- `rufus-sdk[server]` → install `rufus-sdk-server[server]` separately
+- `rufus-sdk[celery]` → install `rufus-sdk-server[celery]` separately
+- `rufus-sdk[edge]` → install `rufus-sdk-edge[edge]` separately
+
+### Action Required
+
+1. Update your `pip install` command or `requirements.txt` to reference the appropriate sub-package
+2. If using the production Docker images, pull the new `0.6.0` tags — they use the split install internally
+3. Run `pytest tests/test_package_versions.py` to verify version consistency
 
 ---
 
@@ -473,6 +524,7 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 
 | Rufus Version | Python | PostgreSQL | SQLite | Redis | Celery |
 |---------------|--------|------------|--------|-------|--------|
+| 0.6.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.5.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.4.2         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.4.1         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
@@ -495,5 +547,5 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 
 ---
 
-**Last Updated:** 2026-02-13
+**Last Updated:** 2026-02-27
 **Next Review:** Each release

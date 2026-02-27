@@ -4,8 +4,20 @@ One-page command reference for the Rufus CLI. For detailed documentation, see [C
 
 ## Installation
 
+| Deployment target | Install command |
+|-------------------|----------------|
+| Core SDK + CLI (dev / general use) | `pip install rufus-sdk` |
+| Edge device (POS, ATM, kiosk) | `pip install 'rufus-sdk-edge[edge]'` |
+| Cloud REST API server | `pip install 'rufus-sdk-server[server,auth]'` |
+| Celery workers | `pip install 'rufus-sdk-server[celery]'` |
+| Full server stack | `pip install 'rufus-sdk-server[all]'` |
+
 ```bash
-pip install -e .  # Development mode
+# Development (all packages from source)
+pip install -e ".[postgres,performance,cli]"
+pip install -e "packages/rufus-sdk-edge[edge]"
+pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+
 rufus --help      # Verify installation
 ```
 
@@ -38,6 +50,8 @@ rufus list --json                       # JSON output
 
 ```bash
 rufus start MyWorkflow --data '{"user_id": "123"}'    # Start workflow
+rufus start MyWorkflow --data '{}' --interactive     # Interactive mode (prompts at HITL steps)
+rufus interactive run MyWorkflow --config wf.yaml    # Interactive run with config file
 rufus show <id>                                       # Show details
 rufus show <id> --state --logs --metrics              # Show everything
 rufus show <id> --json                                # JSON output
@@ -58,6 +72,7 @@ rufus logs <id>                          # View logs
 rufus logs <id> --step Payment           # Filter by step
 rufus logs <id> --level ERROR            # Filter by level
 rufus logs <id> --limit 100              # Limit results
+rufus logs <id> --follow                 # (not yet implemented — shows latest logs only)
 rufus logs <id> --json                   # JSON output
 
 rufus metrics --workflow-id <id>         # View metrics
@@ -90,10 +105,21 @@ rufus db init --db-url sqlite:///path/to/db.sqlite
 rufus db init --db-url postgresql://user:pass@host/db
 ```
 
+## Zombie Recovery
+
+```bash
+rufus scan-zombies --db postgresql://localhost/rufus          # Scan (dry-run)
+rufus scan-zombies --db postgresql://localhost/rufus --fix    # Recover zombies
+rufus scan-zombies --db sqlite:///workflows.db --json        # JSON output
+rufus zombie-daemon --db postgresql://localhost/rufus         # Continuous daemon
+rufus zombie-daemon --db postgresql://localhost/rufus --interval 30
+```
+
 ## Legacy Commands
 
 ```bash
 rufus validate config/workflow.yaml         # Validate YAML syntax
+rufus validate config/workflow.yaml --strict --graph  # Full validation + dependency graph
 rufus run config/workflow.yaml -d '{}'      # Run locally (in-memory)
 ```
 
@@ -202,7 +228,7 @@ export NO_COLOR=1
 version: "1.0"
 
 persistence:
-  provider: sqlite  # or postgres, memory, redis
+  provider: sqlite  # or postgres, memory
   sqlite:
     db_path: ~/.rufus/workflows.db
   postgres:
@@ -211,7 +237,7 @@ persistence:
     pool_max_size: 50
 
 execution:
-  provider: sync  # or thread_pool, celery
+  provider: sync  # or thread_pool
 
 observability:
   provider: logging  # or noop
@@ -283,4 +309,4 @@ rufus logs --help          # Specific command help
 
 ---
 
-**Version:** 1.0 | **Last Updated:** 2026-01-24 | **Rufus CLI:** 0.1.0+
+**Version:** 0.6.0 | **Last Updated:** 2026-02-25 | **Rufus SDK:** 0.6.0

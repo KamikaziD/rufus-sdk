@@ -1,7 +1,7 @@
 # Rufus Features & Capabilities
 
-**Last Updated:** 2026-02-24
-**Version:** 0.5.3 (Stable)
+**Last Updated:** 2026-02-27
+**Version:** 0.6.0 (Stable)
 
 This document provides a comprehensive catalog of all Rufus SDK features, their implementation status, stability, and links to documentation and examples.
 
@@ -364,12 +364,26 @@ workflow.enable_saga_mode()
 
 ## Version History
 
-### v0.5.0 (Current — Stable)
+### v0.6.0 (Current — Stable)
+- ✅ **Package split** — monolithic `rufus-sdk` (9.3 MB) split into three targeted wheels
+  - `rufus-sdk` (core + CLI, ~185 KB wheel) — `rufus` + `rufus_cli`
+  - `rufus-sdk-edge` (~250 KB wheel) — `rufus_edge` only; edge devices no longer pull cloud code
+  - `rufus-sdk-server` (~9.5 MB wheel) — `rufus_server` only
+- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.6.0`, `ruhfuskdev/rufus-worker:0.6.0`, `ruhfuskdev/rufus-flower:0.6.0`
+- ✅ `rufus_edge.__version__` corrected from stale `"0.5.0"` to `"0.6.0"`; `rufus_server` + `rufus_cli` now expose `__version__`
+- ✅ `tests/test_package_versions.py` — version drift guard across all four packages
+
+### v0.5.3
+- ✅ PARALLEL `batch_size` + `allow_partial_success` fields
+- ✅ CRON_SCHEDULE polling engine (Celery Beat)
+- ✅ Admin auth enforced on 8 server endpoints; WebSocket device API key auth
+- ✅ 32 new tests (FaF, CRON, ExpressionEvaluator, TemplateEngine, ThreadPool)
+
+### v0.5.0
 - ✅ 33-table PostgreSQL schema under Alembic management
 - ✅ 10-table SQLite edge schema (auto-created)
 - ✅ Database schema consolidation (`database.py` as single source of truth)
 - ✅ Edge-specific tables: `saf_pending_transactions`, `device_config_cache`, `edge_sync_state`
-- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`, `ruhfuskdev/rufus-flower:0.5.0`
 
 ### v0.4.2
 - ✅ 25 endpoint tests covering all major API routes

@@ -15,23 +15,25 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install rufus-sdk from TestPyPI (TEMPORARY - for testing)
+# Install rufus-sdk packages from TestPyPI (TEMPORARY - for testing)
 # TODO: Switch to production PyPI once published
 
-# First install rufus-sdk core from TestPyPI
+# Step 1: Install rufus-sdk + rufus-sdk-server (no extras) from TestPyPI
 RUN pip install --no-cache-dir \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    'rufus-sdk==0.5.4'
+    'rufus-sdk==0.6.0' \
+    'rufus-sdk-server==0.6.0'
 
-# Then install extras from PyPI to avoid broken packages on TestPyPI
+# Step 2: Install optional dependencies from PyPI (avoids TestPyPI broken packages)
 RUN pip install --no-cache-dir \
-    celery[redis]>=5.3 \
-    redis>=5.0 \
-    flower>=2.0
+    'uvloop>=0.19' \
+    'celery[redis]>=5.3' \
+    'redis>=5.0' \
+    'flower>=2.0'
 
 # PRODUCTION VERSION (uncomment when published to PyPI):
-# RUN pip install --no-cache-dir 'rufus-sdk[all]'
+# RUN pip install --no-cache-dir 'rufus-sdk[performance]==0.6.0' 'rufus-sdk-server[celery]==0.6.0' flower>=2.0
 
 # Default environment variables (override in docker-compose)
 ENV CELERY_BROKER_URL=redis://redis:6379/0

@@ -1560,3 +1560,144 @@ From Docker Compose:
 ```bash
 docker-compose run --rm rufus-server alembic upgrade head
 ```
+
+---
+
+## §17 — Edge Device Package Footprint
+
+Full reference: [`docs/reference/configuration/edge-footprint.md`](../docs/reference/configuration/edge-footprint.md)
+
+### Wheel composition (v0.5.4, 9.3 MB)
+
+| Component | Size | Files | Edge-relevant |
+|-----------|------|-------|---------------|
+| `rufus/` core SDK | 1.9 MB | 57 | Partially (see below) |
+| `rufus_edge/` agent | 232 KB | 8 | Yes |
+| `rufus_cli/` CLI | 520 KB | 12 | No |
+| `rufus_server/` cloud API | 10 MB | 42 | No |
+
+### What is included vs excluded from the wheel
+
+**Included:**
+
+- All of `rufus/implementations/` — sqlite, postgres, sync, celery, thread_pool, onnx, tflite, etc. (716 KB)
+- `rufus_edge/payment_steps.py` — reference implementation, ships with the package
+- `rufus_cli/` and `rufus_server/` — shipped but never imported by edge agents
+
+**Excluded** (via `pyproject.toml exclude`):
+
+- `src/rufus/examples/`
+- `config/*.yaml` (project root — user-supplied, not in any package)
+- `tests/` (dev-only)
+- **User-written step functions** — always external to the package; add to footprint based on user imports
+
+### Installed footprint by scenario
+
+```text
+Scenario A: pip install rufus-sdk
+  Disk: ~25–30 MB  |  RSS: ~50 MB
+  Use: offline payment, SAF, SQLite, config polling
+
+Scenario B: pip install 'rufus-sdk[edge]'
+  Disk: ~40–45 MB  |  RSS: ~65 MB
+  Adds: websockets, psutil, numpy (+14 MB)
+  Use: everything above + WebSocket commands, health metrics
+
+Scenario C: pip install 'rufus-sdk[edge]' && pip install onnxruntime
+  Disk: ~100–600 MB  |  RSS: ~115–165 MB
+  Adds: onnxruntime (+60 MB) + model files (10–500 MB)
+  Use: on-device ML fraud scoring, anomaly detection
+
+Scenario D: pip install 'rufus-sdk[edge]' && pip install tflite-runtime
+  Disk: ~60–250 MB  |  RSS: ~85–115 MB
+  Adds: tflite-runtime (+10 MB) + model files
+  Use: TFLite inference (lighter than ONNX on some hardware)
+```
+
+### Core modules loaded by edge agents at runtime
+
+```python
+rufus.workflow, rufus.builder, rufus.models
+rufus.providers.*  (7 interface files)
+rufus.implementations.persistence.sqlite
+rufus.implementations.execution.sync
+rufus.implementations.observability.logging
+rufus.implementations.templating.jinja2
+rufus.implementations.expression_evaluator.simple
+rufus.implementations.security.crypto_utils
+rufus.implementations.inference.*  (only if AI enabled)
+```
+
+Modules on disk but never imported on edge: `celery_app`, `tasks`, `worker_registry`, `zombie_scanner`, `heartbeat`, `engine` (legacy), celery/postgres/redis implementations, `rufus_cli.*`, `rufus_server.*`
+
+### Hardware minimums
+
+| Scenario | Min RAM | Min Storage | Python |
+|----------|---------|-------------|--------|
+| Minimal | 128 MB | 64 MB | 3.9+ |
+| `[edge]` extras | 128 MB | 100 MB | 3.9+ |
+| ONNX inference | 256 MB | 200 MB+ | 3.9+ |
+| TFLite | 256 MB | 100–300 MB | 3.9+ |
+
+---
+
+## §17 — Package Split (v0.6.0)
+
+Three separate wheels replace the monolithic `rufus-sdk`:
+
+| Package | Contents | PyPI install |
+|---------|----------|--------------|
+| `rufus-sdk` | `rufus/` core + `rufus_cli/` | `pip install rufus-sdk` |
+| `rufus-sdk-edge` | `rufus_edge/` | `pip install rufus-sdk-edge` |
+| `rufus-sdk-server` | `rufus_server/` | `pip install rufus-sdk-server` |
+
+Sub-packages declare `rufus-sdk >= 0.6.0` as a required dependency.
+
+### pyproject.toml locations
+
+- Root: `/pyproject.toml` — `rufus-sdk` (core + CLI)
+- Edge: `/packages/rufus-sdk-edge/pyproject.toml` — `rufus-sdk-edge`
+- Server: `/packages/rufus-sdk-server/pyproject.toml` — `rufus-sdk-server`
+
+Sub-packages reference source via `from = "../../src"` — no file moves required.
+
+### Extras after split
+
+| Extra | Package | Packages added |
+|-------|---------|---------------|
+| `[postgres]` | `rufus-sdk` | asyncpg |
+| `[performance]` | `rufus-sdk` | uvloop |
+| `[cli]` | `rufus-sdk` | rich |
+| `[edge]` | `rufus-sdk-edge` | websockets, psutil, numpy |
+| `[server]` | `rufus-sdk-server` | fastapi, uvicorn, starlette, slowapi |
+| `[celery]` | `rufus-sdk-server` | celery, redis, psycopg2-binary, prometheus-client |
+| `[auth]` | `rufus-sdk-server` | python-jose |
+
+### Dev install (all from source)
+
+```bash
+pip install -e ".[postgres,performance,cli]"
+pip install -e "packages/rufus-sdk-edge[edge]"
+pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+```
+
+### Build
+
+```bash
+# Core
+poetry build
+# Edge
+cd packages/rufus-sdk-edge && poetry build
+# Server
+cd packages/rufus-sdk-server && poetry build
+```
+
+### Wheel size after split
+
+| Wheel | Size |
+|-------|------|
+| `rufus_sdk-0.6.0-py3-none-any.whl` | ~2.5 MB |
+| `rufus_sdk_edge-0.6.0-py3-none-any.whl` | ~250 KB |
+| `rufus_sdk_server-0.6.0-py3-none-any.whl` | ~10 MB |
+
+Edge devices installing `rufus-sdk-edge` save ~10.5 MB vs the old monolithic wheel.

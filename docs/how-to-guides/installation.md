@@ -2,9 +2,21 @@
 
 This guide covers installing Rufus for different scenarios.
 
+## Package structure (v0.6.0+)
+
+Rufus ships as three separate wheels so each deployment target only installs what it needs:
+
+| Package | Contents | Install command |
+|---------|----------|----------------|
+| `rufus-sdk` | Core engine + CLI | `pip install rufus-sdk` |
+| `rufus-sdk-edge` | Edge agent (`rufus_edge`) | `pip install rufus-sdk-edge` |
+| `rufus-sdk-server` | Cloud control plane (`rufus_server`) | `pip install rufus-sdk-server` |
+
+`rufus-sdk-edge` and `rufus-sdk-server` each declare `rufus-sdk` as a dependency, so installing either sub-package also installs the core.
+
 ## Prerequisites
 
-- Python 3.10 or higher
+- Python 3.9 or higher
 - pip package manager
 - (Optional) Docker for containerized setup
 
@@ -12,9 +24,36 @@ This guide covers installing Rufus for different scenarios.
 
 Choose the installation path that fits your needs:
 
-### Path 1: Direct install (SQLite)
+### Path 1: Edge device install
 
-Best for: Learning, prototyping, quick testing
+Best for: POS terminals, ATMs, kiosks, and other resource-constrained hardware
+
+```bash
+# Minimal (offline payment, SAF queue, SQLite — ~25 MB on disk)
+pip install rufus-sdk-edge
+
+# With WebSocket commands + system health metrics (~40 MB)
+pip install 'rufus-sdk-edge[edge]'
+```
+
+### Path 2: Cloud server install
+
+Best for: Running the REST API + Celery workers in production
+
+```bash
+# REST API server
+pip install 'rufus-sdk-server[server,auth]'
+
+# Celery workers
+pip install 'rufus-sdk-server[celery]'
+
+# Everything (API + workers + auth)
+pip install 'rufus-sdk-server[all]'
+```
+
+### Path 3: Core SDK only (SQLite)
+
+Best for: Learning, prototyping, SDK development without server or edge agent
 
 Install the SDK with SQLite support (no external database required):
 
@@ -24,7 +63,9 @@ git clone https://github.com/your-org/rufus-sdk.git
 cd rufus-sdk
 
 # Install in development mode
-pip install -e .
+pip install -e ".[postgres,performance,cli]"
+pip install -e "packages/rufus-sdk-edge[edge]"
+pip install -e "packages/rufus-sdk-server[server,celery,auth]"
 
 # Install core dependencies
 pip install aiosqlite orjson uvloop
@@ -220,8 +261,33 @@ pip install aiosqlite orjson asyncpg uvloop
 - [Configure providers](configuration.md)
 - [Test your installation](testing.md)
 
+## Package footprint
+
+As of v0.6.0 each wheel only ships the code you actually need:
+
+| Wheel | On-disk size | Contents |
+|-------|:-----------:|---------|
+| `rufus-sdk` | ~2.5 MB | Core engine (`rufus/`) + CLI (`rufus_cli/`) |
+| `rufus-sdk-edge` | ~250 KB | Edge agent (`rufus_edge/`) |
+| `rufus-sdk-server` | ~9.5 MB | Cloud control plane (`rufus_server/`) |
+
+**Total installed footprint** (wheel + core dependencies):
+
+| Scenario | Command | Disk | RAM |
+|----------|---------|:----:|:---:|
+| Edge, minimal | `pip install rufus-sdk-edge` | ~15–20 MB | ~50 MB |
+| Edge + WebSocket/metrics | `pip install 'rufus-sdk-edge[edge]'` | ~30–35 MB | ~65 MB |
+| Edge + ONNX fraud scoring | above + `pip install onnxruntime` | ~80–600 MB* | ~115–165 MB |
+| Cloud server (full) | `pip install 'rufus-sdk-server[all]'` | ~35–45 MB | — |
+
+\* Varies by model file size. Model files are downloaded separately.
+
+> For per-file breakdowns, hardware requirements, and footprint reduction tips see
+> [Edge Device Package Footprint](../reference/configuration/edge-footprint.md).
+
 ## See also
 
 - [Configuration guide](configuration.md)
 - [Deployment guide](deployment.md)
+- [Edge Device Package Footprint](../reference/configuration/edge-footprint.md)
 - QUICKSTART.md for quick start instructions

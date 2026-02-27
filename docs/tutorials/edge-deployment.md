@@ -815,7 +815,7 @@ Sync Result:
    cd ~/rufus-edge-demo
    python -m venv venv
    source venv/bin/activate
-   pip install rufus
+   pip install 'rufus-sdk-edge[edge]'
    ```
 
 3. **Run as systemd service**:

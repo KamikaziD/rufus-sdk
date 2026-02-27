@@ -296,6 +296,17 @@ class TestWorkflowLogs:
             logs = json.loads(json_output)
             assert isinstance(logs, list)
 
+    def test_logs_follow_flag_warns(self, cli_runner, temp_config_dir, mock_persistence):
+        """--follow is not yet implemented; verify a warning is printed instead of silently ignoring."""
+        workflow_id = "test-workflow-id"
+        mock_persistence.get_workflow_logs.return_value = []
+
+        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+            result = cli_runner.invoke(app, ["logs", workflow_id, "--follow"])
+
+        assert result.exit_code == 0
+        assert "not yet implemented" in result.stdout
+
 
 class TestWorkflowMetrics:
     """Tests for 'rufus metrics' command."""

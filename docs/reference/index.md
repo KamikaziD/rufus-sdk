@@ -105,6 +105,17 @@ All 9 step execution types with configuration options.
 - `CRON_SCHEDULE` - Recurring workflows
 - `HUMAN_IN_LOOP` - Human approval
 
+### [Edge Device Footprint](configuration/edge-footprint.md)
+
+Installed package size across all edge deployment scenarios.
+
+**Scenarios:**
+- Minimal (offline payment, no AI) — ~25–30 MB
+- With `[edge]` extras (monitoring, WebSocket) — ~40–45 MB
+- With ONNX inference — ~100–600 MB
+- What is and is not included in the wheel
+- Hardware minimum requirements per scenario
+
 ### [CLI Commands](configuration/cli-commands.md)
 
 Complete command-line interface reference.

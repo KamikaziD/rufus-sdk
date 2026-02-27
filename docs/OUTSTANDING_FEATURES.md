@@ -1,8 +1,8 @@
 # Rufus Outstanding Features & Roadmap
 
-**Last Updated:** 2026-02-24
-**Current Version:** 0.5.0 (Stable)
-**Next Planned Release:** 0.6.0 (OpenTelemetry + Prometheus)
+**Last Updated:** 2026-02-27
+**Current Version:** 0.6.0 (Stable)
+**Next Planned Release:** 0.7.0 (OpenTelemetry + Prometheus)
 
 This document tracks planned features, in-progress work, and the project roadmap for Rufus SDK.
 
@@ -20,7 +20,7 @@ This document tracks planned features, in-progress work, and the project roadmap
 
 ## Version Status
 
-### Current Release: v0.5.0 (Stable)
+### Current Release: v0.6.0 (Stable)
 
 **Status:** Production-capable for most workloads, API may change in minor pre-1.0 releases.
 
@@ -37,7 +37,8 @@ This document tracks planned features, in-progress work, and the project roadmap
 - ✅ 10-table SQLite edge schema (auto-created)
 - ✅ OpenAPI tags / grouped Swagger UI (14 tag groups, 86 endpoints)
 - ✅ RUFUS_CUSTOM_ROUTERS for user-defined API extensions
-- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`
+- ✅ **Package split** — three separate wheels (`rufus-sdk`, `rufus-sdk-edge`, `rufus-sdk-server`); edge devices install only ~250 KB instead of 9.3 MB
+- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.6.0`, `ruhfuskdev/rufus-worker:0.6.0`, `ruhfuskdev/rufus-flower:0.6.0`
 
 **What's Missing for 1.0:**
 - Enhanced monitoring & observability
