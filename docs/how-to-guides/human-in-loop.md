@@ -6,28 +6,11 @@ This guide covers pausing workflows for human input and resuming with user decis
 
 Human-in-the-loop (HITL) workflows pause execution to wait for manual approval, data entry, or decisions. The workflow persists its state and can be resumed hours or days later.
 
-## Basic pause and resume
+## Self-contained HITL step (recommended)
 
-### Pause workflow for approval
-
-```python
-from rufus.models import StepContext, WorkflowPauseDirective
-from my_app.state_models import OrderState
-
-def await_manager_approval(state: OrderState, context: StepContext) -> dict:
-    """Pause workflow for manager approval."""
-
-    # Prepare approval request
-    approval_data = {
-        "order_id": state.order_id,
-        "amount": state.amount,
-        "customer_id": state.customer_id,
-        "awaiting_approval": True
-    }
-
-    # Pause workflow - raises exception to halt execution
-    raise WorkflowPauseDirective(result=approval_data)
-```
+The `HUMAN_IN_LOOP` step type is self-contained. On first call it auto-pauses and exposes its
+`input_model` schema to the API. On resume it calls the step function with `**user_input` and
+advances automatically.
 
 ### Define in YAML
 
@@ -43,30 +26,46 @@ steps:
 
   - name: "Await_Manager_Approval"
     type: "HUMAN_IN_LOOP"
-    function: "my_app.steps.await_manager_approval"
-    # No automate_next - waits for manual resume
+    function: "my_app.steps.process_approval"
+    input_model: "my_app.models.ApprovalInput"  # validated on resume; schema exposed to API
 
   - name: "Process_Approved_Order"
     type: "STANDARD"
     function: "my_app.steps.process_order"
-    dependencies: ["Await_Manager_Approval"]
 ```
+
+### Implement the step function
+
+```python
+from rufus.models import StepContext, WorkflowJumpDirective
+from my_app.state_models import OrderState
+
+# Works for decisions (approval/rejection routing):
+def process_approval(state: OrderState, context: StepContext, **user_input) -> dict:
+    if not user_input.get("approved"):
+        raise WorkflowJumpDirective("Send_Rejection_Email")
+    return {"approved_by": user_input["reviewer"]}
+
+# Works for pure data collection (no routing needed):
+def collect_customer_info(state: OrderState, context: StepContext, **user_input) -> dict:
+    return {"customer_name": user_input["name"], "email": user_input["email"]}
+```
+
+`func` is optional — if omitted, `user_input` is merged directly into state on resume.
 
 ### Resume with approval
 
 ```python
-from rufus.builder import WorkflowBuilder
-
 # Load paused workflow
 workflow = await builder.load_workflow(workflow_id)
 
 # Check status
-assert workflow.status == "WAITING_HUMAN_INPUT"
+assert workflow.status == "WAITING_HUMAN"
 
 # Resume with approval decision
 await workflow.next_step(user_input={
     "approved": True,
-    "approved_by": "manager@company.com",
+    "reviewer": "manager@company.com",
     "approval_notes": "Verified customer credentials"
 })
 
@@ -77,140 +76,105 @@ await workflow.next_step(user_input={
 
 ```bash
 # List paused workflows
-rufus list --status WAITING_HUMAN_INPUT
+rufus list --status WAITING_HUMAN
 
 # Show workflow details
 rufus show <workflow-id>
 
 # Resume with approval
-rufus resume <workflow-id> --input '{"approved": true, "approved_by": "manager@company.com"}'
+rufus resume <workflow-id> --input '{"approved": true, "reviewer": "manager@company.com"}'
 
 # View updated status
 rufus show <workflow-id>
 ```
 
-## Handling approval decisions
+## Input validation with input_model
 
-Process user input in next step:
+Define a Pydantic model for the expected user input and reference it via `input_model`:
 
 ```python
-def process_approved_order(state: OrderState, context: StepContext, **user_input) -> dict:
-    """Process order after approval."""
+from pydantic import BaseModel
 
-    # Access approval decision from user_input
-    approved = user_input.get("approved", False)
-    approved_by = user_input.get("approved_by")
-
-    if approved:
-        state.status = "approved"
-        state.approved_by = approved_by
-
-        # Continue processing
-        return {"approval_processed": True}
-    else:
-        # Rejection logic
-        state.status = "rejected"
-        state.rejection_reason = user_input.get("rejection_reason")
-
-        raise Exception(f"Order rejected: {state.rejection_reason}")
+class ApprovalInput(BaseModel):
+    approved: bool
+    reviewer: str
+    approval_notes: str = ""
 ```
+
+```yaml
+- name: "Await_Approval"
+  type: "HUMAN_IN_LOOP"
+  function: "my_app.steps.process_approval"
+  input_model: "my_app.models.ApprovalInput"
+```
+
+The schema is exposed via `GET /api/v1/workflow/{id}/current_step_info` when the workflow is
+`WAITING_HUMAN`. Invalid input raises a `ValueError` with field-level errors.
 
 ## Multiple approval stages
 
-Chain multiple human steps:
+Chain multiple HITL steps:
 
 ```yaml
 steps:
   - name: "Analyst_Review"
     type: "HUMAN_IN_LOOP"
-    function: "my_app.steps.await_analyst_review"
+    function: "my_app.steps.process_analyst_review"
 
   - name: "Manager_Approval"
     type: "HUMAN_IN_LOOP"
-    function: "my_app.steps.await_manager_approval"
-    dependencies: ["Analyst_Review"]
+    function: "my_app.steps.process_manager_approval"
 
   - name: "Director_Approval"
     type: "HUMAN_IN_LOOP"
-    function: "my_app.steps.await_director_approval"
-    dependencies: ["Manager_Approval"]
+    function: "my_app.steps.process_director_approval"
 
   - name: "Execute_Transaction"
     type: "STANDARD"
     function: "my_app.steps.execute"
-    dependencies: ["Director_Approval"]
 ```
 
 ## Conditional approval routing
 
-Use DECISION steps after approval:
+Use `WorkflowJumpDirective` inside the HITL step function for branching:
 
 ```yaml
 steps:
   - name: "Await_Approval"
     type: "HUMAN_IN_LOOP"
-    function: "my_app.steps.await_approval"
+    function: "my_app.steps.process_approval_with_routing"
 
-  - name: "Check_Approval_Decision"
-    type: "DECISION"
-    function: "my_app.steps.check_decision"
-    dependencies: ["Await_Approval"]
-    routes:
-      - condition: "state.approved == True"
-        target: "Process_Order"
-      - condition: "state.approved == False"
-        target: "Send_Rejection_Email"
+  - name: "Process_Order"
+    type: "STANDARD"
+    function: "my_app.steps.process_order"
+
+  - name: "Send_Rejection_Email"
+    type: "STANDARD"
+    function: "my_app.steps.send_rejection"
 ```
 
 ```python
-def check_decision(state: OrderState, context: StepContext, **user_input) -> dict:
-    """Process approval decision."""
-
+def process_approval_with_routing(state: OrderState, context: StepContext, **user_input) -> dict:
     approved = user_input.get("approved", False)
     state.approved = approved
 
-    if approved:
-        state.approved_by = user_input.get("approved_by")
-        state.approved_at = context.execution_time
-    else:
+    if not approved:
         state.rejection_reason = user_input.get("rejection_reason")
+        raise WorkflowJumpDirective("Send_Rejection_Email")
 
-    return {
-        "decision_processed": True,
-        "approved": approved
-    }
+    state.approved_by = user_input.get("reviewer")
+    return {"decision_processed": True, "approved": approved}
 ```
 
-## Form data collection
+## Funcless HITL (pure data collection)
 
-Pause to collect detailed input:
+When `function` is omitted, `user_input` is merged directly into the workflow state:
 
-```python
-def collect_kyc_documents(state: ApplicationState, context: StepContext) -> dict:
-    """Pause to collect KYC documents from user."""
-
-    # Prepare form data request
-    form_request = {
-        "required_documents": [
-            "government_id",
-            "proof_of_address",
-            "income_verification"
-        ],
-        "upload_url": f"https://app.example.com/kyc/{state.application_id}"
-    }
-
-    raise WorkflowPauseDirective(result=form_request)
-```
-
-Resume with uploaded documents:
-
-```python
-await workflow.next_step(user_input={
-    "documents_uploaded": True,
-    "government_id_url": "s3://bucket/id.pdf",
-    "proof_of_address_url": "s3://bucket/address.pdf",
-    "income_verification_url": "s3://bucket/income.pdf"
-})
+```yaml
+- name: "Collect_Customer_Info"
+  type: "HUMAN_IN_LOOP"
+  input_model: "my_app.models.CustomerInfoInput"
+  # No function key — user_input is merged into state automatically
 ```
 
 ## Timeout handling
@@ -220,17 +184,16 @@ Implement approval timeouts with scheduled checks:
 ```python
 from datetime import datetime, timedelta
 
-def await_approval_with_timeout(state: OrderState, context: StepContext) -> dict:
-    """Pause with timeout tracking."""
+def await_approval_with_timeout(state: OrderState, context: StepContext, **user_input) -> dict:
+    approved = user_input.get("approved", False)
+    state.approved = approved
 
-    # Set timeout (24 hours from now)
-    timeout_at = datetime.now() + timedelta(hours=24)
-    state.approval_timeout_at = timeout_at.isoformat()
+    if not approved:
+        raise WorkflowJumpDirective("Handle_Rejection")
 
-    raise WorkflowPauseDirective(result={
-        "awaiting_approval": True,
-        "timeout_at": timeout_at.isoformat()
-    })
+    state.approved_by = user_input.get("reviewer")
+    state.approved_at = datetime.now().isoformat()
+    return {"approved": True}
 ```
 
 Check for expired approvals:
@@ -240,14 +203,12 @@ Check for expired approvals:
 from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
 
 async def check_expired_approvals():
-    """Check for and handle expired approval requests."""
-
     persistence = PostgresPersistenceProvider(db_url)
     await persistence.initialize()
 
     # Find workflows waiting for input
     workflows = await persistence.list_workflows(
-        status="WAITING_HUMAN_INPUT",
+        status="WAITING_HUMAN",
         limit=1000
     )
 
@@ -256,10 +217,6 @@ async def check_expired_approvals():
     for wf in workflows:
         timeout_at = wf['state'].get('approval_timeout_at')
         if timeout_at and datetime.fromisoformat(timeout_at) < now:
-            # Timeout expired - auto-reject or escalate
-            print(f"Approval timeout for workflow {wf['id']}")
-
-            # Option 1: Auto-reject
             workflow = await builder.load_workflow(wf['id'])
             await workflow.next_step(user_input={
                 "approved": False,
@@ -269,30 +226,32 @@ async def check_expired_approvals():
 
 ## Notification integration
 
-Send notifications when paused:
+Send notifications when the step auto-pauses by using a STANDARD step before the HITL step:
 
 ```python
-def await_approval(state: OrderState, context: StepContext) -> dict:
-    """Pause and send notification."""
-
-    # Send email notification
-    send_approval_email(
+def send_approval_notification(state: OrderState, context: StepContext) -> dict:
+    send_email(
         to=state.manager_email,
-        order_id=state.order_id,
-        amount=state.amount,
+        subject=f"Order {state.order_id} awaiting approval",
         approval_link=f"https://app.example.com/approve/{context.workflow_id}"
     )
-
-    # Send Slack notification
     send_slack_message(
         channel="#approvals",
         message=f"Order {state.order_id} awaiting approval: ${state.amount}"
     )
+    return {"notification_sent": True}
+```
 
-    raise WorkflowPauseDirective(result={
-        "notification_sent": True,
-        "notified_at": context.execution_time
-    })
+```yaml
+steps:
+  - name: "Send_Notification"
+    type: "STANDARD"
+    function: "my_app.steps.send_approval_notification"
+    automate_next: true
+
+  - name: "Await_Approval"
+    type: "HUMAN_IN_LOOP"
+    function: "my_app.steps.process_approval"
 ```
 
 ## Web UI integration
@@ -307,17 +266,12 @@ app = FastAPI()
 
 class ApprovalRequest(BaseModel):
     approved: bool
-    approved_by: str
-    notes: str = None
+    reviewer: str
+    notes: str = ""
 
 @app.get("/approvals/pending")
 async def list_pending_approvals():
-    """List all workflows awaiting approval."""
-
-    workflows = await persistence.list_workflows(
-        status="WAITING_HUMAN_INPUT"
-    )
-
+    workflows = await persistence.list_workflows(status="WAITING_HUMAN")
     return {
         "pending_approvals": [
             {
@@ -332,25 +286,19 @@ async def list_pending_approvals():
 
 @app.post("/approvals/{workflow_id}/approve")
 async def approve_workflow(workflow_id: str, request: ApprovalRequest):
-    """Approve a workflow."""
-
     try:
         workflow = await builder.load_workflow(workflow_id)
 
-        if workflow.status != "WAITING_HUMAN_INPUT":
+        if workflow.status != "WAITING_HUMAN":
             raise HTTPException(400, "Workflow not awaiting approval")
 
-        # Resume with approval
         await workflow.next_step(user_input={
             "approved": request.approved,
-            "approved_by": request.approved_by,
+            "reviewer": request.reviewer,
             "approval_notes": request.notes
         })
 
-        return {
-            "status": "approved",
-            "workflow_id": workflow_id
-        }
+        return {"status": "approved", "workflow_id": workflow_id}
 
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -361,13 +309,9 @@ async def approve_workflow(workflow_id: str, request: ApprovalRequest):
 Workflow state is automatically persisted:
 
 ```python
-# Before pause
+# Before pause (first call auto-pauses; state is already correct)
 state.order_id = "ORD-001"
 state.amount = 1500.00
-state.customer_id = "CUST-123"
-
-# Pause (state saved to database)
-raise WorkflowPauseDirective(result={"awaiting_approval": True})
 
 # ... minutes, hours, or days later ...
 
@@ -385,39 +329,35 @@ from rufus.testing.harness import TestHarness
 
 @pytest.mark.asyncio
 async def test_approval_workflow():
-    """Test workflow with approval step."""
-
     harness = TestHarness()
 
     # Start workflow
     workflow = await harness.start_workflow(
         workflow_type="OrderProcessing",
-        initial_data={
-            "order_id": "ORD-001",
-            "amount": 1500.00
-        }
+        initial_data={"order_id": "ORD-001", "amount": 1500.00}
     )
 
-    # Execute until approval
-    await harness.next_step(workflow.id)
+    # Execute until HITL step auto-pauses
+    try:
+        await harness.next_step(workflow.id, user_input={})
+    except WorkflowPauseDirective:
+        pass
 
     # Should be paused
-    assert workflow.status == "WAITING_HUMAN_INPUT"
+    assert workflow.status == "WAITING_HUMAN"
 
     # Simulate approval
     await harness.next_step(workflow.id, user_input={
         "approved": True,
-        "approved_by": "test@example.com"
+        "reviewer": "test@example.com"
     })
 
     # Should continue processing
-    assert workflow.status == "ACTIVE"
-    assert workflow.state.approved == True
+    assert workflow.status in ("ACTIVE", "COMPLETED")
+    assert workflow.state.approved_by == "test@example.com"
 
 @pytest.mark.asyncio
 async def test_rejection_workflow():
-    """Test workflow rejection."""
-
     harness = TestHarness()
 
     workflow = await harness.start_workflow(
@@ -425,7 +365,10 @@ async def test_rejection_workflow():
         initial_data={"order_id": "ORD-002"}
     )
 
-    await harness.next_step(workflow.id)
+    try:
+        await harness.next_step(workflow.id, user_input={})
+    except WorkflowPauseDirective:
+        pass
 
     # Reject
     await harness.next_step(workflow.id, user_input={
@@ -433,73 +376,38 @@ async def test_rejection_workflow():
         "rejection_reason": "Invalid customer"
     })
 
-    # Should fail or route to rejection handler
     assert workflow.state.approved == False
 ```
 
-## Common patterns
+## Legacy migration note
 
-### Multi-level approval
+Before v0.6.1, HITL required a 2-step pattern: a STANDARD step that raised
+`WorkflowPauseDirective`, plus a separate STANDARD step that received `user_input` on resume.
+This pattern still works (backward compatible) but the self-contained `HUMAN_IN_LOOP` type is
+simpler and preferred for all new workflows.
 
-```python
-def await_tiered_approval(state: LoanState, context: StepContext) -> dict:
-    """Determine approval tier based on amount."""
+Old pattern (still supported):
+```yaml
+- name: "Pause_For_Approval"   # STANDARD step raises WorkflowPauseDirective
+  type: "STANDARD"
+  function: "my_app.steps.pause_step"
 
-    if state.amount < 10000:
-        state.approval_tier = "analyst"
-    elif state.amount < 100000:
-        state.approval_tier = "manager"
-    else:
-        state.approval_tier = "director"
-
-    raise WorkflowPauseDirective(result={
-        "approval_tier": state.approval_tier,
-        "amount": state.amount
-    })
-```
-
-### Comment collection
-
-```python
-def collect_review_comments(state: ReviewState, context: StepContext) -> dict:
-    """Pause to collect review comments."""
-
-    raise WorkflowPauseDirective(result={
-        "requesting_comments": True,
-        "review_url": f"https://app.example.com/review/{state.review_id}"
-    })
-
-# Resume with comments
-await workflow.next_step(user_input={
-    "comments": "Looks good, approved",
-    "rating": 5
-})
-```
-
-### Batch approval
-
-```python
-# Approve multiple workflows at once
-workflow_ids = ["wf-1", "wf-2", "wf-3"]
-
-for workflow_id in workflow_ids:
-    workflow = await builder.load_workflow(workflow_id)
-    await workflow.next_step(user_input={
-        "approved": True,
-        "approved_by": "batch-approver@example.com"
-    })
+- name: "Process_After_Approval"  # Next STANDARD step receives user_input via context
+  type: "STANDARD"
+  function: "my_app.steps.process_step"
+  input_model: "my_app.models.ApprovalInput"
 ```
 
 ## Best practices
 
-1. **Set clear expectations** - Include timeout information in pause data
-2. **Send notifications** - Alert users when approval is needed
-3. **Track approval metadata** - Store who approved and when
-4. **Handle rejections** - Plan for both approval and rejection paths
-5. **Implement timeouts** - Don't let workflows pause indefinitely
-6. **Log approvals** - Audit trail for compliance
-7. **Test both paths** - Test approval and rejection scenarios
-8. **Validate input** - Check user input for required fields
+1. **Set clear input_model** — Validates input and powers auto-generated UI forms
+2. **Send notifications** — Use a STANDARD step before the HITL step for notifications
+3. **Track approval metadata** — Return approved_by/approved_at from the step function
+4. **Handle rejections** — Raise `WorkflowJumpDirective` to route to a rejection step
+5. **Implement timeouts** — Poll `WAITING_HUMAN` workflows and auto-reject expired ones
+6. **Log approvals** — The step execution is automatically audit-logged
+7. **Test both paths** — Test approval and rejection scenarios in unit tests
+8. **Validate input** — Use `input_model` for required-field enforcement
 
 ## Next steps
 
@@ -511,5 +419,4 @@ for workflow_id in workflow_ids:
 
 - [Create workflow guide](create-workflow.md)
 - [Testing guide](testing.md)
-- USAGE_GUIDE.md section 8.3 for HUMAN_IN_LOOP steps
 - CLAUDE.md "Control Flow Mechanisms" section

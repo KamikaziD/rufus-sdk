@@ -245,6 +245,21 @@ class CronScheduleWorkflowStep(WorkflowStep):
     initial_data_template: Dict[str, Any]
     schedule_name: Optional[str] = None
 
+
+class HumanWorkflowStep(WorkflowStep):
+    """Self-contained HITL step.
+
+    Lifecycle:
+    - First call (no user_input): framework auto-pauses, sets status to WAITING_HUMAN,
+      exposes this step's input_schema to the API.
+    - Resume (user_input provided): validates against input_schema (if set), calls func
+      with **user_input, merges result into state, then advances.
+
+    func is optional — if omitted, user_input is merged directly into state on resume.
+    """
+    pass  # Inherits func, input_schema, required_input, automate_next, routes from WorkflowStep
+
+
 # --- Directives and Exceptions ---
 
 

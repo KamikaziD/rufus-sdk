@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional, List, Callable, Type
 import uuid
 import os
 import importlib
+import asyncio
 import traceback  # For saga rollback error logging
 import time
 
@@ -11,7 +12,7 @@ from rufus.models import (
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
     WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
-    MergeStrategy, MergeConflictBehavior
+    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep
 )
 
 
@@ -590,11 +591,21 @@ class Workflow:
         self.state = current_state.__class__(**state_dict)
 
     async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
+        # Track whether we are re-executing a HumanWorkflowStep on resume
+        # (vs the legacy pattern where we advance past the pause step)
+        _resuming_from_human = False
+
         # Handle resumption from WAITING_HUMAN status
         if self.status == "WAITING_HUMAN":
             old_status = self.status
             self.status = "ACTIVE"
-            self.current_step += 1  # Advance past the pause step
+            current_paused_step = self.workflow_steps[self.current_step]
+            if isinstance(current_paused_step, HumanWorkflowStep):
+                # New path: do NOT increment — resume executes the same HITL step with user_input
+                _resuming_from_human = True
+            else:
+                # Legacy path: advance past the pause step to the next one
+                self.current_step += 1
             await self.persistence.save_workflow(self.id, self.to_dict())
             await self._notify_status_change(old_status, self.status, self.current_step_name)
             print(f"[RESUME] Workflow resumed from human input, advancing to step: {self.current_step_name}")
@@ -617,7 +628,11 @@ class Workflow:
         validated_model = None
         try:
             if step.input_schema:
-                validated_model = step.input_schema(**user_input)
+                # Skip validation on HumanWorkflowStep auto-pause (no input yet)
+                if isinstance(step, HumanWorkflowStep) and not _resuming_from_human:
+                    pass
+                else:
+                    validated_model = step.input_schema(**user_input)
         except ValidationError as e:
             raise ValueError(f"Invalid input for step '{step.name}': {e}")
 
@@ -636,12 +651,29 @@ class Workflow:
             if self.saga_mode and isinstance(step, CompensatableStep):
                 state_snapshot_before = self.state.model_dump()
 
+            # Auto-pause for HumanWorkflowStep on first call (no user_input, not resuming)
+            if isinstance(step, HumanWorkflowStep) and not user_input and not _resuming_from_human:
+                raise WorkflowPauseDirective(result={})
+
             result = {}
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
                                                  FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep))
 
             if is_sync_step:
-                if step.func:
+                if isinstance(step, HumanWorkflowStep):
+                    # Call func with user_input, or merge user_input directly into state
+                    if step.func:
+                        if asyncio.iscoroutinefunction(step.func):
+                            result = await step.func(state=self.state, context=context, **user_input)
+                        else:
+                            result = step.func(state=self.state, context=context, **user_input)
+                        result = result if isinstance(result, dict) else {}
+                    else:
+                        # No func: treat user_input as the result to merge into state
+                        result = user_input.copy()
+                    self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif step.func:
                     result = await self.execution.execute_sync_step_function(
                         step.func, self.state, context)
                     # Apply merge strategy for sync step results

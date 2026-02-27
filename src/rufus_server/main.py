@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # --- Import Rufus SDK Components ---
 from rufus.engine import WorkflowEngine
-from rufus.models import WorkflowJumpDirective, WorkflowPauseDirective, WorkflowFailedException, SagaWorkflowException
+from rufus.models import WorkflowJumpDirective, WorkflowPauseDirective, WorkflowFailedException, SagaWorkflowException, HumanWorkflowStep
 from rufus.workflow import Workflow
 from rufus.builder import WorkflowBuilder
 from rufus.providers.persistence import PersistenceProvider
@@ -518,16 +518,24 @@ async def get_current_step_info(
 
     # Add input schema for dynamic form rendering
     if workflow.status == "WAITING_HUMAN":
-        # Show the schema of the step that will execute when the user submits
-        next_step_index = workflow.current_step + 1
-        if next_step_index < len(workflow.workflow_steps):
-            next_step = workflow.workflow_steps[next_step_index]
-            if hasattr(next_step, 'input_schema') and next_step.input_schema:
-                response["input_schema"] = next_step.input_schema.model_json_schema()
+        current_paused_step = workflow.workflow_steps[workflow.current_step]
+        if isinstance(current_paused_step, HumanWorkflowStep):
+            # New path: expose the HITL step's own input_schema
+            if hasattr(current_paused_step, 'input_schema') and current_paused_step.input_schema:
+                response["input_schema"] = current_paused_step.input_schema.model_json_schema()
             else:
                 response["input_schema"] = None
         else:
-            response["input_schema"] = None
+            # Legacy path: show the next step's schema (old 2-step HITL pattern)
+            next_step_index = workflow.current_step + 1
+            if next_step_index < len(workflow.workflow_steps):
+                next_step = workflow.workflow_steps[next_step_index]
+                if hasattr(next_step, 'input_schema') and next_step.input_schema:
+                    response["input_schema"] = next_step.input_schema.model_json_schema()
+                else:
+                    response["input_schema"] = None
+            else:
+                response["input_schema"] = None
     elif hasattr(step, "input_model") and step.input_model:
         try:
             response["input_schema"] = step.input_model.model_json_schema()

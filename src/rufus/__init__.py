@@ -26,10 +26,11 @@ __all__ = [
     "Workflow",
     "WorkflowBuilder",
     "WorkflowStep",
+    "HumanWorkflowStep",
     "StepContext",
 ]
 
 # Import core classes for convenience
 from rufus.workflow import Workflow
 from rufus.builder import WorkflowBuilder
-from rufus.models import WorkflowStep, StepContext
+from rufus.models import WorkflowStep, HumanWorkflowStep, StepContext

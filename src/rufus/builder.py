@@ -158,7 +158,7 @@ class WorkflowBuilder:
             WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
             MergeStrategy, MergeConflictBehavior,
-            AIInferenceWorkflowStep, AIInferenceConfig
+            AIInferenceWorkflowStep, AIInferenceConfig, HumanWorkflowStep
         )
 
         steps = []
@@ -298,6 +298,19 @@ class WorkflowBuilder:
                     automate_next=automate_next
                 )
 
+            elif step_type_str == "HUMAN_IN_LOOP":
+                func = cls._import_from_string(func_path) if func_path else None
+                if func:
+                    cls._validate_step_function(func)
+                step = HumanWorkflowStep(
+                    name=config["name"],
+                    func=func,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    routes=routes
+                )
+
             else: # Standard step type or implicit
                 # If func_path is None here, it means no 'function' was provided
                 # for a STANDARD step, which is an error unless it's a specific step type
@@ -307,7 +320,7 @@ class WorkflowBuilder:
 
                 # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
                 # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
-                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULE", "PARALLEL"] and \
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULE", "PARALLEL", "HUMAN_IN_LOOP"] and \
                    "." not in step_type_str and step_type_str not in cls._marketplace_steps:
                     raise ValueError(f"Unknown step type: '{step_type_str}'")
 
