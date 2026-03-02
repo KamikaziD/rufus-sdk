@@ -1,7 +1,7 @@
 """consolidate schema: add all missing tables and fix device_commands columns
 
 Revision ID: a1b2c3d4e5f6
-Revises: d08b401e4c86
+Revises: 441ed90ac861
 Create Date: 2026-02-23 00:00:00.000000
 
 This migration makes database.py the single source of truth for all PostgreSQL tables.
@@ -32,7 +32,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, None] = 'd08b401e4c86'
+down_revision: Union[str, None] = '441ed90ac861'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -777,14 +777,19 @@ def upgrade() -> None:
     """)
 
     # Default command versions
-    op.execute(f"""
+    # Note: spaces added after ":" before numeric values to avoid SQLAlchemy named-param regex matching ":0"/":300"
+    _v1 = str(uuid.uuid4())
+    _v2 = str(uuid.uuid4())
+    _v3 = str(uuid.uuid4())
+    _v4 = str(uuid.uuid4())
+    op.execute(sa.text(f"""
         INSERT INTO command_versions (id, command_type, version, schema_definition, changelog, created_by) VALUES
-            ('{uuid.uuid4()}', 'restart', '1.0.0', '{{"type":"object","properties":{{"delay_seconds":{{"type":"integer","minimum":0,"maximum":300}}}},"required":[]}}', 'Initial version', 'system'),
-            ('{uuid.uuid4()}', 'health_check', '1.0.0', '{{"type":"object","properties":{{}},"required":[]}}', 'Initial version', 'system'),
-            ('{uuid.uuid4()}', 'update_firmware', '1.0.0', '{{"type":"object","properties":{{"version":{{"type":"string"}},"url":{{"type":"string","format":"uri"}}}},"required":["version"]}}', 'Initial version', 'system'),
-            ('{uuid.uuid4()}', 'clear_cache', '1.0.0', '{{"type":"object","properties":{{"cache_type":{{"type":"string","enum":["all","temp","logs"]}}}},"required":[]}}', 'Initial version', 'system')
+            ('{_v1}', 'restart', '1.0.0', '{{"type": "object", "properties": {{"delay_seconds": {{"type": "integer", "minimum": 0, "maximum": 300}}}}, "required": []}}', 'Initial version', 'system'),
+            ('{_v2}', 'health_check', '1.0.0', '{{"type": "object", "properties": {{}}, "required": []}}', 'Initial version', 'system'),
+            ('{_v3}', 'update_firmware', '1.0.0', '{{"type": "object", "properties": {{"version": {{"type": "string"}}, "url": {{"type": "string", "format": "uri"}}}}, "required": ["version"]}}', 'Initial version', 'system'),
+            ('{_v4}', 'clear_cache', '1.0.0', '{{"type": "object", "properties": {{"cache_type": {{"type": "string", "enum": ["all", "temp", "logs"]}}}}, "required": []}}', 'Initial version', 'system')
         ON CONFLICT (command_type, version) DO NOTHING
-    """)
+    """))
 
 
 def downgrade() -> None:
