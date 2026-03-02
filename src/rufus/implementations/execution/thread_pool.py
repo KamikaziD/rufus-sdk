@@ -136,7 +136,7 @@ class ThreadPoolExecutorProvider(ExecutionProvider):
         return self._run_async_in_thread(_internal_task())
 
 
-    def dispatch_parallel_tasks(self, tasks: List[Any], state_data: Dict[str, Any], workflow_id: str, current_step_index: int, merge_function_path: Optional[str], data_region: Optional[str], merge_strategy: str, merge_conflict_behavior: str) -> str:
+    def dispatch_parallel_tasks(self, tasks: List[Any], state_data: Dict[str, Any], workflow_id: str, current_step_index: int, merge_function_path: Optional[str], data_region: Optional[str], merge_strategy: str, merge_conflict_behavior: str, allow_partial_success: bool = False) -> str:
         """
         Dispatches multiple tasks for parallel execution to the thread pool.
         """
@@ -156,7 +156,7 @@ class ThreadPoolExecutorProvider(ExecutionProvider):
         # This can be handled by another thread pool submission or directly by the main thread
         master_future = self._executor.submit(
             self._merge_and_resume_parallel_tasks,
-            futures, state_data, workflow_id, current_step_index, merge_function_path, merge_strategy, merge_conflict_behavior
+            futures, state_data, workflow_id, current_step_index, merge_function_path, merge_strategy, merge_conflict_behavior, allow_partial_success
         )
         return f"thread-pool-parallel-group-{workflow_id}-{current_step_index}-{id(master_future)}"
 
@@ -178,10 +178,21 @@ class ThreadPoolExecutorProvider(ExecutionProvider):
         
         return self._run_async_in_thread(_internal_sub_task())
 
-    def _merge_and_resume_parallel_tasks(self, futures: List[Future], state_data: Dict[str, Any], workflow_id: str, current_step_index: int, merge_function_path: Optional[str], merge_strategy: str, merge_conflict_behavior: str):
+    def _merge_and_resume_parallel_tasks(self, futures: List[Future], state_data: Dict[str, Any], workflow_id: str, current_step_index: int, merge_function_path: Optional[str], merge_strategy: str, merge_conflict_behavior: str, allow_partial_success: bool = False):
         """Internal method to merge results from parallel tasks and resume workflow."""
+        import logging
+        _logger = logging.getLogger(__name__)
+
         async def _internal_merge_and_resume():
-            results = [f.result() for f in futures] # This will block until all futures are done
+            results = []
+            for f in futures:
+                try:
+                    results.append(f.result())
+                except Exception as e:
+                    if allow_partial_success:
+                        _logger.warning(f"Parallel sub-task failed (allow_partial_success=True): {e}")
+                    else:
+                        raise
 
             merged_result = {}
             if merge_function_path:

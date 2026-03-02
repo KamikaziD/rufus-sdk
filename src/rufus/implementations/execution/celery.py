@@ -161,7 +161,8 @@ class CeleryExecutionProvider(ExecutionProvider):
                                merge_function_path: Optional[str] = None,
                                data_region: Optional[str] = None,
                                merge_strategy: str = "SHALLOW",
-                               merge_conflict_behavior: str = "PREFER_NEW") -> Dict[str, Any]:
+                               merge_conflict_behavior: str = "PREFER_NEW",
+                               allow_partial_success: bool = False) -> Dict[str, Any]:
         """
         Dispatches multiple tasks for parallel execution.
 
@@ -203,7 +204,8 @@ class CeleryExecutionProvider(ExecutionProvider):
             current_step_index,
             merge_function_path,
             merge_strategy,
-            merge_conflict_behavior
+            merge_conflict_behavior,
+            allow_partial_success
         )
 
         # Use chord: parallel tasks → merge results → resume workflow

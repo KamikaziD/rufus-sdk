@@ -537,7 +537,8 @@ def poll_scheduled_workflows():
 def merge_and_resume_parallel_tasks(results, workflow_id: str, current_step_index: int,
                                     merge_function_path: str = None,
                                     merge_strategy: str = "SHALLOW",
-                                    merge_conflict_behavior: str = "PREFER_NEW"):
+                                    merge_conflict_behavior: str = "PREFER_NEW",
+                                    allow_partial_success: bool = False):
     """
     Merges the results of parallel tasks and resumes the workflow.
     If a merge_function_path is provided, it will be used to merge the results.
@@ -549,7 +550,18 @@ def merge_and_resume_parallel_tasks(results, workflow_id: str, current_step_inde
         merge_function_path: Optional custom merge function path
         merge_strategy: Strategy for merging (SHALLOW or DEEP)
         merge_conflict_behavior: How to handle conflicts (PREFER_NEW, PREFER_OLD, RAISE_ERROR)
+        allow_partial_success: If True, failed tasks are logged and skipped; if False (default), re-raises
     """
+    # Filter out failed tasks when allow_partial_success is enabled
+    if allow_partial_success:
+        valid_results = []
+        for res in (results or []):
+            if isinstance(res, Exception):
+                logger.warning(f"Parallel task failed (allow_partial_success=True): {res}")
+            else:
+                valid_results.append(res)
+        results = valid_results
+
     if merge_function_path:
         module_path, func_name = merge_function_path.rsplit('.', 1)
         module = importlib.import_module(module_path)
