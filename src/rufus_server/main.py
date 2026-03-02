@@ -3456,7 +3456,7 @@ async def query_audit_logs(
 
     if not audit_service:
         from rufus_server.audit_service import AuditService
-        audit_service = AuditService(persistence)
+        audit_service = AuditService(workflow_engine.persistence)
 
     from rufus_server.audit import AuditQuery
     from datetime import datetime
@@ -3523,7 +3523,7 @@ async def export_audit_logs(
 
     if not audit_service:
         from rufus_server.audit_service import AuditService
-        audit_service = AuditService(persistence)
+        audit_service = AuditService(workflow_engine.persistence)
 
     from rufus_server.audit import AuditQuery, AuditExportFormat
     from datetime import datetime
@@ -3577,7 +3577,7 @@ async def get_audit_stats(
 
     if not audit_service:
         from rufus_server.audit_service import AuditService
-        audit_service = AuditService(persistence)
+        audit_service = AuditService(workflow_engine.persistence)
 
     from datetime import datetime, timedelta
 
