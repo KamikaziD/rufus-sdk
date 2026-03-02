@@ -203,9 +203,20 @@ export function sendDeviceCommand(
 }
 
 export async function listDeviceCommands(token: string, deviceId: string): Promise<{ commands: DeviceCommand[] }> {
-  // No list-commands GET endpoint exists; return empty
-  void token; void deviceId;
-  return { commands: [] };
+  const raw = await apiFetch<{ commands: Array<Record<string, unknown>>; total: number }>(
+    `/api/v1/devices/${deviceId}/commands`,
+    token
+  );
+  const commands = (raw.commands ?? []).map((c) => ({
+    command_id:   c.command_id as string,
+    device_id:    deviceId,
+    command_type: c.command_type as string,
+    payload:      (c.command_data ?? {}) as Record<string, unknown>,
+    status:       (c.status ?? "pending") as DeviceCommand["status"],
+    created_at:   c.created_at as string,
+    executed_at:  (c.completed_at ?? c.sent_at ?? null) as string | null,
+  }));
+  return { commands };
 }
 
 // ── Audit API ────────────────────────────────────────────────────────────────
@@ -233,24 +244,85 @@ export async function queryAuditLogs(
   return { logs: entries, total: raw.total_count ?? entries.length };
 }
 
-export function exportAuditLogs(
+export async function exportAuditLogs(
   token: string,
   format: "json" | "csv",
   params: Record<string, string> = {}
-): Promise<{ download_url: string }> {
-  return apiFetch("/api/v1/audit/export", token, {
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/api/v1/audit/export`, {
     method: "POST",
+    headers,
     body: JSON.stringify({ format, ...params }),
   });
+
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const body = await res.json();
+      msg = body.detail ?? msg;
+    } catch {}
+    throw new ApiError(res.status, msg);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `audit-export.${format}`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Policy API ───────────────────────────────────────────────────────────────
 
+function normalizePolicy(raw: Record<string, unknown>): Policy {
+  return {
+    policy_id:   (raw.policy_id ?? raw.id ?? "") as string,
+    name:        (raw.name ?? raw.policy_name ?? "") as string,
+    description: (raw.description ?? "") as string,
+    status:      ((raw.status as string ?? "DRAFT").toUpperCase()) as Policy["status"],
+    rules:       (raw.rules ?? []) as Policy["rules"],
+    created_at:  (raw.created_at ?? "") as string,
+    updated_at:  (raw.updated_at ?? "") as string,
+  };
+}
+
 export async function listPolicies(token: string): Promise<{ policies: Policy[] }> {
-  // Server returns bare array, not { policies: [] }
-  const raw = await apiFetch<Policy[] | { policies?: Policy[] }>("/api/v1/policies", token);
-  if (Array.isArray(raw)) return { policies: raw };
-  return { policies: raw.policies ?? [] };
+  // Server returns bare array of Policy objects with `policy_name` and `id` fields
+  const raw = await apiFetch<Record<string, unknown>[] | { policies?: Record<string, unknown>[] }>(
+    "/api/v1/policies",
+    token
+  );
+  const arr = Array.isArray(raw) ? raw : (raw.policies ?? []);
+  return { policies: arr.map(normalizePolicy) };
+}
+
+export function createPolicy(
+  token: string,
+  body: {
+    policy_name: string;
+    description?: string;
+    version?: string;
+    rules: Array<{ condition: string; artifact: string; priority?: number; description?: string }>;
+  }
+): Promise<Record<string, unknown>> {
+  return apiFetch("/api/v1/policies", token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updatePolicyStatus(
+  token: string,
+  policyId: string,
+  status: "active" | "paused" | "archived"
+): Promise<{ status: string; new_status: string }> {
+  return apiFetch(`/api/v1/policies/${policyId}/status?new_status=${status}`, token, {
+    method: "PUT",
+  });
 }
 
 // ── Metrics API ───────────────────────────────────────────────────────────────

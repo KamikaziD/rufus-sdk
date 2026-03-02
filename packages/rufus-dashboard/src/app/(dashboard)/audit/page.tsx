@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
-import { queryAuditLogs } from "@/lib/api";
+import { queryAuditLogs, exportAuditLogs } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,20 @@ export default function AuditPage() {
   const token = (session as unknown as { accessToken?: string })?.accessToken;
 
   const [page, setPage] = useState(1);
+  const [exportFormat, setExportFormat] = useState<"json" | "csv">("json");
+  const [isExporting, setIsExporting] = useState(false);
+
+  async function handleExport() {
+    if (!token) return;
+    setIsExporting(true);
+    try {
+      await exportAuditLogs(token, exportFormat);
+    } catch (e) {
+      console.error("Export failed", e);
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["audit", page],
@@ -37,9 +51,17 @@ export default function AuditPage() {
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
-          <Button variant="outline" size="sm">
+          <select
+            value={exportFormat}
+            onChange={(e) => setExportFormat(e.target.value as "json" | "csv")}
+            className="text-xs border rounded px-2 py-1 bg-background"
+          >
+            <option value="json">JSON</option>
+            <option value="csv">CSV</option>
+          </select>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
             <Download className="h-3.5 w-3.5" />
-            Export
+            {isExporting ? "Exporting…" : "Export"}
           </Button>
         </div>
       </div>

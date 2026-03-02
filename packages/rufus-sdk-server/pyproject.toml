@@ -1,6 +1,6 @@
 [project]
 name = "rufus-sdk-server"
-version = "0.6.3"
+version = "0.7.0"
 description = "Rufus cloud control plane — REST API, device fleet management, Celery workers"
 authors = [{name = "Rufus Team", email = "team@rufus.dev"}]
 license = {text = "MIT"}

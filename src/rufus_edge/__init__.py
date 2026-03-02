@@ -41,7 +41,7 @@ from rufus_edge.models import (
     SyncStatus,
 )
 
-__version__ = "0.6.3"
+__version__ = "0.7.0"
 
 __all__ = [
     "RufusEdgeAgent",

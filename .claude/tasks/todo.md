@@ -62,6 +62,17 @@
 - `src/app/(dashboard)/layout.tsx` — check `x-test-bypass` header via `headers()` to skip `redirect("/login")` in bypass mode
 - `e2e/smoke.spec.ts` — updated assertions to match actual headings ("Approval Queue", "Start Workflow", role heading selector)
 
+## Phase 7 — Dashboard Completion + Infrastructure (2026-03-02) ✅
+- [x] **Audit export** — `exportAuditLogs()` fetches blob + triggers browser download; format select (JSON/CSV) + onClick wired to Export button in audit/page.tsx
+- [x] **GET /api/v1/devices/{device_id}/commands** — new endpoint in main.py; calls `device_service.list_commands()`; `limit`/`offset`/`status` query params; tags: Commands
+- [x] **listDeviceCommands()** stub replaced — real apiFetch; normalizes `command_data→payload`, `completed_at→executed_at`, injects `device_id`
+- [x] **listPolicies()** normalization — maps `id→policy_id`, `policy_name→name`, lowercase status→uppercase
+- [x] **createPolicy() + updatePolicyStatus()** added to api.ts
+- [x] **policies/page.tsx** — Create Policy button + Radix Dialog modal (policy_name, description, condition, artifact); Activate/Pause/Archive action buttons per row; useMutation hooks
+- [x] **rufus_test/docker-compose.test-async.yml** created — postgres, redis, rufus-server (ruhfuskdev images); server command: pip install psycopg2-binary + alembic upgrade head + uvicorn; bind-mounts for main.py + api_models.py
+- [x] **build-production-images.sh** — migrated from `docker build` to `docker buildx build --platform linux/amd64,linux/arm64 --push`; auto-creates `rufus-builder` buildx instance; single-arch `--load` fallback for local testing
+- [x] TypeScript type-check → 0 errors
+
 ## Review
 
 ### Proof of Work

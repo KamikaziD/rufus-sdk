@@ -1967,6 +1967,27 @@ async def send_device_command(
     }
 
 
+@app.get("/api/v1/devices/{device_id}/commands", tags=["Commands"])
+async def list_device_commands(
+    device_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """List commands sent to an edge device, ordered by created_at DESC."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    device = await device_service.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    commands = await device_service.list_commands(device_id, status=status)
+    total = len(commands)
+    return {"commands": commands[offset: offset + limit], "total": total}
+
+
 @app.post("/api/v1/devices/{device_id}/commands/{command_id}/status", tags=["Devices"])
 async def update_command_status(
     device_id: str,
