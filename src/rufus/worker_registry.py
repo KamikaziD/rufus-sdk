@@ -24,31 +24,43 @@ class WorkerRegistry:
     def _get_connection(self):
         return psycopg2.connect(self.db_url)
 
-    def register(self):
-        """Register the worker in the database."""
-        try:
-            with self._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO worker_nodes
-                        (worker_id, hostname, region, zone, capabilities, status, last_heartbeat)
-                        VALUES (%s, %s, %s, %s, %s, 'online', NOW())
-                        ON CONFLICT (worker_id)
-                        DO UPDATE SET
-                            status = 'online',
-                            last_heartbeat = NOW(),
-                            updated_at = NOW();
-                    """, (
-                        self.worker_id,
-                        self.hostname,
-                        self.region,
-                        self.zone,
-                        json.dumps(self.capabilities)
-                    ))
-            logger.info(f"Worker {self.worker_id} registered successfully in region {self.region}.")
-            self._start_heartbeat()
-        except Exception as e:
-            logger.error(f"Failed to register worker {self.worker_id}: {e}")
+    def register(self, retries: int = 10, retry_delay: float = 5.0):
+        """Register the worker in the database.
+
+        Retries if the worker_nodes table doesn't exist yet (race with server migration).
+        """
+        for attempt in range(1, retries + 1):
+            try:
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO worker_nodes
+                            (worker_id, hostname, region, zone, capabilities, status, last_heartbeat)
+                            VALUES (%s, %s, %s, %s, %s, 'online', NOW())
+                            ON CONFLICT (worker_id)
+                            DO UPDATE SET
+                                status = 'online',
+                                last_heartbeat = NOW(),
+                                updated_at = NOW();
+                        """, (
+                            self.worker_id,
+                            self.hostname,
+                            self.region,
+                            self.zone,
+                            json.dumps(self.capabilities)
+                        ))
+                logger.info(f"Worker {self.worker_id} registered successfully in region {self.region}.")
+                self._start_heartbeat()
+                return
+            except Exception as e:
+                if "does not exist" in str(e) and attempt < retries:
+                    logger.warning(
+                        f"Worker registration attempt {attempt}/{retries} failed "
+                        f"(table not ready yet), retrying in {retry_delay}s: {e}"
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"Failed to register worker {self.worker_id}: {e}")
 
     def deregister(self):
         """Mark the worker as offline."""

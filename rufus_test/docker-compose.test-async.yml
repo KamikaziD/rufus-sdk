@@ -51,7 +51,7 @@ services:
   # Rufus API Server — runs Alembic migration before starting uvicorn
   # ─────────────────────────────────────────────────────────────────────────
   rufus-server:
-    image: ruhfuskdev/rufus-server:${VERSION:-0.6.3}
+    image: ruhfuskdev/rufus-server:${VERSION:-0.7.0}
     container_name: test-rufus-server
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -97,7 +97,7 @@ services:
   # Celery Worker
   # ─────────────────────────────────────────────────────────────────────────
   celery-worker:
-    image: ruhfuskdev/rufus-worker:${VERSION:-0.6.3}
+    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.0}
     container_name: test-rufus-worker
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -109,6 +109,9 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      # Wait for server to complete alembic upgrade head before worker registers
+      rufus-server:
         condition: service_healthy
     networks:
       - test-net
