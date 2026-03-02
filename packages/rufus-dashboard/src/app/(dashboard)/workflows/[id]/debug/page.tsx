@@ -47,7 +47,9 @@ export default function DebugStepperPage({
   }
 
   const isWaitingHuman = workflow.status === "WAITING_HUMAN";
-  const canAdvance     = ["RUNNING", "PENDING", "ACTIVE"].includes(workflow.status) && !isWaitingHuman;
+  const hasInputSchema = !!workflow.current_step_info?.input_schema;
+  const needsInput     = isWaitingHuman || hasInputSchema;
+  const canAdvance     = ["RUNNING", "PENDING", "ACTIVE"].includes(workflow.status) && !needsInput;
   const canRewind      = currentIdx > 0;
 
   // Compute state diff
@@ -122,7 +124,7 @@ export default function DebugStepperPage({
       </Card>
 
       {/* HITL form (if waiting) */}
-      {isWaitingHuman && (
+      {needsInput && (
         <HitlForm
           workflowId={id}
           inputSchema={workflow.current_step_info?.input_schema}

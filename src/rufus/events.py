@@ -5,21 +5,23 @@ import asyncio
 from typing import Dict, Any, Optional
 import redis.asyncio as redis
 import os
-from prometheus_client import Counter, REGISTRY
-
 logger = logging.getLogger(__name__)
 
-# Prometheus Metrics
+# Prometheus Metrics (optional — only available when prometheus_client is installed)
 try:
-    WORKFLOW_EVENTS_TOTAL = Counter(
-        'workflow_events_total',
-        'Total number of workflow events published',
-        ['event_type'],
-        registry=REGISTRY
-    )
-except ValueError:
-    # If metric already exists (e.g. during reload or multiple imports), retrieve it
-    WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors['workflow_events_total']
+    from prometheus_client import Counter, REGISTRY
+    try:
+        WORKFLOW_EVENTS_TOTAL = Counter(
+            'workflow_events_total',
+            'Total number of workflow events published',
+            ['event_type'],
+            registry=REGISTRY
+        )
+    except ValueError:
+        # Metric already registered (e.g. reload or multiple imports)
+        WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors['workflow_events_total']
+except ImportError:
+    WORKFLOW_EVENTS_TOTAL = None
 
 class EventPublisher:
     """
@@ -73,10 +75,11 @@ class EventPublisher:
         }
 
         # Metrics
-        try:
-            WORKFLOW_EVENTS_TOTAL.labels(event_type=event_type).inc()
-        except:
-            pass
+        if WORKFLOW_EVENTS_TOTAL is not None:
+            try:
+                WORKFLOW_EVENTS_TOTAL.labels(event_type=event_type).inc()
+            except:
+                pass
 
         # 1. Publish to Redis Stream (Persistence)
         if stream_key:
