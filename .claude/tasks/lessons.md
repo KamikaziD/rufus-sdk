@@ -175,3 +175,27 @@ userinfo: {
 **Diagnosis:** `docker exec test-redis redis-cli keys "*"` — look for unexpected queue names with entries; compare against queues workers actually listen to
 **Correction:** Remove `data_region` (routes to `default`) OR start a worker with `-Q onsite-london`; flush orphaned queue with `redis-cli DEL <queue-name>`
 **Verification:** `LLEN onsite-london` = 0 after flush; fresh workflow completes the parallel step
+
+## Pattern: Server API Response Shapes Change — Always Verify Against DB Schema, Not Migration Script
+**Context:** `GET /api/v1/workflow/{id}/audit` returning 500 after adding audit fetch to dashboard
+**Anti-Pattern:** Writing SQL column names by reading a migration file (`old_state`, `new_state`, `metadata`, `logged_at`) without checking the actual table definition — the SQLAlchemy `database.py` is the source of truth; the migration may reference renamed columns
+**Correction:** Always verify column names against `src/rufus/db_schema/database.py` (or `docker exec … psql … \d <table>`). Actual `workflow_audit_log` columns: `old_status`, `new_status`, `details`, `timestamp`
+**Verification:** `curl .../audit` returns `[]` (not 500); postgres logs show no "column does not exist" errors
+
+## Pattern: Bind-Mounted site-packages Require Container Restart, Not touch
+**Context:** Patching `main.py` and `api_models.py` via bind mount in `docker-compose.test-async.yml`
+**Anti-Pattern:** Using `docker exec … touch <file>` to bust pyc cache on a running uvicorn server started without `--reload` — uvicorn only re-imports modules on startup; touch has no effect on a live process
+**Correction:** `docker restart <container>` (or `docker compose up -d --force-recreate <service>`) to pick up source changes. Also: if a new file needs to be bind-mounted, add it to the compose volumes AND to the startup `touch` command so pyc is busted on next start
+**Verification:** `curl .../status` response includes the new fields (`steps_config`, `current_step_info`)
+
+## Pattern: Alembic Migration Index Names Must Be Globally Unique Across All Tables
+**Context:** Running migration `a1b2c3d4e5f6` which creates `command_audit_log`
+**Anti-Pattern:** Reusing index names like `ix_audit_event_type` across multiple tables — PostgreSQL index names are schema-scoped (not table-scoped), so creating the same name on a second table raises `DuplicateTable: relation "ix_audit_event_type" already exists`
+**Correction:** Prefix indexes with the table abbreviation: `ix_cmd_audit_event_type` for `command_audit_log` vs `ix_audit_event_type` for `workflow_audit_log`
+**Verification:** Migration runs without `DuplicateTable` error; `SELECT indexname FROM pg_indexes WHERE indexname LIKE 'ix_%audit%'` shows distinct names
+
+## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
+**Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
+**Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
+**Correction:** Create only the missing table(s) directly via `asyncpg` with `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`, then stamp: `INSERT INTO alembic_version (version_num) VALUES ('<rev>') ON CONFLICT DO NOTHING`. Worker container has psycopg2; server container does not.
+**Verification:** `SELECT version_num FROM alembic_version` shows the new revision; target endpoint returns 200

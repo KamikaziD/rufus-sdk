@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useWorkflow, useNextStep, useRewindWorkflow } from "@/lib/hooks/useWorkflow";
+import { useWorkflow, useNextStep, useRewindWorkflow, useResumeWorkflow } from "@/lib/hooks/useWorkflow";
 import { WorkflowStatusBadge } from "@/components/shared/StatusBadge";
 import { HitlForm } from "@/components/workflows/HitlForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,7 @@ export default function DebugStepperPage({
   const { data: workflow, isLoading, refetch } = useWorkflow(id);
   const nextStep = useNextStep();
   const rewindWorkflow = useRewindWorkflow();
+  const resumeWorkflow = useResumeWorkflow();
   const [prevState, setPrevState] = useState<Record<string, unknown> | null>(null);
 
   if (isLoading) return <div className="animate-pulse h-32 bg-muted rounded-xl" />;
@@ -31,7 +32,11 @@ export default function DebugStepperPage({
 
   async function handleNext(userInput: Record<string, unknown> = {}) {
     setPrevState(currentState);
-    await nextStep.mutateAsync({ id, userInput });
+    if (isWaitingHuman) {
+      await resumeWorkflow.mutateAsync({ id, userInput });
+    } else {
+      await nextStep.mutateAsync({ id, userInput });
+    }
     refetch();
   }
 
@@ -42,7 +47,7 @@ export default function DebugStepperPage({
   }
 
   const isWaitingHuman = workflow.status === "WAITING_HUMAN";
-  const canAdvance     = ["RUNNING", "PENDING", "WAITING_HUMAN"].includes(workflow.status) && !isWaitingHuman;
+  const canAdvance     = ["RUNNING", "PENDING", "ACTIVE"].includes(workflow.status) && !isWaitingHuman;
   const canRewind      = currentIdx > 0;
 
   // Compute state diff
@@ -123,7 +128,7 @@ export default function DebugStepperPage({
           inputSchema={workflow.current_step_info?.input_schema}
           stepName={workflow.current_step ?? ""}
           onSubmit={(data) => handleNext(data)}
-          isSubmitting={nextStep.isPending}
+          isSubmitting={nextStep.isPending || resumeWorkflow.isPending}
         />
       )}
 
