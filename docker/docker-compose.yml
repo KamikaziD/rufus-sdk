@@ -91,6 +91,33 @@ services:
       - rufus-network
     restart: unless-stopped
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Keycloak — OIDC identity provider for dashboard RBAC
+  # ─────────────────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: rufus-keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_secret}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-rufus_cloud}
+      KC_DB_USERNAME: ${POSTGRES_USER:-rufus}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    command: ["start-dev", "--import-realm"]
+    volumes:
+      - ./keycloak/rufus-realm.json:/opt/keycloak/data/import/rufus-realm.json:ro
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
 networks:
   rufus-network:
     driver: bridge

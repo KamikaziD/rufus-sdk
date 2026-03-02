@@ -14,6 +14,7 @@ import json
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header, Depends, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import importlib.resources
 from dotenv import load_dotenv
@@ -22,7 +23,6 @@ import asyncio
 from typing import Optional, Any, Dict, List
 import logging
 from uuid import UUID
-import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.execution.thread_pool import ThreadPoolExecutorProvider
-from rufus.implementations.execution.celery import CeleryExecutionProvider
+# CeleryExecutionProvider imported lazily in startup_event to avoid
+# ImportError when celery is not installed in the server image
 from rufus.implementations.observability.logging import LoggingObserver
 from rufus.implementations.observability.events import EventPublisherObserver
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
@@ -89,6 +90,19 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — allow the dashboard (Next.js dev + prod)
+_cors_origins = os.getenv(
+    "RUFUS_CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000"
+).split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # --- Device Service ---
@@ -230,6 +244,7 @@ async def startup_event():
     # Execution Provider
     execution_backend = os.getenv('WORKFLOW_EXECUTION_BACKEND', 'sync').lower()
     if execution_backend == 'celery':
+        from rufus.implementations.execution.celery import CeleryExecutionProvider
         execution_provider = CeleryExecutionProvider()
         logger.info("Using CeleryExecutionProvider for distributed async execution")
     elif execution_backend == 'threadpool':
@@ -984,10 +999,16 @@ async def subscribe(websocket: WebSocket):
     await websocket.send_json({"type": "handshake", "state": "connecting"})
     logger.warning(f"[WS-HANDSHAKE] Sent 'connecting'")
 
-    # Get Redis connection
+    # Get Redis connection (lazy import — redis is optional when not using pub/sub)
+    try:
+        import redis.asyncio as redis_asyncio
+    except ImportError:
+        await websocket.send_json({"type": "error", "message": "Redis not available on this server"})
+        await websocket.close(code=1011)
+        return
     redis_host = os.getenv("REDIS_HOST", "redis")
     redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:6379/0")
-    redis_client = redis.from_url(redis_url, decode_responses=True)
+    redis_client = redis_asyncio.from_url(redis_url, decode_responses=True)
 
     # Track subscribed workflows
     subscribed_workflows = set()

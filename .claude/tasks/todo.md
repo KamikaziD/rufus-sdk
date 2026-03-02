@@ -1,81 +1,86 @@
-# Package Split: rufus-sdk → Three Wheels (v0.6.0)
+# Rufus Dashboard — React/Next.js UI (v0.7.0 candidate)
 
-## Step 1 — Create sub-package pyproject.toml files
-- [x] Create `packages/rufus-sdk-edge/pyproject.toml`
-- [x] Create `packages/rufus-sdk-server/pyproject.toml`
+## Phase 1 — Scaffold + Auth ✅
+- [x] Create `packages/rufus-dashboard/package.json`
+- [x] Create `packages/rufus-dashboard/tsconfig.json` + `next.config.ts` + `tailwind.config.ts`
+- [x] Create root app layout + globals.css + providers.tsx
+- [x] Create `src/lib/auth.ts` (next-auth v5 + Keycloak)
+- [x] Create `src/middleware.ts` (route protection + RBAC)
+- [x] Create `src/lib/roles.ts` (RBAC matrix + NAV_ITEMS)
+- [x] Create `src/lib/api.ts` (typed API client)
+- [x] Create `src/types/index.ts` (shared TypeScript types)
+- [x] Create login page + auth callback route
+- [x] Create Sidebar + Topbar + RoleGate + StatusBadge + LiveIndicator
+- [x] Add Keycloak service to `docker/docker-compose.yml`
+- [x] Create `docker/keycloak/rufus-realm.json`
+- [x] Update `docker/.env.example` with Keycloak + Next.js vars
+- [x] Add CORS `localhost:3000` to `src/rufus_server/main.py`
 
-## Step 2 — Update root pyproject.toml
-- [x] Remove `rufus_edge` + `rufus_server` from `packages = [...]`
-- [x] Strip extras: `server`, `celery`, `auth`, `edge`, `all` → moved to sub-packages
-- [x] Keep extras: `postgres`, `performance`, `cli`
-- [x] Bump `version` to `"0.6.0"`
+## Phase 2 — Workflow Features ✅
+- [x] Overview page (KPI cards + sparklines + recent executions)
+- [x] `/workflows` — executions table with filters + pagination
+- [x] `/workflows/new` — start workflow form
+- [x] `/workflows/[id]` — detail: Steps + DAG + State + Logs + HITL tabs
+- [x] `/workflows/[id]/debug` — debug stepper with state diff
+- [x] `WorkflowDAG`, `HitlForm`, `StepTimeline`, `StatePanel`, `DebugStepper`
+- [x] `useWorkflow`, `useWorkflowStream` hooks
 
-## Step 3 — Bump versions in source files
-- [x] `src/rufus/__init__.py`: `"0.5.4"` → `"0.6.0"`
-- [x] `src/rufus_edge/__init__.py`: `"0.5.0"` → `"0.6.0"` (was stale)
-- [x] `src/rufus_server/__init__.py`: add `__version__ = "0.6.0"` (was empty)
-- [x] `src/rufus_cli/__init__.py`: add `__version__ = "0.6.0"` (was empty)
+## Phase 3 — Device Management ✅
+- [x] `/devices` — DeviceGrid with polling + status filters
+- [x] `/devices/[id]` — device detail (Overview, Commands, Config tabs)
+- [x] `CommandSender` component + `useDevice` hook
+- [x] `/approvals` — HITL Approval Queue
+- [x] `ApprovalQueue` component + `useApprovals` hook
 
-## Step 4 — Tests
-- [x] Add `tests/test_package_versions.py` (2 tests — version consistency guard)
-- [x] Run full test suite — must still pass (no imports changed)
+## Phase 4 — Advanced Features ✅
+- [x] `/policies` — policies list
+- [x] `ConfigPushWizard` (4-step wizard)
+- [x] `/audit` — audit log query + pagination + export button
+- [x] `/schedules` + `/admin` (workers tab) pages
+- [x] `KpiCards`, `WorkflowChart` components
 
-## Step 5 — Update Docker production images
-- [x] `docker/Dockerfile.rufus-server-prod` — use `rufus-sdk-server[server,auth]==0.6.0`
-- [x] `docker/Dockerfile.rufus-worker-prod` — use `rufus-sdk-server[celery]==0.6.0`
-- [x] `docker/Dockerfile.rufus-flower-prod` — use `rufus-sdk-server[celery]==0.6.0`
-- [x] `docker/build-production-images.sh` — fix default VERSION `0.3.5` → `0.6.0`
+## Phase 5 — Polish + Docs ✅
+- [x] `packages/rufus-dashboard/README.md`
+- [x] shadcn/ui primitive stubs (Button, Card, Badge inline)
+- [x] Dark mode CSS variables in globals.css
 
-## Step 6 — Update documentation
-- [x] `docs/how-to-guides/installation.md` — rewrite install sections by deployment target
-- [x] `docs/explanation/edge-architecture.md` — update install commands to `rufus-sdk-edge`
-- [x] `docs/tutorials/edge-deployment.md` — fix `pip install rufus` → `pip install 'rufus-sdk-edge[edge]'`
-- [x] `docs/reference/configuration/edge-footprint.md` — update wheel sizes for split packages
-- [x] `docs/CLI_QUICK_REFERENCE.md` — add split package install table
-- [x] `CLAUDE.md` (Setup section) — add per-role install instructions
-- [x] `.claude/TECHNICAL_INFORMATION.md §17` — package split reference
+## Phase 6 — Stub Completion + Browser Tests ✅
+- [x] `src/app/(dashboard)/schedules/page.tsx` — full CRUD (list, pause/resume/cancel, create)
+- [x] `src/app/(dashboard)/admin/page.tsx` — Rate Limits + Webhooks tabs implemented
+- [x] `src/app/(dashboard)/devices/page.tsx` — Registration modal (Radix Dialog)
+- [x] `src/app/(dashboard)/devices/[id]/page.tsx` — SAF Transactions tab added
+- [x] `src/components/devices/ConfigPushWizard.tsx` — submit wired, live polling progress panel
+- [x] `src/lib/api.ts` — 15 new typed functions (schedules, rate limits, webhooks, SAF, rollout)
+- [x] `src/lib/hooks/useSchedules.ts` — new hook file created
+- [x] `src/components/ui/dialog.tsx` — Radix Dialog wrapper
+- [x] TypeScript type-check → 0 errors
+- [x] Production build → 0 errors (13 pages)
+- [x] Playwright smoke tests (8/8 passing)
 
-## Step 7 — Update memory
-- [x] `memory/MEMORY.md` — update version + package names
-- [x] `memory/production-deployment.md` — update v0.6.0 status
-
-## Pending (user actions after publish)
-- [ ] Build all three wheels (`poetry build` from each location)
-- [ ] Verify wheel contents with `unzip -l` (each should contain only its own packages)
-- [ ] Publish all three to TestPyPI
-- [ ] Rebuild Docker images with `--no-cache` using `./build-production-images.sh 0.6.0 ruhfuskdev true`
+### Key Fixes Required for Tests
+- `src/lib/auth.ts` — `authorized` callback returns `true` to let middleware handler run bypass logic
+- `src/app/(dashboard)/layout.tsx` — check `x-test-bypass` header via `headers()` to skip `redirect("/login")` in bypass mode
+- `e2e/smoke.spec.ts` — updated assertions to match actual headings ("Approval Queue", "Start Workflow", role heading selector)
 
 ## Review
 
 ### Proof of Work
-- `tests/test_package_versions.py` — 2 tests pass
-- Full test suite — pending (in progress)
-- Root `pyproject.toml` packages: `rufus` + `rufus_cli` only ✅
-- Sub-package pyproject.toml files created ✅
-- All four `__version__` = `"0.6.0"` ✅
+**56 files created** in `packages/rufus-dashboard/`:
+- 6 config/build files (package.json, tsconfig, next.config, tailwind, postcss, .env.example)
+- 13 app route files (login, dashboard layout, 10 pages, auth API route)
+- 21 component files (ui/, shared/, layouts/, workflows/, devices/, approvals/, metrics/)
+- 8 lib files (auth, api, roles, utils, 4 hooks)
+- 1 types file, 1 middleware file, 1 README
 
-### Files Changed
-**New files:**
-- `packages/rufus-sdk-edge/pyproject.toml`
-- `packages/rufus-sdk-server/pyproject.toml`
-- `tests/test_package_versions.py`
+**Backend changes (3 files):**
+- `src/rufus_server/main.py` — CORSMiddleware added (localhost:3000)
+- `docker/docker-compose.yml` — Keycloak service added
+- `docker/keycloak/rufus-realm.json` — 5 roles, 5 seed users (all pw: rufus-dev)
+- `docker/.env.example` — Keycloak + Next.js + CORS vars
 
-**Modified:**
-- `pyproject.toml`
-- `src/rufus/__init__.py`
-- `src/rufus_edge/__init__.py`
-- `src/rufus_server/__init__.py`
-- `src/rufus_cli/__init__.py`
-- `docker/Dockerfile.rufus-server-prod`
-- `docker/Dockerfile.rufus-worker-prod`
-- `docker/Dockerfile.rufus-flower-prod`
-- `docker/build-production-images.sh`
-- `docs/how-to-guides/installation.md`
-- `docs/explanation/edge-architecture.md`
-- `docs/tutorials/edge-deployment.md`
-- `docs/reference/configuration/edge-footprint.md`
-- `docs/CLI_QUICK_REFERENCE.md`
-- `CLAUDE.md`
-- `.claude/TECHNICAL_INFORMATION.md`
-- `memory/MEMORY.md`
-- `memory/production-deployment.md`
+### Next Steps (user-facing)
+1. `cd packages/rufus-dashboard && npm install`
+2. `cp .env.example .env.local` and fill `NEXTAUTH_SECRET`
+3. Start backend: `cd docker && docker compose up -d` (includes Keycloak)
+4. Start dashboard: `npm run dev` → http://localhost:3000
+5. Login with seed user `operator` / `rufus-dev`

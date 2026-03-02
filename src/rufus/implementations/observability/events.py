@@ -3,27 +3,25 @@ import logging
 import time
 import asyncio
 from typing import Dict, Any, Optional, List
-import redis.asyncio as redis
 import os
-from prometheus_client import Counter, REGISTRY # Assuming prometheus_client is installed
-
 from rufus.providers.observer import WorkflowObserver
 
 logger = logging.getLogger(__name__)
 
-# Prometheus Metrics (ensure these are handled safely in a multi-process/multi-thread environment)
+# Prometheus Metrics (optional — only available when prometheus_client is installed)
 try:
-    WORKFLOW_EVENTS_TOTAL = Counter(
-        'rufus_workflow_events_total', 
-        'Total number of rufus workflow events published',
-        ['event_type'],
-        registry=REGISTRY
-    )
-except ValueError:
-    # If metric already exists (e.g. during reload or multiple imports), retrieve it
-    WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors.get('rufus_workflow_events_total', None)
-    if WORKFLOW_EVENTS_TOTAL is None: # Fallback if not found after all
-        logger.warning("Could not retrieve existing 'rufus_workflow_events_total' metric, some metric data might be lost on reload.")
+    from prometheus_client import Counter, REGISTRY
+    try:
+        WORKFLOW_EVENTS_TOTAL = Counter(
+            'rufus_workflow_events_total',
+            'Total number of rufus workflow events published',
+            ['event_type'],
+            registry=REGISTRY
+        )
+    except ValueError:
+        WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors.get('rufus_workflow_events_total', None)
+except ImportError:
+    WORKFLOW_EVENTS_TOTAL = None
 
 
 class EventPublisherObserver(WorkflowObserver):
@@ -39,23 +37,26 @@ class EventPublisherObserver(WorkflowObserver):
             redis_host = os.getenv("REDIS_HOST", "redis")
             self.redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:6379/0")
 
-        self._redis_client: Optional[redis.Redis] = None
+        self._redis_client: Optional[Any] = None
         self._initialized = False
         self._persistence = persistence_provider
 
     async def initialize(self):
-        """Connects to Redis."""
+        """Connects to Redis. No-ops gracefully if redis package is not installed."""
         if self._initialized and self._redis_client:
             return
         try:
-            self._redis_client = redis.from_url(self.redis_url, decode_responses=True)
+            import redis.asyncio as redis_asyncio
+            self._redis_client = redis_asyncio.from_url(self.redis_url, decode_responses=True)
             await self._redis_client.ping()
             self._initialized = True
             logger.info(f"EventPublisherObserver connected to Redis at {self.redis_url}")
+        except ImportError:
+            logger.warning("redis package not installed — EventPublisherObserver disabled (no pub/sub events)")
+            self._redis_client = None
         except Exception as e:
             logger.error(f"Failed to connect EventPublisherObserver to Redis: {e}")
             self._redis_client = None
-            raise
 
     async def close(self):
         """Closes the Redis connection."""

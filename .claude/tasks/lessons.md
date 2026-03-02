@@ -68,6 +68,106 @@ Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchli
 **Correction:** Create GitHub releases via the GitHub web UI at https://github.com/KamikaziD/rufus-sdk/releases/new, or use the raw GitHub API with `curl` if a token is available. Never use `gh release create`.
 **Verification:** Release appears at https://github.com/KamikaziD/rufus-sdk/releases without a 401 error
 
+## Pattern: Docker Bind-Mounts Bypass Python .pyc Cache Via touch, Not Deletion
+**Context:** Patching installed Python packages in a pre-built Docker image via bind-mounted `.py` files (test docker-compose)
+**Anti-Pattern:** Trying to `find ... -name '*.pyc' -delete` or `chmod` the `__pycache__` directory — the directories are owned by root inside the image, so non-root container user gets "Permission denied"
+**Correction:** `touch` the mounted source files before starting uvicorn: `touch /usr/local/lib/python3.11/site-packages/pkg/patched.py`. Python validates pyc by mtime+size stored in the pyc header; a newer mtime on the source triggers recompile from source, and if the container can't write the new pyc it just uses the in-memory compiled version
+**Verification:** No `ModuleNotFoundError` from old cached code; log shows expected behavior from the patched module
+
+## Pattern: rufus-server Image Missing celery+redis — Must Install at Startup for Celery Backend
+**Context:** Running `ruhfuskdev/rufus-server:latest` with `WORKFLOW_EXECUTION_BACKEND: celery`
+**Anti-Pattern:** Image only has fastapi/uvicorn/asyncpg; `CeleryExecutionProvider.__init__` imports `from rufus.celery_app import celery_app` which imports `from celery import Celery` — crash at startup
+**Correction 1:** Make the `CeleryExecutionProvider` import lazy in `main.py` (inside the `if execution_backend == 'celery':` block, not at module top level)
+**Correction 2:** Add `pip install celery redis --quiet --no-cache-dir` to the container startup command in the test compose
+**Verification:** Server logs show `INFO: Application startup complete.` and `GET /health` returns 200
+
+## Pattern: next.config.ts Not Supported in Next.js 14 (only 15+)
+**Context:** Next.js 14 dashboard in Docker container
+**Anti-Pattern:** Creating `next.config.ts` (TypeScript) — Next.js 14.x throws `Error: Configuring Next.js via 'next.config.ts' is not supported`
+**Correction:** Use `next.config.mjs` (ES module) with `/** @type {import('next').NextConfig} */` JSDoc annotation; remove the `import type` line
+**Verification:** `next dev` starts without config format error
+
+## Pattern: Keycloak 24 Image Has No curl or wget — Use bash /dev/tcp for Healthcheck
+**Context:** Docker Compose healthcheck for Keycloak container
+**Anti-Pattern:** `test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/rufus || exit 1"]` — Keycloak 24.0 base image has no `curl` or `wget`; healthcheck always fails
+**Correction:** Use bash's built-in `/dev/tcp` pseudo-device: `test: ["CMD", "bash", "-c", "(echo > /dev/tcp/localhost/8080) 2>/dev/null"]`. Note: must use `CMD` (not `CMD-SHELL`) to invoke bash explicitly, since `/bin/sh` in the image is not bash and doesn't support `/dev/tcp`
+**Verification:** `docker inspect <container> --format "{{.State.Health.Status}}"` returns `healthy`
+
+## Pattern: Keycloak "HTTPS Required" Is a Realm-Level Setting, Not Server-Level
+**Context:** Next-auth OIDC discovery from inside Docker to `host.docker.internal:8080` returning `{"error":"HTTPS required"}`
+**Anti-Pattern:** Only setting server-level flags (`KC_HTTP_ENABLED=true`, `KC_HOSTNAME_STRICT=false`, `KC_HOSTNAME_STRICT_HTTPS=false`, `KC_PROXY=edge`) — these don't fix it because the "HTTPS required" is enforced at the REALM level (default: `sslRequired=external`, meaning non-loopback IPs must use HTTPS)
+**Correction:** Set `"sslRequired": "none"` in the realm JSON before first import, OR use `kcadm.sh update realms/<name> -s sslRequired=NONE` on a running instance. Also add `KC_PROXY: edge` to the Keycloak service as defense-in-depth.
+**Verification:** `docker exec <dashboard> node -e "fetch('http://host.docker.internal:8080/realms/rufus/.well-known/openid-configuration').then(r=>r.json()).then(d=>console.log(d.issuer))"` returns the issuer URL instead of `{"error":"HTTPS required"}`
+
+## Pattern: Keycloak Realm JSON Rejects Bash Variable Expansion in redirectUris
+**Context:** Keycloak 24.0 realm JSON import
+**Anti-Pattern:** `"${RUFUS_DASHBOARD_URL:+${RUFUS_DASHBOARD_URL}/*}"` in `redirectUris` — Keycloak validates each URI and rejects bash-style parameter expansion as an invalid URI format; throws `ERROR: Invalid client rufus-dashboard: A redirect URI is not a valid URI` and crashes
+**Correction:** Only put literal URIs in redirectUris (e.g., `"http://localhost:3000/*"`); add production URIs via Keycloak Admin Console or a separate realm import step
+**Verification:** Keycloak logs show `Realm 'rufus' imported` and `KC-SERVICES0032: Import finished successfully`
+
+## Pattern: next-auth v5 beta.25 oauth4webapi HTTPS Enforcement on userInfoRequest
+**Context:** next-auth v5 beta.25 OAuth provider (`type: "oauth"`) with HTTP Keycloak token/userinfo endpoints in Docker dev
+**Anti-Pattern:** Setting `userinfo: "http://keycloak:8080/..."` string — auth.js routes this through `oauth4webapi.userInfoRequest()` which throws `OperationProcessingError: only requests to HTTPS are allowed` even though `authorizationCodeGrantRequest` already has `[allowInsecureRequests]: true`. The two branches have inconsistent HTTPS enforcement.
+**Correction:** Provide a custom `userinfo.request` async function instead of a URL string — this bypasses oauth4webapi's enforcement using a plain `fetch`:
+```typescript
+userinfo: {
+  url: `${KC_INTERNAL}/protocol/openid-connect/userinfo`,
+  async request({ tokens }) {
+    const res = await fetch(`${KC_INTERNAL}/protocol/openid-connect/userinfo`, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    return res.json();
+  },
+},
+```
+**Verification:** No `CallbackRouteError` / `OperationProcessingError` in dashboard logs; `GET /api/auth/callback/keycloak` returns 302 to `/` after successful Keycloak login
+
+## Pattern: next-auth v5 Server Action signIn() Drops OAuth State Cookies (CSRF)
+**Context:** next-auth v5 beta.25 login page using a Server Action form (`"use server"` inline) to call `signIn("keycloak")`
+**Anti-Pattern:** Inline server action form — Next.js Server Action redirect doesn't reliably forward the `Set-Cookie` headers for `authjs.state` / `authjs.pkce.code_verifier` to the browser; Keycloak redirects back and `validateCSRF` sees missing state cookie → `MissingCSRF` error
+**Correction:** Use a `"use client"` `LoginButton` component that calls `signIn("keycloak", { callbackUrl })` from `"next-auth/react"` — client-side flow properly fetches CSRF token then POSTs to `/api/auth/signin/keycloak`, receiving cookies in the response before following the Keycloak redirect
+**Verification:** `GET /api/auth/callback/keycloak` is reached after Keycloak login with no MissingCSRF error in logs
+
+## Pattern: docker compose restart Does Not Pick Up Changed Environment Variables
+**Context:** Updating environment variables in docker-compose.yml then restarting containers
+**Anti-Pattern:** `docker compose restart <service>` — restarts the existing container process without re-reading the compose file; changed env vars are silently ignored
+**Correction:** `docker compose up -d <service>` — detects config changes and recreates the container with the new environment
+**Verification:** `docker exec <container> sh -c "echo $THE_VAR"` shows the new value
+
+## Pattern: Next.js 14 params Is a Plain Object — Never use use(params) in Client Components
+**Context:** Dynamic route `[id]/page.tsx` client components in Next.js 14 App Router
+**Anti-Pattern:** `params: Promise<{ id: string }>` + `const { id } = use(params)` — `use()` only accepts a Promise or React Context; passing a plain object causes `An unsupported type was passed to use(): [object Object]` crash at runtime. This pattern is Next.js 15 only.
+**Correction:** In Next.js 14 client components, `params` arrives as a plain object: `params: { id: string }` + `const { id } = params;`
+**Verification:** `GET /workflows/[id]` renders without React error boundary crash
+
+## Pattern: Server API Response Shapes Must Be Verified Before Using in Dashboard
+**Context:** Rufus dashboard API client (`packages/rufus-dashboard/src/lib/api.ts`) against `rufus_server/main.py`
+**Key mismatches found:**
+- `GET /api/v1/workflows/executions` returns bare array, not `{workflows, total, page, page_size}`; uses `offset` not `page`
+- `GET /api/v1/workflow/{id}/status` returns `current_step_name` (not `current_step`); lacks `steps_config`, `current_step_info`, `audit_log`
+- `POST /api/v1/workflow/{id}/next` body key is `input_data` (not `user_input`)
+- `POST /api/v1/workflow/{id}/cancel` does NOT exist on server
+- `GET /api/v1/policies` returns bare array (not `{policies: []}`)
+- `GET /api/v1/workers/status` does NOT exist; real path is `GET /api/v1/admin/workers`
+- Audit: server endpoint is `POST /api/v1/audit/query` with JSON body (not `GET /api/v1/audit` with query params)
+- Devices: DB column is `last_heartbeat_at`, normalize to `last_heartbeat` in client
+**Correction:** Normalize all responses in `api.ts` — wrap bare arrays, remap field names, fix HTTP methods
+**Verification:** Workflow list renders, detail page loads, device fleet shows correct status
+
+## Pattern: next-auth v5 auth() Wrapper Blocks Unauthenticated Requests Before Middleware Handler
+**Context:** Playwright E2E tests using custom `x-test-bypass` header with `auth((req) => {...})` middleware pattern
+**Anti-Pattern:** Putting bypass header check only inside the `auth()` wrapped handler function — the `auth()` wrapper itself has an implicit `authorized` callback that redirects unauthenticated requests to signIn before the handler executes
+**Correction (1):** Add an `authorized` callback to `NextAuth({callbacks: {authorized}})` that returns `true` when `PLAYWRIGHT_TEST_BYPASS=true` env var is set and `x-test-bypass: true` header is present — or just return `true` for all requests and let the middleware handler manage redirects
+**Correction (2):** Server components (layout.tsx) that call `await auth()` and redirect must also check the bypass: import `{ headers }` from `"next/headers"`, check `headers().get("x-test-bypass")`, skip `redirect("/login")` in bypass mode
+**Note:** In Next.js 14, `headers()` from `next/headers` is synchronous (NOT async); do not `await` it
+**Verification:** `npx playwright test` — all authenticated-page tests pass without the login page appearing
+
+## Pattern: Playwright Test Assertions Must Match Actual Rendered Text
+**Context:** Writing smoke tests before seeing the actual UI rendering
+**Anti-Pattern:** Guessing heading text (`/approvals/i`, `/new workflow/i`) or using `getByText("Workflows")` without strict-mode consideration
+**Correction:** Run tests once, read the `error-context.md` page snapshots (in `test-results/*/`) to see the exact rendered text, then update assertions to match. Common mismatches found: "Approval Queue" (not "Approvals"), "Start Workflow" (not "New Workflow"). Also `getByText` in strict mode fails if multiple elements match — prefer `getByRole('heading')` for unique heading assertions.
+**Verification:** All 8 smoke tests pass in `npx playwright test` output
+
 ## Pattern: data_region Routes Sub-Workflow Tasks to Orphan Queue
 **Context:** `StartSubWorkflowDirective(data_region="onsite-london")` in user step function
 **Anti-Pattern:** Setting `data_region` to a named region without a worker listening to that queue — child workflow inherits `data_region`, all its async/parallel tasks dispatch to that queue (e.g., `onsite-london`), workers only consume `default`
