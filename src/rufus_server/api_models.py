@@ -52,6 +52,8 @@ class WorkflowStatusResponse(BaseModel):
     workflow_type: Optional[str] = None
     parent_execution_id: Optional[str] = None
     blocked_on_child_id: Optional[str] = None
+    steps_config: List[Dict[str, Any]] = Field(default_factory=list)
+    current_step_info: Optional[Dict[str, Any]] = None
 
 
 class ResumeWorkflowRequest(BaseModel):

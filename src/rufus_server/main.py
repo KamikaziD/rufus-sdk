@@ -441,6 +441,24 @@ async def get_workflow_status(
 
     workflow = await _get_workflow_or_404(workflow_id)
 
+    steps_config = [step.to_dict() for step in workflow.workflow_steps]
+
+    current_step_info: Optional[Dict[str, Any]] = None
+    if isinstance(workflow.current_step, int) and workflow.current_step < len(workflow.workflow_steps):
+        step = workflow.workflow_steps[workflow.current_step]
+        info: Dict[str, Any] = {
+            "name": step.name,
+            "type": type(step).__name__,
+            "required_input": getattr(step, "required_input", []) or [],
+            "input_schema": None,
+        }
+        if hasattr(step, "input_schema") and step.input_schema:
+            try:
+                info["input_schema"] = step.input_schema.model_json_schema()
+            except Exception:
+                pass
+        current_step_info = info
+
     return WorkflowStatusResponse(
         workflow_id=workflow.id,
         status=workflow.status,
@@ -448,7 +466,9 @@ async def get_workflow_status(
         state=workflow.state.model_dump(),
         workflow_type=workflow.workflow_type,
         parent_execution_id=workflow.parent_execution_id,
-        blocked_on_child_id=workflow.blocked_on_child_id
+        blocked_on_child_id=workflow.blocked_on_child_id,
+        steps_config=steps_config,
+        current_step_info=current_step_info,
     )
 
 
@@ -740,10 +760,10 @@ async def get_workflow_audit_log(
     try:
         async with workflow_engine.persistence.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT event_type, step_name, old_state, new_state, metadata, logged_at
+                SELECT event_type, step_name, old_status, new_status, details, timestamp
                 FROM workflow_audit_log
                 WHERE workflow_id = $1
-                ORDER BY logged_at DESC
+                ORDER BY timestamp DESC
                 LIMIT $2
             """, workflow_id, limit)
 
@@ -751,8 +771,8 @@ async def get_workflow_audit_log(
 
             # Convert datetime to ISO format
             for log in audit_logs:
-                if log.get('logged_at'):
-                    log['logged_at'] = log['logged_at'].isoformat()
+                if log.get('timestamp'):
+                    log['timestamp'] = log['timestamp'].isoformat()
 
             return audit_logs
     except Exception as e:

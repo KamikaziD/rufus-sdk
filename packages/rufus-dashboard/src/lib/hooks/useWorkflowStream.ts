@@ -26,18 +26,24 @@ export function useWorkflowStream({ workflowId, onMessage }: UseWorkflowStreamOp
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<StreamMessage | null>(null);
+  // Use a ref so onMessage changes never cause the WS to reconnect
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
 
   const connect = useCallback(() => {
     if (!token) return;
 
-    const url = workflowId
-      ? `${WS_BASE}/api/v1/subscribe/${workflowId}?token=${token}`
-      : `${WS_BASE}/api/v1/subscribe?token=${token}`;
+    const url = `${WS_BASE}/api/v1/subscribe?token=${token}`;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      setConnected(true);
+      if (workflowId) {
+        ws.send(JSON.stringify({ action: "subscribe", workflow_id: workflowId }));
+      }
+    };
     ws.onclose = () => {
       setConnected(false);
       // Reconnect after 3s
@@ -48,7 +54,7 @@ export function useWorkflowStream({ workflowId, onMessage }: UseWorkflowStreamOp
       try {
         const msg: StreamMessage = JSON.parse(event.data);
         setLastMessage(msg);
-        onMessage?.(msg);
+        onMessageRef.current?.(msg);
       } catch {}
     };
 
@@ -56,7 +62,7 @@ export function useWorkflowStream({ workflowId, onMessage }: UseWorkflowStreamOp
       ws.onclose = null; // prevent reconnect on intentional close
       ws.close();
     };
-  }, [token, workflowId, onMessage]);
+  }, [token, workflowId]); // onMessage intentionally excluded — handled via ref
 
   useEffect(() => {
     const cleanup = connect();

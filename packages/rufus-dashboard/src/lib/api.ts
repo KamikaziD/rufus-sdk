@@ -77,17 +77,23 @@ export async function listWorkflows(
 }
 
 export async function getWorkflow(token: string, id: string): Promise<WorkflowStatusResponse> {
-  // Server returns current_step_name (not current_step) and lacks steps_config/audit_log
-  const raw = await apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/status`, token);
+  const [raw, auditRaw] = await Promise.all([
+    apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/status`, token),
+    apiFetch<Record<string, unknown>[]>(`/api/v1/workflow/${id}/audit`, token).catch(() => []),
+  ]);
   return {
     workflow_id: raw.workflow_id as string,
     status: raw.status as WorkflowStatusResponse["status"],
-    // Server field is current_step_name, normalize to current_step
     current_step: (raw.current_step_name ?? raw.current_step ?? null) as string | null,
     current_step_info: (raw.current_step_info ?? null) as WorkflowStatusResponse["current_step_info"],
     state: (raw.state ?? {}) as Record<string, unknown>,
     steps_config: (raw.steps_config ?? []) as WorkflowStatusResponse["steps_config"],
-    audit_log: (raw.audit_log ?? []) as WorkflowStatusResponse["audit_log"],
+    audit_log: (Array.isArray(auditRaw) ? auditRaw : []).map((e) => ({
+      timestamp: e.timestamp as string,
+      event:     e.event_type as string,
+      step:      e.step_name as string | undefined,
+      details:   { old: e.old_status, new: e.new_status, ...((e.details as Record<string, unknown>) ?? {}) },
+    })) as WorkflowStatusResponse["audit_log"],
     workflow_type: raw.workflow_type as string | undefined,
   };
 }
