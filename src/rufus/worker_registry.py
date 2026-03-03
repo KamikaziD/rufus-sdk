@@ -3,7 +3,6 @@ import time
 import threading
 import json
 import socket
-import uuid
 import logging
 import psycopg2
 from datetime import datetime, timezone
@@ -13,8 +12,8 @@ logger = logging.getLogger(__name__)
 class WorkerRegistry:
     def __init__(self, db_url: str):
         self.db_url = db_url
-        self.worker_id = os.getenv("WORKER_ID", f"worker-{uuid.uuid4().hex[:12]}")
         self.hostname = socket.gethostname()
+        self.worker_id = os.getenv("WORKER_ID", f"worker-{self.hostname}")
         self.region = os.getenv("WORKER_REGION", "default")
         self.zone = os.getenv("WORKER_ZONE", "default")
         self.capabilities = json.loads(os.getenv("WORKER_CAPABILITIES", "{}"))
@@ -33,6 +32,10 @@ class WorkerRegistry:
             try:
                 with self._get_connection() as conn:
                     with conn.cursor() as cur:
+                        cur.execute("""
+                            DELETE FROM worker_nodes
+                            WHERE hostname = %s AND status = 'offline';
+                        """, (self.hostname,))
                         cur.execute("""
                             INSERT INTO worker_nodes
                             (worker_id, hostname, region, zone, capabilities, status, last_heartbeat)

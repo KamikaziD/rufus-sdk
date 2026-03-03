@@ -133,8 +133,14 @@ broadcast_service: Optional[BroadcastService] = None
 
 
 # --- Auth / RBAC ---
-from rufus_server.auth import get_current_user, require_admin, AuthUser as UserContext  # noqa: F401 (UserContext alias keeps existing type annotations valid)
+from rufus_server.auth import get_current_user, require_admin as _require_admin_orig, AuthUser as UserContext  # noqa: F401 (UserContext alias keeps existing type annotations valid)
 from rufus_server.auth.loader import load_auth_provider, set_auth_provider
+
+async def require_admin(user: Optional[UserContext] = Depends(get_current_user)) -> UserContext:
+    """When auth is disabled (default dev mode), treat every request as admin."""
+    if os.getenv("RUFUS_AUTH_PROVIDER", "disabled") == "disabled":
+        return user or UserContext(user_id="system", roles=["admin"])
+    return await _require_admin_orig(user=user)
 
 
 # --- Rate Limiting Dependency ---
@@ -639,6 +645,7 @@ async def next_workflow_step(
 async def get_workflow_executions(
     status: Optional[str] = None,
     exclude_status: Optional[str] = None,
+    since: Optional[str] = None,
     limit: int = 50,
     offset: int = 0
 ):
@@ -647,6 +654,7 @@ async def get_workflow_executions(
     Args:
         status: Filter by specific status (e.g., "ACTIVE", "FAILED")
         exclude_status: Exclude specific status (e.g., "COMPLETED")
+        since: ISO 8601 datetime — only return workflows updated at or after this time
         limit: Maximum number of results to return
         offset: Number of results to skip
     """
@@ -663,7 +671,13 @@ async def get_workflow_executions(
     if exclude_status:
         workflow_list = [wf for wf in workflow_list if wf.get('status') != exclude_status]
 
-    return workflow_list[offset:offset+limit]
+    # Apply since filter if provided (ISO 8601 string comparison works for UTC timestamps)
+    if since:
+        workflow_list = [wf for wf in workflow_list if (wf.get('updated_at') or '') >= since]
+
+    total = len(workflow_list)
+    page_items = workflow_list[offset:offset + limit]
+    return {"total": total, "workflows": page_items}
 
 
 @app.get("/api/v1/metrics/summary", tags=["Monitoring"])
@@ -2658,7 +2672,7 @@ async def create_broadcast(
 
     if not broadcast_service:
         from rufus_server.broadcast_service import BroadcastService
-        broadcast_service = BroadcastService(persistence, device_service)
+        broadcast_service = BroadcastService(persistence_provider, device_service)
 
     from rufus_server.broadcast import CommandBroadcast, TargetFilter, RolloutConfig
 
@@ -2697,7 +2711,7 @@ async def get_broadcast_status(
 
     if not broadcast_service:
         from rufus_server.broadcast_service import BroadcastService
-        broadcast_service = BroadcastService(persistence, device_service)
+        broadcast_service = BroadcastService(persistence_provider, device_service)
 
     progress = await broadcast_service.get_broadcast_progress(broadcast_id)
 
@@ -2718,7 +2732,7 @@ async def list_broadcasts(
 
     if not broadcast_service:
         from rufus_server.broadcast_service import BroadcastService
-        broadcast_service = BroadcastService(persistence, device_service)
+        broadcast_service = BroadcastService(persistence_provider, device_service)
 
     broadcasts = await broadcast_service.list_broadcasts(status=status, limit=limit)
 
@@ -2738,7 +2752,7 @@ async def cancel_broadcast(
 
     if not broadcast_service:
         from rufus_server.broadcast_service import BroadcastService
-        broadcast_service = BroadcastService(persistence, device_service)
+        broadcast_service = BroadcastService(persistence_provider, device_service)
 
     success = await broadcast_service.cancel_broadcast(broadcast_id)
 
@@ -3215,13 +3229,13 @@ async def create_schedule(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     from rufus_server.scheduling import CommandSchedule
     from datetime import time
@@ -3273,13 +3287,13 @@ async def get_schedule(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     progress = await schedule_service.get_schedule(schedule_id)
 
@@ -3323,13 +3337,13 @@ async def list_schedules(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     schedules = await schedule_service.list_schedules(
         device_id=device_id,
@@ -3356,13 +3370,13 @@ async def pause_schedule(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     success = await schedule_service.pause_schedule(schedule_id)
 
@@ -3391,13 +3405,13 @@ async def resume_schedule(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     success = await schedule_service.resume_schedule(schedule_id)
 
@@ -3426,13 +3440,13 @@ async def cancel_schedule(
         from rufus_server.schedule_service import ScheduleService
 
         if not device_service:
-            device_service = DeviceService(persistence)
+            device_service = DeviceService(persistence_provider)
 
         if not broadcast_service:
             from rufus_server.broadcast_service import BroadcastService
-            broadcast_service = BroadcastService(persistence, device_service)
+            broadcast_service = BroadcastService(persistence_provider, device_service)
 
-        schedule_service = ScheduleService(persistence, device_service, broadcast_service)
+        schedule_service = ScheduleService(persistence_provider, device_service, broadcast_service)
 
     success = await schedule_service.cancel_schedule(schedule_id)
 

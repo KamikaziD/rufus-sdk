@@ -51,7 +51,7 @@ services:
   # Rufus API Server — runs Alembic migration before starting uvicorn
   # ─────────────────────────────────────────────────────────────────────────
   rufus-server:
-    image: ruhfuskdev/rufus-server:${VERSION:-0.7.0}
+    image: ruhfuskdev/rufus-server:${VERSION:-0.7.1}
     container_name: test-rufus-server
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -97,7 +97,7 @@ services:
   # Celery Worker
   # ─────────────────────────────────────────────────────────────────────────
   celery-worker:
-    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.0}
+    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.1}
     container_name: test-rufus-worker
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -105,6 +105,15 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-test-encryption-key-32chars-here!}
       LOG_LEVEL: DEBUG
+      WORKER_ID: rufus-worker-1
+    command: >
+      sh -c "
+        celery -A rufus.celery_app worker
+          --loglevel=${WORKER_LOG_LEVEL:-info}
+          --concurrency=${WORKER_CONCURRENCY:-4}
+          --pool=${WORKER_POOL:-prefork}
+          -Q default,high_priority,low_priority
+      "
     depends_on:
       postgres:
         condition: service_healthy
