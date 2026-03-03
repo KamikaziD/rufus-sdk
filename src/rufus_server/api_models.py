@@ -5,7 +5,7 @@ These models define the request/response structures for the REST API.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 
 
@@ -151,3 +151,60 @@ class SyncResponse(BaseModel):
     rejected: List[SyncAck]
     server_sequence: int
     next_sync_delay: int = Field(default=30)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker Fleet Management Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+WorkerCommandType = Literal[
+    'restart', 'pool_restart', 'drain', 'update_code', 'update_config',
+    'pause_queue', 'resume_queue', 'set_concurrency', 'check_health'
+]
+
+
+class WorkerCommandRequest(BaseModel):
+    """Request to send a command to a specific worker."""
+    command_type: WorkerCommandType
+    command_data: Dict[str, Any] = Field(default_factory=dict)
+    priority: Literal['low', 'normal', 'high', 'critical'] = 'normal'
+    expires_in_seconds: Optional[int] = None
+
+
+class WorkerBroadcastRequest(BaseModel):
+    """Request to broadcast a command to all workers (or a filtered subset)."""
+    target_filter: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Empty dict = all workers. Keys: region, zone, or capability keys.",
+    )
+    command_type: str
+    command_data: Dict[str, Any] = Field(default_factory=dict)
+    priority: str = 'normal'
+    expires_in_seconds: Optional[int] = None
+
+
+class WorkerCommandResponse(BaseModel):
+    """Worker command status response."""
+    command_id: str
+    worker_id: Optional[str] = None
+    command_type: str
+    status: str
+    priority: str
+    created_at: Optional[str] = None
+    delivered_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+
+
+class WorkerDetail(BaseModel):
+    """Worker node detail response."""
+    worker_id: str
+    hostname: str
+    region: str
+    zone: str
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+    status: str
+    sdk_version: Optional[str] = None
+    last_heartbeat: Optional[str] = None
+    pending_command_count: int = 0

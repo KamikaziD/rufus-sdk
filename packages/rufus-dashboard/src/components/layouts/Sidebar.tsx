@@ -7,12 +7,12 @@ import { cn } from "@/lib/utils";
 import { getVisibleNavItems } from "@/lib/roles";
 import {
   LayoutDashboard, GitBranch, CheckSquare, Cpu, Shield,
-  Clock, FileText, Settings
+  Clock, FileText, Settings, Server
 } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, GitBranch, CheckSquare, Cpu, Shield,
-  Clock, FileText, Settings,
+  Clock, FileText, Settings, Server,
 };
 
 export function Sidebar() {

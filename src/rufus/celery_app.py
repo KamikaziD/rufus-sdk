@@ -282,7 +282,7 @@ def on_worker_ready(**kwargs):
         try:
             from rufus.worker_registry import WorkerRegistry
             logger.info(f"Initializing Worker Registry for database: {db_url.split('@')[-1]}")  # Log safe URL
-            _worker_registry = WorkerRegistry(db_url)
+            _worker_registry = WorkerRegistry(db_url, celery_app=celery_app)
             _worker_registry.register()
         except Exception as e:
             logger.error(f"Failed to initialize worker registry: {e}")

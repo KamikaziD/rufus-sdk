@@ -1,13 +1,14 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GitBranch, Cpu, CheckSquare, AlertCircle } from "lucide-react";
+import { GitBranch, Cpu, CheckSquare, AlertCircle, Server } from "lucide-react";
 
 interface KpiData {
   activeWorkflows: number;
   onlineDevices: number;
   pendingHitl: number;
   failedToday: number;
+  onlineWorkers?: number;
 }
 
 interface KpiCardsProps {
@@ -52,7 +53,7 @@ function KpiCard({
 
 export function KpiCards({ data, isLoading }: KpiCardsProps) {
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
       <KpiCard
         title="Active Workflows"
         value={data?.activeWorkflows ?? 0}
@@ -84,6 +85,14 @@ export function KpiCards({ data, isLoading }: KpiCardsProps) {
         description="Needs investigation"
         isLoading={isLoading}
         accent="text-red-500"
+      />
+      <KpiCard
+        title="Online Workers"
+        value={data?.onlineWorkers ?? 0}
+        icon={Server}
+        description="Workers heartbeating"
+        isLoading={isLoading}
+        accent="text-violet-500"
       />
     </div>
   );

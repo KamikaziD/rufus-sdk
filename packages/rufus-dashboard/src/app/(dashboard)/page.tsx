@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { KpiCardsServer } from "@/components/metrics/KpiCardsServer";
 import { RecentWorkflows } from "@/components/workflows/RecentWorkflows";
-import { WorkflowChart } from "@/components/metrics/WorkflowChart";
+import { WorkflowChartServer } from "@/components/metrics/WorkflowChartServer";
 
 export default function OverviewPage() {
   return (
@@ -18,7 +18,9 @@ export default function OverviewPage() {
       </Suspense>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <WorkflowChart />
+        <Suspense fallback={<ChartSkeleton />}>
+          <WorkflowChartServer />
+        </Suspense>
         <RecentWorkflows />
       </div>
     </div>
@@ -34,6 +36,15 @@ function KpiCardsSkeleton() {
           <div className="h-8 w-16 bg-muted rounded" />
         </div>
       ))}
+    </div>
+  );
+}
+
+function ChartSkeleton() {
+  return (
+    <div className="rounded-xl border bg-card p-6 animate-pulse">
+      <div className="h-4 w-40 bg-muted rounded mb-4" />
+      <div className="h-48 bg-muted rounded" />
     </div>
   );
 }

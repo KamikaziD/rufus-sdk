@@ -49,7 +49,7 @@ async function apiFetch<T>(
 
 export async function listWorkflows(
   token: string,
-  params: { status?: string; type?: string; limit?: number; page?: number } = {}
+  params: { status?: string; type?: string; limit?: number; page?: number; since?: string } = {}
 ): Promise<WorkflowListResponse> {
   const q = new URLSearchParams();
   if (params.status) q.set("status", params.status);
@@ -57,12 +57,13 @@ export async function listWorkflows(
   if (params.limit)  q.set("limit", String(params.limit));
   // Server uses `offset`, not `page`
   if (params.page)   q.set("offset", String(((params.page ?? 1) - 1) * (params.limit ?? 50)));
-  // Server returns a bare array — normalize to expected shape
-  const raw = await apiFetch<Record<string, unknown>[]>(
+  if (params.since)  q.set("since", params.since);
+  // Server returns { total, workflows } envelope
+  const raw = await apiFetch<{ total: number; workflows: Record<string, unknown>[] }>(
     `/api/v1/workflows/executions?${q}`,
     token
   );
-  const workflows = raw.map((wf) => ({
+  const workflows = raw.workflows.map((wf) => ({
     workflow_id: (wf.id ?? wf.workflow_id) as string,
     workflow_type: wf.workflow_type as string,
     status: wf.status as WorkflowExecution["status"],
@@ -73,7 +74,7 @@ export async function listWorkflows(
     error: (wf.error ?? null) as string | null,
     owner: (wf.owner_id ?? wf.owner ?? null) as string | null,
   }));
-  return { workflows, total: workflows.length, page: params.page ?? 1, page_size: params.limit ?? 50 };
+  return { workflows, total: raw.total, page: params.page ?? 1, page_size: params.limit ?? 50 };
 }
 
 export async function getWorkflow(token: string, id: string): Promise<WorkflowStatusResponse> {
@@ -325,15 +326,105 @@ export function updatePolicyStatus(
   });
 }
 
+// ── Worker Fleet API ─────────────────────────────────────────────────────────
+
+export interface WorkerSummary {
+  worker_id: string;
+  hostname: string;
+  region: string;
+  zone: string;
+  capabilities: Record<string, unknown>;
+  status: string;
+  sdk_version: string | null;
+  last_heartbeat: string | null;
+  pending_command_count: number;
+}
+
+export interface WorkerCommand {
+  command_id: string;
+  worker_id: string | null;
+  command_type: string;
+  command_data: Record<string, unknown>;
+  status: string;
+  priority: string;
+  created_at: string | null;
+  delivered_at: string | null;
+  executed_at: string | null;
+  completed_at: string | null;
+  expires_at: string | null;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
+}
+
+export async function listWorkers(
+  token: string | undefined,
+  params?: { status?: string; region?: string; limit?: number; offset?: number }
+): Promise<{ workers: WorkerSummary[]; total: number }> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.region) q.set("region", params.region);
+  if (params?.limit)  q.set("limit", String(params.limit));
+  if (params?.offset) q.set("offset", String(params.offset));
+  return apiFetch(`/api/v1/workers?${q}`, token);
+}
+
+export async function getWorkerById(
+  token: string | undefined,
+  workerId: string
+): Promise<WorkerSummary> {
+  return apiFetch(`/api/v1/workers/${encodeURIComponent(workerId)}`, token);
+}
+
+export function sendWorkerCommand(
+  token: string | undefined,
+  workerId: string,
+  body: { command_type: string; command_data?: Record<string, unknown>; priority?: string; expires_in_seconds?: number }
+): Promise<{ command_id: string; worker_id: string; status: string }> {
+  return apiFetch(`/api/v1/workers/${encodeURIComponent(workerId)}/commands`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function broadcastWorkerCommand(
+  token: string | undefined,
+  body: { target_filter?: Record<string, unknown>; command_type: string; command_data?: Record<string, unknown>; priority?: string; expires_in_seconds?: number }
+): Promise<{ command_id: string; status: string; broadcast: boolean }> {
+  return apiFetch("/api/v1/workers/broadcast", token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listWorkerCommands(
+  token: string | undefined,
+  workerId: string,
+  params?: { status?: string; limit?: number; offset?: number }
+): Promise<{ commands: WorkerCommand[]; total: number }> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.limit)  q.set("limit", String(params.limit));
+  if (params?.offset) q.set("offset", String(params.offset));
+  return apiFetch(`/api/v1/workers/${encodeURIComponent(workerId)}/commands?${q}`, token);
+}
+
+export function cancelWorkerCommand(
+  token: string | undefined,
+  commandId: string
+): Promise<{ command_id: string; status: string }> {
+  return apiFetch(`/api/v1/workers/commands/${encodeURIComponent(commandId)}`, token, {
+    method: "DELETE",
+  });
+}
+
 // ── Metrics API ───────────────────────────────────────────────────────────────
 
 export function getMetrics(token: string): Promise<Record<string, unknown>> {
   return apiFetch("/api/v1/metrics/summary", token);
 }
 
-export function getSystemHealth(token: string): Promise<Record<string, unknown>> {
-  // Correct path is /api/v1/admin/workers (not /api/v1/workers/status)
-  return apiFetch("/api/v1/admin/workers", token);
+export function getSystemHealth(token: string): Promise<{ workers: WorkerSummary[] }> {
+  return listWorkers(token);
 }
 
 // ── Schedule API ─────────────────────────────────────────────────────────────

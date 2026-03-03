@@ -26,6 +26,10 @@ export const PERMISSIONS = {
   managePolicies:      ["SUPER_ADMIN"] as RufusRole[],
   viewPolicies:        ["SUPER_ADMIN", "FLEET_MANAGER", "AUDITOR"] as RufusRole[],
 
+  // Workers
+  viewWorkers:         ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR"] as RufusRole[],
+  manageWorkers:       ["SUPER_ADMIN", "FLEET_MANAGER"] as RufusRole[],
+
   // Admin
   adminPanel:          ["SUPER_ADMIN"] as RufusRole[],
   viewSchedules:       ["SUPER_ADMIN", "WORKFLOW_OPERATOR"] as RufusRole[],
@@ -73,6 +77,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Workflows",  href: "/workflows",   icon: "GitBranch",        requiredRoles: ["SUPER_ADMIN", "WORKFLOW_OPERATOR", "AUDITOR", "READ_ONLY"] },
   { label: "Approvals",  href: "/approvals",   icon: "CheckSquare",      requiredRoles: ["SUPER_ADMIN", "WORKFLOW_OPERATOR"] },
   { label: "Devices",    href: "/devices",     icon: "Cpu",              requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR", "AUDITOR", "READ_ONLY"] },
+  { label: "Workers",    href: "/workers",     icon: "Server",           requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR"] },
   { label: "Policies",   href: "/policies",    icon: "Shield",           requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "AUDITOR"] },
   { label: "Schedules",  href: "/schedules",   icon: "Clock",            requiredRoles: ["SUPER_ADMIN", "WORKFLOW_OPERATOR"] },
   { label: "Audit",      href: "/audit",       icon: "FileText",         requiredRoles: ["SUPER_ADMIN", "AUDITOR"] },

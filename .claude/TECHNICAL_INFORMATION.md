@@ -594,12 +594,41 @@ CREATE TABLE worker_nodes (
     capabilities JSONB DEFAULT '{}',
     status VARCHAR(20),  -- 'online', 'offline'
     last_heartbeat TIMESTAMPTZ,
+    -- Added in migration b2c3d4e5f6a7 (v0.7.3) ──────────────────────────────
+    sdk_version VARCHAR(50),             -- rufus-sdk version string from __version__
+    pending_command_count INTEGER DEFAULT 0,  -- bumped on insert, decremented on execute
+    last_command_at TIMESTAMPTZ,         -- when last command was queued for this worker
+    -- ─────────────────────────────────────────────────────────────────────────
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE worker_commands (
+    command_id VARCHAR(100) PRIMARY KEY,
+    worker_id VARCHAR(100) REFERENCES worker_nodes(worker_id) ON DELETE CASCADE,
+    target_filter TEXT,          -- JSON: {region, zone, ...} for broadcast targeting; NULL = all
+    command_type VARCHAR(50) NOT NULL,
+    command_data TEXT DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'pending',  -- pending→delivered→executing→completed|failed|cancelled
+    priority VARCHAR(20) DEFAULT 'normal', -- critical | high | normal | low
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by VARCHAR(100),
+    delivered_at TIMESTAMPTZ,
+    executed_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    result TEXT,
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 0
+);
+
+CREATE INDEX ix_worker_cmd_worker_status  ON worker_commands (worker_id, status);
+CREATE INDEX ix_worker_cmd_status_created ON worker_commands (status, created_at);
+CREATE INDEX ix_worker_cmd_expires        ON worker_commands (expires_at);
+
 -- Active workers query
-SELECT worker_id, hostname, region, last_heartbeat
+SELECT worker_id, hostname, region, sdk_version, pending_command_count, last_heartbeat
 FROM worker_nodes
 WHERE status = 'online'
   AND last_heartbeat > NOW() - INTERVAL '2 minutes';
@@ -609,6 +638,92 @@ SELECT region, COUNT(*) as worker_count
 FROM worker_nodes WHERE status = 'online'
 GROUP BY region;
 ```
+
+### Worker Fleet Commands
+
+Introduced in **v0.7.3**. The control plane sends commands to Celery workers via the `worker_commands`
+PostgreSQL table. Workers poll on every heartbeat (default 30 s) using `SELECT ... FOR UPDATE SKIP LOCKED`
+to atomically claim up to 10 pending commands per tick and execute them in daemon threads.
+
+```
+Control Plane API  ─→  INSERT worker_commands  ─→  PostgreSQL
+                                                        │  (poll every 30s)
+                                               Worker heartbeat loop
+                                                        │
+                                             _execute_command(type, data)
+                                                        │
+                                          ┌─────────────┴────────────┐
+                                          │ SIGTERM / pool_restart   │
+                                          │ pip install / celery ctl │
+                                          │ UPDATE capabilities      │
+                                          └──────────────────────────┘
+```
+
+**Supported command types (9):**
+
+| `command_type` | Key `command_data` fields | Mechanism | Latency |
+|----------------|--------------------------|-----------|---------|
+| `check_health` | _(none)_ | Collect platform + Celery stats; write to `result` | ≤30s |
+| `restart` | `delay_seconds` (default 5) | `os.kill(pid, SIGTERM)` after delay | ≤30s |
+| `pool_restart` | _(none)_ | `celery_app.control.pool_restart(reload=True)` — hot module reload | ≤30s |
+| `drain` | `queue`, `wait_seconds` | Cancel consumer → wait → SIGTERM | ≤30s + wait |
+| `update_code` | `package`, `version`, `index_url` | `pip install package==version` then SIGTERM | ≤30s + pip |
+| `update_code` | `wheel_url` | `pip install <URL>` then SIGTERM | ≤30s + pip |
+| `update_config` | `capabilities: {key: value}` | Merge into in-memory capabilities + persist to DB | ≤30s |
+| `pause_queue` | `queue` | `celery_app.control.cancel_consumer(queue)` | ≤30s |
+| `resume_queue` | `queue` | `celery_app.control.add_consumer(queue)` | ≤30s |
+| `set_concurrency` | `direction` (`grow`/`shrink`), `n` | `pool_grow` / `pool_shrink` | ≤30s |
+
+**API endpoints (v0.7.3):**
+
+```bash
+# List workers
+curl http://localhost:8000/api/v1/workers
+
+# Get a single worker
+curl http://localhost:8000/api/v1/workers/worker-hostname-001
+
+# Send a health-check command to one worker
+curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
+  -H "Content-Type: application/json" \
+  -d '{"command_type": "check_health"}'
+
+# Restart a worker after 10 s
+curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
+  -d '{"command_type": "restart", "command_data": {"delay_seconds": 10}}'
+
+# Update rufus-sdk from TestPyPI to 0.7.3
+curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
+  -d '{"command_type": "update_code", "command_data": {
+        "package": "rufus-sdk", "version": "0.7.3",
+        "index_url": "https://test.pypi.org/simple/"}}'
+
+# Update code from a wheel URL (air-gapped / edge)
+curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
+  -d '{"command_type": "update_code", "command_data": {
+        "wheel_url": "https://cdn.example.com/rufus_sdk-0.7.3-py3-none-any.whl"}}'
+
+# Broadcast restart to all workers in region "us-east"
+curl -X POST http://localhost:8000/api/v1/workers/broadcast \
+  -d '{"command_type": "restart", "target_filter": {"region": "us-east"},
+       "command_data": {"delay_seconds": 5}}'
+
+# List commands for a worker
+curl "http://localhost:8000/api/v1/workers/worker-hostname-001/commands?status=pending"
+
+# Cancel a pending command
+curl -X DELETE http://localhost:8000/api/v1/workers/commands/<command_id>
+```
+
+**Limitations:**
+
+- **≤30 s latency** — commands are delivered on the next heartbeat tick; there is no instant push channel.
+- **No zero-downtime updates** — `update_code` + restart causes a brief worker gap; Celery re-queues
+  in-flight tasks via the broker.
+- **Broadcast targeting** — the `target_filter` is evaluated client-side in the worker (region, zone,
+  capabilities keys); there is no server-side pre-filtering before insert.
+- **PEX as future path** — packaging workflows as PEX archives would allow atomic, zero-downtime code
+  swaps without pip and are planned as a post-beta enhancement.
 
 ### Event Publishing
 
@@ -1455,10 +1570,11 @@ steps:
 | `edge_devices` | Device registry |
 | `device_commands` | Per-device command queue; expanded with batch/broadcast/retry columns in migration a1b2c3d4e5f6 |
 
-#### Workers (1) — PostgreSQL only
+#### Workers (2) — PostgreSQL only
 | Table | Notes |
 |-------|-------|
-| `worker_nodes` | Celery fleet registry; added in migration d08b401e4c86 |
+| `worker_nodes` | Celery fleet registry; added in migration `d08b401e4c86`; 3 new columns (`sdk_version`, `pending_command_count`, `last_command_at`) added in migration `b2c3d4e5f6a7` (v0.7.3) |
+| `worker_commands` | DB-delivery channel for control-plane → worker commands; 9 command types; poll-based (30 s); added in migration `b2c3d4e5f6a7` (v0.7.3) |
 
 #### Command Infrastructure (6) — PostgreSQL only
 | Table | Notes |

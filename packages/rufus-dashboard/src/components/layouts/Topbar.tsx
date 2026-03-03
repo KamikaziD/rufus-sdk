@@ -3,6 +3,7 @@
 import { signOut } from "next-auth/react";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { LogOut, Bell } from "lucide-react";
 
 export function Topbar() {
@@ -15,6 +16,8 @@ export function Topbar() {
       <Button variant="ghost" size="icon" aria-label="Notifications">
         <Bell className="h-4 w-4" />
       </Button>
+
+      <ThemeToggle />
 
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground hidden sm:block">

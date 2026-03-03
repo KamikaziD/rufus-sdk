@@ -7,7 +7,7 @@ Used for:
 - Type-safe schema definition
 - Database-agnostic type mapping (PostgreSQL + SQLite)
 
-Table inventory (33 cloud tables + alembic_version managed by Alembic):
+Table inventory (34 cloud tables + alembic_version managed by Alembic):
 
   Core workflow (7):
     workflow_executions, workflow_audit_log, workflow_execution_logs,
@@ -16,8 +16,8 @@ Table inventory (33 cloud tables + alembic_version managed by Alembic):
   Scheduling (1):
     scheduled_workflows
 
-  Edge device management - cloud side (2):
-    edge_devices, worker_nodes
+  Edge device management - cloud side (3):
+    edge_devices, worker_nodes, worker_commands
 
   Command infrastructure (8):
     command_broadcasts, command_batches, command_templates, device_commands,
@@ -269,10 +269,45 @@ worker_nodes = Table(
     Column('last_heartbeat', DateTime),
     Column('created_at', DateTime, server_default=func.now()),
     Column('updated_at', DateTime, server_default=func.now(), onupdate=func.now()),
+    Column('sdk_version', String(50), nullable=True),
+    Column('pending_command_count', Integer, server_default='0'),
+    Column('last_command_at', DateTime, nullable=True),
 
     Index('ix_worker_status', 'status'),
     Index('ix_worker_heartbeat', 'last_heartbeat'),
     Index('ix_worker_region', 'region'),
+)
+
+# Worker command queue — DB-delivery channel for control plane → Celery worker commands
+worker_commands = Table(
+    'worker_commands',
+    metadata,
+    Column('command_id', String(100), primary_key=True),
+    Column('worker_id', String(100), ForeignKey('worker_nodes.worker_id', ondelete='CASCADE'), nullable=True),
+    # NULL worker_id = broadcast; target_filter JSON narrows which workers execute
+    Column('target_filter', Text, nullable=True),   # JSONB: {region, zone, capabilities, ...}
+    Column('command_type', String(50), nullable=False),
+    # Values: restart|pool_restart|drain|update_code|update_config|
+    #         pause_queue|resume_queue|set_concurrency|check_health
+    Column('command_data', Text, server_default='{}'),
+    Column('status', String(20), server_default='pending'),
+    # Values: pending|delivered|executing|completed|failed|expired|cancelled
+    Column('priority', String(20), server_default='normal'),
+    # Values: low|normal|high|critical
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('created_by', String(100), nullable=True),
+    Column('delivered_at', DateTime, nullable=True),
+    Column('executed_at', DateTime, nullable=True),
+    Column('completed_at', DateTime, nullable=True),
+    Column('expires_at', DateTime, nullable=True),
+    Column('result', Text, nullable=True),        # JSONB: execution result
+    Column('error_message', Text, nullable=True),
+    Column('retry_count', Integer, server_default='0'),
+    Column('max_retries', Integer, server_default='0'),
+
+    Index('ix_worker_cmd_worker_status', 'worker_id', 'status'),
+    Index('ix_worker_cmd_status_created', 'status', 'created_at'),
+    Index('ix_worker_cmd_expires', 'expires_at'),
 )
 
 # ============================================================================
@@ -852,6 +887,7 @@ def get_cloud_only_tables() -> list:
     return [
         scheduled_workflows,
         worker_nodes,
+        worker_commands,
         command_broadcasts,
         command_batches,
         command_templates,

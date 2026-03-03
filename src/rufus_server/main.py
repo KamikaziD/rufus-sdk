@@ -57,7 +57,8 @@ from rufus_server.api_models import (
     WorkflowStartRequest, WorkflowStartResponse, WorkflowStepRequest, WorkflowStepResponse,
     WorkflowStatusResponse, ResumeWorkflowRequest, RetryWorkflowRequest,
     DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceHeartbeatRequest,
-    DeviceHeartbeatResponse, SyncRequest, SyncResponse
+    DeviceHeartbeatResponse, SyncRequest, SyncResponse,
+    WorkerCommandRequest, WorkerBroadcastRequest, WorkerCommandResponse, WorkerDetail,
 )
 
 # --- FastAPI App Setup ---
@@ -111,6 +112,9 @@ from rufus_server.device_service import DeviceService
 # --- Broadcast Service ---
 from rufus_server.broadcast_service import BroadcastService
 
+# --- Worker Fleet Service ---
+from rufus_server.worker_service import WorkerService
+
 # --- Policy Engine ---
 from rufus_server.policy_engine import (
     Policy, PolicyRule, PolicyStatus, RolloutConfig, RolloutStrategy,
@@ -130,6 +134,7 @@ device_assignments: Dict[str, DeviceAssignment] = {}  # In-memory for now
 version_service = None  # Command version service
 webhook_service = None  # Webhook notification service
 broadcast_service: Optional[BroadcastService] = None
+worker_service: Optional[WorkerService] = None
 
 
 # --- Auth / RBAC ---
@@ -213,7 +218,7 @@ async def add_rate_limit_headers(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
-    global rate_limit_service, version_service, webhook_service, broadcast_service
+    global rate_limit_service, version_service, webhook_service, broadcast_service, worker_service
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -290,6 +295,11 @@ async def startup_event():
 
     # Initialize Broadcast Service
     broadcast_service = BroadcastService(persistence_provider, device_service)
+
+    # Initialize Worker Fleet Service (PostgreSQL only; no-op when using sqlite/memory)
+    if isinstance(persistence_provider, PostgresPersistenceProvider):
+        worker_service = WorkerService(persistence_provider)
+        logger.info("WorkerService initialized for Celery fleet management")
 
     # Wire services into ConfigRollout step module
     from rufus_server.steps.config_rollout_steps import init_services as init_rollout_services
@@ -4145,6 +4155,159 @@ async def delete_rate_limit(
         "status": "deactivated",
         "message": "Rate limit rule deactivated successfully"
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker Fleet Management
+# Route ordering is critical: /workers/broadcast must be registered BEFORE
+# /workers/{worker_id} or FastAPI will interpret "broadcast" as a worker_id.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/workers", tags=["Monitoring"])
+async def list_workers(
+    status: Optional[str] = None,
+    region: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """List registered Celery worker nodes (PostgreSQL backend required)."""
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    workers = await worker_service.list_workers(
+        status=status, region=region, limit=limit, offset=offset
+    )
+    return {"workers": workers, "total": len(workers)}
+
+
+@app.post("/api/v1/workers/broadcast", tags=["Monitoring"])
+async def broadcast_worker_command(
+    request: WorkerBroadcastRequest,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Broadcast a command to all workers (or a filtered subset).
+
+    Use `target_filter` to narrow recipients, e.g. `{"region": "us-east-1"}`.
+    An empty `target_filter` targets all online workers.
+    Workers pick up the command within 30s (next heartbeat cycle).
+    """
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    command_id = await worker_service.broadcast_command(
+        command_type=request.command_type,
+        target_filter=request.target_filter,
+        command_data=request.command_data,
+        priority=request.priority,
+        expires_in_seconds=request.expires_in_seconds,
+        created_by=user.user_id if user else None,
+    )
+    return {"command_id": command_id, "status": "pending", "broadcast": True}
+
+
+@app.get("/api/v1/workers/{worker_id}", tags=["Monitoring"])
+async def get_worker(
+    worker_id: str,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Get details for a single Celery worker node."""
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    worker = await worker_service.get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return worker
+
+
+@app.post("/api/v1/workers/{worker_id}/commands", tags=["Monitoring"])
+async def send_worker_command(
+    worker_id: str,
+    request: WorkerCommandRequest,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Send a command to a specific Celery worker.
+
+    The worker polls the DB on every heartbeat (≤30s) and executes the command.
+
+    Supported command types:
+    - `restart` — cold restart via SIGTERM (in-flight tasks re-queue)
+    - `pool_restart` — hot pool restart (reloads modules without full restart)
+    - `drain` — stop consuming + wait for in-flight tasks + SIGTERM
+    - `update_code` — pip install new version then restart
+    - `update_config` — update worker capabilities in-memory + DB
+    - `pause_queue` — stop consuming from a queue
+    - `resume_queue` — resume consuming from a queue
+    - `set_concurrency` — grow or shrink worker pool
+    - `check_health` — collect platform info + Celery stats
+    """
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    worker = await worker_service.get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    command_id = await worker_service.send_command(
+        worker_id=worker_id,
+        command_type=request.command_type,
+        command_data=request.command_data,
+        priority=request.priority,
+        expires_in_seconds=request.expires_in_seconds,
+        created_by=user.user_id if user else None,
+    )
+    return {"command_id": command_id, "worker_id": worker_id, "status": "pending"}
+
+
+@app.get("/api/v1/workers/{worker_id}/commands", tags=["Monitoring"])
+async def list_worker_commands(
+    worker_id: str,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """List commands sent to a specific worker, ordered by created_at DESC."""
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    commands = await worker_service.list_commands(
+        worker_id=worker_id, status=status, limit=limit, offset=offset
+    )
+    return {"commands": commands, "total": len(commands)}
+
+
+@app.delete("/api/v1/workers/commands/{command_id}", tags=["Monitoring"])
+async def cancel_worker_command(
+    command_id: str,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Cancel a pending worker command. Only works while status is 'pending'."""
+    if worker_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker service not initialized (requires PostgreSQL backend)"
+        )
+    cancelled = await worker_service.cancel_command(command_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Command cannot be cancelled (not in pending state or not found)"
+        )
+    return {"command_id": command_id, "status": "cancelled"}
 
 
 # To run: uvicorn rufus_server.main:app --reload

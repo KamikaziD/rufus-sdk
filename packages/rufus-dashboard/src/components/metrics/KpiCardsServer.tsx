@@ -11,15 +11,18 @@ export async function KpiCardsServer() {
     onlineDevices: 0,
     pendingHitl: 0,
     failedToday: 0,
+    onlineWorkers: 0,
   };
 
   if (token) {
     try {
-      const [running, hitl, failed, devices] = await Promise.allSettled([
+      const since24h = new Date(Date.now() - 86400000).toISOString();
+      const [running, hitl, failed, devices, workers] = await Promise.allSettled([
         api.listWorkflows(token, { status: "RUNNING", limit: 1 }),
         api.listWorkflows(token, { status: "WAITING_HUMAN", limit: 1 }),
-        api.listWorkflows(token, { status: "FAILED", limit: 1 }),
+        api.listWorkflows(token, { status: "FAILED", limit: 1, since: since24h }),
         api.listDevices(token),
+        api.listWorkers(token, { status: "online", limit: 1 }),
       ]);
 
       kpiData = {
@@ -29,6 +32,7 @@ export async function KpiCardsServer() {
         onlineDevices:   devices.status === "fulfilled"
           ? devices.value.devices.filter((d) => d.status === "online").length
           : 0,
+        onlineWorkers:   workers.status === "fulfilled" ? (workers.value.total ?? 0) : 0,
       };
     } catch {}
   }

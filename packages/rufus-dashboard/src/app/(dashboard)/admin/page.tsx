@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  getSystemHealth,
+  listWorkers,
   listRateLimits,
   createRateLimitRule,
   updateRateLimitRule,
@@ -13,13 +13,16 @@ import {
   deleteWebhook,
   getWebhookDeliveries,
   testWebhook,
+  type WorkerSummary,
   type RateLimitRule,
   type Webhook,
   type WebhookDelivery,
 } from "@/lib/api";
+import { hasPermission } from "@/lib/roles";
+import { WorkerCommandModal } from "@/components/workers/WorkerCommandModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Settings, RefreshCw, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { Settings, RefreshCw, Plus, ChevronDown, ChevronUp, Cpu, MapPin, Clock, Wifi, WifiOff, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Tab = "workers" | "rate-limits" | "webhooks";
@@ -33,11 +36,14 @@ function useToken() {
 
 export default function AdminPage() {
   const token = useToken();
+  const { data: session } = useSession();
+  const roles = (session?.user as unknown as { roles?: string[] })?.roles ?? [];
+  const canManageWorkers = hasPermission(roles, "manageWorkers");
   const [activeTab, setActiveTab] = useState<Tab>("workers");
 
-  const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
+  const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery<{ workers: WorkerSummary[]; total: number }>({
     queryKey: ["system-health"],
-    queryFn: () => getSystemHealth(token!),
+    queryFn: () => listWorkers(token!, { limit: 100 }),
     enabled: !!token,
     refetchInterval: 30_000,
   });
@@ -82,7 +88,7 @@ export default function AdminPage() {
       </div>
 
       {activeTab === "workers" && (
-        <WorkersTab health={health} isLoading={healthLoading} />
+        <WorkersTab health={health} isLoading={healthLoading} canManage={canManageWorkers} />
       )}
       {activeTab === "rate-limits" && <RateLimitsTab token={token} />}
       {activeTab === "webhooks" && <WebhooksTab token={token} />}
@@ -92,29 +98,168 @@ export default function AdminPage() {
 
 // ── Workers Tab ───────────────────────────────────────────────────────────────
 
-function WorkersTab({ health, isLoading }: { health?: Record<string, unknown>; isLoading: boolean }) {
+function timeAgo(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+function WorkerCard({
+  worker,
+  onSendCommand,
+}: {
+  worker: WorkerSummary;
+  onSendCommand: (worker: WorkerSummary) => void;
+}) {
+  const isOnline = worker.status === "online";
+  const capabilities = Object.keys(worker.capabilities ?? {});
+
+  return (
+    <Card>
+      <CardContent className="pt-5 pb-5">
+        <div className="flex items-start justify-between gap-4">
+          {/* Left: identity */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`flex-shrink-0 rounded-lg p-2 ${isOnline ? "bg-green-50" : "bg-muted"}`}>
+              {isOnline
+                ? <Wifi className="h-4 w-4 text-green-600" />
+                : <WifiOff className="h-4 w-4 text-muted-foreground" />}
+            </div>
+            <div className="min-w-0">
+              <p className="font-mono text-sm font-semibold truncate">{worker.worker_id}</p>
+              <p className="text-xs text-muted-foreground truncate flex items-center gap-1 mt-0.5">
+                <Cpu className="h-3 w-3 flex-shrink-0" />
+                {worker.hostname}
+              </p>
+            </div>
+          </div>
+
+          {/* Right: status badge + send command */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Badge variant={isOnline ? "success" : "destructive"}>
+              {worker.status}
+            </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => onSendCommand(worker)}
+            >
+              Send Command
+            </Button>
+          </div>
+        </div>
+
+        {/* Meta row */}
+        <div className="mt-4 grid grid-cols-4 gap-3 text-xs">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <MapPin className="h-3 w-3" /> Region
+            </span>
+            <span className="font-medium">{worker.region || "—"}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted-foreground">Zone</span>
+            <span className="font-medium">{worker.zone || "—"}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted-foreground">SDK</span>
+            <span className="font-mono font-medium">{worker.sdk_version ?? "—"}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" /> Heartbeat
+            </span>
+            <span className="font-medium tabular-nums">{timeAgo(worker.last_heartbeat)}</span>
+          </div>
+        </div>
+
+        {/* SDK + pending summary */}
+        <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+          {worker.pending_command_count > 0 && (
+            <Badge variant="outline" className="text-xs">
+              {worker.pending_command_count} pending
+            </Badge>
+          )}
+        </div>
+
+        {/* Capabilities */}
+        {capabilities.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1">
+            {capabilities.map((cap) => (
+              <Badge key={cap} variant="secondary" className="text-xs">{cap}</Badge>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkersTab({ health, isLoading, canManage }: { health?: { workers: WorkerSummary[]; total: number }; isLoading: boolean; canManage: boolean }) {
+
+  const [cmdModal, setCmdModal] = useState<{ open: boolean; workerId: string; hostname: string }>({
+    open: false, workerId: "", hostname: "",
+  });
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+
   if (isLoading) return <div className="h-32 animate-pulse bg-muted rounded-xl" />;
 
-  const workers = (health?.workers as unknown[]) ?? [];
+  const workers = health?.workers ?? [];
+  const onlineCount = workers.filter((w) => w.status === "online").length;
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle className="text-sm">System Health</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">Workers</p>
-              <p className="font-semibold">{workers.length} registered</p>
+      {/* Summary bar */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className="rounded-md bg-primary/10 p-2">
+              <Cpu className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="text-muted-foreground">Status</p>
-              <Badge variant="success">Operational</Badge>
+              <p className="text-xs text-muted-foreground">Total</p>
+              <p className="text-lg font-bold leading-none">{workers.length}</p>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className="rounded-md bg-green-100 p-2">
+              <Wifi className="h-4 w-4 text-green-600" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Online</p>
+              <p className="text-lg font-bold leading-none text-green-600">{onlineCount}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className="rounded-md bg-muted p-2">
+              <WifiOff className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Offline</p>
+              <p className="text-lg font-bold leading-none">{workers.length - onlineCount}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
+      {/* Broadcast button */}
+      {canManage && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => setBroadcastOpen(true)}>
+            <Radio className="h-3.5 w-3.5" />
+            Broadcast to All
+          </Button>
+        </div>
+      )}
+
+      {/* Worker cards */}
       {workers.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
@@ -124,17 +269,33 @@ function WorkersTab({ health, isLoading }: { health?: Record<string, unknown>; i
         </Card>
       ) : (
         <div className="grid gap-3">
-          {workers.map((worker, i) => (
-            <Card key={i}>
-              <CardContent className="pt-4 pb-4 text-sm">
-                <pre className="font-mono text-xs text-muted-foreground">
-                  {JSON.stringify(worker, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
+          {workers.map((worker) => (
+            <WorkerCard
+              key={worker.worker_id}
+              worker={worker}
+              onSendCommand={(w) =>
+                canManage && setCmdModal({ open: true, workerId: w.worker_id, hostname: w.hostname })
+              }
+            />
           ))}
         </div>
       )}
+
+      {/* Command modal (single worker) */}
+      <WorkerCommandModal
+        open={cmdModal.open}
+        onClose={() => setCmdModal((m) => ({ ...m, open: false }))}
+        mode="single"
+        workerId={cmdModal.workerId}
+        workerHostname={cmdModal.hostname}
+      />
+
+      {/* Broadcast modal */}
+      <WorkerCommandModal
+        open={broadcastOpen}
+        onClose={() => setBroadcastOpen(false)}
+        mode="broadcast"
+      />
     </div>
   );
 }

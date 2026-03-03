@@ -194,6 +194,18 @@ userinfo: {
 **Correction:** Prefix indexes with the table abbreviation: `ix_cmd_audit_event_type` for `command_audit_log` vs `ix_audit_event_type` for `workflow_audit_log`
 **Verification:** Migration runs without `DuplicateTable` error; `SELECT indexname FROM pg_indexes WHERE indexname LIKE 'ix_%audit%'` shows distinct names
 
+## Pattern: Next.js Dockerfile COPY public/ Fails When Directory Doesn't Exist
+**Context:** Multi-stage Next.js Dockerfile (`Dockerfile.rufus-dashboard-prod`) — COPY public/ in runner stage
+**Anti-Pattern:** `COPY --from=builder /app/public ./public` — if the project has no `public/` directory, Docker buildx throws `failed to calculate checksum of ref ...: "/app/public": not found` and aborts the build
+**Correction:** Check whether the project actually has a `public/` directory before adding the COPY line. If absent, omit it entirely — Next.js doesn't require `public/` and will serve `/_next/static/` directly from `.next/`.
+**Verification:** `docker buildx build` completes without checksum error; `npm run start` serves the app
+
+## Pattern: Sub-package `python -m build` Fails sdist for `../../` Relative Paths — Use `--wheel`
+**Context:** Building `packages/rufus-sdk-edge/` and `packages/rufus-sdk-server/` sub-packages
+**Anti-Pattern:** `python -m build` (builds both sdist and wheel) — sdist extraction validates that files don't escape the temp dir; `readme = "../../README.md"` resolves to a path outside the temp dir, raising `tarfile.OutsideDestinationError`
+**Correction:** `python -m build --wheel` — skips sdist entirely; wheel build via Hatchling uses `force-include` which resolves paths correctly
+**Verification:** `dist/*.whl` created successfully; no tarfile error
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
