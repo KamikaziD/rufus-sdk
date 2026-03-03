@@ -9,7 +9,7 @@ received commands autonomously.
 import json
 import uuid
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class WorkerService:
         """Queue a command for a specific worker. Returns command_id."""
         command_id = str(uuid.uuid4())
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
+            datetime.utcnow() + timedelta(seconds=expires_in_seconds)
             if expires_in_seconds
             else None
         )
@@ -141,7 +141,7 @@ class WorkerService:
         """
         command_id = str(uuid.uuid4())
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
+            datetime.utcnow() + timedelta(seconds=expires_in_seconds)
             if expires_in_seconds
             else None
         )
