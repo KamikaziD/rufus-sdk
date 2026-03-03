@@ -65,6 +65,13 @@ docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
     -t ${REGISTRY}/rufus-flower:latest \
     ..
 
+echo "Building rufus-dashboard..."
+docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
+    -f Dockerfile.rufus-dashboard-prod \
+    -t ${REGISTRY}/rufus-dashboard:${VERSION} \
+    -t ${REGISTRY}/rufus-dashboard:latest \
+    ..
+
 echo ""
 echo "Build complete!"
 echo ""
@@ -77,6 +84,8 @@ if [ "$PUSH" = "true" ]; then
     echo "  - ${REGISTRY}/rufus-worker:latest"
     echo "  - ${REGISTRY}/rufus-flower:${VERSION}"
     echo "  - ${REGISTRY}/rufus-flower:latest"
+    echo "  - ${REGISTRY}/rufus-dashboard:${VERSION}"
+    echo "  - ${REGISTRY}/rufus-dashboard:latest"
     echo ""
     echo "Verify multi-arch manifests:"
     echo "  docker buildx imagetools inspect ${REGISTRY}/rufus-server:${VERSION}"
@@ -85,6 +94,7 @@ else
     echo "  - ${REGISTRY}/rufus-server:${VERSION}"
     echo "  - ${REGISTRY}/rufus-worker:${VERSION}"
     echo "  - ${REGISTRY}/rufus-flower:${VERSION}"
+    echo "  - ${REGISTRY}/rufus-dashboard:${VERSION}"
     echo ""
     echo "To build and push multi-arch:"
     echo "  ./build-production-images.sh $VERSION $REGISTRY true"
