@@ -1,23 +1,14 @@
-import { auth } from "@/lib/auth";
+"use client";
+
 import Link from "next/link";
+import { useWorkflowList } from "@/lib/hooks/useWorkflow";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WorkflowStatusBadge } from "@/components/shared/StatusBadge";
 import { truncateId, formatRelativeTime } from "@/lib/utils";
-import * as api from "@/lib/api";
-import type { WorkflowStatus } from "@/types";
 
-export async function RecentWorkflows() {
-  const session = await auth();
-  const token = (session as unknown as { accessToken?: string })?.accessToken;
-
-  let workflows: { workflow_id: string; workflow_type: string; status: WorkflowStatus; started_at: string }[] = [];
-
-  if (token) {
-    try {
-      const res = await api.listWorkflows(token, { limit: 10 });
-      workflows = res.workflows ?? [];
-    } catch {}
-  }
+export function RecentWorkflows() {
+  const { data, isLoading } = useWorkflowList({ limit: 10 });
+  const workflows = data?.workflows ?? [];
 
   return (
     <Card>
@@ -28,7 +19,13 @@ export async function RecentWorkflows() {
         </Link>
       </CardHeader>
       <CardContent>
-        {workflows.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-10 animate-pulse bg-muted rounded" />
+            ))}
+          </div>
+        ) : workflows.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">No workflows yet</p>
         ) : (
           <div className="space-y-2">

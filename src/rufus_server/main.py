@@ -59,6 +59,9 @@ from rufus_server.api_models import (
     DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceHeartbeatRequest,
     DeviceHeartbeatResponse, SyncRequest, SyncResponse,
     WorkerCommandRequest, WorkerBroadcastRequest, WorkerCommandResponse, WorkerDetail,
+    WorkflowDefinitionUploadRequest, WorkflowDefinitionPatchRequest,
+    WorkflowDefinitionResponse, WorkflowDefinitionDetailResponse,
+    ServerCommandRequest, ServerCommandResponse,
 )
 
 # --- FastAPI App Setup ---
@@ -115,6 +118,10 @@ from rufus_server.broadcast_service import BroadcastService
 # --- Worker Fleet Service ---
 from rufus_server.worker_service import WorkerService
 
+# --- Workflow Definition + Server Command Services ---
+from rufus_server.workflow_definition_service import WorkflowDefinitionService
+from rufus_server.server_command_service import ServerCommandService
+
 # --- Policy Engine ---
 from rufus_server.policy_engine import (
     Policy, PolicyRule, PolicyStatus, RolloutConfig, RolloutStrategy,
@@ -135,6 +142,9 @@ version_service = None  # Command version service
 webhook_service = None  # Webhook notification service
 broadcast_service: Optional[BroadcastService] = None
 worker_service: Optional[WorkerService] = None
+workflow_definition_service: Optional[WorkflowDefinitionService] = None
+server_command_service: Optional[ServerCommandService] = None
+_definition_poller_task: Optional[asyncio.Task] = None
 
 
 # --- Auth / RBAC ---
@@ -219,6 +229,7 @@ async def add_rate_limit_headers(request: Request, call_next):
 async def startup_event():
     global persistence_provider, execution_provider, workflow_observer, workflow_engine, workflow_registry_config
     global rate_limit_service, version_service, webhook_service, broadcast_service, worker_service
+    global workflow_definition_service, server_command_service, _definition_poller_task
 
     # Load workflow registry
     RUFUS_WORKFLOW_REGISTRY_PATH = os.getenv("RUFUS_WORKFLOW_REGISTRY_PATH", "config/workflow_registry.yaml")
@@ -301,6 +312,36 @@ async def startup_event():
         worker_service = WorkerService(persistence_provider)
         logger.info("WorkerService initialized for Celery fleet management")
 
+        # Initialize Workflow Definition + Server Command services
+        workflow_definition_service = WorkflowDefinitionService(persistence_provider)
+        server_command_service = ServerCommandService(persistence_provider)
+        logger.info("WorkflowDefinitionService and ServerCommandService initialized")
+
+        # Pre-load all active DB definitions into the builder before first request
+        try:
+            active_defs = await workflow_definition_service.get_all_active()
+            for defn in active_defs:
+                try:
+                    workflow_engine.workflow_builder.reload_workflow_type(
+                        defn["workflow_type"], defn["yaml_content"]
+                    )
+                    logger.info(
+                        f"Pre-loaded DB definition: {defn['workflow_type']} "
+                        f"v{defn['version']}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to pre-load definition "
+                        f"'{defn['workflow_type']}': {e}"
+                    )
+        except Exception as e:
+            logger.warning(f"Could not pre-load workflow definitions: {e}")
+
+        # Start background pollers
+        _definition_poller_task = asyncio.create_task(
+            _definition_poller_loop(), name="definition_poller"
+        )
+
     # Wire services into ConfigRollout step module
     from rufus_server.steps.config_rollout_steps import init_services as init_rollout_services
     init_rollout_services(persistence_provider, broadcast_service, device_service)
@@ -343,7 +384,13 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global persistence_provider, execution_provider, workflow_observer
+    global persistence_provider, execution_provider, workflow_observer, _definition_poller_task
+    if _definition_poller_task and not _definition_poller_task.done():
+        _definition_poller_task.cancel()
+        try:
+            await _definition_poller_task
+        except asyncio.CancelledError:
+            pass
     from rufus_server.auth.loader import get_auth_provider
     auth_provider = get_auth_provider()
     if auth_provider:
@@ -681,9 +728,22 @@ async def get_workflow_executions(
     if exclude_status:
         workflow_list = [wf for wf in workflow_list if wf.get('status') != exclude_status]
 
-    # Apply since filter if provided (ISO 8601 string comparison works for UTC timestamps)
+    # Apply since filter if provided
     if since:
-        workflow_list = [wf for wf in workflow_list if (wf.get('updated_at') or '') >= since]
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
+            def _ts(val):
+                if val is None:
+                    return _dt.min.replace(tzinfo=_tz.utc)
+                if isinstance(val, str):
+                    return _dt.fromisoformat(val.replace("Z", "+00:00"))
+                if isinstance(val, _dt) and val.tzinfo is None:
+                    return val.replace(tzinfo=_tz.utc)
+                return val
+            workflow_list = [wf for wf in workflow_list if _ts(wf.get('updated_at')) >= since_dt]
+        except (ValueError, TypeError):
+            pass
 
     total = len(workflow_list)
     page_items = workflow_list[offset:offset + limit]
@@ -4290,6 +4350,131 @@ async def list_worker_commands(
     return {"commands": commands, "total": len(commands)}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Background Pollers (definition hot-reload + server command execution)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tracks the last seen version per workflow_type to avoid redundant reloads
+_last_seen_versions: Dict[str, int] = {}
+
+
+async def _definition_poller_loop():
+    """
+    Runs every 60 s.  Loads all active workflow definitions from DB and calls
+    WorkflowBuilder.reload_workflow_type() for any type with a newer version.
+    Also runs the server command poller every 30 s.
+    """
+    tick = 0
+    while True:
+        try:
+            await asyncio.sleep(30)
+            tick += 1
+
+            # ── Server commands (every 30 s) ─────────────────────────────────
+            if server_command_service and workflow_engine:
+                await _process_server_commands()
+
+            # ── Workflow definition reload (every 60 s = every 2 ticks) ─────
+            if tick % 2 == 0 and workflow_definition_service and workflow_engine:
+                await _reload_changed_definitions()
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Definition poller error: {e}")
+
+
+async def _process_server_commands():
+    """Claim and execute pending server_commands rows."""
+    try:
+        pending = await server_command_service.claim_pending()
+    except Exception as e:
+        logger.error(f"Server command claim failed: {e}")
+        return
+
+    for cmd in pending:
+        command_id = cmd["id"]
+        command = cmd["command"]
+        try:
+            import json as _json
+            payload = _json.loads(cmd["payload"]) if isinstance(cmd["payload"], str) else cmd["payload"]
+        except Exception:
+            payload = {}
+
+        try:
+            result = await _execute_server_command(command, payload)
+            await server_command_service.mark_done(command_id, "completed", result)
+        except Exception as e:
+            logger.error(f"Server command {command_id} ({command}) failed: {e}")
+            await server_command_service.mark_done(
+                command_id, "failed", {"error": str(e)}
+            )
+
+
+async def _execute_server_command(command: str, payload: dict) -> dict:
+    """Execute a single server command and return a result dict."""
+    if command == "reload_workflows":
+        if workflow_definition_service and workflow_engine:
+            await _reload_changed_definitions(force=True)
+        return {"reloaded": True}
+
+    elif command == "gc_caches":
+        if workflow_engine:
+            from rufus.builder import WorkflowBuilder
+            WorkflowBuilder._import_cache.clear()
+            workflow_engine.workflow_builder._workflow_configs.clear()
+        return {"caches_cleared": True}
+
+    elif command == "update_code":
+        package = payload.get("package", "rufus-sdk")
+        version = payload.get("version", "")
+        pkg_spec = f"{package}=={version}" if version else package
+        import subprocess, sys
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", pkg_spec, "--quiet"],
+            capture_output=True, text=True
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"pip install failed: {proc.stderr}")
+        # Schedule graceful restart after response is sent
+        asyncio.get_event_loop().call_later(2.0, _graceful_restart)
+        return {"installed": pkg_spec, "restarting": True}
+
+    elif command == "restart":
+        asyncio.get_event_loop().call_later(2.0, _graceful_restart)
+        return {"restarting": True}
+
+    raise ValueError(f"Unknown command: {command}")
+
+
+def _graceful_restart():
+    """Send SIGTERM to the current process so the supervisor can restart it."""
+    import signal, os
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+async def _reload_changed_definitions(force: bool = False):
+    """Load active definitions from DB; reload builder only for changed versions."""
+    try:
+        active = await workflow_definition_service.get_all_active()
+    except Exception as e:
+        logger.warning(f"Failed to fetch active definitions: {e}")
+        return
+
+    for defn in active:
+        wf_type = defn["workflow_type"]
+        version = defn["version"]
+        if force or _last_seen_versions.get(wf_type, -1) < version:
+            try:
+                workflow_engine.workflow_builder.reload_workflow_type(
+                    wf_type, defn["yaml_content"]
+                )
+                _last_seen_versions[wf_type] = version
+                logger.info(f"Hot-reloaded '{wf_type}' to v{version}")
+            except Exception as e:
+                logger.error(f"Hot-reload failed for '{wf_type}': {e}")
+
+
 @app.delete("/api/v1/workers/commands/{command_id}", tags=["Monitoring"])
 async def cancel_worker_command(
     command_id: str,
@@ -4308,6 +4493,198 @@ async def cancel_worker_command(
             detail="Command cannot be cancelled (not in pending state or not found)"
         )
     return {"command_id": command_id, "status": "cancelled"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workflow Definitions API  (DB-backed YAML, hot-reload)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _require_definition_service():
+    if workflow_definition_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="WorkflowDefinitionService not initialized (requires PostgreSQL)"
+        )
+    return workflow_definition_service
+
+
+@app.get("/api/v1/admin/workflow-definitions", tags=["Workflows"])
+async def list_workflow_definitions(
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """List all workflow types that have a DB-backed definition (summary, no YAML)."""
+    svc = _require_definition_service()
+    return await svc.list_definitions()
+
+
+@app.post("/api/v1/admin/workflow-definitions", tags=["Workflows"])
+async def upload_workflow_definition(
+    body: WorkflowDefinitionUploadRequest,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """
+    Upload a new workflow YAML definition.  Creates a new version row and
+    triggers an immediate hot-reload on this server instance.
+
+    Returns the stored definition plus the resolved (env-expanded) config.
+    """
+    svc = _require_definition_service()
+    row = await svc.create_definition(
+        workflow_type=body.workflow_type,
+        yaml_content=body.yaml_content,
+        description=body.description,
+        uploaded_by=user.user_id if user else None,
+    )
+
+    resolved = None
+    if workflow_engine:
+        try:
+            resolved = workflow_engine.workflow_builder.reload_workflow_type(
+                body.workflow_type, body.yaml_content
+            )
+            _last_seen_versions[body.workflow_type] = row["version"]
+        except Exception as e:
+            logger.warning(f"Hot-reload after upload failed for '{body.workflow_type}': {e}")
+
+    return {**row, "resolved_config": resolved}
+
+
+@app.get("/api/v1/admin/workflow-definitions/{workflow_type}", tags=["Workflows"])
+async def get_workflow_definition(
+    workflow_type: str,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """Return the current active YAML content for a workflow type."""
+    svc = _require_definition_service()
+    defn = await svc.get_definition(workflow_type)
+    if not defn:
+        raise HTTPException(status_code=404, detail=f"No active definition for '{workflow_type}'")
+    return defn
+
+
+@app.patch("/api/v1/admin/workflow-definitions/{workflow_type}", tags=["Workflows"])
+async def patch_workflow_definition(
+    workflow_type: str,
+    body: WorkflowDefinitionPatchRequest,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """
+    Replace the active definition (creates a new version).  Triggers an
+    immediate hot-reload so new workflow starts use the updated YAML within
+    milliseconds.
+    """
+    svc = _require_definition_service()
+    row = await svc.update_definition(
+        workflow_type=workflow_type,
+        yaml_content=body.yaml_content,
+        uploaded_by=user.user_id if user else None,
+    )
+
+    resolved = None
+    if workflow_engine:
+        try:
+            resolved = workflow_engine.workflow_builder.reload_workflow_type(
+                workflow_type, body.yaml_content
+            )
+            _last_seen_versions[workflow_type] = row["version"]
+        except Exception as e:
+            logger.warning(f"Hot-reload after patch failed for '{workflow_type}': {e}")
+
+    return {**row, "resolved_config": resolved}
+
+
+@app.get("/api/v1/admin/workflow-definitions/{workflow_type}/history", tags=["Workflows"])
+async def get_workflow_definition_history(
+    workflow_type: str,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """Return all historical versions for a workflow type (newest first)."""
+    svc = _require_definition_service()
+    return await svc.get_history(workflow_type)
+
+
+@app.delete("/api/v1/admin/workflow-definitions/{workflow_type}", tags=["Workflows"])
+async def delete_workflow_definition(
+    workflow_type: str,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """
+    Soft-delete: marks all versions inactive.  The server falls back to the
+    on-disk YAML on the next builder cache miss.
+    """
+    svc = _require_definition_service()
+    deactivated = await svc.deactivate_definition(workflow_type)
+    if not deactivated:
+        raise HTTPException(status_code=404, detail=f"No active definition for '{workflow_type}'")
+    # Evict builder cache so fallback to disk YAML takes effect immediately
+    if workflow_engine:
+        workflow_engine.workflow_builder._workflow_configs.pop(workflow_type, None)
+        workflow_engine.workflow_registry.get(workflow_type, {}).pop("_yaml_content", None)
+    return {"workflow_type": workflow_type, "status": "deactivated"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Commands API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _require_server_command_service():
+    if server_command_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ServerCommandService not initialized (requires PostgreSQL)"
+        )
+    return server_command_service
+
+
+@app.post("/api/v1/admin/server/commands", tags=["Monitoring"])
+async def send_server_command(
+    body: ServerCommandRequest,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """
+    Queue a command for the control-plane server process.
+
+    Commands are picked up within 30 s by the background poller.
+
+    - **reload_workflows** — force-reload all active DB definitions immediately
+    - **gc_caches** — clear WorkflowBuilder import + config caches
+    - **update_code** — `pip install <package==version>` then graceful restart
+    - **restart** — graceful SIGTERM (supervisor/k8s brings it back)
+    """
+    svc = _require_server_command_service()
+    command_id = await svc.send_command(
+        command=body.command,
+        payload=body.payload,
+        created_by=user.user_id if user else None,
+    )
+    return {"id": command_id, "command": body.command, "status": "pending"}
+
+
+@app.get("/api/v1/admin/server/commands", tags=["Monitoring"])
+async def list_server_commands(
+    limit: int = 50,
+    offset: int = 0,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """List recent server commands (newest first)."""
+    svc = _require_server_command_service()
+    return await svc.list_commands(limit=limit, offset=offset)
+
+
+@app.patch("/api/v1/admin/server/commands/{command_id}/cancel", tags=["Monitoring"])
+async def cancel_server_command(
+    command_id: str,
+    user: Optional[UserContext] = Depends(require_admin),
+):
+    """Cancel a pending server command."""
+    svc = _require_server_command_service()
+    cancelled = await svc.cancel_command(command_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Command cannot be cancelled (not pending or not found)"
+        )
+    return {"id": command_id, "status": "cancelled"}
 
 
 # To run: uvicorn rufus_server.main:app --reload

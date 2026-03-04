@@ -400,6 +400,58 @@ class WorkflowBuilder:
                 scheduled[wf_type] = config
         return scheduled
 
+    def reload_workflow_type(self, workflow_type: str, yaml_content: str) -> Dict[str, Any]:
+        """
+        Hot-reload a workflow definition from a YAML string (no file I/O).
+
+        Called by the server background poller when a newer version is found in
+        the workflow_definitions table.  Also called immediately after a
+        successful POST /admin/workflow-definitions upload.
+
+        Steps:
+        1. Parse the YAML string — raises ValueError on invalid YAML.
+        2. Evict any cached config and affected import-cache entries.
+        3. Inject _yaml_content into the registry entry so subsequent calls to
+           get_workflow_config() read from the string rather than disk.
+        4. Return the freshly-processed config (same as get_workflow_config()).
+        """
+        try:
+            parsed = yaml.safe_load(yaml_content)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML for {workflow_type}: {e}")
+        if not parsed:
+            raise ValueError(f"Empty YAML content for {workflow_type}")
+
+        # Collect step function paths so we can evict their import-cache entries
+        def _collect_func_paths(steps: list) -> list:
+            paths = []
+            for step in steps:
+                for key in ("function", "compensate_function", "task_function"):
+                    if step.get(key):
+                        paths.append(step[key])
+                for task in step.get("tasks", []):
+                    if isinstance(task, dict) and task.get("function"):
+                        paths.append(task["function"])
+                paths.extend(_collect_func_paths(step.get("loop_body", [])))
+            return paths
+
+        func_paths = _collect_func_paths(parsed.get("steps", []))
+
+        # Evict caches
+        self._workflow_configs.pop(workflow_type, None)
+        for path in func_paths:
+            WorkflowBuilder._import_cache.pop(path, None)
+
+        # Ensure type exists in registry; create stub entry if brand-new
+        if workflow_type not in self.workflow_registry:
+            self.workflow_registry[workflow_type] = {"type": workflow_type}
+
+        # Store YAML string in registry entry — get_workflow_config() will use it
+        self.workflow_registry[workflow_type]["_yaml_content"] = yaml_content
+
+        logger.info(f"Hot-reloaded workflow type '{workflow_type}' from DB definition")
+        return self.get_workflow_config(workflow_type)
+
     def get_workflow_config(self, workflow_type: str) -> Dict[str, Any]:
         config_info = self.workflow_registry.get(workflow_type)
         if not config_info:
@@ -410,8 +462,20 @@ class WorkflowBuilder:
         if workflow_type in self._workflow_configs:
             return self._workflow_configs[workflow_type]
 
+        # ── DB-backed definition (hot-reload path) ──────────────────────────
+        if '_yaml_content' in config_info:
+            try:
+                workflow_config = yaml.safe_load(config_info['_yaml_content'])
+                if not workflow_config:
+                    raise ValueError(f"Empty workflow config for {workflow_type}")
+                merged_config = {**config_info, **workflow_config}
+                # Remove internal marker from the merged config
+                merged_config.pop('_yaml_content', None)
+            except yaml.YAMLError as e:
+                raise ValueError(f"Invalid stored YAML for {workflow_type}: {e}")
+
         # Load the actual workflow YAML file if config_file is specified
-        if 'config_file' in config_info:
+        elif 'config_file' in config_info:
             config_file_path = os.path.join(self.config_dir, config_info['config_file'])
             try:
                 with open(config_file_path, 'r') as f:

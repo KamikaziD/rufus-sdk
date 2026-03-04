@@ -1537,12 +1537,12 @@ steps:
 
 | Layer | Tool | Target | Tables |
 |-------|------|--------|--------|
-| PostgreSQL — all 33 cloud tables | **Alembic** (`alembic upgrade head`) | PostgreSQL only | See inventory below |
+| PostgreSQL — all 35 cloud tables | **Alembic** (`alembic upgrade head`) | PostgreSQL only | See inventory below |
 | PostgreSQL — extensions bootstrap | `docker/init-db.sql` (init script) | PostgreSQL only | N/A — extensions only |
 | Edge SQLite — core workflow (7) | `sqlite.py` `SQLITE_SCHEMA` | SQLite only | workflow_executions, workflow_audit_log, workflow_execution_logs, workflow_metrics, workflow_heartbeats, tasks, compensation_log |
 | Edge SQLite — edge-specific (3) | `sqlite.py` `SQLITE_SCHEMA` (appended) | SQLite only | saf_pending_transactions, device_config_cache, edge_sync_state |
 
-`database.py` is the **single source of truth** for all 33 PostgreSQL tables.
+`database.py` is the **single source of truth** for all 35 PostgreSQL tables.
 `sqlite.py:SQLITE_SCHEMA` is the single source of truth for the 10 edge SQLite tables.
 `edge_database.py` documents the edge schema (constants + SQL strings, no Alembic).
 
@@ -1570,11 +1570,13 @@ steps:
 | `edge_devices` | Device registry |
 | `device_commands` | Per-device command queue; expanded with batch/broadcast/retry columns in migration a1b2c3d4e5f6 |
 
-#### Workers (2) — PostgreSQL only
+#### Workers (4) — PostgreSQL only
 | Table | Notes |
 |-------|-------|
 | `worker_nodes` | Celery fleet registry; added in migration `d08b401e4c86`; 3 new columns (`sdk_version`, `pending_command_count`, `last_command_at`) added in migration `b2c3d4e5f6a7` (v0.7.3) |
 | `worker_commands` | DB-delivery channel for control-plane → worker commands; 9 command types; poll-based (30 s); added in migration `b2c3d4e5f6a7` (v0.7.3) |
+| `workflow_definitions` | Versioned YAML for hot-reload via `WorkflowBuilder.reload_workflow_type()`; DB row overrides disk YAML; added in migration `c1d2e3f4a5b6` (v0.7.4) |
+| `server_commands` | Control-plane command queue (reload_workflows, gc_caches, update_code, restart); polled every 30 s by `_definition_poller_loop`; added in migration `c1d2e3f4a5b6` (v0.7.4) |
 
 #### Command Infrastructure (6) — PostgreSQL only
 | Table | Notes |
@@ -1679,7 +1681,200 @@ docker-compose run --rm rufus-server alembic upgrade head
 
 ---
 
-## §17 — Edge Device Package Footprint
+## §17 — Live Workflow Updates (v0.7.4)
+
+Hot-deploy workflow YAML definitions to running servers and edge devices without restarting containers.
+
+### Architecture Overview
+
+```
+Dashboard Admin "Server" tab
+        │  POST /api/v1/admin/workflow-definitions
+        ▼
+workflow_definitions table (PostgreSQL)
+        │
+        │  _definition_poller_loop() — 60 s tick
+        ▼
+WorkflowBuilder.reload_workflow_type(type, yaml_content)
+  ├── evicts _workflow_config_cache[type]
+  ├── evicts _import_cache entries for this type
+  └── inserts registry[type]["_yaml_content"] = yaml_content
+
+  On next create_workflow(type):
+    ├── get_workflow_config() detects _yaml_content key
+    └── parses YAML from DB row (not disk file)
+```
+
+### `workflow_definitions` Table
+
+```sql
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_type   VARCHAR(255) NOT NULL,
+    version         INTEGER NOT NULL DEFAULT 1,
+    yaml_content    TEXT NOT NULL,
+    description     TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_by      VARCHAR(255),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(workflow_type, version)
+);
+CREATE INDEX IF NOT EXISTS ix_workflow_definitions_type
+    ON workflow_definitions(workflow_type);
+CREATE INDEX IF NOT EXISTS ix_workflow_definitions_active
+    ON workflow_definitions(workflow_type, is_active);
+```
+
+**Loading priority:** DB row (if `is_active=true`) → disk YAML file fallback. Startup pre-loads all active DB definitions before serving the first request.
+
+### `WorkflowBuilder.reload_workflow_type()` (builder.py)
+
+```python
+def reload_workflow_type(self, workflow_type: str, yaml_content: str) -> dict:
+    """Hot-reload a workflow definition from YAML string (called by server poller)."""
+    # 1. Evict cached config + import cache for this type
+    self._workflow_config_cache.pop(workflow_type, None)
+    for key in list(self._import_cache.keys()):
+        if key.startswith(workflow_type):
+            del self._import_cache[key]
+    # 2. Inject the raw YAML into the registry
+    import yaml
+    config = yaml.safe_load(yaml_content)
+    config["_yaml_content"] = yaml_content   # marker: tells get_workflow_config to use this
+    self._workflow_registry[workflow_type] = config
+    return config
+```
+
+In `get_workflow_config()`, the `_yaml_content` branch is checked first:
+```python
+if "_yaml_content" in registry_entry:
+    return yaml.safe_load(registry_entry["_yaml_content"])
+```
+
+### `_definition_poller_loop()` (main.py)
+
+Background asyncio task started at server startup, cancelled on shutdown:
+
+```python
+async def _definition_poller_loop(app: FastAPI) -> None:
+    tick = 0
+    while True:
+        await asyncio.sleep(30)
+        tick += 1
+        # Every tick (30 s): process pending server commands
+        await _process_server_commands(app)
+        # Every 2 ticks (60 s): reload active workflow definitions
+        if tick % 2 == 0:
+            await _reload_workflow_definitions(app)
+```
+
+### `server_commands` Table
+
+```sql
+CREATE TABLE IF NOT EXISTS server_commands (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    command      VARCHAR(100) NOT NULL,
+    payload      JSONB,
+    status       VARCHAR(50) NOT NULL DEFAULT 'pending',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    executed_at  TIMESTAMPTZ,
+    result       JSONB
+);
+CREATE INDEX IF NOT EXISTS ix_server_commands_status
+    ON server_commands(status, created_at);
+```
+
+#### Server Command Types
+
+| Command | Mechanism |
+|---------|-----------|
+| `reload_workflows` | Triggers immediate `_reload_workflow_definitions()` call (skips 60 s wait) |
+| `gc_caches` | Calls `builder.clear_all_caches()` — evicts `_workflow_config_cache` + `_import_cache` |
+| `update_code` | Runs `pip install --upgrade rufus-sdk` in a subprocess, then triggers reload |
+| `restart` | Calls `os.kill(os.getpid(), signal.SIGUSR1)` — graceful uvicorn reload |
+
+### API Endpoints
+
+#### Workflow Definitions (`/api/v1/admin/workflow-definitions`)
+
+```bash
+# List all definitions
+curl http://localhost:8000/api/v1/admin/workflow-definitions
+
+# Get single definition (latest active)
+curl http://localhost:8000/api/v1/admin/workflow-definitions/PaymentAuthorization
+
+# Upload / replace definition
+curl -X POST http://localhost:8000/api/v1/admin/workflow-definitions \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_type":"PaymentAuthorization","yaml_content":"workflow_type: PaymentAuthorization\n..."}'
+
+# Update (patch yaml or description)
+curl -X PATCH http://localhost:8000/api/v1/admin/workflow-definitions/PaymentAuthorization \
+  -H "Content-Type: application/json" \
+  -d '{"yaml_content":"..."}'
+
+# Push definition to all edge devices via broadcast
+curl -X POST \
+  "http://localhost:8000/api/v1/admin/workflow-definitions/PaymentAuthorization/push-to-devices"
+
+# Delete definition (soft-delete: sets is_active=false)
+curl -X DELETE \
+  http://localhost:8000/api/v1/admin/workflow-definitions/PaymentAuthorization
+```
+
+#### Server Commands (`/api/v1/admin/server/commands`)
+
+```bash
+# Dispatch a server command
+curl -X POST http://localhost:8000/api/v1/admin/server/commands \
+  -H "Content-Type: application/json" \
+  -d '{"command":"reload_workflows","payload":{}}'
+
+# List recent commands
+curl "http://localhost:8000/api/v1/admin/server/commands?limit=10"
+
+# Cancel a pending command
+curl -X DELETE http://localhost:8000/api/v1/admin/server/commands/<id>
+```
+
+### Dashboard DAG Editor
+
+The **Admin → Server** tab provides a full workflow definition management UI:
+
+- **Definitions panel**: list table with type, version, active status; Upload modal (YAML paste); Edit modal with:
+  - Live ReactFlow DAG preview (dagre TB layout; custom colours per step type; DECISION dashed edges with condition labels)
+  - Raw YAML editor textarea
+  - DECISION inline editor: structured `{lhs, op, rhs}` form with regex parser + raw textarea fallback
+  - Push to Devices confirmation dialog (broadcasts `update_workflow` command to all online devices)
+- **Server Commands panel**: list table of recent commands + status; Send Command modal (all 4 types); Cancel button
+
+### Edge Agent Handler (config_manager.py)
+
+When the control plane broadcasts `update_workflow`, the edge agent processes it via:
+
+```python
+async def handle_update_workflow_command(
+    self,
+    payload: dict,          # {"workflow_type": str, "yaml_content": str}
+    workflow_builder,       # WorkflowBuilder instance
+) -> None:
+    # 1. Persist to local SQLite (survives restarts)
+    await self._persist_workflow_definition(
+        payload["workflow_type"], payload["yaml_content"]
+    )
+    # 2. Hot-reload into builder
+    workflow_builder.reload_workflow_type(
+        payload["workflow_type"], payload["yaml_content"]
+    )
+```
+
+On startup, `load_local_workflow_definitions(workflow_builder)` reads all persisted definitions from the `tasks` table (under `step_name='EDGE_CONFIG'`) and pre-loads them into the builder before the agent accepts traffic.
+
+---
+
+## §18 — Edge Device Package Footprint
 
 Full reference: [`docs/reference/configuration/edge-footprint.md`](../docs/reference/configuration/edge-footprint.md)
 
@@ -1757,7 +1952,7 @@ Modules on disk but never imported on edge: `celery_app`, `tasks`, `worker_regis
 
 ---
 
-## §17 — Package Split (v0.6.0)
+## §19 — Package Split (v0.6.0)
 
 Three separate wheels replace the monolithic `rufus-sdk`:
 

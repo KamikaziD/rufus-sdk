@@ -7,7 +7,7 @@ Used for:
 - Type-safe schema definition
 - Database-agnostic type mapping (PostgreSQL + SQLite)
 
-Table inventory (34 cloud tables + alembic_version managed by Alembic):
+Table inventory (36 cloud tables + alembic_version managed by Alembic):
 
   Core workflow (7):
     workflow_executions, workflow_audit_log, workflow_execution_logs,
@@ -18,6 +18,9 @@ Table inventory (34 cloud tables + alembic_version managed by Alembic):
 
   Edge device management - cloud side (3):
     edge_devices, worker_nodes, worker_commands
+
+  Live workflow updates (2):
+    workflow_definitions, server_commands
 
   Command infrastructure (8):
     command_broadcasts, command_batches, command_templates, device_commands,
@@ -312,6 +315,43 @@ worker_commands = Table(
 
 # ============================================================================
 # Command Infrastructure
+# ============================================================================
+# Live Workflow Updates
+# ============================================================================
+
+# DB-backed workflow YAML definitions with version history and hot-reload support
+workflow_definitions = Table(
+    'workflow_definitions',
+    metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('workflow_type', String(200), nullable=False),
+    Column('version', Integer, nullable=False, server_default='1'),
+    Column('yaml_content', Text, nullable=False),
+    Column('is_active', Boolean, nullable=False, server_default='true'),
+    Column('description', Text),
+    Column('uploaded_by', String(200)),
+    Column('created_at', DateTime, server_default=func.now()),
+
+    UniqueConstraint('workflow_type', 'version', name='uq_wf_def_type_ver'),
+    Index('ix_wf_def_type_active', 'workflow_type', 'is_active'),
+)
+
+# Control plane server commands (mirrors worker_commands for the server process itself)
+server_commands = Table(
+    'server_commands',
+    metadata,
+    Column('id', String(36), primary_key=True),   # UUID
+    Column('command', String(100), nullable=False),
+    Column('payload', Text, nullable=False, server_default='{}'),  # JSONB in PG
+    Column('status', String(50), nullable=False, server_default='pending'),
+    Column('result', Text),                        # JSONB in PG
+    Column('created_by', String(200)),
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('updated_at', DateTime, server_default=func.now()),
+
+    Index('ix_srv_cmd_status', 'status', 'created_at'),
+)
+
 # ============================================================================
 
 # Fleet-wide broadcast commands (no FK — referenced by device_commands.broadcast_id)
@@ -888,6 +928,8 @@ def get_cloud_only_tables() -> list:
         scheduled_workflows,
         worker_nodes,
         worker_commands,
+        workflow_definitions,
+        server_commands,
         command_broadcasts,
         command_batches,
         command_templates,

@@ -9,7 +9,7 @@
 set -e
 
 # Configuration
-VERSION="${1:-0.6.3}"
+VERSION="${1:-0.7.4}"
 REGISTRY="${2:-ruhfuskdev}"
 PUSH="${3:-false}"
 PLATFORMS="linux/amd64,linux/arm64"

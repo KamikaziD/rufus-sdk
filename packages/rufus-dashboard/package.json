@@ -1,6 +1,6 @@
 {
   "name": "rufus-dashboard",
-  "version": "0.7.0",
+  "version": "0.7.4",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
@@ -35,6 +35,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.53.0",
+    "@dagrejs/dagre": "^1.0.4",
+    "js-yaml": "^4.1.0",
     "reactflow": "^11.11.4",
     "recharts": "^2.12.7",
     "tailwind-merge": "^2.5.3",
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",

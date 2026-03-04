@@ -785,3 +785,139 @@ class ConfigManager:
             )
         except Exception as e:
             logger.warning(f"Failed to report update status: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Device Command: update_workflow
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def handle_update_workflow_command(
+        self,
+        payload: Dict[str, Any],
+        workflow_builder=None,
+    ) -> bool:
+        """
+        Handle an `update_workflow` device command delivered via the
+        device_commands polling mechanism.
+
+        The payload must contain:
+            workflow_type  (str)  — e.g. "PaymentAuthorization"
+            yaml_content   (str)  — full YAML string
+            version        (int)  — for logging; optional
+
+        Steps:
+        1. Persist the YAML to local SQLite under a dedicated config-cache key.
+        2. If a WorkflowBuilder instance is passed, call
+           reload_workflow_type() to invalidate its caches immediately.
+        3. New workflow starts use the updated YAML; running workflows are
+           unaffected (their definition_snapshot is already frozen).
+
+        Returns True on success, False on error.
+        """
+        workflow_type = payload.get("workflow_type")
+        yaml_content = payload.get("yaml_content")
+        version = payload.get("version", "?")
+
+        if not workflow_type or not yaml_content:
+            logger.error(
+                "update_workflow command missing workflow_type or yaml_content"
+            )
+            return False
+
+        # Persist to local SQLite so the YAML survives a device restart
+        if self.persistence:
+            try:
+                cache_key = f"WORKFLOW_DEF_{workflow_type}"
+                cache_data = self.persistence._serialize_json({
+                    "workflow_type": workflow_type,
+                    "yaml_content": yaml_content,
+                    "version": version,
+                    "updated_at": datetime.utcnow().isoformat(),
+                })
+                # Upsert: delete old entry, insert new
+                await self.persistence.conn.execute(
+                    """
+                    DELETE FROM tasks
+                    WHERE step_name = ? AND execution_id = 'EDGE_CONFIG'
+                    """,
+                    (cache_key,)
+                )
+                await self.persistence.conn.execute(
+                    """
+                    INSERT INTO tasks (
+                        task_id, execution_id, step_name, step_index,
+                        status, task_data
+                    ) VALUES (?, 'EDGE_CONFIG', ?, 0, 'COMPLETED', ?)
+                    """,
+                    (
+                        self.persistence._generate_uuid(),
+                        cache_key,
+                        cache_data,
+                    )
+                )
+                await self.persistence.conn.commit()
+                logger.info(
+                    f"Persisted workflow definition '{workflow_type}' "
+                    f"v{version} to local SQLite"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to persist workflow definition locally: {e}"
+                )
+
+        # Hot-reload the in-process WorkflowBuilder cache
+        if workflow_builder is not None:
+            try:
+                workflow_builder.reload_workflow_type(workflow_type, yaml_content)
+                logger.info(
+                    f"Hot-reloaded edge workflow '{workflow_type}' v{version}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Edge hot-reload failed for '{workflow_type}': {e}"
+                )
+                return False
+
+        return True
+
+    async def load_local_workflow_definitions(self, workflow_builder=None) -> int:
+        """
+        On device startup, load any previously persisted workflow definitions
+        from SQLite and inject them into the WorkflowBuilder.
+
+        Returns the number of definitions loaded.
+        """
+        if not self.persistence or not workflow_builder:
+            return 0
+
+        loaded = 0
+        try:
+            async with self.persistence.conn.execute(
+                """
+                SELECT step_name, task_data FROM tasks
+                WHERE execution_id = 'EDGE_CONFIG'
+                  AND step_name LIKE 'WORKFLOW_DEF_%'
+                  AND status = 'COMPLETED'
+                """
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            for step_name, task_data in rows:
+                try:
+                    cached = self.persistence._deserialize_json(task_data)
+                    if cached and "yaml_content" in cached:
+                        workflow_builder.reload_workflow_type(
+                            cached["workflow_type"],
+                            cached["yaml_content"],
+                        )
+                        loaded += 1
+                        logger.info(
+                            f"Loaded local workflow definition "
+                            f"'{cached['workflow_type']}' v{cached.get('version', '?')}"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to load cached definition {step_name}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Failed to load local workflow definitions: {e}")
+
+        return loaded

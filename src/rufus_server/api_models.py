@@ -208,3 +208,66 @@ class WorkerDetail(BaseModel):
     sdk_version: Optional[str] = None
     last_heartbeat: Optional[str] = None
     pending_command_count: int = 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workflow Definition Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WorkflowDefinitionUploadRequest(BaseModel):
+    """Upload (create) or replace a workflow YAML definition in the DB."""
+    workflow_type: str = Field(..., description="Workflow type identifier")
+    yaml_content: str = Field(..., description="Full YAML workflow definition")
+    description: Optional[str] = Field(None, description="Human-readable description")
+
+
+class WorkflowDefinitionPatchRequest(BaseModel):
+    """Update an existing workflow definition (creates a new version)."""
+    yaml_content: str = Field(..., description="Updated full YAML definition")
+
+
+class WorkflowDefinitionResponse(BaseModel):
+    """Workflow definition metadata (no yaml_content for list views)."""
+    id: int
+    workflow_type: str
+    version: int
+    is_active: bool
+    description: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class WorkflowDefinitionDetailResponse(WorkflowDefinitionResponse):
+    """Full workflow definition including yaml_content."""
+    yaml_content: str
+    resolved_config: Optional[Dict[str, Any]] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Command Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+ServerCommandType = Literal[
+    'reload_workflows', 'gc_caches', 'update_code', 'restart'
+]
+
+
+class ServerCommandRequest(BaseModel):
+    """Request to queue a control-plane server command."""
+    command: ServerCommandType
+    payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Command-specific payload. update_code expects {package, version}.",
+    )
+
+
+class ServerCommandResponse(BaseModel):
+    """Server command status."""
+    id: str
+    command: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    status: str
+    result: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

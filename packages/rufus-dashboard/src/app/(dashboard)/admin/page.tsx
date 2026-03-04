@@ -13,19 +13,31 @@ import {
   deleteWebhook,
   getWebhookDeliveries,
   testWebhook,
+  listWorkflowDefinitions,
+  getWorkflowDefinition,
+  uploadWorkflowDefinition,
+  patchWorkflowDefinition,
+  deleteWorkflowDefinition,
+  listServerCommands,
+  sendServerCommand,
+  cancelServerCommand,
+  pushWorkflowToDevices,
   type WorkerSummary,
   type RateLimitRule,
   type Webhook,
   type WebhookDelivery,
+  type WorkflowDefinition,
+  type ServerCommand,
 } from "@/lib/api";
 import { hasPermission } from "@/lib/roles";
 import { WorkerCommandModal } from "@/components/workers/WorkerCommandModal";
+import { WorkflowDAG } from "@/components/workflows/WorkflowDAG";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Settings, RefreshCw, Plus, ChevronDown, ChevronUp, Cpu, MapPin, Clock, Wifi, WifiOff, Radio } from "lucide-react";
+import { Settings, RefreshCw, Plus, ChevronDown, ChevronUp, Cpu, MapPin, Clock, Wifi, WifiOff, Radio, Upload, Send, Trash2, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type Tab = "workers" | "rate-limits" | "webhooks";
+type Tab = "workers" | "rate-limits" | "webhooks" | "server";
 
 const INPUT_CLS = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm";
 
@@ -52,6 +64,7 @@ export default function AdminPage() {
     { key: "workers",     label: "Workers" },
     { key: "rate-limits", label: "Rate Limits" },
     { key: "webhooks",    label: "Webhooks" },
+    { key: "server",      label: "Server" },
   ];
 
   function handleRefresh() {
@@ -92,6 +105,7 @@ export default function AdminPage() {
       )}
       {activeTab === "rate-limits" && <RateLimitsTab token={token} />}
       {activeTab === "webhooks" && <WebhooksTab token={token} />}
+      {activeTab === "server" && <ServerTab token={token} />}
     </div>
   );
 }
@@ -731,6 +745,475 @@ function WebhooksTab({ token }: { token: string | undefined }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Server Tab ────────────────────────────────────────────────────────────────
+
+const SERVER_CMDS = ["reload_workflows", "gc_caches", "update_code", "restart"] as const;
+type ServerCmdType = typeof SERVER_CMDS[number];
+const SERVER_CMD_LABELS: Record<ServerCmdType, string> = {
+  reload_workflows: "Reload Workflows",
+  gc_caches:        "GC Caches",
+  update_code:      "Update Code",
+  restart:          "Restart Server",
+};
+
+function ServerTab({ token }: { token?: string }) {
+  const qc = useQueryClient();
+
+  // ── Workflow Definitions ─────────────────────────────────────────────────
+  const { data: defs = [], isLoading: defsLoading, refetch: refetchDefs } = useQuery<WorkflowDefinition[]>({
+    queryKey: ["workflow-definitions"],
+    queryFn: () => listWorkflowDefinitions(token!),
+    enabled: !!token,
+  });
+
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadWfType, setUploadWfType] = useState("");
+  const [uploadYaml, setUploadYaml] = useState("");
+  const [uploadDesc, setUploadDesc] = useState("");
+  const [editingDef, setEditingDef] = useState<WorkflowDefinition | null>(null);
+  const [editYaml, setEditYaml] = useState("");
+  const [dagPreviewDef, setDagPreviewDef] = useState<WorkflowDefinition | null>(null);
+  const [pushTarget, setPushTarget] = useState<WorkflowDefinition | null>(null);
+
+  const uploadMut = useMutation({
+    mutationFn: () =>
+      uploadWorkflowDefinition(token!, {
+        workflow_type: uploadWfType,
+        yaml_content: uploadYaml,
+        description: uploadDesc || undefined,
+      }),
+    onSuccess: () => {
+      setUploadOpen(false);
+      setUploadWfType(""); setUploadYaml(""); setUploadDesc("");
+      refetchDefs();
+    },
+  });
+
+  const patchMut = useMutation({
+    mutationFn: (d: WorkflowDefinition) =>
+      patchWorkflowDefinition(token!, d.workflow_type, editYaml),
+    onSuccess: () => {
+      setEditingDef(null);
+      refetchDefs();
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (wfType: string) => deleteWorkflowDefinition(token!, wfType),
+    onSuccess: () => refetchDefs(),
+  });
+
+  const pushMut = useMutation({
+    mutationFn: (d: WorkflowDefinition) =>
+      pushWorkflowToDevices(token!, {
+        workflow_type: d.workflow_type,
+        version: d.version,
+        yaml_content: d.yaml_content ?? "",
+      }),
+    onSuccess: () => setPushTarget(null),
+  });
+
+  function startEdit(def: WorkflowDefinition) {
+    getWorkflowDefinition(token!, def.workflow_type)
+      .then((full) => {
+        setEditingDef(full);
+        setEditYaml(full.yaml_content ?? "");
+      })
+      .catch(() => {
+        setEditingDef(def);
+        setEditYaml(def.yaml_content ?? "");
+      });
+  }
+
+  function handleDagSave(newYaml: string) {
+    if (!editingDef) return;
+    setEditYaml(newYaml);
+  }
+
+  // ── Server Commands ──────────────────────────────────────────────────────
+  const { data: srvCmds = [], refetch: refetchCmds } = useQuery<ServerCommand[]>({
+    queryKey: ["server-commands"],
+    queryFn: () => listServerCommands(token!),
+    enabled: !!token,
+    refetchInterval: 15_000,
+  });
+
+  const [sendCmdOpen, setSendCmdOpen] = useState(false);
+  const [selectedCmd, setSelectedCmd] = useState<ServerCmdType>("reload_workflows");
+  const [cmdPackage, setCmdPackage] = useState("");
+  const [cmdVersion, setCmdVersion] = useState("");
+
+  const sendCmdMut = useMutation({
+    mutationFn: () =>
+      sendServerCommand(token!, {
+        command: selectedCmd,
+        payload:
+          selectedCmd === "update_code"
+            ? { package: cmdPackage, version: cmdVersion }
+            : {},
+      }),
+    onSuccess: () => {
+      setSendCmdOpen(false);
+      refetchCmds();
+    },
+  });
+
+  const cancelCmdMut = useMutation({
+    mutationFn: (id: string) => cancelServerCommand(token!, id),
+    onSuccess: () => refetchCmds(),
+  });
+
+  const statusColor = (s: string) =>
+    s === "completed" ? "success" : s === "failed" ? "destructive" : s === "running" ? "warning" : "secondary";
+
+  return (
+    <div className="space-y-6">
+      {/* ── Workflow Definitions ─────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Workflow Definitions</CardTitle>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => refetchDefs()}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
+              <Upload className="h-3.5 w-3.5 mr-1" /> Upload
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {defsLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : defs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No DB-backed definitions yet. Upload a YAML to override disk files.
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left py-1.5 font-medium">Type</th>
+                  <th className="text-left py-1.5 font-medium">Version</th>
+                  <th className="text-left py-1.5 font-medium">Status</th>
+                  <th className="text-left py-1.5 font-medium">Uploaded by</th>
+                  <th className="text-left py-1.5 font-medium">Date</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {defs.map((d) => (
+                  <tr key={d.workflow_type} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="py-2 font-mono text-xs">{d.workflow_type}</td>
+                    <td className="py-2 text-xs">v{d.version}</td>
+                    <td className="py-2">
+                      <Badge variant={d.is_active ? "success" : "secondary"} className="text-xs">
+                        {d.is_active ? "active" : "inactive"}
+                      </Badge>
+                    </td>
+                    <td className="py-2 text-xs text-muted-foreground">{d.uploaded_by ?? "—"}</td>
+                    <td className="py-2 text-xs text-muted-foreground">
+                      {d.created_at ? new Date(d.created_at).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="py-2">
+                      <div className="flex gap-1 justify-end">
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => startEdit(d)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={async () => {
+                            const full = await getWorkflowDefinition(token!, d.workflow_type).catch(() => d);
+                            setDagPreviewDef(full);
+                          }}
+                        >
+                          DAG
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 px-2 text-xs text-blue-600"
+                          onClick={() => setPushTarget(d)}
+                        >
+                          Push
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 px-2 text-xs text-destructive"
+                          onClick={() => deleteMut.mutate(d.workflow_type)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Upload dialog */}
+          {uploadOpen && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+              <div className="bg-background rounded-lg shadow-xl w-full max-w-2xl p-5 space-y-3">
+                <h3 className="text-base font-semibold">Upload Workflow Definition</h3>
+                <input
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  placeholder="workflow_type (e.g. PaymentAuthorization)"
+                  value={uploadWfType}
+                  onChange={(e) => setUploadWfType(e.target.value)}
+                />
+                <input
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  placeholder="Description (optional)"
+                  value={uploadDesc}
+                  onChange={(e) => setUploadDesc(e.target.value)}
+                />
+                <textarea
+                  className="w-full font-mono text-xs border rounded px-3 py-2 bg-muted/30"
+                  rows={14}
+                  placeholder="Paste YAML workflow definition here…"
+                  value={uploadYaml}
+                  onChange={(e) => setUploadYaml(e.target.value)}
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setUploadOpen(false)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    disabled={!uploadWfType || !uploadYaml || uploadMut.isPending}
+                    onClick={() => uploadMut.mutate()}
+                  >
+                    Upload
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit dialog */}
+          {editingDef && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+              <div className="bg-background rounded-lg shadow-xl w-full max-w-4xl p-5 space-y-3 max-h-[90vh] overflow-auto">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-semibold">Edit — {editingDef.workflow_type}</h3>
+                  <span className="text-xs text-muted-foreground">v{editingDef.version} → v{editingDef.version + 1}</span>
+                </div>
+
+                {/* DAG preview with editable DECISION routing */}
+                <div className="border rounded-lg overflow-hidden">
+                  <WorkflowDAG
+                    stepsConfig={(() => {
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        const yaml = require("js-yaml");
+                        const doc = yaml.load(editYaml) as Record<string, unknown>;
+                        return (doc?.steps as Array<{ name: string; type: string }>) ?? [];
+                      } catch { return []; }
+                    })()}
+                    currentStep={null}
+                    status="RUNNING"
+                    editable
+                    yamlContent={editYaml}
+                    onSaveYaml={(newYaml) => {
+                      setEditYaml(newYaml);
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Click a DECISION node to edit its route conditions inline.
+                </p>
+
+                <textarea
+                  className="w-full font-mono text-xs border rounded px-3 py-2 bg-muted/30"
+                  rows={12}
+                  value={editYaml}
+                  onChange={(e) => setEditYaml(e.target.value)}
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setEditingDef(null)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    disabled={!editYaml || patchMut.isPending}
+                    onClick={() => patchMut.mutate(editingDef)}
+                  >
+                    Save &amp; Reload Server
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DAG preview (read-only) */}
+          {dagPreviewDef && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+              <div className="bg-background rounded-lg shadow-xl w-full max-w-3xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-semibold">DAG — {dagPreviewDef.workflow_type} v{dagPreviewDef.version}</h3>
+                  <Button variant="ghost" size="sm" onClick={() => setDagPreviewDef(null)}>✕</Button>
+                </div>
+                <WorkflowDAG
+                  stepsConfig={(() => {
+                    try {
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      const yaml = require("js-yaml");
+                      const doc = yaml.load(dagPreviewDef.yaml_content ?? "") as Record<string, unknown>;
+                      return (doc?.steps as Array<{ name: string; type: string }>) ?? [];
+                    } catch { return []; }
+                  })()}
+                  currentStep={null}
+                  status="RUNNING"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Push to devices confirmation */}
+          {pushTarget && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+              <div className="bg-background rounded-lg shadow-xl w-96 p-5 space-y-3">
+                <h3 className="text-base font-semibold">Push to Devices</h3>
+                <p className="text-sm text-muted-foreground">
+                  Broadcast <span className="font-mono font-medium">{pushTarget.workflow_type}</span> v{pushTarget.version}
+                  {" "}to all registered edge devices via{" "}
+                  <span className="font-mono">update_workflow</span> command.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Devices pick it up within 30–60 s on their next heartbeat poll.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setPushTarget(null)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    disabled={pushMut.isPending}
+                    onClick={() => pushMut.mutate(pushTarget)}
+                  >
+                    <Send className="h-3.5 w-3.5 mr-1" /> Push to All Devices
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Server Commands ──────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Server Commands</CardTitle>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => refetchCmds()}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" onClick={() => setSendCmdOpen(true)}>
+              <Send className="h-3.5 w-3.5 mr-1" /> Send Command
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {srvCmds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No server commands yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left py-1.5 font-medium">Command</th>
+                  <th className="text-left py-1.5 font-medium">Status</th>
+                  <th className="text-left py-1.5 font-medium">By</th>
+                  <th className="text-left py-1.5 font-medium">When</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {srvCmds.map((c) => (
+                  <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="py-2 font-mono text-xs">{c.command}</td>
+                    <td className="py-2">
+                      <Badge variant={statusColor(c.status) as "success" | "destructive" | "warning" | "secondary"} className="text-xs">
+                        {c.status}
+                      </Badge>
+                    </td>
+                    <td className="py-2 text-xs text-muted-foreground">{c.created_by ?? "—"}</td>
+                    <td className="py-2 text-xs text-muted-foreground">
+                      {c.created_at ? new Date(c.created_at).toLocaleTimeString() : "—"}
+                    </td>
+                    <td className="py-2">
+                      {c.status === "pending" && (
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 px-2 text-xs text-destructive"
+                          onClick={() => cancelCmdMut.mutate(c.id)}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Send command dialog */}
+          {sendCmdOpen && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+              <div className="bg-background rounded-lg shadow-xl w-96 p-5 space-y-3">
+                <h3 className="text-base font-semibold">Send Server Command</h3>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Command</label>
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                    value={selectedCmd}
+                    onChange={(e) => setSelectedCmd(e.target.value as ServerCmdType)}
+                  >
+                    {SERVER_CMDS.map((c) => (
+                      <option key={c} value={c}>{SERVER_CMD_LABELS[c]}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedCmd === "update_code" && (
+                  <>
+                    <input
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                      placeholder="package (e.g. rufus-sdk)"
+                      value={cmdPackage}
+                      onChange={(e) => setCmdPackage(e.target.value)}
+                    />
+                    <input
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                      placeholder="version (e.g. 0.8.0, leave blank for latest)"
+                      value={cmdVersion}
+                      onChange={(e) => setCmdVersion(e.target.value)}
+                    />
+                  </>
+                )}
+                <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2">
+                  {selectedCmd === "reload_workflows" && "Force-reload all active workflow definitions from DB immediately."}
+                  {selectedCmd === "gc_caches" && "Clear WorkflowBuilder import + config caches. Safe — next request rebuilds them."}
+                  {selectedCmd === "update_code" && "pip install the package then SIGTERM. Supervisor/k8s restarts the server."}
+                  {selectedCmd === "restart" && "Graceful SIGTERM. Supervisor/k8s restart policy brings the server back."}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setSendCmdOpen(false)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    disabled={sendCmdMut.isPending}
+                    onClick={() => sendCmdMut.mutate()}
+                  >
+                    Send
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

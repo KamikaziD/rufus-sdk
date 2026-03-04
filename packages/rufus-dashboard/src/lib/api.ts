@@ -664,3 +664,145 @@ export function getRolloutStatus(
   const q = policyId ? `?policy_id=${encodeURIComponent(policyId)}` : "";
   return apiFetch(`/api/v1/rollout/status${q}`, token);
 }
+
+// ── Workflow Definitions (DB-backed, hot-reload) ──────────────────────────────
+
+export interface WorkflowDefinition {
+  id: number;
+  workflow_type: string;
+  version: number;
+  is_active: boolean;
+  description: string | null;
+  uploaded_by: string | null;
+  created_at: string | null;
+  yaml_content?: string;
+  resolved_config?: Record<string, unknown> | null;
+}
+
+export function listWorkflowDefinitions(
+  token: string
+): Promise<WorkflowDefinition[]> {
+  return apiFetch("/api/v1/admin/workflow-definitions", token);
+}
+
+export function getWorkflowDefinition(
+  token: string,
+  workflowType: string
+): Promise<WorkflowDefinition> {
+  return apiFetch(
+    `/api/v1/admin/workflow-definitions/${encodeURIComponent(workflowType)}`,
+    token
+  );
+}
+
+export function getWorkflowDefinitionHistory(
+  token: string,
+  workflowType: string
+): Promise<WorkflowDefinition[]> {
+  return apiFetch(
+    `/api/v1/admin/workflow-definitions/${encodeURIComponent(workflowType)}/history`,
+    token
+  );
+}
+
+export function uploadWorkflowDefinition(
+  token: string,
+  body: { workflow_type: string; yaml_content: string; description?: string }
+): Promise<WorkflowDefinition> {
+  return apiFetch("/api/v1/admin/workflow-definitions", token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchWorkflowDefinition(
+  token: string,
+  workflowType: string,
+  yaml_content: string
+): Promise<WorkflowDefinition> {
+  return apiFetch(
+    `/api/v1/admin/workflow-definitions/${encodeURIComponent(workflowType)}`,
+    token,
+    { method: "PATCH", body: JSON.stringify({ yaml_content }) }
+  );
+}
+
+export function deleteWorkflowDefinition(
+  token: string,
+  workflowType: string
+): Promise<{ workflow_type: string; status: string }> {
+  return apiFetch(
+    `/api/v1/admin/workflow-definitions/${encodeURIComponent(workflowType)}`,
+    token,
+    { method: "DELETE" }
+  );
+}
+
+// ── Server Commands ───────────────────────────────────────────────────────────
+
+export interface ServerCommand {
+  id: string;
+  command: string;
+  payload: Record<string, unknown>;
+  status: string;
+  result: Record<string, unknown> | null;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export function listServerCommands(
+  token: string,
+  limit = 50
+): Promise<ServerCommand[]> {
+  return apiFetch(`/api/v1/admin/server/commands?limit=${limit}`, token);
+}
+
+export function sendServerCommand(
+  token: string,
+  body: {
+    command: "reload_workflows" | "gc_caches" | "update_code" | "restart";
+    payload?: Record<string, unknown>;
+  }
+): Promise<{ id: string; command: string; status: string }> {
+  return apiFetch("/api/v1/admin/server/commands", token, {
+    method: "POST",
+    body: JSON.stringify({ payload: {}, ...body }),
+  });
+}
+
+export function cancelServerCommand(
+  token: string,
+  commandId: string
+): Promise<{ id: string; status: string }> {
+  return apiFetch(
+    `/api/v1/admin/server/commands/${encodeURIComponent(commandId)}/cancel`,
+    token,
+    { method: "PATCH" }
+  );
+}
+
+// ── Push workflow definition to edge devices ─────────────────────────────────
+
+export function pushWorkflowToDevices(
+  token: string,
+  body: {
+    workflow_type: string;
+    version: number;
+    yaml_content: string;
+    target_filter?: Record<string, string>;
+  }
+): Promise<{ command_id: string; status: string; broadcast: boolean }> {
+  return apiFetch("/api/v1/devices/commands/broadcast", token, {
+    method: "POST",
+    body: JSON.stringify({
+      command: "update_workflow",
+      command_data: {
+        workflow_type: body.workflow_type,
+        version: body.version,
+        yaml_content: body.yaml_content,
+      },
+      target_filter: body.target_filter ?? {},
+    }),
+  });
+}

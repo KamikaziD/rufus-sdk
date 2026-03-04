@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  transpilePackages: ['@dagrejs/dagre', '@dagrejs/graphlib'],
   experimental: {
     typedRoutes: false,
   },
