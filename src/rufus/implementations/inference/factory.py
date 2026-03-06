@@ -55,6 +55,7 @@ class HardwareIdentity:
     This is sent to the Cloud Policy Engine during check-in to determine
     which artifact/model to deploy to this device.
     """
+    id: str  # Unique device identifier
     device_id: str
     hardware_type: str  # 'NVIDIA', 'APPLE_SILICON', 'EDGE_TPU', 'CPU'
     accelerators: List[str]
@@ -242,6 +243,7 @@ class InferenceFactory:
             tflite_delegates.append("gpu")
 
         return HardwareIdentity(
+            id=device_id,
             device_id=device_id,
             hardware_type=self.get_hardware_type(),
             accelerators=[a.value for a in self.accelerators],
@@ -337,7 +339,8 @@ class InferenceFactory:
         # Prefer ONNX with GPU providers
         if AcceleratorType.CUDA in self.accelerators:
             return await self._create_onnx_provider(
-                providers=["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+                providers=["TensorrtExecutionProvider",
+                           "CUDAExecutionProvider", "CPUExecutionProvider"],
                 **kwargs
             )
         elif AcceleratorType.APPLE_NEURAL_ENGINE in self.accelerators:
@@ -385,7 +388,8 @@ class InferenceFactory:
                 use_edgetpu=False,
             )
         else:
-            raise RuntimeError("No inference runtime available. Install onnxruntime or tflite-runtime")
+            raise RuntimeError(
+                "No inference runtime available. Install onnxruntime or tflite-runtime")
 
         await provider.initialize()
         return provider
@@ -395,7 +399,8 @@ class InferenceFactory:
         from rufus.implementations.inference.onnx import ONNXInferenceProvider, is_onnx_available
 
         if not is_onnx_available():
-            raise RuntimeError("ONNX Runtime not available. Install with: pip install onnxruntime")
+            raise RuntimeError(
+                "ONNX Runtime not available. Install with: pip install onnxruntime")
 
         # Get providers
         providers = kwargs.pop("providers", None)
@@ -458,11 +463,14 @@ class InferenceFactory:
         from rufus.implementations.inference.tflite import TFLiteInferenceProvider, is_tflite_available
 
         if not is_tflite_available():
-            raise RuntimeError("TFLite not available. Install with: pip install tflite-runtime")
+            raise RuntimeError(
+                "TFLite not available. Install with: pip install tflite-runtime")
 
         # Determine delegate usage
-        use_gpu = kwargs.get("use_gpu", AcceleratorType.CUDA in self.accelerators)
-        use_edgetpu = kwargs.get("use_edgetpu", AcceleratorType.EDGE_TPU in self.accelerators)
+        use_gpu = kwargs.get(
+            "use_gpu", AcceleratorType.CUDA in self.accelerators)
+        use_edgetpu = kwargs.get(
+            "use_edgetpu", AcceleratorType.EDGE_TPU in self.accelerators)
 
         # Note: TFLite CoreML delegate is iOS-only, not available in Python on macOS
         if is_apple_silicon() and use_gpu:

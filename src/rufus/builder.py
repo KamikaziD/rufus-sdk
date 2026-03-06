@@ -555,6 +555,7 @@ class WorkflowBuilder:
 
         # Extract workflow version (if present in YAML)
         workflow_version = workflow_config.get("workflow_version")
+        automate_start = workflow_config.get("automate_start", False)
 
         # Create definition snapshot to protect running workflows from YAML changes
         # This is part of the Tier 2 workflow versioning enhancement
@@ -577,6 +578,7 @@ class WorkflowBuilder:
             priority=priority,
             idempotency_key=idempotency_key,
             metadata=metadata,
+            automate_start=automate_start,
             persistence_provider=persistence_provider,
             execution_provider=execution_provider,
             workflow_builder=workflow_builder,

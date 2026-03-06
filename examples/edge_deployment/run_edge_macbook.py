@@ -28,7 +28,8 @@ import sys
 from datetime import datetime
 
 # Add project root to path
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(project_root, 'src'))
 
 # Configure logging
@@ -48,6 +49,8 @@ DEVICE_ID = os.getenv('RUFUS_DEVICE_ID', 'macbook-m4-001')
 API_KEY = os.getenv('RUFUS_API_KEY', 'demo-api-key-macbook')
 ARTIFACTS_DIR = os.path.join(project_root, 'artifacts')
 MODELS_DIR = os.path.join(project_root, 'models')
+
+print(f"Configuration: {API_KEY}, {CLOUD_URL}, Device ID: {DEVICE_ID}")
 
 
 async def detect_hardware():
@@ -115,7 +118,8 @@ async def check_for_updates(identity):
                 data = response.json()
                 print(f"  Needs Update:    {data.get('needs_update')}")
                 print(f"  Artifact:        {data.get('artifact', 'N/A')}")
-                print(f"  Policy Version:  {data.get('policy_version', 'N/A')}")
+                print(
+                    f"  Policy Version:  {data.get('policy_version', 'N/A')}")
                 print(f"  Message:         {data.get('message', 'N/A')}")
                 return data
             else:
@@ -125,7 +129,8 @@ async def check_for_updates(identity):
 
         except httpx.ConnectError:
             print(f"  ERROR: Cannot connect to cloud at {CLOUD_URL}")
-            print(f"         Make sure Docker is running: cd docker && docker compose up -d")
+            print(
+                f"         Make sure Docker is running: cd docker && docker compose up -d")
             return None
 
 
@@ -242,7 +247,8 @@ async def run_edge_loop():
         import websockets
         while True:
             try:
-                ws_url = CLOUD_URL.replace("http://", "ws://").replace("https://", "wss://")
+                ws_url = CLOUD_URL.replace(
+                    "http://", "ws://").replace("https://", "wss://")
                 ws_url = f"{ws_url}/api/v1/devices/{DEVICE_ID}/ws"
 
                 async with websockets.connect(ws_url) as websocket:
@@ -255,12 +261,14 @@ async def run_edge_loop():
 
                         if data.get('type') == 'command':
                             command = data.get('command')
-                            logger.info(f"Received critical command via WebSocket: {command.get('command_type')}")
+                            logger.info(
+                                f"Received critical command via WebSocket: {command.get('command_type')}")
                             await command_handler.process_commands([command])
                         elif data.get('type') == 'ping':
                             await websocket.send(json.dumps({"type": "pong"}))
             except Exception as e:
-                logger.warning(f"WebSocket connection lost: {e}, reconnecting in 10s...")
+                logger.warning(
+                    f"WebSocket connection lost: {e}, reconnecting in 10s...")
                 await asyncio.sleep(10)
 
     # Start WebSocket handler in background (runs independently)
@@ -292,7 +300,8 @@ async def run_edge_loop():
                         heartbeat_data = response.json()
                         commands = heartbeat_data.get('commands', [])
                         if commands:
-                            logger.info(f"Received {len(commands)} command(s) from heartbeat")
+                            logger.info(
+                                f"Received {len(commands)} command(s) from heartbeat")
                             await command_handler.process_commands(commands)
                 except Exception as e:
                     logger.warning(f"Heartbeat failed: {e}")
@@ -314,7 +323,8 @@ async def run_edge_loop():
                     artifact = data.get('artifact', '-')
 
                     status_str = "UPDATE AVAILABLE" if needs_update else "UP-TO-DATE"
-                    print(f"  [{timestamp}] Poll #{poll_count}: {status_str} | {artifact}")
+                    print(
+                        f"  [{timestamp}] Poll #{poll_count}: {status_str} | {artifact}")
 
                     if needs_update:
                         print(f"\n  {'─'*58}")
@@ -352,11 +362,13 @@ async def run_edge_loop():
                             if result.rollback_performed:
                                 print(f"  ↶ Rollback successful - system restored")
                             else:
-                                print(f"  ⚠ Rollback failed - manual intervention may be needed")
+                                print(
+                                    f"  ⚠ Rollback failed - manual intervention may be needed")
 
                         print(f"  {'─'*58}\n")
                 else:
-                    print(f"  [{timestamp}] Poll #{poll_count}: HTTP {response.status_code}")
+                    print(
+                        f"  [{timestamp}] Poll #{poll_count}: HTTP {response.status_code}")
 
             except httpx.ConnectError:
                 print(f"  [{timestamp}] Poll #{poll_count}: Cloud unreachable")

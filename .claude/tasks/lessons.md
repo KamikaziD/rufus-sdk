@@ -12,6 +12,12 @@
 **Correction:** Remove `tags=` from all `@app.websocket()` decorators; only HTTP method decorators (get/post/put/delete/patch) support tags
 **Verification:** Server starts without `TypeError: FastAPI.websocket() got an unexpected keyword argument 'tags'`
 
+## Pattern: TestPyPI CDN Propagation Takes 1-3 Minutes Per Package, Not 15 Seconds
+**Context:** Docker build after twine upload to TestPyPI in multi-arch (amd64+arm64) build
+**Anti-Pattern:** Starting Docker build immediately after twine reports success — TestPyPI CDN nodes can still show the old version list for 1-3+ minutes; different packages propagate at different rates
+**Correction:** (1) Check each package individually via `curl -s "https://test.pypi.org/pypi/<pkg>/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sorted(d['releases'].keys())[-3:])"` before building. (2) If Docker build fails with "could not find version", prune the buildx cache (`docker buildx prune --builder rufus-builder --force`) then retry once all 3 packages are confirmed indexed.
+**Verification:** All 3 `curl` commands return 0.7.x as the last version before starting Docker build
+
 ## Pattern: Docker Layer Cache Silently Ships Wrong Version
 **Context:** Version bump — bumping `pyproject.toml` + `__init__.py` then running the Docker build script
 **Anti-Pattern:** Running `build-production-images.sh` without `--no-cache` after a version bump — Docker reuses the cached `pip install rufus-sdk==<old>` layer, producing images tagged `0.5.2` that silently run `0.5.1` inside
@@ -205,6 +211,17 @@ userinfo: {
 **Anti-Pattern:** `python -m build` (builds both sdist and wheel) — sdist extraction validates that files don't escape the temp dir; `readme = "../../README.md"` resolves to a path outside the temp dir, raising `tarfile.OutsideDestinationError`
 **Correction:** `python -m build --wheel` — skips sdist entirely; wheel build via Hatchling uses `force-include` which resolves paths correctly
 **Verification:** `dist/*.whl` created successfully; no tarfile error
+
+## Pattern: Missing Table/Column Errors → Check Alembic Revisions First
+**Context:** Any server error containing "relation does not exist" or "column does not exist" (PostgreSQL) or "no such table/column" (SQLite)
+**Anti-Pattern:** Immediately diving into Python source code, checking service files, or adding workarounds — the missing object almost always means a migration was never applied, not that the code is wrong.
+**Correction:** Before touching any code, run this diagnostic sequence:
+  1. `SELECT version_num FROM alembic_version;` — what is the DB currently stamped at?
+  2. Compare against the HEAD revision in `src/rufus/alembic/versions/` (latest file by down_revision chain)
+  3. If they differ, a migration file exists in source but was never applied to this DB
+  4. Root cause is usually: older Docker image (missing migration files in site-packages), or DB created before the migration was written
+  5. Fix: ensure the migration file is visible to Alembic (bind-mount the versions/ directory in test compose) then re-run `alembic upgrade head`
+**Verification:** `SELECT version_num FROM alembic_version` matches the HEAD revision ID; error disappears without any code changes
 
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)

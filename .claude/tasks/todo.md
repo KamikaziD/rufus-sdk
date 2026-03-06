@@ -1,97 +1,66 @@
-# Rufus Dashboard — React/Next.js UI (v0.7.0 candidate)
+# v0.7.4 Release — Version Bump, Wheels, Docker Images, Docs ✅
 
-## Phase 1 — Scaffold + Auth ✅
-- [x] Create `packages/rufus-dashboard/package.json`
-- [x] Create `packages/rufus-dashboard/tsconfig.json` + `next.config.ts` + `tailwind.config.ts`
-- [x] Create root app layout + globals.css + providers.tsx
-- [x] Create `src/lib/auth.ts` (next-auth v5 + Keycloak)
-- [x] Create `src/middleware.ts` (route protection + RBAC)
-- [x] Create `src/lib/roles.ts` (RBAC matrix + NAV_ITEMS)
-- [x] Create `src/lib/api.ts` (typed API client)
-- [x] Create `src/types/index.ts` (shared TypeScript types)
-- [x] Create login page + auth callback route
-- [x] Create Sidebar + Topbar + RoleGate + StatusBadge + LiveIndicator
-- [x] Add Keycloak service to `docker/docker-compose.yml`
-- [x] Create `docker/keycloak/rufus-realm.json`
-- [x] Update `docker/.env.example` with Keycloak + Next.js vars
-- [x] Add CORS `localhost:3000` to `src/rufus_server/main.py`
+## Release Checklist
 
-## Phase 2 — Workflow Features ✅
-- [x] Overview page (KPI cards + sparklines + recent executions)
-- [x] `/workflows` — executions table with filters + pagination
-- [x] `/workflows/new` — start workflow form
-- [x] `/workflows/[id]` — detail: Steps + DAG + State + Logs + HITL tabs
-- [x] `/workflows/[id]/debug` — debug stepper with state diff
-- [x] `WorkflowDAG`, `HitlForm`, `StepTimeline`, `StatePanel`, `DebugStepper`
-- [x] `useWorkflow`, `useWorkflowStream` hooks
+### Step 1 — Version Bump (12 locations) ✅
+- [x] `pyproject.toml` → 0.7.4
+- [x] `packages/rufus-sdk-edge/pyproject.toml` → 0.7.4
+- [x] `packages/rufus-sdk-server/pyproject.toml` → 0.7.4
+- [x] `src/rufus/__init__.py` → 0.7.4
+- [x] `src/rufus_cli/__init__.py` → 0.7.4
+- [x] `src/rufus_server/__init__.py` → 0.7.4
+- [x] `src/rufus_edge/__init__.py` → 0.7.4
+- [x] `docker/Dockerfile.rufus-server-prod` → 0.7.4
+- [x] `docker/Dockerfile.rufus-worker-prod` → 0.7.4
+- [x] `docker/Dockerfile.rufus-flower-prod` → 0.7.4
+- [x] `docker/build-production-images.sh` default → 0.7.4
+- [x] `packages/rufus-dashboard/package.json` → 0.7.4
 
-## Phase 3 — Device Management ✅
-- [x] `/devices` — DeviceGrid with polling + status filters
-- [x] `/devices/[id]` — device detail (Overview, Commands, Config tabs)
-- [x] `CommandSender` component + `useDevice` hook
-- [x] `/approvals` — HITL Approval Queue
-- [x] `ApprovalQueue` component + `useApprovals` hook
+### Step 2 — Build 3 Python Wheels ✅
+- [x] `dist/rufus_sdk-0.7.4-py3-none-any.whl`
+- [x] `packages/rufus-sdk-edge/dist/rufus_sdk_edge-0.7.4-py3-none-any.whl`
+- [x] `packages/rufus-sdk-server/dist/rufus_sdk_server-0.7.4-py3-none-any.whl`
 
-## Phase 4 — Advanced Features ✅
-- [x] `/policies` — policies list
-- [x] `ConfigPushWizard` (4-step wizard)
-- [x] `/audit` — audit log query + pagination + export button
-- [x] `/schedules` + `/admin` (workers tab) pages
-- [x] `KpiCards`, `WorkflowChart` components
+### Step 3 — Upload Wheels to TestPyPI ✅
+- [x] All 3 wheels uploaded; confirmed indexed:
+  - https://test.pypi.org/project/rufus-sdk/0.7.4/
+  - https://test.pypi.org/project/rufus-sdk-edge/0.7.4/
+  - https://test.pypi.org/project/rufus-sdk-server/0.7.4/
 
-## Phase 5 — Polish + Docs ✅
-- [x] `packages/rufus-dashboard/README.md`
-- [x] shadcn/ui primitive stubs (Button, Card, Badge inline)
-- [x] Dark mode CSS variables in globals.css
+### Step 4 — Build & Push 4 Docker Images ✅
+- [x] `ruhfuskdev/rufus-server:0.7.4` + `:latest` — multi-arch (amd64+arm64) ✓
+- [x] `ruhfuskdev/rufus-worker:0.7.4` + `:latest` — multi-arch ✓
+- [x] `ruhfuskdev/rufus-flower:0.7.4` + `:latest` — multi-arch ✓
+- [x] `ruhfuskdev/rufus-dashboard:0.7.4` + `:latest` — multi-arch, Next.js 14.2.21, 17 routes built ✓
+- **Note:** Encountered TestPyPI CDN propagation delay on arm64 builder (3 retries needed)
+  — Fixed by confirming all 3 packages indexed via API + pruning Docker buildx cache before final retry
 
-## Phase 6 — Stub Completion + Browser Tests ✅
-- [x] `src/app/(dashboard)/schedules/page.tsx` — full CRUD (list, pause/resume/cancel, create)
-- [x] `src/app/(dashboard)/admin/page.tsx` — Rate Limits + Webhooks tabs implemented
-- [x] `src/app/(dashboard)/devices/page.tsx` — Registration modal (Radix Dialog)
-- [x] `src/app/(dashboard)/devices/[id]/page.tsx` — SAF Transactions tab added
-- [x] `src/components/devices/ConfigPushWizard.tsx` — submit wired, live polling progress panel
-- [x] `src/lib/api.ts` — 15 new typed functions (schedules, rate limits, webhooks, SAF, rollout)
-- [x] `src/lib/hooks/useSchedules.ts` — new hook file created
-- [x] `src/components/ui/dialog.tsx` — Radix Dialog wrapper
-- [x] TypeScript type-check → 0 errors
-- [x] Production build → 0 errors (13 pages)
-- [x] Playwright smoke tests (8/8 passing)
+### Step 5 — Documentation Updates ✅
+- [x] `README.md`: all 0.5.4 → 0.7.4 (Docker image tags, pip install lines)
+- [x] `TECHNICAL_INFORMATION.md §16`: added `workflow_definitions` + `server_commands` rows (Workers group now 4 tables; total 35 cloud tables)
+- [x] `TECHNICAL_INFORMATION.md §17`: NEW Live Workflow Updates section (architecture, DDL, hot-reload, poller, API, edge agent, dashboard)
+- [x] `TECHNICAL_INFORMATION.md §18/19`: renumbered Edge Footprint + Package Split
+- [x] `memory/MEMORY.md`: version 0.7.4, Docker image tags, outstanding tasks updated
 
-### Key Fixes Required for Tests
-- `src/lib/auth.ts` — `authorized` callback returns `true` to let middleware handler run bypass logic
-- `src/app/(dashboard)/layout.tsx` — check `x-test-bypass` header via `headers()` to skip `redirect("/login")` in bypass mode
-- `e2e/smoke.spec.ts` — updated assertions to match actual headings ("Approval Queue", "Start Workflow", role heading selector)
+### Step 6 — Git Commit + Tag ✅
+- [x] Commit `e87f7e88`: "feat: v0.7.4 — Live Workflow Updates + Dashboard DAG Editor"
+- [x] Tag `v0.7.4` (annotated)
 
-## Phase 7 — Dashboard Completion + Infrastructure (2026-03-02) ✅
-- [x] **Audit export** — `exportAuditLogs()` fetches blob + triggers browser download; format select (JSON/CSV) + onClick wired to Export button in audit/page.tsx
-- [x] **GET /api/v1/devices/{device_id}/commands** — new endpoint in main.py; calls `device_service.list_commands()`; `limit`/`offset`/`status` query params; tags: Commands
-- [x] **listDeviceCommands()** stub replaced — real apiFetch; normalizes `command_data→payload`, `completed_at→executed_at`, injects `device_id`
-- [x] **listPolicies()** normalization — maps `id→policy_id`, `policy_name→name`, lowercase status→uppercase
-- [x] **createPolicy() + updatePolicyStatus()** added to api.ts
-- [x] **policies/page.tsx** — Create Policy button + Radix Dialog modal (policy_name, description, condition, artifact); Activate/Pause/Archive action buttons per row; useMutation hooks
-- [x] **rufus_test/docker-compose.test-async.yml** created — postgres, redis, rufus-server (ruhfuskdev images); server command: pip install psycopg2-binary + alembic upgrade head + uvicorn; bind-mounts for main.py + api_models.py
-- [x] **build-production-images.sh** — migrated from `docker build` to `docker buildx build --platform linux/amd64,linux/arm64 --push`; auto-creates `rufus-builder` buildx instance; single-arch `--load` fallback for local testing
-- [x] TypeScript type-check → 0 errors
+---
+
+# Fix Server Crash + automate_start Feature ✅
+
+## Part 1 — Server Crash Fix ✅
+- [x] `rufus_test/docker-compose.test-async.yml`: added 2 bind-mounts (`workflow_definition_service.py`, `server_command_service.py`) + 2 touch entries in startup command
+
+## Part 2 — `automate_start: true` Feature ✅
+- [x] `src/rufus/workflow.py`: added `automate_start: bool = False` param to `__init__`; stored as `self.automate_start`
+- [x] `src/rufus/builder.py`: parse `automate_start` from workflow config YAML; pass to `Workflow()` constructor
+- [x] `src/rufus/engine.py`: after `on_workflow_started`, call `await new_workflow.next_step(user_input={})` if `automate_start` is set
 
 ## Review
 
-### Proof of Work
-**56 files created** in `packages/rufus-dashboard/`:
-- 6 config/build files (package.json, tsconfig, next.config, tailwind, postcss, .env.example)
-- 13 app route files (login, dashboard layout, 10 pages, auth API route)
-- 21 component files (ui/, shared/, layouts/, workflows/, devices/, approvals/, metrics/)
-- 8 lib files (auth, api, roles, utils, 4 hooks)
-- 1 types file, 1 middleware file, 1 README
-
-**Backend changes (3 files):**
-- `src/rufus_server/main.py` — CORSMiddleware added (localhost:3000)
-- `docker/docker-compose.yml` — Keycloak service added
-- `docker/keycloak/rufus-realm.json` — 5 roles, 5 seed users (all pw: rufus-dev)
-- `docker/.env.example` — Keycloak + Next.js + CORS vars
-
-### Next Steps (user-facing)
-1. `cd packages/rufus-dashboard && npm install`
-2. `cp .env.example .env.local` and fill `NEXTAUTH_SECRET`
-3. Start backend: `cd docker && docker compose up -d` (includes Keycloak)
-4. Start dashboard: `npm run dev` → http://localhost:3000
-5. Login with seed user `operator` / `rufus-dev`
+### Lessons Learned
+- **TestPyPI CDN propagation**: All 3 packages must be confirmed indexed via API before Docker build — check each individually, not just one. CDN can show different versions for different packages even when uploaded together.
+- **Docker buildx cache prune**: Required before retry when arm64 builder hits stale CDN; `docker buildx prune --builder rufus-builder --force` clears intermediate layers.
+- **12 version locations** (not 10 as previously noted): build script default + dashboard package.json were missing from the old checklist.

@@ -2,13 +2,13 @@
 
 **The runtime that keeps working when the network doesn't.**
 
-Rufus is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device also powers the cloud control plane that manages that device — three roles, one runtime, no magic paths.
+Rufus is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device also powers the cloud control plane that manages that device — four layers, one runtime, no magic paths.
 
 ```
-DEVICE RUNTIME        CLOUD WORKER          CONTROL PLANE
-SQLite / WAL   │  PostgreSQL        │  PostgreSQL
-SyncExecution  │  CeleryExecution   │  CeleryExecution
-Offline-first  │  Horizontal scale  │  Policy & fleet mgmt
+DEVICE RUNTIME   │  CLOUD WORKER  │  CONTROL PLANE  │  DASHBOARD
+SQLite / WAL     │  PostgreSQL    │  PostgreSQL      │  Next.js 14
+SyncExecution    │  Celery        │  Celery          │  Keycloak RBAC
+Offline-first    │  Horizontal    │  Fleet & policy  │  9-page UI
 ```
 
 ---
@@ -43,6 +43,20 @@ ETag-based config push for hot-deploy without firmware updates. Definition snaps
 
 ---
 
+## The Ecosystem
+
+Rufus ships as five composable layers. Deploy only what you need.
+
+| Layer | Package | Runtime | Purpose |
+|-------|---------|---------|---------|
+| **Core SDK** | `rufus-sdk` | Any Python app | Workflow engine, providers, 9 step types |
+| **CLI** | `rufus-sdk` | Terminal | Local run / validate / manage |
+| **Edge Agent** | `rufus-sdk-edge` | Device (SQLite) | Offline-first runtime, SAF, config sync |
+| **Cloud Server** | `rufus-sdk-server` | Docker / K8s | REST API, fleet commands, 86 endpoints |
+| **Dashboard** | `rufus-dashboard` | Docker / K8s | Management UI, RBAC, DAG editor |
+
+---
+
 ## Quick Start — Docker Compose (30 seconds)
 
 ```bash
@@ -58,21 +72,32 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:0.7.4
+    image: ruhfuskdev/rufus-server:0.7.5
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:0.7.4
+    image: ruhfuskdev/rufus-worker:0.7.5
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:0.7.4
+    image: ruhfuskdev/rufus-flower:0.7.5
     ports: ["5555:5555"]
+
+  rufus-dashboard:
+    image: ruhfuskdev/rufus-dashboard:0.7.5
+    ports: ["3000:3000"]
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: change-me-in-production
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/rufus
+      KEYCLOAK_ID: rufus-dashboard
+      KEYCLOAK_SECRET: your-keycloak-secret
+    depends_on: [rufus-server]
 
   postgres:
     image: postgres:15
@@ -85,14 +110,14 @@ services:
     image: redis:7-alpine
 ```
 
-API at `http://localhost:8000` · Swagger UI (grouped) at `http://localhost:8000/docs` · Flower at `http://localhost:5555`
+API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs` · Dashboard at `http://localhost:3000` · Flower at `http://localhost:5555`
 
 ---
 
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.4
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.5
 ```
 
 ```python
@@ -152,11 +177,15 @@ python examples/healthcare_wearable/device_simulator.py
 ### Cloud Control Plane ↔ Edge Device
 
 ```
-CLOUD (PostgreSQL)                EDGE (SQLite)
-├── Device Registry API           ├── RufusEdgeAgent
-├── Config Server (ETag)  <──>    ├── SyncManager (SAF)
-├── Transaction Sync API          ├── ConfigManager
-└── Settlement Gateway            └── Local Workflows
+CLOUD                               EDGE (SQLite)
+├── Rufus Dashboard (port 3000)     ├── RufusEdgeAgent
+│   └── Keycloak RBAC               ├── SyncManager (SAF)
+├── REST API (port 8000)   <──>     ├── ConfigManager (ETag)
+│   ├── Device Registry             └── Local Workflows
+│   ├── Worker Fleet Commands
+│   ├── Workflow Definitions
+│   └── Audit & Policies
+└── Celery Workers (Redis)
 ```
 
 ### Step Types (9 built-in)
@@ -185,6 +214,51 @@ builder = WorkflowBuilder(
 
 ---
 
+## Rufus Dashboard
+
+The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:0.7.5`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
+
+### Pages
+
+| Page | Who | What you can do |
+|------|-----|-----------------|
+| **Overview** | All roles | Live KPI cards: active workflows, online workers, pending approvals, device count |
+| **Workflows** | Operator+ | List, filter, start, resume, cancel, retry; debug step-through with DAG view; audit trail |
+| **Approvals** | Operator+ | `HUMAN_IN_LOOP` approval queue; approve or reject with notes |
+| **Devices** | Fleet Mgr+ | Device registry; per-device status, last heartbeat, command history |
+| **Workers** | Fleet Mgr+ | Celery worker fleet; 9 command types (restart, drain, update\_code…); broadcast to fleet |
+| **Policies** | Admin / Fleet Mgr | Fraud rules and config policy CRUD |
+| **Schedules** | Admin / Operator | Cron-based workflow scheduling |
+| **Audit** | Admin / Auditor | Full compliance log; export to JSON |
+| **Admin** | SUPER\_ADMIN only | Live workflow definitions (YAML upload, ReactFlow DAG editor, push to devices), server commands |
+
+### Role-Based Access Control
+
+Five roles map to least-privilege access across all pages:
+
+| Role | Access |
+|------|--------|
+| `SUPER_ADMIN` | Everything — Admin panel, policy management, server commands |
+| `FLEET_MANAGER` | Devices, Workers, Policies (read), Schedules |
+| `WORKFLOW_OPERATOR` | Workflows, Approvals, Schedules, Workers (read) |
+| `AUDITOR` | Workflows (read), Devices (read), Audit log, Policies (read) |
+| `READ_ONLY` | Workflows and Devices (read-only) |
+
+Roles are assigned in Keycloak (or any OIDC provider) and propagated via JWT claims on every API request.
+
+### Admin Panel — Live Workflow Updates (v0.7.4)
+
+The Admin panel's **Server** tab unlocks live workflow management without redeployment:
+
+- **Upload or edit YAML inline** — paste a new workflow definition or edit an existing one
+- **ReactFlow DAG preview** — see the execution graph update as you type; DECISION step conditions are editable in a side panel without touching raw YAML
+- **Push to Devices** — broadcasts the updated YAML to the entire edge fleet instantly via the `update_workflow` server command
+- **Server commands** — trigger `reload_workflows`, `gc_caches`, `update_code`, or `restart` across all connected workers from the UI
+
+See [Dashboard Guide](docs/how-to-guides/dashboard.md) for deploy instructions, environment variables, and a step-by-step live-update walkthrough.
+
+---
+
 ## Key Features
 
 ### Offline-First Architecture
@@ -206,6 +280,7 @@ builder = WorkflowBuilder(
 - Human-in-the-loop with resume from any step
 
 ### Observability
+- **Rufus Dashboard** at `http://localhost:3000` — 9-page management UI with role-based access
 - Grouped Swagger UI at `/docs` (14 tag groups, 86 endpoints)
 - Flower monitoring at port 5555
 - Audit log table captures every workflow event
@@ -314,6 +389,7 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 | [Saga Mode](docs/how-to-guides/saga-mode.md) | Compensation and rollback |
 | [Human-in-the-Loop](docs/how-to-guides/human-in-loop.md) | Manual approval steps |
 | [Deployment](docs/how-to-guides/deployment.md) | Docker / Kubernetes |
+| [Dashboard Guide](docs/how-to-guides/dashboard.md) | Deploy, log in, navigate, manage fleet |
 
 ### Reference
 
@@ -407,14 +483,16 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:0.7.4` · `ruhfuskdev/rufus-worker:0.7.4` · `ruhfuskdev/rufus-flower:0.7.4`
+**Docker Hub:** `ruhfuskdev/rufus-server:0.7.5` · `ruhfuskdev/rufus-worker:0.7.5` · `ruhfuskdev/rufus-flower:0.7.5` · `ruhfuskdev/rufus-dashboard:0.7.5`
+
+> Dashboard auth requires Keycloak (included in `docker/docker-compose.keycloak.yml`) or any OIDC provider configured via `KEYCLOAK_ISSUER`, `KEYCLOAK_ID`, and `KEYCLOAK_SECRET`.
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.4
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.5
 ```
 
 ---
 
-**Current Version:** v0.7.4
+**Current Version:** v0.7.5
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

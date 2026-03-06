@@ -55,6 +55,7 @@ class Workflow:
                  priority: Optional[int] = None,
                  idempotency_key: Optional[str] = None,
                  metadata: Optional[Dict[str, Any]] = None,
+                 automate_start: bool = False,
                  persistence_provider: 'PersistenceProvider' = None, # Use string literal
                  execution_provider: 'ExecutionProvider' = None, # Use string literal
                  workflow_builder: 'WorkflowBuilder' = None, # Still need type hint for mypy
@@ -88,6 +89,9 @@ class Workflow:
 
         # Metadata
         self.metadata = metadata if metadata is not None else {}
+
+        # Auto-start: trigger first step immediately on start
+        self.automate_start = automate_start
 
         # Saga pattern support
         self.saga_mode = False

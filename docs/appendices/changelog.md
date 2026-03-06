@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.5] - 2026-03-06
+
+### Added
+- **`automate_start` workflow flag** — new optional YAML/Python boolean; when `true`, the engine calls `next_step()` immediately after `create_workflow()` with no manual resumption required
+  - YAML: `automate_start: true` in workflow definition
+  - `Workflow(..., automate_start=True)` constructor parameter
+  - `builder.py` reads the flag from YAML and passes it to `Workflow`
+- **`HardwareIdentity.id` field** — unique device identifier added to `HardwareIdentity` dataclass in `implementations/inference/factory.py`
+- **Dashboard how-to guide** (`docs/how-to-guides/dashboard.md`) — complete operational reference covering deployment, Keycloak OIDC setup, 5 role types, 13-page UI walkthrough, live definition updates, and troubleshooting
+
+### Fixed
+- Test docker-compose (`rufus_test/docker-compose.test-async.yml`) — image tags updated to v0.7.5; bind-mount `alembic/versions/` directory so migration `c1d2e3f4a5b6` (workflow_definitions + server_commands) is visible when running on older base images
+
+---
+
 ## [0.6.0] - 2026-02-27
 
 ### Added

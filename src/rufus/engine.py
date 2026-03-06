@@ -100,6 +100,8 @@ class WorkflowEngine:
         
         await self.persistence.save_workflow(new_workflow.id, new_workflow.to_dict())
         await self.observer.on_workflow_started(new_workflow.id, new_workflow.workflow_type, new_workflow.state)
+        if new_workflow.automate_start:
+            await new_workflow.next_step(user_input={})
         return new_workflow
 
     async def report_child_status(self,
