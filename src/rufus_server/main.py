@@ -57,7 +57,7 @@ from rufus_server.api_models import (
     WorkflowStartRequest, WorkflowStartResponse, WorkflowStepRequest, WorkflowStepResponse,
     WorkflowStatusResponse, ResumeWorkflowRequest, RetryWorkflowRequest,
     DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceHeartbeatRequest,
-    DeviceHeartbeatResponse, SyncRequest, SyncResponse,
+    DeviceHeartbeatResponse, SyncRequest, SyncResponse, DeviceBroadcastRequest,
     WorkerCommandRequest, WorkerBroadcastRequest, WorkerCommandResponse, WorkerDetail,
     WorkflowDefinitionUploadRequest, WorkflowDefinitionPatchRequest,
     WorkflowDefinitionResponse, WorkflowDefinitionDetailResponse,
@@ -2070,6 +2070,46 @@ async def list_device_commands(
     commands = await device_service.list_commands(device_id, status=status)
     total = len(commands)
     return {"commands": commands[offset: offset + limit], "total": total}
+
+
+@app.post("/api/v1/devices/commands/broadcast", tags=["Devices"])
+async def broadcast_device_command(
+    request: DeviceBroadcastRequest,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Broadcast a command to all registered edge devices.
+
+    Devices receive the command on their next heartbeat poll (within 30–60 s).
+    Primary use: push updated workflow definitions via the `update_workflow` command.
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    devices = await device_service.list_devices(limit=1000)
+    device_ids = [d["device_id"] for d in devices]
+
+    queued, failed = 0, 0
+    for device_id in device_ids:
+        try:
+            await device_service.send_command(
+                device_id=device_id,
+                command_type=request.command,
+                command_data=request.command_data,
+                expires_in_seconds=request.timeout_seconds,
+            )
+            queued += 1
+        except Exception:
+            failed += 1
+
+    return {
+        "command_id": f"broadcast-{uuid.uuid4().hex[:12]}",
+        "status": "queued",
+        "broadcast": True,
+        "queued": queued,
+        "failed": failed,
+        "device_count": len(device_ids),
+    }
 
 
 @app.post("/api/v1/devices/{device_id}/commands/{command_id}/status", tags=["Devices"])

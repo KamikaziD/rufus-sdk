@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.6] - 2026-03-08
+
+### Added
+- **`POST /api/v1/devices/commands/broadcast`** — new endpoint broadcasts a command to all registered edge devices; primary use is pushing `update_workflow` commands from the Admin dashboard
+- **`DeviceBroadcastRequest`** Pydantic model in `api_models.py`
+- **`update_workflow` command handler** in `RufusEdgeAgent._handle_cloud_command()` — edge agents now process workflow-push commands received via heartbeat response
+- **`ruhfuskdev/rufus-edge-dev:0.7.6`** Docker image — minimal edge device emulator for docker-compose testing
+- **`examples/edge_deployment/edge_device_sim.py`** — clean self-contained edge device simulator script
+- **`docker/Dockerfile.rufus-edge-dev`** — Dockerfile for the edge device emulator image
+- **`rufus-edge-sim` service** in `rufus_test/docker-compose.test-async.yml` — automatically registers with the cloud control plane and receives workflow pushes
+
+### Fixed
+- **Edge agent heartbeat payload field mismatch** — `RufusEdgeAgent._send_heartbeat()` was sending `"status"` but the server's `DeviceHeartbeatRequest` model requires `"device_status"`; caused silent 422 errors dropping all heartbeat responses (and pending commands)
+- **`run_edge_macbook.py`** — removed broken imports (`artifact_updater`, `command_handler`, `InferenceFactory`) and rewrote to use `RufusEdgeAgent` with proper device registration
+
+---
+
 ## [0.7.5] - 2026-03-06
 
 ### Added

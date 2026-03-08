@@ -183,6 +183,18 @@ class WorkerBroadcastRequest(BaseModel):
     expires_in_seconds: Optional[int] = None
 
 
+class DeviceBroadcastRequest(BaseModel):
+    """Broadcast a command to all (or filtered) registered edge devices."""
+    command: str
+    command_data: Dict[str, Any] = Field(default_factory=dict)
+    target_filter: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Empty dict = all devices. Reserved for future tag/region filtering.",
+    )
+    timeout_seconds: int = 300
+    priority: str = "normal"
+
+
 class WorkerCommandResponse(BaseModel):
     """Worker command status response."""
     command_id: str

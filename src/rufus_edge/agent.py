@@ -415,7 +415,7 @@ class RufusEdgeAgent:
         pending_count = await self.sync_manager.get_pending_count() if self.sync_manager else 0
 
         payload = {
-            "status": "online" if self._is_online else "offline",
+            "device_status": "online" if self._is_online else "offline",
             "metrics": {
                 "pending_sync_count": pending_count,
                 "last_sync_at": (
@@ -449,6 +449,7 @@ class RufusEdgeAgent:
     async def _handle_cloud_command(self, command: Dict[str, Any]):
         """Handle a command received from cloud via heartbeat response."""
         cmd_type = command.get("command_type", "")
+        cmd_data = command.get("command_data", {})
         logger.info(f"Received cloud command: {cmd_type}")
 
         if cmd_type == "force_sync":
@@ -457,8 +458,15 @@ class RufusEdgeAgent:
         elif cmd_type == "reload_config":
             if self.config_manager:
                 await self.config_manager.pull_config()
+        elif cmd_type == "update_workflow":
+            if self.config_manager:
+                success = await self.config_manager.handle_update_workflow_command(
+                    payload=cmd_data,
+                    workflow_builder=self.workflow_builder,
+                )
+                logger.info(f"update_workflow command handled: {success}")
         elif cmd_type == "update_model":
-            model_name = command.get("command_data", {}).get("model_name")
+            model_name = cmd_data.get("model_name")
             if model_name and self.config_manager:
                 logger.info(f"Cloud requested model update: {model_name}")
         else:

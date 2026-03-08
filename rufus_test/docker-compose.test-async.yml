@@ -51,7 +51,7 @@ services:
   # Rufus API Server — runs Alembic migration before starting uvicorn
   # ─────────────────────────────────────────────────────────────────────────
   rufus-server:
-    image: ruhfuskdev/rufus-server:${VERSION:-0.7.1}
+    image: ruhfuskdev/rufus-server:${VERSION:-0.7.6}
     container_name: test-rufus-server
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -97,7 +97,7 @@ services:
   # Celery Worker
   # ─────────────────────────────────────────────────────────────────────────
   celery-worker:
-    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.1}
+    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.6}
     container_name: test-rufus-worker
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -124,6 +124,25 @@ services:
         condition: service_healthy
     networks:
       - test-net
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Edge Device Emulator — tests the upload-YAML → push-to-devices flow
+  # ─────────────────────────────────────────────────────────────────────────
+  rufus-edge-sim:
+    image: ruhfuskdev/rufus-edge-dev:${VERSION:-0.7.6}
+    container_name: test-edge-device
+    environment:
+      CLOUD_URL: http://rufus-server:8000
+      DEVICE_ID: sim-device-001
+      RUFUS_REGISTRATION_KEY: test-registration-key
+      RUFUS_ENCRYPTION_KEY: ""
+      DB_PATH: /tmp/edge_sim.db
+    depends_on:
+      rufus-server:
+        condition: service_healthy
+    networks:
+      - test-net
+    restart: unless-stopped
 
 networks:
   test-net:
