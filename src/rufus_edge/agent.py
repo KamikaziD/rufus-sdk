@@ -144,13 +144,9 @@ class RufusEdgeAgent:
 
         # Initialize workflow builder with empty registry (loaded from config)
         self.workflow_builder = WorkflowBuilder(
-            config_dir="",  # Not used - workflows come from config
             workflow_registry={},
-            persistence_provider=self.persistence,
-            execution_provider=self.executor,
             expression_evaluator_cls=SimpleExpressionEvaluator,
             template_engine_cls=Jinja2TemplateEngine,
-            observer=self.observer,
         )
 
         # Register config change callback to reload workflows
@@ -238,6 +234,12 @@ class RufusEdgeAgent:
         # Create workflow
         workflow = await self.workflow_builder.create_workflow(
             workflow_type=workflow_type,
+            persistence_provider=self.persistence,
+            execution_provider=self.executor,
+            workflow_builder=self.workflow_builder,
+            expression_evaluator_cls=SimpleExpressionEvaluator,
+            template_engine_cls=Jinja2TemplateEngine,
+            workflow_observer=self.observer,
             initial_data=data,
             owner_id=self.device_id,
         )

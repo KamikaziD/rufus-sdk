@@ -10,6 +10,7 @@ Handles:
 
 import hashlib
 import hmac as hmac_lib
+import json
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -77,16 +78,19 @@ class DeviceService:
             raise ValueError(f"Device {device_id} already registered")
 
         # Insert device record (asyncpg uses $1, $2, etc. for placeholders)
+        import uuid as _uuid
+        device_row_id = str(_uuid.uuid4())
+
         async with self.persistence.pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO edge_devices (
-                    device_id, device_type, device_name, merchant_id,
+                    id, device_id, device_type, device_name, merchant_id,
                     location, api_key_hash, public_key, firmware_version,
                     sdk_version, capabilities, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'online')
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'online')
                 """,
-                device_id, device_type, device_name, merchant_id,
+                device_row_id, device_id, device_type, device_name, merchant_id,
                 location, api_key_hash, public_key, firmware_version,
                 sdk_version, json.dumps(capabilities or [])
             )
@@ -512,10 +516,16 @@ class DeviceService:
             )
             commands = []
             for row in rows:
+                raw_data = row["command_data"]
+                if isinstance(raw_data, str):
+                    try:
+                        raw_data = json.loads(raw_data)
+                    except (json.JSONDecodeError, ValueError):
+                        raw_data = {}
                 commands.append({
                     "command_id": row["command_id"],
                     "command_type": row["command_type"],
-                    "command_data": row["command_data"],
+                    "command_data": raw_data,
                 })
 
                 # Mark as sent
@@ -561,20 +571,22 @@ class DeviceService:
         if self.version_service:
             if not command_version:
                 latest = await self.version_service.get_latest_version(command_type)
-                command_version = latest.version if latest else "1.0.0"
+                command_version = latest.version if latest else None
 
-            # Validate command data against schema
-            validation = await self.version_service.validate_command_data(
-                command_type, command_version, command_data or {}
-            )
-            if not validation.valid:
-                raise ValueError(f"Invalid command data: {', '.join(validation.errors)}")
+            # Only validate if a schema is registered for this command type
+            if command_version:
+                validation = await self.version_service.validate_command_data(
+                    command_type, command_version, command_data or {}
+                )
+                if not validation.valid:
+                    raise ValueError(f"Invalid command data: {', '.join(validation.errors)}")
 
-            # Log warnings (e.g., deprecated version)
-            for warning in validation.warnings:
-                logger.warning(f"Command validation warning: {warning}")
+                # Log warnings (e.g., deprecated version)
+                for warning in validation.warnings:
+                    logger.warning(f"Command validation warning: {warning}")
 
         command_id = str(uuid.uuid4())
+        row_id = str(uuid.uuid4())
         expires_at = (datetime.utcnow() + timedelta(seconds=expires_in_seconds))
 
         # Extract max_retries for quick filtering
@@ -584,10 +596,11 @@ class DeviceService:
             await conn.execute(
                 """
                 INSERT INTO device_commands (
-                    command_id, device_id, command_type, command_data,
+                    id, command_id, device_id, command_type, command_data,
                     command_version, expires_at, retry_policy, max_retries
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
+                row_id,
                 command_id,
                 device_id,
                 command_type,

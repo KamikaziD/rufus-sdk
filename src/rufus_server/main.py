@@ -2089,6 +2089,7 @@ async def broadcast_device_command(
     devices = await device_service.list_devices(limit=1000)
     device_ids = [d["device_id"] for d in devices]
 
+    import uuid as _uuid
     queued, failed = 0, 0
     for device_id in device_ids:
         try:
@@ -2099,11 +2100,12 @@ async def broadcast_device_command(
                 expires_in_seconds=request.timeout_seconds,
             )
             queued += 1
-        except Exception:
+        except Exception as exc:
+            logger.error(f"broadcast: failed to queue for {device_id}: {exc}")
             failed += 1
 
     return {
-        "command_id": f"broadcast-{uuid.uuid4().hex[:12]}",
+        "command_id": f"broadcast-{_uuid.uuid4().hex[:12]}",
         "status": "queued",
         "broadcast": True,
         "queued": queued,
