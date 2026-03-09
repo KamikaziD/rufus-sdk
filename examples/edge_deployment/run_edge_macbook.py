@@ -26,7 +26,8 @@ import sys
 import httpx
 
 # Add project root to path (for local dev without pip install)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(project_root, "src"))
 
 logging.basicConfig(
@@ -68,7 +69,8 @@ async def detect_hardware():
         info = get_platform_info()
         print(f"  Platform:        {info.system} {info.machine}")
         print(f"  Apple Silicon:   {'Yes' if info.is_apple_silicon else 'No'}")
-        print(f"  Neural Engine:   {'Yes' if has_apple_neural_engine() else 'No'}")
+        print(
+            f"  Neural Engine:   {'Yes' if has_apple_neural_engine() else 'No'}")
         print(f"  Accelerators:    {[a.value for a in info.accelerators]}")
         print(f"  Recommended:     {get_recommended_runtime()}")
         print(f"  ONNX Providers:  {get_recommended_onnx_providers()}")
@@ -108,7 +110,7 @@ async def register_device(hw_info=None) -> str:
                     "device_name": f"MacBook {DEVICE_ID}",
                     "merchant_id": "dev-merchant",
                     "firmware_version": "macOS-14",
-                    "sdk_version": "0.7.5",
+                    "sdk_version": "0.7.6",
                     "location": "local",
                     "capabilities": capabilities,
                 },
@@ -126,12 +128,14 @@ async def register_device(hw_info=None) -> str:
                 print(f"  Device {DEVICE_ID} already registered — continuing")
                 return ""
 
-            print(f"  Registration failed: HTTP {resp.status_code}: {resp.text}")
+            print(
+                f"  Registration failed: HTTP {resp.status_code}: {resp.text}")
             return ""
 
         except httpx.ConnectError:
             print(f"  ERROR: Cannot connect to cloud at {CLOUD_URL}")
-            print("         Make sure Docker is running: cd docker && docker compose up -d")
+            print(
+                "         Make sure Docker is running: cd docker && docker compose up -d")
             return ""
 
 

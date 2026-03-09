@@ -195,7 +195,7 @@ export async function getDevice(token: string, id: string): Promise<Device> {
 export function sendDeviceCommand(
   token: string,
   deviceId: string,
-  command: { command_type: string; payload: Record<string, unknown>; priority?: number }
+  command: { type: string; data?: Record<string, unknown>; priority?: string; expires_in_seconds?: number }
 ): Promise<DeviceCommand> {
   return apiFetch(`/api/v1/devices/${deviceId}/commands`, token, {
     method: "POST",

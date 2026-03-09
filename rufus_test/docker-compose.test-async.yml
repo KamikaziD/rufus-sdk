@@ -67,11 +67,13 @@ services:
       # Bind-mount patched source files so changes take effect without rebuilding
       - ../src/rufus_server/main.py:/usr/local/lib/python3.11/site-packages/rufus_server/main.py:ro
       - ../src/rufus_server/api_models.py:/usr/local/lib/python3.11/site-packages/rufus_server/api_models.py:ro
+      - ../src/rufus_server/webhook_service.py:/usr/local/lib/python3.11/site-packages/rufus_server/webhook_service.py:ro
     command: >
       sh -c "
         pip install psycopg2-binary -q &&
         touch /usr/local/lib/python3.11/site-packages/rufus_server/main.py
-              /usr/local/lib/python3.11/site-packages/rufus_server/api_models.py &&
+              /usr/local/lib/python3.11/site-packages/rufus_server/api_models.py
+              /usr/local/lib/python3.11/site-packages/rufus_server/webhook_service.py &&
         cd /usr/local/lib/python3.11/site-packages/rufus &&
         alembic upgrade head &&
         cd /app &&
@@ -136,7 +138,12 @@ services:
       DEVICE_ID: sim-device-001
       RUFUS_REGISTRATION_KEY: test-registration-key
       RUFUS_ENCRYPTION_KEY: ""
-      DB_PATH: /tmp/edge_sim.db
+      DB_PATH: /data/edge_sim.db
+    volumes:
+      # Persist DB + API key across container recreations
+      - edge-sim-data:/data
+      # Bind-mount patched sim script
+      - ../examples/edge_deployment/edge_device_sim.py:/app/edge_device_sim.py:ro
     depends_on:
       rufus-server:
         condition: service_healthy
@@ -147,3 +154,6 @@ services:
 networks:
   test-net:
     driver: bridge
+
+volumes:
+  edge-sim-data:

@@ -367,7 +367,7 @@ class WebhookService:
             query = """
                 SELECT webhook_id, url, secret, headers, retry_policy
                 FROM webhook_registrations
-                WHERE is_active = true AND events @> $1::jsonb
+                WHERE is_active = true AND events::jsonb @> $1::jsonb
             """
             params = [json.dumps([event_type.value])]
         else:

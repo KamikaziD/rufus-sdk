@@ -784,6 +784,7 @@ rate_limit_tracking = Table(
     Column('window_end', DateTime, nullable=False),
     Column('last_request', DateTime, server_default=func.now()),
 
+    UniqueConstraint('identifier', 'resource', 'window_start', name='uq_rate_limit_window'),
     Index('ix_rate_limit_identifier', 'identifier', 'resource', 'window_end'),
     Index('ix_rate_limit_cleanup', 'window_end'),
 )

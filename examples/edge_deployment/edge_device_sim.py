@@ -32,14 +32,28 @@ DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
 ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
 REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
 
+# Persist API key alongside the SQLite DB so it survives container restarts
+_API_KEY_FILE = DB_PATH + ".apikey"
+
 
 async def register_device() -> str:
     """
     Register the device with the cloud control plane.
 
-    Returns the api_key assigned by the server, or empty string if already
-    registered (in which case no api_key can be recovered from this call).
+    Returns the api_key (from server on first registration, or from local
+    cache on subsequent starts). The server only returns the key once, so
+    we persist it to _API_KEY_FILE for use across restarts.
     """
+    # Load cached key if available (device already registered and key persisted)
+    try:
+        with open(_API_KEY_FILE) as f:
+            cached = f.read().strip()
+        if cached:
+            logger.info(f"Loaded persisted API key for {DEVICE_ID}")
+            return cached
+    except FileNotFoundError:
+        pass
+
     async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=15) as client:
         resp = await client.post(
             "/api/v1/devices/register",
@@ -59,10 +73,19 @@ async def register_device() -> str:
             data = resp.json()
             api_key = data.get("api_key", "")
             logger.info(f"Device registered: {DEVICE_ID}  api_key={api_key[:8]}...")
+            # Persist for future restarts
+            try:
+                with open(_API_KEY_FILE, "w") as f:
+                    f.write(api_key)
+            except OSError as e:
+                logger.warning(f"Could not persist API key: {e}")
             return api_key
 
         if resp.status_code == 400 and "already registered" in resp.text:
-            logger.info(f"Device {DEVICE_ID} already registered — continuing without new api_key")
+            logger.warning(
+                f"Device {DEVICE_ID} already registered but no local key file found — "
+                "config endpoint will 401 until the device is re-registered"
+            )
             return ""
 
         logger.warning(f"Registration returned {resp.status_code}: {resp.text}")

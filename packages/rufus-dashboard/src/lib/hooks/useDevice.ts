@@ -39,10 +39,11 @@ export function useSendCommand() {
       command,
     }: {
       deviceId: string;
-      command: { command_type: string; payload: Record<string, unknown>; priority?: number };
+      command: { type: string; data?: Record<string, unknown>; priority?: string; expires_in_seconds?: number };
     }) => api.sendDeviceCommand(token!, deviceId, command),
     onSuccess: (_, { deviceId }) => {
       queryClient.invalidateQueries({ queryKey: ["device", deviceId] });
+      queryClient.invalidateQueries({ queryKey: ["device-commands", deviceId] });
     },
   });
 }
