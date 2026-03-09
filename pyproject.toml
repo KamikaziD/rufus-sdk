@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rufus-sdk"
-version = "0.7.7"
+version = "0.7.8"
 description = "Offline-first workflow engine for edge devices - saga compensation, store-and-forward, fleet config rollout"
 authors = ["Rufus Team <team@rufus.dev>"]
 license = "MIT"

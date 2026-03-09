@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    'rufus-sdk-edge[edge]==0.7.7'
+    'rufus-sdk-edge[edge]==0.7.8'
 
 RUN pip install --no-cache-dir 'httpx>=0.24' 'aiosqlite>=0.19'
 

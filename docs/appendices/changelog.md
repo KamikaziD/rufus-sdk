@@ -11,6 +11,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.8] - 2026-03-09
+
+### Added
+- **Edge telemetry loop** — `edge_device_sim.py` now runs a continuous `EdgeTelemetry`
+  workflow loop (default 30 s interval) instead of an idle `sleep(999_999)`.
+  Graceful shutdown on SIGTERM/SIGINT via `_shutdown_event`.
+- **`telemetry_steps.py`** — 4-step workflow (collect → analyse → sync → finalise):
+  - `collect_telemetry`: CPU/memory/disk/network via `psutil`; random fallback when unavailable
+  - `analyse_metrics`: threshold alerts (HIGH_CPU >80%, HIGH_MEM >90%, LOW_DISK >95%)
+  - `sync_telemetry`: probes `/health`; tracks SAF queue depth when offline
+  - `finalise_cycle`: queries SQLite row counts; projects DB growth in MB/day
+- **`edge_admin_tool.py`** — interactive host-side CLI for edge fleet management:
+  list devices, show config, list/edit/push workflow definitions, broadcast `update_workflow`
+- **`docker-compose.test-async.yml`**: `telemetry_steps.py` bind-mount, `TELEMETRY_INTERVAL`
+  env var, `touch` command override to bust `.pyc` cache on start
+
+### Fixed
+- **Audit log population** — `postgres.py save_workflow()` now writes an audit row on every
+  workflow lifecycle event; `log_audit_event()` column names corrected
+  (`old_state→old_status`, `new_state→new_status`, `metadata→details`)
+- **SQLite audit** — `sqlite.py save_workflow()` writes audit rows using SQLite schema column
+  names (`audit_id`, `user_id`, `old_state`, `new_state`)
+- **`POST /api/v1/audit/query`** — redirected from dead `command_audit_log` table to
+  `workflow_audit_log`; returns normalized `{log_id, timestamp, event_type, entity_type,
+  entity_id, actor}` shape
+- **Edge sim `sdk_version`** — bumped from `"0.7.5"` to `"0.7.7"` in device registration payload
+
+---
+
 ## [0.7.7] - 2026-03-09
 
 ### Fixed
