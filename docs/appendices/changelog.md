@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.7] - 2026-03-09
+
+### Fixed
+- **Edge SQLite config cache**: migrate `_cache_config` / `_load_cached_config` from `tasks`
+  table (FK violation) to dedicated `device_config_cache` table
+- **Edge SQLite workflow cache**: migrate `handle_update_workflow_command` /
+  `load_local_workflow_definitions` from `tasks` table to new `edge_workflow_cache` table;
+  persisted workflow definitions now survive device restarts
+- **Dashboard**: `sendDeviceCommand` API call now sends `{ type, data }` matching server model
+  (was sending `{ command_type, payload }` which server silently ignored)
+- **Server**: `webhook_registrations.events` cast to JSONB before `@>` containment operator
+  (was failing with `operator does not exist: text @> jsonb` on every webhook dispatch)
+- **Server**: added UNIQUE constraint on `rate_limit_tracking(identifier, resource, window_start)`
+  required by `ON CONFLICT` upsert (was silently failing on every API request)
+- **Edge simulator**: persist API key to `{DB_PATH}.apikey` so config endpoint authenticates
+  across container restarts
+- **Dashboard**: CommandSender replaced free-text command form with structured dropdown +
+  per-command dynamic fields (force_sync, reload_config, update_workflow, update_model)
+
+---
+
 ## [0.7.6] - 2026-03-08
 
 ### Added
