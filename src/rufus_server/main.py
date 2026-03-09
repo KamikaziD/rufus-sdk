@@ -11,6 +11,7 @@ This FastAPI server provides:
 import sys
 import os
 import json
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header, Depends, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,6 +63,7 @@ from rufus_server.api_models import (
     WorkflowDefinitionUploadRequest, WorkflowDefinitionPatchRequest,
     WorkflowDefinitionResponse, WorkflowDefinitionDetailResponse,
     ServerCommandRequest, ServerCommandResponse,
+    WorkflowSyncRequest, WorkflowSyncResponse,
 )
 
 # --- FastAPI App Setup ---
@@ -502,7 +504,41 @@ async def get_workflow_status(
     if workflow_engine is None:
         raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
 
-    workflow = await _get_workflow_or_404(workflow_id)
+    try:
+        workflow = await _get_workflow_or_404(workflow_id)
+    except HTTPException as exc:
+        if exc.status_code == 404 and persistence_provider is not None:
+            # Reconstruction may have failed (e.g. edge workflow whose step modules
+            # aren't installed on the server). Check if the row actually exists.
+            raw = await persistence_provider.load_workflow(workflow_id)
+            if raw is None:
+                raise  # genuine 404 — row doesn't exist
+            # Return read-only status from raw DB data — no step reconstruction needed
+            state = raw.get("state", {})
+            if isinstance(state, str):
+                try:
+                    state = json.loads(state)
+                except Exception:
+                    state = {}
+            steps_cfg = raw.get("steps_config", [])
+            if isinstance(steps_cfg, str):
+                try:
+                    steps_cfg = json.loads(steps_cfg)
+                except Exception:
+                    steps_cfg = []
+            current_step_raw = raw.get("current_step")
+            return WorkflowStatusResponse(
+                workflow_id=workflow_id,
+                status=raw.get("status", "UNKNOWN"),
+                current_step_name=str(current_step_raw) if current_step_raw is not None else None,
+                state=state if isinstance(state, dict) else {},
+                workflow_type=raw.get("workflow_type"),
+                parent_execution_id=raw.get("parent_execution_id"),
+                blocked_on_child_id=raw.get("blocked_on_child_id"),
+                steps_config=steps_cfg if isinstance(steps_cfg, list) else [],
+                current_step_info=None,
+            )
+        raise
 
     steps_config = [step.to_dict() for step in workflow.workflow_steps]
 
@@ -1610,6 +1646,95 @@ async def sync_device_transactions(
         rejected=[SyncAck(**r) for r in result["rejected"]],
         server_sequence=result.get("server_sequence", 0),
         next_sync_delay=30,
+    )
+
+
+def _parse_edge_dt(s) -> Optional[datetime]:
+    """Parse ISO8601 string from edge device → datetime. Returns None on failure."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+@app.post("/api/v1/devices/{device_id}/sync/workflows", response_model=WorkflowSyncResponse, tags=["Devices"])
+async def sync_edge_workflows(
+    device_id: str,
+    request_data: WorkflowSyncRequest,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+):
+    """
+    Ingest completed edge workflow executions + audit logs into cloud PostgreSQL.
+
+    Called by EdgeWorkflowSyncer on each online sync cycle. Idempotent — duplicate
+    workflow IDs are silently skipped (ON CONFLICT DO NOTHING).
+    """
+    if persistence_provider is None:
+        raise HTTPException(status_code=503, detail="Persistence not initialized")
+
+    if not isinstance(persistence_provider, PostgresPersistenceProvider):
+        raise HTTPException(status_code=503, detail="Workflow sync requires PostgreSQL persistence")
+
+    accepted_ids = []
+    skipped = 0
+    audit_count = 0
+
+    async with persistence_provider.pool.acquire() as conn:
+        for wf in request_data.workflows:
+            existing = await conn.fetchval(
+                "SELECT id FROM workflow_executions WHERE id=$1", wf.get("id")
+            )
+            if existing:
+                skipped += 1
+                continue
+
+            await conn.execute(
+                """INSERT INTO workflow_executions
+                   (id, workflow_type, workflow_version, definition_snapshot, current_step,
+                    status, state, steps_config, state_model_path, saga_mode,
+                    completed_steps_stack, parent_execution_id, data_region, priority,
+                    idempotency_key, metadata, owner_id, created_at, updated_at, completed_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                   ON CONFLICT (id) DO NOTHING""",
+                wf.get("id"), wf.get("workflow_type"), wf.get("workflow_version"),
+                wf.get("definition_snapshot"), str(wf.get("current_step", 0)), wf.get("status"),
+                wf.get("state", "{}"), wf.get("steps_config", "[]"),
+                wf.get("state_model_path", ""), bool(wf.get("saga_mode", 0)),
+                wf.get("completed_steps_stack", "[]"), wf.get("parent_execution_id"),
+                wf.get("data_region", "edge"), int(wf.get("priority", 5)),
+                wf.get("idempotency_key"), wf.get("metadata", "{}"),
+                device_id,
+                _parse_edge_dt(wf.get("created_at")), _parse_edge_dt(wf.get("updated_at")),
+                _parse_edge_dt(wf.get("completed_at")),
+            )
+            accepted_ids.append(wf["id"])
+
+        # Insert audit rows only for newly accepted workflows
+        accepted_set = set(accepted_ids)
+        for log in request_data.audit_logs:
+            if log.get("workflow_id") not in accepted_set:
+                continue
+            try:
+                await conn.execute(
+                    """INSERT INTO workflow_audit_log
+                       (workflow_id, event_type, step_name, actor, old_status, new_status, details, timestamp)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                    log.get("workflow_id"), log.get("event_type"), log.get("step_name"),
+                    log.get("user_id") or log.get("worker_id"),
+                    log.get("old_state"), log.get("new_state"),
+                    log.get("metadata", "{}"),
+                    _parse_edge_dt(log.get("recorded_at")),
+                )
+                audit_count += 1
+            except Exception as audit_err:
+                logger.warning(f"Audit row insert skipped: {audit_err}")
+
+    return WorkflowSyncResponse(
+        accepted_workflow_ids=accepted_ids,
+        audit_rows_inserted=audit_count,
+        skipped=skipped,
     )
 
 

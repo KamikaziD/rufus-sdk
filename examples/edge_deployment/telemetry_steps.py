@@ -85,7 +85,7 @@ def analyse_metrics(state, context, **kw) -> dict:
         alerts.append(f"HIGH_CPU:{state.cpu_percent:.1f}%")
     if state.mem_percent > 90:
         alerts.append(f"HIGH_MEM:{state.mem_percent:.1f}%")
-    if state.disk_percent > 95:
+    if state.disk_percent > 90:
         alerts.append(f"LOW_DISK:{state.disk_percent:.1f}%used")
     health = "CRITICAL" if alerts else "NORMAL"
     return {"health_status": health, "alerts": alerts}

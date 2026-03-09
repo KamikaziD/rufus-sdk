@@ -72,24 +72,24 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:0.7.8
+    image: ruhfuskdev/rufus-server:0.7.9
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:0.7.8
+    image: ruhfuskdev/rufus-worker:0.7.9
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:0.7.8
+    image: ruhfuskdev/rufus-flower:0.7.9
     ports: ["5555:5555"]
 
   rufus-dashboard:
-    image: ruhfuskdev/rufus-dashboard:0.7.8
+    image: ruhfuskdev/rufus-dashboard:0.7.9
     ports: ["3000:3000"]
     environment:
       NEXTAUTH_URL: http://localhost:3000
@@ -117,7 +117,7 @@ API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs` · 
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.8
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.9
 ```
 
 ```python
@@ -216,7 +216,7 @@ builder = WorkflowBuilder(
 
 ## Rufus Dashboard
 
-The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:0.7.8`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
+The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:0.7.9`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
 
 ### Pages
 
@@ -483,16 +483,16 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:0.7.8` · `ruhfuskdev/rufus-worker:0.7.8` · `ruhfuskdev/rufus-flower:0.7.8` · `ruhfuskdev/rufus-dashboard:0.7.8`
+**Docker Hub:** `ruhfuskdev/rufus-server:0.7.9` · `ruhfuskdev/rufus-worker:0.7.9` · `ruhfuskdev/rufus-flower:0.7.9` · `ruhfuskdev/rufus-dashboard:0.7.9`
 
 > Dashboard auth requires Keycloak (included in `docker/docker-compose.keycloak.yml`) or any OIDC provider configured via `KEYCLOAK_ISSUER`, `KEYCLOAK_ID`, and `KEYCLOAK_SECRET`.
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.8
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.9
 ```
 
 ---
 
-**Current Version:** v0.7.8
+**Current Version:** v0.7.9
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

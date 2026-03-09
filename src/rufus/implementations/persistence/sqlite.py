@@ -116,8 +116,10 @@ CREATE TABLE IF NOT EXISTS workflow_audit_log (
     decision_rationale TEXT,
     metadata TEXT DEFAULT '{}',
     ip_address TEXT,
-    user_agent TEXT
+    user_agent TEXT,
+    FOREIGN KEY (workflow_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_audit_workflow_id ON workflow_audit_log(workflow_id);
 
 -- Execution logs
 CREATE TABLE IF NOT EXISTS workflow_execution_logs (
@@ -1267,6 +1269,84 @@ class SQLitePersistenceProvider(PersistenceProvider):
                 schedule_name, workflow_type, cron_expression, initial_data, enabled
             )
         )
+
+    # ============================================================================
+    # EDGE WORKFLOW SYNC METHODS
+    # ============================================================================
+
+    async def get_pending_sync_workflows(self, limit: int = 100) -> list[dict]:
+        """Return up to `limit` terminal-status workflows not yet synced to cloud.
+
+        Ordered oldest-first so backlog drains in chronological order.
+        Once synced, rows are deleted by delete_synced_workflows() — so there
+        is no need for a time-based watermark; a full scan is safe and correct.
+        """
+        terminal = ("COMPLETED", "FAILED", "CANCELLED", "FAILED_ROLLED_BACK")
+        placeholders = ",".join("?" * len(terminal))
+        sql = (
+            f"SELECT * FROM workflow_executions WHERE status IN ({placeholders})"
+            f" ORDER BY COALESCE(completed_at, updated_at) LIMIT ?"
+        )
+        async with self.conn.execute(sql, [*terminal, limit]) as cursor:
+            rows = await cursor.fetchall()
+            if not rows:
+                return []
+            cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in rows]
+
+    async def get_audit_logs_for_workflows(self, workflow_ids: list[str]) -> list[dict]:
+        """Return all audit log rows for the given workflow IDs."""
+        if not workflow_ids:
+            return []
+        placeholders = ",".join("?" * len(workflow_ids))
+        async with self.conn.execute(
+            f"SELECT * FROM workflow_audit_log WHERE workflow_id IN ({placeholders})",
+            workflow_ids,
+        ) as cursor:
+            rows = await cursor.fetchall()
+            if not rows:
+                return []
+            cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in rows]
+
+    async def delete_synced_workflows(self, workflow_ids: list[str]) -> int:
+        """Delete synced workflows + their audit rows. Returns deleted workflow count.
+
+        Audit rows are deleted explicitly before workflows so this works on both:
+        - New DBs (schema has FK ON DELETE CASCADE — explicit delete is a no-op cascade)
+        - Existing DBs created before the FK was added (no cascade, explicit delete required)
+        """
+        if not workflow_ids:
+            return 0
+        placeholders = ",".join("?" * len(workflow_ids))
+        # Delete audit rows first (avoids FK violation on DBs with the constraint)
+        await self.conn.execute(
+            f"DELETE FROM workflow_audit_log WHERE workflow_id IN ({placeholders})",
+            workflow_ids,
+        )
+        async with self.conn.execute(
+            f"DELETE FROM workflow_executions WHERE id IN ({placeholders})", workflow_ids
+        ) as cursor:
+            deleted = cursor.rowcount
+        await self.conn.commit()
+        return deleted
+
+    async def get_edge_sync_state(self, key: str) -> str | None:
+        """Read a key from edge_sync_state. Returns None if not set."""
+        async with self.conn.execute(
+            "SELECT value FROM edge_sync_state WHERE key=?", (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_edge_sync_state(self, key: str, value: str) -> None:
+        """Upsert a key/value pair in edge_sync_state."""
+        await self.conn.execute(
+            "INSERT INTO edge_sync_state(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            (key, value),
+        )
+        await self.conn.commit()
 
     def create_task_record_sync(
         self,

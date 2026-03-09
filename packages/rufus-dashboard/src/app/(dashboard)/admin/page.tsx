@@ -30,6 +30,7 @@ import {
   type ServerCommand,
 } from "@/lib/api";
 import { hasPermission } from "@/lib/roles";
+import { parseUtcDate, formatDateTime } from "@/lib/utils";
 import { WorkerCommandModal } from "@/components/workers/WorkerCommandModal";
 import { WorkflowDAG } from "@/components/workflows/WorkflowDAG";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,8 +114,9 @@ export default function AdminPage() {
 // ── Workers Tab ───────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return "—";
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const d = parseUtcDate(iso);
+  if (!d) return "—";
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
@@ -916,7 +918,7 @@ function ServerTab({ token }: { token?: string }) {
                     </td>
                     <td className="py-2 text-xs text-muted-foreground">{d.uploaded_by ?? "—"}</td>
                     <td className="py-2 text-xs text-muted-foreground">
-                      {d.created_at ? new Date(d.created_at).toLocaleDateString() : "—"}
+                      {formatDateTime(d.created_at)}
                     </td>
                     <td className="py-2">
                       <div className="flex gap-1 justify-end">
@@ -1141,7 +1143,7 @@ function ServerTab({ token }: { token?: string }) {
                     </td>
                     <td className="py-2 text-xs text-muted-foreground">{c.created_by ?? "—"}</td>
                     <td className="py-2 text-xs text-muted-foreground">
-                      {c.created_at ? new Date(c.created_at).toLocaleTimeString() : "—"}
+                      {formatDateTime(c.created_at)}
                     </td>
                     <td className="py-2">
                       {c.status === "pending" && (

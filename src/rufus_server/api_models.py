@@ -154,6 +154,23 @@ class SyncResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Edge Workflow Sync Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WorkflowSyncRequest(BaseModel):
+    """Batch of completed workflow executions + audit logs from an edge device."""
+    workflows: List[Dict[str, Any]]
+    audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkflowSyncResponse(BaseModel):
+    """Cloud acknowledgment after ingesting edge workflow data."""
+    accepted_workflow_ids: List[str]
+    audit_rows_inserted: int
+    skipped: int = 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Worker Fleet Management Models
 # ─────────────────────────────────────────────────────────────────────────────
 

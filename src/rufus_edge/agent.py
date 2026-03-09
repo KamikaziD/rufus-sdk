@@ -30,6 +30,7 @@ from rufus_edge.models import (
 )
 from rufus_edge.sync_manager import SyncManager
 from rufus_edge.config_manager import ConfigManager
+from rufus_edge.workflow_sync import EdgeWorkflowSyncer
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class RufusEdgeAgent:
         config_poll_interval: int = 60,
         sync_interval: int = 30,
         heartbeat_interval: int = 60,
+        workflow_sync_enabled: bool = True,
     ):
         """
         Initialize the edge agent.
@@ -91,6 +93,7 @@ class RufusEdgeAgent:
         self.config_poll_interval = config_poll_interval
         self.sync_interval = sync_interval
         self.heartbeat_interval = heartbeat_interval
+        self.workflow_sync_enabled = workflow_sync_enabled
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -99,6 +102,7 @@ class RufusEdgeAgent:
         self.workflow_builder: Optional[WorkflowBuilder] = None
         self.sync_manager: Optional[SyncManager] = None
         self.config_manager: Optional[ConfigManager] = None
+        self.workflow_syncer: Optional[EdgeWorkflowSyncer] = None
 
         # State
         self._is_running = False
@@ -149,6 +153,15 @@ class RufusEdgeAgent:
             template_engine_cls=Jinja2TemplateEngine,
         )
 
+        # Initialize workflow syncer (push completed workflows to cloud on sync cycles)
+        if self.workflow_sync_enabled:
+            self.workflow_syncer = EdgeWorkflowSyncer(
+                persistence=self.persistence,
+                cloud_url=self.cloud_url,
+                device_id=self.device_id,
+                api_key=self.api_key,
+            )
+
         # Register config change callback to reload workflows
         self.config_manager.on_config_change(self._on_config_change)
 
@@ -159,6 +172,9 @@ class RufusEdgeAgent:
         # Start background tasks
         self._background_tasks.append(
             asyncio.create_task(self._sync_loop())
+        )
+        self._background_tasks.append(
+            asyncio.create_task(self._reconnect_sync_loop())
         )
         self._background_tasks.append(
             asyncio.create_task(self._heartbeat_loop())
@@ -383,7 +399,7 @@ class RufusEdgeAgent:
                 self._is_online = await self.sync_manager.check_connectivity()
 
                 if self._is_online:
-                    # Attempt sync
+                    # Attempt SAF sync
                     pending = await self.sync_manager.get_pending_count()
                     if pending > 0:
                         logger.info(f"Syncing {pending} pending transactions...")
@@ -393,10 +409,64 @@ class RufusEdgeAgent:
                             f"{report.failed_count} failed"
                         )
 
+                    # Attempt workflow sync (push completed workflows to cloud + purge SQLite)
+                    if self.workflow_syncer:
+                        try:
+                            ws_result = await self.workflow_syncer.sync()
+                            if ws_result.get("synced", 0) > 0:
+                                logger.info(f"Workflow sync complete: {ws_result}")
+                        except Exception as exc:
+                            logger.warning(f"Workflow sync error: {exc}")
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Sync loop error: {e}")
+
+    async def _reconnect_sync_loop(self):
+        """Fast-polls connectivity while offline; triggers an immediate sync the
+        moment the device comes back online, without waiting for _sync_loop's
+        full sync_interval to elapse."""
+        OFFLINE_POLL_INTERVAL = 5  # seconds between connectivity checks while offline
+        while True:
+            try:
+                if self._is_online:
+                    # Already online — nothing to do; _sync_loop handles periodic syncs.
+                    # Check again after a short sleep so we catch transitions quickly.
+                    await asyncio.sleep(OFFLINE_POLL_INTERVAL)
+                    continue
+
+                # Device is offline — poll until we're back
+                await asyncio.sleep(OFFLINE_POLL_INTERVAL)
+                is_now_online = await self.sync_manager.check_connectivity()
+                if not is_now_online:
+                    continue
+
+                # Transition: offline → online
+                self._is_online = True
+                logger.info("Device reconnected — running immediate sync")
+
+                if self.sync_manager:
+                    pending = await self.sync_manager.get_pending_count()
+                    if pending > 0:
+                        report = await self.sync_manager.sync_all_pending()
+                        logger.info(
+                            f"Reconnect SAF sync: {report.synced_count} synced, "
+                            f"{report.failed_count} failed"
+                        )
+
+                if self.workflow_syncer:
+                    try:
+                        ws_result = await self.workflow_syncer.sync()
+                        if ws_result.get("synced", 0) > 0:
+                            logger.info(f"Reconnect workflow sync: {ws_result}")
+                    except Exception as exc:
+                        logger.warning(f"Reconnect workflow sync error: {exc}")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Reconnect sync loop error: {e}")
 
     async def _heartbeat_loop(self):
         """Background heartbeat loop - reports device health to cloud."""
@@ -457,6 +527,9 @@ class RufusEdgeAgent:
         if cmd_type == "force_sync":
             if self.sync_manager:
                 await self.sync_manager.sync_all_pending()
+            if self.workflow_syncer:
+                result = await self.workflow_syncer.sync()
+                logger.info(f"force_sync: workflow sync result: {result}")
         elif cmd_type == "reload_config":
             if self.config_manager:
                 await self.config_manager.pull_config()

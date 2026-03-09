@@ -5,9 +5,42 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Parse a timestamp string as UTC.
+ *
+ * PostgreSQL/SQLite store timestamps in UTC but serialize them without a
+ * timezone suffix (e.g. "2026-03-09T12:33:00").  JavaScript's Date constructor
+ * treats such strings as *local* time, which is wrong.  Appending "Z" forces
+ * UTC interpretation, after which toLocale* methods convert to the browser's
+ * local timezone automatically.
+ */
+export function parseUtcDate(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  // Already has timezone info — leave as-is
+  const hasOffset = s.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(s);
+  const normalized = hasOffset ? s : s + "Z";
+  const d = new Date(normalized);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Format a UTC timestamp as a short date + time in the browser's local timezone. */
+export function formatDateTime(s: string | null | undefined): string {
+  const d = parseUtcDate(s);
+  if (!d) return "—";
+  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+/** Format a UTC timestamp as a time-only string in the browser's local timezone. */
+export function formatTime(s: string | null | undefined): string {
+  const d = parseUtcDate(s);
+  if (!d) return "—";
+  return d.toLocaleTimeString();
+}
+
 export function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return "—";
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const d = parseUtcDate(dateStr);
+  if (!d) return "—";
+  const diff = Date.now() - d.getTime();
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
@@ -22,8 +55,8 @@ export function truncateId(id: string, length = 8): string {
 }
 
 export function formatDuration(startedAt: string, completedAt: string | null): string {
-  const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const start = parseUtcDate(startedAt)?.getTime() ?? 0;
+  const end = completedAt ? (parseUtcDate(completedAt)?.getTime() ?? Date.now()) : Date.now();
   const ms = end - start;
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;

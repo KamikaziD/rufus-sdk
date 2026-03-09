@@ -12,7 +12,7 @@ import { HitlForm } from "@/components/workflows/HitlForm";
 import { WorkflowDAG } from "@/components/workflows/WorkflowDAG";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { truncateId } from "@/lib/utils";
+import { truncateId, formatTime } from "@/lib/utils";
 import { RefreshCw, RotateCcw, XCircle, Bug, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
@@ -178,7 +178,7 @@ function AuditLogTab({ entries }: { entries: { timestamp: string; event: string;
       {entries.map((entry, i) => (
         <div key={i} className="flex gap-4 text-sm">
           <span className="text-muted-foreground font-mono text-xs w-36 flex-shrink-0">
-            {new Date(entry.timestamp).toLocaleTimeString()}
+            {formatTime(entry.timestamp)}
           </span>
           <span className="font-medium">{entry.event}</span>
           {entry.step && (

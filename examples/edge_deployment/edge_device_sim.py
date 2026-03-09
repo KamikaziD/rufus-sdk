@@ -14,6 +14,7 @@ Environment variables:
     DB_PATH               SQLite database path (default: /tmp/edge_sim.db)
     RUFUS_REGISTRATION_KEY  Key required for /api/v1/devices/register (default: test-registration-key)
     TELEMETRY_INTERVAL    Seconds between telemetry cycles (default: 30)
+    EDGE_WORKFLOW_SYNC    Push completed workflows to cloud + purge SQLite (default: true)
 """
 
 import asyncio
@@ -35,6 +36,7 @@ DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
 ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
 REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
 TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
+EDGE_WORKFLOW_SYNC = os.getenv("EDGE_WORKFLOW_SYNC", "true").lower() == "true"
 
 # Persist API key alongside the SQLite DB so it survives container restarts
 _API_KEY_FILE = DB_PATH + ".apikey"
@@ -52,7 +54,7 @@ EDGE_TELEMETRY_YAML = """
 workflow_type: "EdgeTelemetry"
 workflow_version: "1.0.0"
 description: "Continuous system telemetry for edge device health monitoring"
-initial_state_model: "telemetry_steps.TelemetryState"
+initial_state_model_path: "telemetry_steps.TelemetryState"
 
 steps:
   - name: "Collect_Telemetry"
@@ -251,6 +253,7 @@ async def main():
         heartbeat_interval=30,    # poll for commands every 30 s
         config_poll_interval=60,
         sync_interval=60,
+        workflow_sync_enabled=EDGE_WORKFLOW_SYNC,
     )
 
     await agent.start()

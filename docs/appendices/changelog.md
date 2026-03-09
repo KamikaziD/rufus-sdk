@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.9] - 2026-03-09
+
+### Added
+- **Edge Workflow Sync** — `EdgeWorkflowSyncer` pushes completed edge workflows + audit logs
+  to cloud PostgreSQL in batches of 100 (oldest-first); purges local SQLite rows after
+  cloud ack; idempotent `ON CONFLICT DO NOTHING` on server side
+- **Immediate reconnect sync** — new `_reconnect_sync_loop` polls connectivity every 5 s while
+  offline; triggers SAF + workflow sync within 5 s of reconnect (no 60 s wait)
+- **`force_sync` command now includes workflow sync** — dashboard Force Sync button pushes
+  both SAF transactions and completed workflows
+
+### Fixed
+- **Dashboard timezone display** — all timestamps now parsed as UTC via `parseUtcDate()` in
+  `utils.ts`; affects Audit Log, Workflow Detail, and Admin pages
+- **Synced edge workflow detail 404** — `get_workflow_status` falls back to raw DB row when
+  edge step modules are not installed on the cloud server
+- **SQLite `workflow_audit_log` FK + CASCADE** — audit rows cascade-delete when parent
+  workflow is purged; explicit pre-delete ensures backwards compatibility with older DBs
+
+---
+
 ## [0.7.8] - 2026-03-09
 
 ### Added

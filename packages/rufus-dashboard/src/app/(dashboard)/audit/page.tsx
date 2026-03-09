@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { queryAuditLogs, exportAuditLogs } from "@/lib/api";
+import { formatDateTime } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -94,7 +95,7 @@ export default function AuditPage() {
                   {logs.map((entry) => (
                     <tr key={entry.log_id} className="border-b hover:bg-muted/30">
                       <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                        {new Date(entry.timestamp).toLocaleString()}
+                        {formatDateTime(entry.timestamp)}
                       </td>
                       <td className="px-4 py-2">
                         <Badge variant="outline">{entry.event_type}</Badge>
