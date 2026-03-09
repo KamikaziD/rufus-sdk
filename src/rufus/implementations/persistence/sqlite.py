@@ -223,6 +223,13 @@ CREATE TABLE IF NOT EXISTS edge_sync_state (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS edge_workflow_cache (
+    workflow_type TEXT PRIMARY KEY,
+    yaml_content  TEXT NOT NULL,
+    version       TEXT,
+    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

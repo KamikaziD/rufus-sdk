@@ -14,7 +14,7 @@ intentionally separate from database.py (PostgreSQL / Alembic) because:
 
   CLOUD (PostgreSQL + Alembic)          EDGE (SQLite + sqlite.py)
   ────────────────────────────          ──────────────────────────
-  33 tables, fully Alembic-managed      10 tables, CREATE IF NOT EXISTS
+  33 tables, fully Alembic-managed      11 tables, CREATE IF NOT EXISTS
   database.py = single source of truth  sqlite.py SQLITE_SCHEMA = source of truth
   Migrations: alembic upgrade head      Migrations: re-create or restart device
 
@@ -24,12 +24,14 @@ intentionally separate from database.py (PostgreSQL / Alembic) because:
   transactions for cloud sync. This is a deliberate hack documented here.
   Future: migrate to saf_pending_transactions table.
 
-* ConfigManager uses the tasks table with step_name='CONFIG_CACHE' to cache
-  device config. This is a deliberate hack documented here.
-  Future: migrate to device_config_cache table.
+* ConfigManager (v0.7.7+): fully migrated off the tasks table.
+  - _cache_config / _load_cached_config → device_config_cache table
+  - handle_update_workflow_command / load_local_workflow_definitions →
+    edge_workflow_cache table (added in v0.7.7)
+  No more FOREIGN KEY constraint violations from sentinel execution_id values.
 
-* The three new edge-specific tables (saf_pending_transactions,
-  device_config_cache, edge_sync_state) are appended to SQLITE_SCHEMA in
+* The four edge-specific tables (saf_pending_transactions, device_config_cache,
+  edge_sync_state, edge_workflow_cache) are appended to SQLITE_SCHEMA in
   sqlite.py. New edge deployments will have them; existing deployments can
   add them via: sqlite3 device.db < edge_tables.sql
 
@@ -51,8 +53,9 @@ EDGE_CORE_TABLES = [
 # New edge-specific tables appended to SQLITE_SCHEMA (sqlite.py)
 EDGE_SPECIFIC_TABLES = [
     "saf_pending_transactions",  # Proper SAF queue (future: replace tasks hack)
-    "device_config_cache",       # Proper config cache (future: replace tasks hack)
+    "device_config_cache",       # Device config cache (ConfigManager, v0.7.7+)
     "edge_sync_state",           # Sync cursor / progress tracking
+    "edge_workflow_cache",       # Workflow YAML cache (ConfigManager, v0.7.7+)
 ]
 
 # All edge tables
@@ -62,7 +65,8 @@ ALL_EDGE_TABLES = EDGE_CORE_TABLES + EDGE_SPECIFIC_TABLES
 EDGE_SCHEMA_SQL = """
 -- ===================================================================
 -- Edge-Specific Tables
--- SyncManager and ConfigManager still use tasks table (legacy support)
+-- SyncManager still uses the tasks table (legacy; future: migrate).
+-- ConfigManager was fully migrated to these tables in v0.7.7.
 -- ===================================================================
 
 CREATE TABLE IF NOT EXISTS saf_pending_transactions (
@@ -100,5 +104,12 @@ CREATE TABLE IF NOT EXISTS edge_sync_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS edge_workflow_cache (
+    workflow_type TEXT PRIMARY KEY,
+    yaml_content  TEXT NOT NULL,
+    version       TEXT,
+    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

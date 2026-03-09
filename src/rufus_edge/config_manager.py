@@ -223,64 +223,50 @@ class ConfigManager:
             return False
 
     async def _load_cached_config(self):
-        """Load cached config from local storage via SQLite tasks table."""
+        """Load cached config from local storage via device_config_cache table."""
         if not self.persistence:
             return
 
         try:
             async with self.persistence.conn.execute(
-                """
-                SELECT task_data FROM tasks
-                WHERE step_name = 'CONFIG_CACHE'
-                  AND execution_id = ?
-                  AND status = 'COMPLETED'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
+                "SELECT config_data, etag FROM device_config_cache WHERE device_id = ?",
                 (self.device_id,)
             ) as cursor:
                 row = await cursor.fetchone()
 
             if row:
                 cached = self.persistence._deserialize_json(row[0])
-                if cached and "config" in cached:
-                    self._current_config = DeviceConfig(**cached["config"])
-                    self._current_etag = cached.get("etag")
-                    logger.info("Loaded cached config from local storage")
+                self._current_config = DeviceConfig(**cached)
+                self._current_etag = row[1]
+                logger.info("Loaded cached config from local storage")
         except Exception as e:
             logger.warning(f"Failed to load cached config: {e}")
 
     async def _cache_config(self):
-        """Cache current config to local storage via SQLite tasks table."""
+        """Cache current config to local storage via device_config_cache table."""
         if not self.persistence or not self._current_config:
             return
 
         try:
-            cache_data = self.persistence._serialize_json({
-                "config": self._current_config.model_dump(mode="json"),
-                "etag": self._current_etag,
-                "cached_at": datetime.utcnow().isoformat(),
-            })
-
-            # Upsert: delete old cache, insert new
             await self.persistence.conn.execute(
                 """
-                DELETE FROM tasks
-                WHERE step_name = 'CONFIG_CACHE' AND execution_id = ?
-                """,
-                (self.device_id,)
-            )
-            await self.persistence.conn.execute(
-                """
-                INSERT INTO tasks (
-                    task_id, execution_id, step_name, step_index,
-                    status, task_data
-                ) VALUES (?, ?, 'CONFIG_CACHE', 0, 'COMPLETED', ?)
+                INSERT INTO device_config_cache
+                    (device_id, config_version, config_data, etag, cached_at, last_poll_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    config_version = excluded.config_version,
+                    config_data    = excluded.config_data,
+                    etag           = excluded.etag,
+                    cached_at      = excluded.cached_at,
+                    last_poll_at   = excluded.last_poll_at
                 """,
                 (
-                    self.persistence._generate_uuid(),
                     self.device_id,
-                    cache_data,
+                    self._current_config.version,
+                    self.persistence._serialize_json(
+                        self._current_config.model_dump(mode="json")
+                    ),
+                    self._current_etag,
                 )
             )
             await self.persistence.conn.commit()
@@ -826,33 +812,16 @@ class ConfigManager:
         # Persist to local SQLite so the YAML survives a device restart
         if self.persistence:
             try:
-                cache_key = f"WORKFLOW_DEF_{workflow_type}"
-                cache_data = self.persistence._serialize_json({
-                    "workflow_type": workflow_type,
-                    "yaml_content": yaml_content,
-                    "version": version,
-                    "updated_at": datetime.utcnow().isoformat(),
-                })
-                # Upsert: delete old entry, insert new
                 await self.persistence.conn.execute(
                     """
-                    DELETE FROM tasks
-                    WHERE step_name = ? AND execution_id = 'EDGE_CONFIG'
+                    INSERT INTO edge_workflow_cache (workflow_type, yaml_content, version, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(workflow_type) DO UPDATE SET
+                        yaml_content = excluded.yaml_content,
+                        version      = excluded.version,
+                        updated_at   = excluded.updated_at
                     """,
-                    (cache_key,)
-                )
-                await self.persistence.conn.execute(
-                    """
-                    INSERT INTO tasks (
-                        task_id, execution_id, step_name, step_index,
-                        status, task_data
-                    ) VALUES (?, 'EDGE_CONFIG', ?, 0, 'COMPLETED', ?)
-                    """,
-                    (
-                        self.persistence._generate_uuid(),
-                        cache_key,
-                        cache_data,
-                    )
+                    (workflow_type, yaml_content, str(version))
                 )
                 await self.persistence.conn.commit()
                 logger.info(
@@ -892,30 +861,21 @@ class ConfigManager:
         loaded = 0
         try:
             async with self.persistence.conn.execute(
-                """
-                SELECT step_name, task_data FROM tasks
-                WHERE execution_id = 'EDGE_CONFIG'
-                  AND step_name LIKE 'WORKFLOW_DEF_%'
-                  AND status = 'COMPLETED'
-                """
+                "SELECT workflow_type, yaml_content, version FROM edge_workflow_cache"
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            for step_name, task_data in rows:
+            for workflow_type, yaml_content, version in rows:
                 try:
-                    cached = self.persistence._deserialize_json(task_data)
-                    if cached and "yaml_content" in cached:
-                        workflow_builder.reload_workflow_type(
-                            cached["workflow_type"],
-                            cached["yaml_content"],
-                        )
-                        loaded += 1
-                        logger.info(
-                            f"Loaded local workflow definition "
-                            f"'{cached['workflow_type']}' v{cached.get('version', '?')}"
-                        )
+                    workflow_builder.reload_workflow_type(workflow_type, yaml_content)
+                    loaded += 1
+                    logger.info(
+                        f"Loaded local workflow definition '{workflow_type}' v{version}"
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to load cached definition {step_name}: {e}")
+                    logger.warning(
+                        f"Failed to load cached definition '{workflow_type}': {e}"
+                    )
 
         except Exception as e:
             logger.warning(f"Failed to load local workflow definitions: {e}")
