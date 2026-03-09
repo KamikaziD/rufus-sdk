@@ -3585,65 +3585,71 @@ async def query_audit_logs(
     user: Optional[UserContext] = Depends(get_current_user)
 ):
     """
-    Query audit logs with filters.
+    Query workflow audit events across all workflows.
 
     Example:
     ```json
     {
       "start_time": "2026-02-01T00:00:00Z",
       "end_time": "2026-02-04T23:59:59Z",
-      "device_id": "macbook-m4-001",
-      "event_types": ["command_created", "command_completed"],
-      "limit": 100,
+      "event_types": ["WORKFLOW_COMPLETED", "WORKFLOW_FAILED"],
+      "limit": 50,
       "offset": 0
     }
     ```
     """
-    global audit_service
+    limit  = int(query_data.get("limit", 50))
+    offset = int(query_data.get("offset", 0))
+    event_types = query_data.get("event_types") or []
+    start_time  = query_data.get("start_time")
+    end_time    = query_data.get("end_time")
 
-    if not audit_service:
-        from rufus_server.audit_service import AuditService
-        audit_service = AuditService(workflow_engine.persistence)
+    filters = ["1=1"]
+    args    = []
+    idx     = 1
 
-    from rufus_server.audit import AuditQuery
-    from datetime import datetime
+    if event_types:
+        filters.append(f"event_type = ANY(${idx}::text[])")
+        args.append(event_types); idx += 1
+    if start_time:
+        filters.append(f"timestamp >= ${idx}::timestamptz")
+        args.append(start_time); idx += 1
+    if end_time:
+        filters.append(f"timestamp <= ${idx}::timestamptz")
+        args.append(end_time); idx += 1
 
-    # Parse datetime strings
-    if "start_time" in query_data and isinstance(query_data["start_time"], str):
-        query_data["start_time"] = datetime.fromisoformat(
-            query_data["start_time"].replace("Z", "+00:00")
-        )
+    where = " AND ".join(filters)
 
-    if "end_time" in query_data and isinstance(query_data["end_time"], str):
-        query_data["end_time"] = datetime.fromisoformat(
-            query_data["end_time"].replace("Z", "+00:00")
-        )
-
-    query = AuditQuery(**query_data)
-    result = await audit_service.query_logs(query)
-
-    return {
-        "entries": [
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            total = await conn.fetchval(
+                f"SELECT COUNT(*) FROM workflow_audit_log WHERE {where}", *args
+            )
+            rows = await conn.fetch(
+                f"""
+                SELECT id, workflow_id, event_type, step_name, actor,
+                       old_status, new_status, details, timestamp
+                FROM workflow_audit_log
+                WHERE {where}
+                ORDER BY timestamp DESC
+                LIMIT {limit} OFFSET {offset}
+                """,
+                *args
+            )
+        entries = [
             {
-                "audit_id": entry.audit_id,
-                "event_type": entry.event_type,
-                "command_type": entry.command_type,
-                "device_id": entry.device_id,
-                "merchant_id": entry.merchant_id,
-                "actor_type": entry.actor_type,
-                "actor_id": entry.actor_id,
-                "status": entry.status,
-                "timestamp": entry.timestamp.isoformat(),
-                "error_message": entry.error_message,
-                "compliance_tags": entry.compliance_tags
+                "log_id":      str(row["id"]),
+                "timestamp":   row["timestamp"].isoformat() if row["timestamp"] else None,
+                "event_type":  row["event_type"],
+                "entity_type": "workflow",
+                "entity_id":   row["workflow_id"],
+                "actor":       row["actor"] or "system",
             }
-            for entry in result.entries
-        ],
-        "total_count": result.total_count,
-        "limit": result.limit,
-        "offset": result.offset,
-        "has_more": result.has_more
-    }
+            for row in rows
+        ]
+        return {"entries": entries, "total_count": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {str(e)}")
 
 
 @app.post("/api/v1/audit/export", tags=["Audit"])

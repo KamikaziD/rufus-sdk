@@ -1,22 +1,25 @@
 """
-edge_device_sim.py — Minimal Rufus edge device emulator for docker-compose testing.
+edge_device_sim.py — Rufus edge device emulator for docker-compose testing.
 
 1. Registers the device with the cloud control plane.
 2. Starts RufusEdgeAgent (heartbeat + config polling).
-3. Keeps running so push-workflow / update_workflow commands can be tested live.
+3. Runs a continuous EdgeTelemetry workflow loop (TELEMETRY_INTERVAL seconds).
+4. Gracefully shuts down on SIGTERM / SIGINT.
 
 Environment variables:
-    CLOUD_URL           Cloud control plane URL (default: http://rufus-server:8000)
-    DEVICE_ID           Unique device identifier (default: sim-device-001)
-    RUFUS_API_KEY       API key returned after registration (leave blank; set after register)
+    CLOUD_URL             Cloud control plane URL (default: http://rufus-server:8000)
+    DEVICE_ID             Unique device identifier (default: sim-device-001)
+    RUFUS_API_KEY         API key returned after registration (leave blank; set after register)
     RUFUS_ENCRYPTION_KEY  Encryption key for workflow state (optional)
-    DB_PATH             SQLite database path (default: /tmp/edge_sim.db)
+    DB_PATH               SQLite database path (default: /tmp/edge_sim.db)
     RUFUS_REGISTRATION_KEY  Key required for /api/v1/devices/register (default: test-registration-key)
+    TELEMETRY_INTERVAL    Seconds between telemetry cycles (default: 30)
 """
 
 import asyncio
 import logging
 import os
+import signal
 
 import httpx
 
@@ -31,9 +34,50 @@ DEVICE_ID = os.getenv("DEVICE_ID", "sim-device-001")
 DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
 ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
 REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
+TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
 
 # Persist API key alongside the SQLite DB so it survives container restarts
 _API_KEY_FILE = DB_PATH + ".apikey"
+
+# Graceful shutdown event
+_shutdown_event = asyncio.Event()
+
+
+def _handle_signal(sig, frame):
+    logger.info(f"Signal {sig} received — stopping telemetry loop gracefully")
+    _shutdown_event.set()
+
+
+EDGE_TELEMETRY_YAML = """
+workflow_type: "EdgeTelemetry"
+workflow_version: "1.0.0"
+description: "Continuous system telemetry for edge device health monitoring"
+initial_state_model: "telemetry_steps.TelemetryState"
+
+steps:
+  - name: "Collect_Telemetry"
+    type: "STANDARD"
+    function: "telemetry_steps.collect_telemetry"
+    description: "Gather CPU/memory/disk/network metrics"
+    automate_next: true
+
+  - name: "Analyse_Metrics"
+    type: "STANDARD"
+    function: "telemetry_steps.analyse_metrics"
+    description: "Check thresholds and classify device health"
+    automate_next: true
+
+  - name: "Sync_Telemetry"
+    type: "STANDARD"
+    function: "telemetry_steps.sync_telemetry"
+    description: "Report to cloud if online; track SAF queue depth if offline"
+    automate_next: true
+
+  - name: "Finalise_Cycle"
+    type: "STANDARD"
+    function: "telemetry_steps.finalise_cycle"
+    description: "Log cycle summary and DB growth projections"
+"""
 
 
 async def register_device() -> str:
@@ -63,7 +107,7 @@ async def register_device() -> str:
                 "device_name": f"Sim Device {DEVICE_ID}",
                 "merchant_id": "test-merchant-001",
                 "firmware_version": "1.0.0",
-                "sdk_version": "0.7.5",
+                "sdk_version": "0.7.7",
                 "capabilities": ["workflow_execution", "update_workflow"],
             },
             headers={"X-Registration-Key": REGISTRATION_KEY},
@@ -92,6 +136,92 @@ async def register_device() -> str:
         return ""
 
 
+async def _register_telemetry_workflow(agent):
+    """Inject EdgeTelemetry YAML into the WorkflowBuilder via the config cache."""
+    ok = await agent.config_manager.handle_update_workflow_command(
+        {
+            "workflow_type": "EdgeTelemetry",
+            "yaml_content": EDGE_TELEMETRY_YAML.strip(),
+            "version": "1.0.0",
+        },
+        workflow_builder=agent.workflow_builder,
+    )
+    logger.info(
+        f"EdgeTelemetry workflow registered (cached in edge_workflow_cache): {ok}"
+    )
+
+
+async def _run_workflow_direct(agent, workflow_type: str, data: dict) -> dict:
+    """
+    Run a workflow to completion, bypassing the config_manager.get_workflow_config()
+    check that only knows about DeviceConfig.workflows (cloud-polled definitions).
+
+    Workflows registered via handle_update_workflow_command() live in
+    workflow_builder._workflow_configs, which create_workflow() looks up directly.
+    """
+    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+
+    workflow = await agent.workflow_builder.create_workflow(
+        workflow_type=workflow_type,
+        persistence_provider=agent.persistence,
+        execution_provider=agent.executor,
+        workflow_builder=agent.workflow_builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=agent.observer,
+        initial_data=data,
+        owner_id=agent.device_id,
+    )
+
+    try:
+        while workflow.status not in (
+            "COMPLETED", "FAILED", "CANCELLED", "FAILED_ROLLED_BACK"
+        ):
+            await workflow.next_step(user_input={})
+
+        return {
+            "workflow_id": workflow.id,
+            "status": workflow.status,
+            "state": (
+                workflow.state.model_dump()
+                if hasattr(workflow.state, "model_dump")
+                else {}
+            ),
+        }
+    except Exception as exc:
+        logger.error(f"Workflow {workflow_type} failed: {exc}")
+        return {
+            "workflow_id": getattr(workflow, "id", "?"),
+            "status": "FAILED",
+            "error": str(exc),
+        }
+
+
+async def telemetry_loop(agent):
+    """Continuously run EdgeTelemetry workflow, pausing TELEMETRY_INTERVAL between cycles."""
+    cycle = 0
+    logger.info(
+        f"Telemetry loop started (interval={TELEMETRY_INTERVAL}s). "
+        "Stop container or cut network to emulate disconnection / power failure."
+    )
+    while not _shutdown_event.is_set():
+        cycle += 1
+        logger.info(f"─── Telemetry cycle {cycle} ───")
+        await _run_workflow_direct(agent, "EdgeTelemetry", {
+            "device_id": DEVICE_ID,
+            "cloud_url": CLOUD_URL,
+            "db_path": DB_PATH,
+            "cycle": cycle,
+        })
+        try:
+            await asyncio.wait_for(
+                _shutdown_event.wait(), timeout=float(TELEMETRY_INTERVAL)
+            )
+        except asyncio.TimeoutError:
+            pass
+
+
 async def main():
     # Wait for server to be reachable
     for attempt in range(20):
@@ -118,20 +248,24 @@ async def main():
         api_key=api_key,
         db_path=DB_PATH,
         encryption_key=ENCRYPTION_KEY,
-        heartbeat_interval=30,   # poll for commands every 30 s
+        heartbeat_interval=30,    # poll for commands every 30 s
         config_poll_interval=60,
         sync_interval=60,
     )
 
     await agent.start()
-    logger.info("Edge agent running. Waiting for workflow push commands...")
+    logger.info("Edge agent running — starting telemetry loop...")
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    await _register_telemetry_workflow(agent)
 
     try:
-        await asyncio.sleep(999_999)
-    except asyncio.CancelledError:
-        pass
+        await telemetry_loop(agent)
     finally:
         await agent.stop()
+        logger.info("Edge sim stopped cleanly.")
 
 
 if __name__ == "__main__":

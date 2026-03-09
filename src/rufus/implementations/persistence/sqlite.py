@@ -442,6 +442,36 @@ class SQLitePersistenceProvider(PersistenceProvider):
         ))
         await self.conn.commit()
 
+        # Write audit event
+        _STATUS_TO_EVENT = {
+            'RUNNING':   'STEP_EXECUTED',
+            'COMPLETED': 'WORKFLOW_COMPLETED',
+            'FAILED':    'WORKFLOW_FAILED',
+            'PENDING':   'WORKFLOW_CREATED',
+            'PAUSED':    'WORKFLOW_PAUSED',
+            'CANCELLED': 'WORKFLOW_CANCELLED',
+        }
+        event_type = _STATUS_TO_EVENT.get(workflow_dict.get('status', ''), 'STATUS_CHANGED')
+        try:
+            await self.conn.execute(
+                """
+                INSERT INTO workflow_audit_log
+                    (audit_id, workflow_id, event_type, step_name, user_id, new_state)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    workflow_id,
+                    event_type,
+                    str(workflow_dict.get('current_step', '')) if workflow_dict.get('current_step') is not None else None,
+                    workflow_dict.get('owner_id'),
+                    workflow_dict.get('status'),
+                )
+            )
+            await self.conn.commit()
+        except Exception as _audit_err:
+            logger.warning(f"Audit log write failed (non-fatal): {_audit_err}")
+
     async def load_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
         """
         Load workflow state by ID

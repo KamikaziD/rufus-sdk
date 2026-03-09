@@ -176,6 +176,32 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 encryption_key_id
             )
 
+            # Write audit event — map workflow status → audit event_type
+            _STATUS_TO_EVENT = {
+                'RUNNING':   'STEP_EXECUTED',
+                'COMPLETED': 'WORKFLOW_COMPLETED',
+                'FAILED':    'WORKFLOW_FAILED',
+                'PENDING':   'WORKFLOW_CREATED',
+                'PAUSED':    'WORKFLOW_PAUSED',
+                'CANCELLED': 'WORKFLOW_CANCELLED',
+            }
+            event_type = _STATUS_TO_EVENT.get(workflow_dict['status'], 'STATUS_CHANGED')
+            try:
+                await conn.execute("""
+                    INSERT INTO workflow_audit_log
+                        (workflow_id, event_type, step_name, actor, new_status, details)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                    workflow_dict['id'],
+                    event_type,
+                    workflow_dict.get('current_step'),
+                    workflow_dict.get('owner_id'),
+                    workflow_dict['status'],
+                    serialize({'metadata': workflow_dict.get('metadata')}) if workflow_dict.get('metadata') else None,
+                )
+            except Exception as _audit_err:
+                logger.warning(f"Audit log write failed (non-fatal): {_audit_err}")
+
             logger.debug(f"Saved workflow {workflow_id} (status={workflow_dict['status']})")
 
     async def load_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
@@ -380,18 +406,15 @@ class PostgresPersistenceProvider(PersistenceProvider):
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO workflow_audit_log
-                    (workflow_id, event_type, step_name, user_id, worker_id,
-                     old_state, new_state, decision_rationale, metadata, recorded_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    (workflow_id, event_type, step_name, actor, old_status, new_status, details)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
                 workflow_id,
                 event_type,
                 step_name,
-                user_id,
-                worker_id,
+                user_id or worker_id,
                 serialize(old_state) if old_state else None,
                 serialize(new_state) if new_state else None,
-                decision_rationale,
                 serialize(metadata) if metadata else None
             )
 

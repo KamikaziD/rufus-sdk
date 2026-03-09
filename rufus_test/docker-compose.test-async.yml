@@ -51,7 +51,7 @@ services:
   # Rufus API Server — runs Alembic migration before starting uvicorn
   # ─────────────────────────────────────────────────────────────────────────
   rufus-server:
-    image: ruhfuskdev/rufus-server:${VERSION:-0.7.6}
+    image: ruhfuskdev/rufus-server:${VERSION:-0.7.7}
     container_name: test-rufus-server
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -68,12 +68,14 @@ services:
       - ../src/rufus_server/main.py:/usr/local/lib/python3.11/site-packages/rufus_server/main.py:ro
       - ../src/rufus_server/api_models.py:/usr/local/lib/python3.11/site-packages/rufus_server/api_models.py:ro
       - ../src/rufus_server/webhook_service.py:/usr/local/lib/python3.11/site-packages/rufus_server/webhook_service.py:ro
+      - ../src/rufus/implementations/persistence/postgres.py:/usr/local/lib/python3.11/site-packages/rufus/implementations/persistence/postgres.py:ro
     command: >
       sh -c "
         pip install psycopg2-binary -q &&
         touch /usr/local/lib/python3.11/site-packages/rufus_server/main.py
               /usr/local/lib/python3.11/site-packages/rufus_server/api_models.py
-              /usr/local/lib/python3.11/site-packages/rufus_server/webhook_service.py &&
+              /usr/local/lib/python3.11/site-packages/rufus_server/webhook_service.py
+              /usr/local/lib/python3.11/site-packages/rufus/implementations/persistence/postgres.py &&
         cd /usr/local/lib/python3.11/site-packages/rufus &&
         alembic upgrade head &&
         cd /app &&
@@ -99,7 +101,7 @@ services:
   # Celery Worker
   # ─────────────────────────────────────────────────────────────────────────
   celery-worker:
-    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.6}
+    image: ruhfuskdev/rufus-worker:${VERSION:-0.7.7}
     container_name: test-rufus-worker
     environment:
       DATABASE_URL: postgresql://rufus:rufus_test_secret@postgres:5432/rufus_test
@@ -108,8 +110,11 @@ services:
       RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-test-encryption-key-32chars-here!}
       LOG_LEVEL: DEBUG
       WORKER_ID: rufus-worker-1
+    volumes:
+      - ../src/rufus/implementations/persistence/postgres.py:/usr/local/lib/python3.11/site-packages/rufus/implementations/persistence/postgres.py:ro
     command: >
       sh -c "
+        touch /usr/local/lib/python3.11/site-packages/rufus/implementations/persistence/postgres.py &&
         celery -A rufus.celery_app worker
           --loglevel=${WORKER_LOG_LEVEL:-info}
           --concurrency=${WORKER_CONCURRENCY:-4}
@@ -131,7 +136,7 @@ services:
   # Edge Device Emulator — tests the upload-YAML → push-to-devices flow
   # ─────────────────────────────────────────────────────────────────────────
   rufus-edge-sim:
-    image: ruhfuskdev/rufus-edge-dev:${VERSION:-0.7.6}
+    image: ruhfuskdev/rufus-edge-dev:${VERSION:-0.7.7}
     container_name: test-edge-device
     environment:
       CLOUD_URL: http://rufus-server:8000
@@ -139,11 +144,18 @@ services:
       RUFUS_REGISTRATION_KEY: test-registration-key
       RUFUS_ENCRYPTION_KEY: ""
       DB_PATH: /data/edge_sim.db
+      TELEMETRY_INTERVAL: "30"
     volumes:
       # Persist DB + API key across container recreations
       - edge-sim-data:/data
-      # Bind-mount patched sim script
+      # Bind-mount patched sim script + telemetry step functions
       - ../examples/edge_deployment/edge_device_sim.py:/app/edge_device_sim.py:ro
+      - ../examples/edge_deployment/telemetry_steps.py:/app/telemetry_steps.py:ro
+    command: >
+      sh -c "
+        touch /app/edge_device_sim.py /app/telemetry_steps.py &&
+        python edge_device_sim.py
+      "
     depends_on:
       rufus-server:
         condition: service_healthy
