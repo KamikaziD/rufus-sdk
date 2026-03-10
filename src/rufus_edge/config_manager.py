@@ -872,6 +872,9 @@ class ConfigManager:
                     logger.info(
                         f"Loaded local workflow definition '{workflow_type}' v{version}"
                     )
+                    # Prefetch any WASM binaries referenced by this workflow
+                    if self.persistence and self._http_client:
+                        await self._prefetch_missing_wasm_binaries(yaml_content)
                 except Exception as e:
                     logger.warning(
                         f"Failed to load cached definition '{workflow_type}': {e}"
@@ -881,3 +884,133 @@ class ConfigManager:
             logger.warning(f"Failed to load local workflow definitions: {e}")
 
         return loaded
+
+    async def handle_sync_wasm_command(self, payload: dict) -> bool:
+        """Handle a sync_wasm command from the cloud.
+
+        Downloads a WASM binary identified by binary_hash and caches it in
+        the device_wasm_cache SQLite table. Idempotent — silently skips if
+        the hash is already cached.
+
+        Args:
+            payload: Command data dict containing:
+                binary_hash (str): SHA-256 hex digest of the .wasm binary.
+
+        Returns:
+            True if the binary was newly cached; False if already present or on error.
+        """
+        import hashlib
+
+        binary_hash = payload.get("binary_hash")
+        if not binary_hash:
+            logger.error("sync_wasm: missing binary_hash in command payload")
+            return False
+
+        if not self.persistence:
+            logger.error("sync_wasm: persistence not available")
+            return False
+
+        if not self._http_client:
+            logger.error("sync_wasm: HTTP client not initialized")
+            return False
+
+        # Idempotency check
+        try:
+            cursor = await self.persistence.conn.execute(
+                "SELECT 1 FROM device_wasm_cache WHERE binary_hash = ?",
+                (binary_hash,),
+            )
+            row = await cursor.fetchone()
+            if row:
+                logger.info(f"sync_wasm: binary already cached: {binary_hash[:16]}…")
+                return False
+        except Exception as e:
+            logger.warning(f"sync_wasm: cache lookup failed: {e}")
+
+        # Download binary from cloud
+        download_url = f"{self.config_url}/api/v1/wasm-components/{binary_hash}/download"
+        logger.info(f"sync_wasm: downloading {binary_hash[:16]}… from {download_url}")
+        try:
+            response = await self._http_client.get(download_url)
+            response.raise_for_status()
+            binary_data = response.content
+        except Exception as e:
+            logger.error(f"sync_wasm: download failed for {binary_hash[:16]}…: {e}")
+            return False
+
+        # Verify integrity
+        actual_hash = hashlib.sha256(binary_data).hexdigest()
+        if actual_hash != binary_hash:
+            logger.error(
+                f"sync_wasm: hash mismatch for downloaded binary "
+                f"(expected {binary_hash[:16]}…, got {actual_hash[:16]}…)"
+            )
+            return False
+
+        # Persist to SQLite cache
+        try:
+            from datetime import datetime
+            now = datetime.utcnow().isoformat()
+            await self.persistence.conn.execute(
+                "INSERT OR REPLACE INTO device_wasm_cache (binary_hash, binary_data, last_accessed) "
+                "VALUES (?, ?, ?)",
+                (binary_hash, binary_data, now),
+            )
+            await self.persistence.conn.commit()
+            logger.info(
+                f"sync_wasm: cached {len(binary_data):,} bytes for {binary_hash[:16]}…"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"sync_wasm: failed to write to device_wasm_cache: {e}")
+            return False
+
+    async def _prefetch_missing_wasm_binaries(self, yaml_content: str) -> None:
+        """Scan a workflow YAML for WASM steps and prefetch any uncached binaries.
+
+        Called from load_local_workflow_definitions() for each cached workflow.
+        Missing binaries are fetched in the background so they are ready when
+        the workflow runs.
+
+        Args:
+            yaml_content: Raw YAML string of the workflow definition.
+        """
+        import yaml as _yaml
+        import asyncio
+
+        try:
+            config = _yaml.safe_load(yaml_content)
+        except Exception as e:
+            logger.debug(f"_prefetch_missing_wasm_binaries: YAML parse error: {e}")
+            return
+
+        steps = config.get("steps", []) if isinstance(config, dict) else []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if step.get("type") != "WASM":
+                continue
+            wasm_config = step.get("wasm_config", {})
+            binary_hash = wasm_config.get("wasm_hash")
+            if not binary_hash:
+                continue
+
+            # Check cache
+            try:
+                cursor = await self.persistence.conn.execute(
+                    "SELECT 1 FROM device_wasm_cache WHERE binary_hash = ?",
+                    (binary_hash,),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    continue  # Already cached
+            except Exception:
+                continue
+
+            logger.info(
+                f"WASM binary not cached for step '{step.get('name')}' "
+                f"(hash={binary_hash[:16]}…) — scheduling background fetch"
+            )
+            asyncio.ensure_future(
+                self.handle_sync_wasm_command({"binary_hash": binary_hash})
+            )

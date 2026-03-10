@@ -232,6 +232,12 @@ CREATE TABLE IF NOT EXISTS edge_workflow_cache (
     version       TEXT,
     updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS device_wasm_cache (
+    binary_hash   TEXT PRIMARY KEY,
+    binary_data   BLOB NOT NULL,
+    last_accessed TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

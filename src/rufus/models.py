@@ -197,6 +197,65 @@ class AIInferenceWorkflowStep(WorkflowStep):
     merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
 
 
+class WasmConfig(BaseModel):
+    """Configuration for a WASM step execution via WASI stdin/stdout interface."""
+
+    wasm_hash: str = Field(
+        ...,
+        description="SHA-256 hex digest of the .wasm binary (used to resolve the binary)"
+    )
+    entrypoint: str = Field(
+        "execute",
+        description="Exported WASM function name to invoke"
+    )
+    state_mapping: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of workflow state key → WASM input key. If empty, full state is passed."
+    )
+    timeout_ms: int = Field(
+        5000,
+        ge=100,
+        le=60000,
+        description="Maximum execution time in milliseconds"
+    )
+    fallback_on_error: str = Field(
+        "fail",
+        description="Behavior on error: 'fail' raises, 'skip' returns {}, 'default' returns default_result"
+    )
+    default_result: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Result to return when fallback_on_error='default'"
+    )
+
+    model_config = {"extra": "forbid"}
+
+
+class WasmWorkflowStep(WorkflowStep):
+    """
+    Workflow step that executes a pre-compiled WebAssembly binary via the WASI interface.
+
+    The WASM module receives workflow state as JSON on stdin and must write its result
+    as JSON to stdout. State is selectively mapped via state_mapping, or the full state
+    dict is passed if state_mapping is empty.
+
+    Example YAML:
+        - name: "Calculate_Risk"
+          type: "WASM"
+          wasm_config:
+            wasm_hash: "a3f5c2d1..."
+            entrypoint: "execute"
+            state_mapping:
+              transaction_amount: "amount"
+              card_country: "country"
+            timeout_ms: 3000
+            fallback_on_error: "fail"
+          automate_next: true
+    """
+    wasm_config: WasmConfig
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+
 class ParallelExecutionTask(BaseModel):
     name: str
     func_path: str  # Path to the function for parallel execution

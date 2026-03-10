@@ -544,5 +544,10 @@ class RufusEdgeAgent:
             model_name = cmd_data.get("model_name")
             if model_name and self.config_manager:
                 logger.info(f"Cloud requested model update: {model_name}")
+        elif cmd_type == "sync_wasm":
+            if self.config_manager:
+                await self.config_manager.handle_sync_wasm_command(cmd_data)
+            else:
+                logger.warning("sync_wasm command received but config_manager is not set")
         else:
             logger.warning(f"Unknown cloud command: {cmd_type}")

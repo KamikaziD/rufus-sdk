@@ -40,6 +40,9 @@ Table inventory (36 cloud tables + alembic_version managed by Alembic):
   Edge config & SAF (4):
     device_configs, saf_transactions, device_assignments, policies
 
+  WASM component registry (1):
+    wasm_components
+
 Note: Persistence providers use raw SQL for performance-critical operations.
 Note: command_audit_log.searchable_text (TSVECTOR GENERATED) is added via
       op.execute() in the Alembic migration — it cannot be modelled in SA generically.
@@ -882,6 +885,28 @@ policies = Table(
 
     Index('ix_policy_status', 'status'),
     Index('ix_policy_name', 'policy_name'),
+)
+
+# ============================================================================
+# WASM Component Registry
+# ============================================================================
+
+wasm_components = Table(
+    'wasm_components',
+    metadata,
+    Column('id', String(36), primary_key=True),
+    Column('name', String(200), nullable=False, index=True),
+    Column('version_tag', String(50), nullable=False),
+    Column('binary_hash', String(64), nullable=False),     # SHA-256 hex digest
+    Column('blob_storage_path', Text, nullable=False),     # Local disk path to .wasm file
+    Column('input_schema', Text),                          # JSON string (optional documentation)
+    Column('output_schema', Text),                         # JSON string (optional documentation)
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('updated_at', DateTime, server_default=func.now(), onupdate=func.now()),
+
+    UniqueConstraint('binary_hash', name='uq_wasm_components_binary_hash'),
+    Index('ix_wasm_components_name', 'name'),
+    Index('ix_wasm_components_hash', 'binary_hash'),
 )
 
 # ============================================================================
