@@ -158,7 +158,8 @@ class WorkflowBuilder:
             WorkflowStep, ParallelExecutionTask, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
             MergeStrategy, MergeConflictBehavior,
-            AIInferenceWorkflowStep, AIInferenceConfig, HumanWorkflowStep
+            AIInferenceWorkflowStep, AIInferenceConfig, HumanWorkflowStep,
+            WasmWorkflowStep, WasmConfig
         )
 
         steps = []
@@ -261,6 +262,19 @@ class WorkflowBuilder:
                     merge_strategy=merge_strategy,
                     merge_conflict_behavior=merge_conflict_behavior,
                     routes=routes
+                )
+
+            elif step_type_str == "WASM":
+                wasm_config_dict = config.get("wasm_config", {})
+                wasm_config = WasmConfig(**wasm_config_dict)
+                step = WasmWorkflowStep(
+                    name=config["name"],
+                    wasm_config=wasm_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior,
                 )
 
             elif step_type_str == "FIRE_AND_FORGET":

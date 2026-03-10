@@ -754,6 +754,102 @@ steps:
 
 ---
 
+## WASM Step Schema
+
+### Structure
+
+```yaml
+type: "WASM"
+wasm_config:
+  wasm_hash: string         # Required — SHA-256 hex digest
+  entrypoint: string        # Optional — default "execute"
+  state_mapping: dict       # Optional — workflow key → WASM input key
+  timeout_ms: int           # Optional — default 5000 (range 100–60000)
+  fallback_on_error: string # Optional — "fail" | "skip" | "default"
+  default_result: dict      # Optional — used when fallback_on_error: "default"
+merge_strategy: string      # Optional — default "SHALLOW"
+merge_conflict_behavior: string  # Optional — default "PREFER_NEW"
+automate_next: bool         # Optional
+```
+
+### Fields
+
+#### `wasm_config.wasm_hash`
+
+**Type:** `string`
+
+**Required:** Yes
+
+SHA-256 hex digest (64 lowercase hex chars) of the `.wasm` binary. Used for both binary resolution and integrity verification at execution time.
+
+#### `wasm_config.entrypoint`
+
+**Type:** `string`
+
+**Default:** `"execute"`
+
+The name of the exported function in the WASM module to call. The function receives no arguments; it reads state from stdin and writes results to stdout.
+
+#### `wasm_config.state_mapping`
+
+**Type:** `dict[string, string]`
+
+**Default:** `{}` (full state passed)
+
+Maps workflow state keys to WASM input keys. If provided, only the specified keys are sent to the module. If omitted, the entire workflow state dict is passed as-is.
+
+```yaml
+state_mapping:
+  transaction_amount: "amount"   # state.transaction_amount → input["amount"]
+  card_country: "country"        # state.card_country → input["country"]
+```
+
+#### `wasm_config.timeout_ms`
+
+**Type:** `int`
+
+**Default:** `5000` | **Range:** `100` – `60000`
+
+Maximum execution time. If the module does not complete within this duration, an `asyncio.TimeoutError` is raised and `fallback_on_error` is applied.
+
+#### `wasm_config.fallback_on_error`
+
+**Type:** `string` — `"fail"` | `"skip"` | `"default"`
+
+**Default:** `"fail"`
+
+| Value | Behavior |
+|-------|----------|
+| `"fail"` | Raises `RuntimeError`, workflow transitions to `FAILED` |
+| `"skip"` | Returns `{}`, workflow continues unchanged |
+| `"default"` | Returns `default_result`, workflow continues |
+
+#### `wasm_config.default_result`
+
+**Type:** `dict`
+
+Returned when `fallback_on_error: "default"`. Must be a valid dict that can merge into workflow state.
+
+### Example
+
+```yaml
+- name: "Validate_Card_BIN"
+  type: "WASM"
+  wasm_config:
+    wasm_hash: "c9a1b2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1"
+    entrypoint: "execute"
+    state_mapping:
+      card_bin: "bin"
+    timeout_ms: 500
+    fallback_on_error: "default"
+    default_result:
+      bin_valid: false
+      bin_country: "UNKNOWN"
+  automate_next: true
+```
+
+---
+
 ## See Also
 
 - [Step Types Reference](step-types.md)

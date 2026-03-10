@@ -2012,3 +2012,354 @@ cd packages/rufus-sdk-server && poetry build
 | `rufus_sdk_server-0.6.0-py3-none-any.whl` | ~10 MB |
 
 Edge devices installing `rufus-sdk-edge` save ~10.5 MB vs the old monolithic wheel.
+
+---
+
+## §15 WASM Execution Environment
+
+### Overview
+
+`WASM` is a workflow step type that executes pre-compiled WebAssembly binaries in a WASI sandbox. It enables polyglot step logic — write performance-critical code in Rust, C, or Go, compile to WASM once, run everywhere (cloud server, edge POS terminal, ATM).
+
+**Dependency:** `pip install wasmtime` (imported lazily — only required if a workflow uses WASM steps).
+
+**Optional extra:** `pip install 'rufus-sdk[wasm]'`
+
+---
+
+### WASM Module Contract
+
+Every WASM module used as a workflow step must follow this contract:
+
+| Requirement | Detail |
+|-------------|--------|
+| Read input from **stdin** | JSON object (full state or mapped subset via `state_mapping`) |
+| Write result to **stdout** | JSON object — keys are merged into workflow state |
+| Exit code **0** | Success |
+| Exit code **non-zero** | Failure — `fallback_on_error` policy applied |
+| No filesystem access | WASI sandbox — no host file access by default |
+| No network access | Modules cannot make outbound connections |
+
+---
+
+### State Model
+
+```python
+# my_app/state_models.py
+from pydantic import BaseModel
+from typing import Optional
+
+class PaymentState(BaseModel):
+    transaction_amount: float
+    card_bin: str
+    card_country: str
+    merchant_category: str
+    risk_score: Optional[float] = None
+    risk_label: Optional[str] = None
+    approved: Optional[bool] = None
+```
+
+---
+
+### Writing a WASM Module (Rust)
+
+```rust
+// src/main.rs
+use std::io::{self, Read};
+use serde::{Deserialize, Serialize};
+use serde_json;
+
+#[derive(Deserialize)]
+struct Input {
+    amount: f64,
+    country: String,
+    mcc: String,
+}
+
+#[derive(Serialize)]
+struct Output {
+    risk_score: f64,
+    risk_label: String,
+}
+
+fn main() {
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf).unwrap();
+    let input: Input = serde_json::from_str(&buf).expect("Invalid JSON on stdin");
+
+    // Pure computation — no I/O, no side effects
+    let mut score = 0.1_f64;
+    if input.amount > 10_000.0 { score += 0.4; }
+    if input.country == "HIGHRISK" { score += 0.3; }
+    if input.mcc == "7995" { score += 0.2; }  // gambling MCC
+    score = score.min(1.0);
+
+    let label = if score > 0.7 { "HIGH" } else if score > 0.4 { "MEDIUM" } else { "LOW" };
+
+    let out = Output { risk_score: score, risk_label: label.into() };
+    print!("{}", serde_json::to_string(&out).unwrap());
+}
+```
+
+```toml
+# Cargo.toml
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+```bash
+# Build to WASI target
+rustup target add wasm32-wasi
+cargo build --target wasm32-wasi --release
+# Output: target/wasm32-wasi/release/risk_scorer.wasm
+
+# Compute hash for YAML wasm_hash field
+sha256sum target/wasm32-wasi/release/risk_scorer.wasm
+```
+
+---
+
+### Workflow YAML
+
+```yaml
+workflow_type: "PaymentAuthorization"
+workflow_version: "2.0.0"
+initial_state_model: "my_app.state_models.PaymentState"
+
+steps:
+  - name: "Validate_Input"
+    type: "STANDARD"
+    function: "my_app.steps.validate_payment_input"
+    automate_next: true
+
+  - name: "Score_Risk"
+    type: "WASM"
+    wasm_config:
+      wasm_hash: "a3f5c2d1e4b6f890..."   # sha256 of risk_scorer.wasm
+      entrypoint: "execute"
+      state_mapping:
+        transaction_amount: "amount"
+        card_country: "country"
+        merchant_category: "mcc"
+      timeout_ms: 2000
+      fallback_on_error: "default"
+      default_result:
+        risk_score: 0.5
+        risk_label: "UNKNOWN"
+    automate_next: true
+
+  - name: "Authorize_Payment"
+    type: "DECISION"
+    function: "my_app.steps.authorize_payment"
+    routes:
+      - condition: "state.risk_score < 0.7"
+        target: "Capture_Payment"
+      - condition: "state.risk_score >= 0.7"
+        target: "Decline_Payment"
+
+  - name: "Capture_Payment"
+    type: "ASYNC"
+    function: "my_app.tasks.capture_payment"
+
+  - name: "Decline_Payment"
+    type: "STANDARD"
+    function: "my_app.steps.decline_payment"
+```
+
+---
+
+### Python — Wiring Up WasmRuntime
+
+```python
+from rufus.implementations.execution.wasm_runtime import WasmRuntime, DiskWasmBinaryResolver
+from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from rufus.builder import WorkflowBuilder
+
+# Cloud setup: DiskWasmBinaryResolver queries wasm_components table and reads disk
+persistence = PostgresPersistenceProvider(db_url=DATABASE_URL)
+await persistence.initialize()
+
+wasm_resolver = DiskWasmBinaryResolver(db_pool=persistence.pool)
+wasm_runtime = WasmRuntime(resolver=wasm_resolver)
+
+# Pass wasm_runtime= when creating any workflow that contains WASM steps
+workflow = await builder.create_workflow(
+    workflow_type="PaymentAuthorization",
+    initial_data={
+        "transaction_amount": 4500.0,
+        "card_bin": "424242",
+        "card_country": "US",
+        "merchant_category": "5411",
+    },
+    persistence_provider=persistence,
+    execution_provider=SyncExecutor(),
+    workflow_builder=builder,
+    expression_evaluator_cls=SimpleExpressionEvaluator,
+    template_engine_cls=Jinja2TemplateEngine,
+    workflow_observer=LoggingObserver(),
+    wasm_runtime=wasm_runtime,  # ← inject here; None by default
+)
+
+await workflow.next_step()
+# State after Score_Risk step:
+# {"risk_score": 0.1, "risk_label": "LOW", ...}
+```
+
+---
+
+### Edge Device Setup
+
+```python
+from rufus.implementations.execution.wasm_runtime import WasmRuntime, SqliteWasmBinaryResolver
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+
+# Edge persistence wraps an aiosqlite connection
+persistence = SQLitePersistenceProvider(db_path="/data/edge_device.db")
+await persistence.initialize()
+
+# SqliteWasmBinaryResolver reads binary_data BLOB from device_wasm_cache
+wasm_resolver = SqliteWasmBinaryResolver(conn=persistence.conn)
+wasm_runtime = WasmRuntime(resolver=wasm_resolver)
+
+# Inject into workflow as above — identical API, different resolver
+```
+
+---
+
+### Uploading a Binary (Cloud API)
+
+```bash
+# Upload via admin API
+curl -X POST https://control-plane.example.com/api/v1/admin/wasm-components \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F "file=@risk_scorer.wasm" \
+  -F "name=risk_scorer" \
+  -F "version_tag=v1.0.0"
+
+# Response
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "binary_hash": "a3f5c2d1e4b6f890...",
+  "name": "risk_scorer",
+  "version_tag": "v1.0.0",
+  "size_bytes": 1458234,
+  "created_at": "2026-03-10T12:00:00"
+}
+
+# List all registered binaries
+curl https://control-plane.example.com/api/v1/wasm-components \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Download a binary (used automatically by edge sync)
+curl https://control-plane.example.com/api/v1/wasm-components/a3f5c2d1.../download \
+  -o risk_scorer.wasm
+```
+
+---
+
+### Pushing WASM to Edge Fleet
+
+```python
+# Broadcast sync_wasm to all POS devices in the fleet
+await broadcast_service.create_broadcast(
+    command_type="sync_wasm",
+    command_data={"binary_hash": "a3f5c2d1e4b6f890..."},
+    target_filter={"device_type": "POS"},
+)
+```
+
+Each edge device that receives the command will:
+1. Check `device_wasm_cache` — skip if already cached (idempotent)
+2. `GET /api/v1/wasm-components/{hash}/download`
+3. Verify SHA-256 of response
+4. `INSERT OR REPLACE INTO device_wasm_cache (binary_hash, binary_data, last_accessed)`
+
+On device startup, `load_local_workflow_definitions()` also scans cached YAML for `type: WASM` steps and prefetches any missing binaries as background tasks.
+
+---
+
+### Testing WASM Steps
+
+```python
+# tests/sdk/test_wasm_step.py
+import pytest
+import hashlib
+from rufus.implementations.execution.wasm_runtime import WasmRuntime
+from rufus.models import WasmConfig
+
+class MockBinaryResolver:
+    def __init__(self, binary: bytes):
+        self._binary = binary
+
+    async def resolve(self, binary_hash: str) -> bytes:
+        return self._binary
+
+
+class FailResolver:
+    async def resolve(self, binary_hash: str) -> bytes:
+        raise FileNotFoundError("binary not found")
+
+
+@pytest.mark.asyncio
+async def test_wasm_fallback_skip():
+    runtime = WasmRuntime(resolver=FailResolver())
+    config = WasmConfig(wasm_hash="a" * 64, fallback_on_error="skip")
+    result = await runtime.execute(config, {"amount": 100})
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_wasm_fallback_default():
+    runtime = WasmRuntime(resolver=FailResolver())
+    config = WasmConfig(
+        wasm_hash="a" * 64,
+        fallback_on_error="default",
+        default_result={"risk_score": 0.5},
+    )
+    result = await runtime.execute(config, {"amount": 100})
+    assert result == {"risk_score": 0.5}
+
+
+# Full integration test requires a real .wasm binary — see tests/fixtures/echo.wasm
+@pytest.mark.asyncio
+async def test_wasm_real_execution():
+    with open("tests/fixtures/echo.wasm", "rb") as f:
+        wasm_bytes = f.read()
+    binary_hash = hashlib.sha256(wasm_bytes).hexdigest()
+
+    config = WasmConfig(
+        wasm_hash=binary_hash,
+        entrypoint="execute",
+        state_mapping={"transaction_amount": "amount"},
+    )
+    runtime = WasmRuntime(resolver=MockBinaryResolver(wasm_bytes))
+    result = await runtime.execute(config, {"transaction_amount": 500.0, "other": "ignored"})
+    assert "amount" in result
+```
+
+---
+
+### Error Handling Matrix
+
+| Condition | `"fail"` | `"skip"` | `"default"` |
+|-----------|----------|----------|-------------|
+| Binary not found | `FAILED` | `{}` | `default_result` |
+| Hash mismatch | `FAILED` | `{}` | `default_result` |
+| WASM runtime error | `FAILED` | `{}` | `default_result` |
+| Timeout exceeded | `FAILED` | `{}` | `default_result` |
+| Invalid JSON output | `FAILED` | `{}` | `default_result` |
+| Non-object JSON output | `FAILED` | `{}` | `default_result` |
+
+---
+
+### Security Notes
+
+- **WASI sandbox:** The module cannot access the host filesystem, network, or environment variables. Only stdin/stdout are available.
+- **Integrity check:** SHA-256 is recomputed and compared at every execution. A tampered file is detected immediately.
+- **Provenance:** Only binaries uploaded via the admin API (admin auth required) are registered. Edge devices download via device-level auth and verify the hash independently.
+- **Memory:** wasmtime defaults apply (~4 GB addressable space). Keep edge binaries < 5 MB to stay within practical SQLite BLOB limits.

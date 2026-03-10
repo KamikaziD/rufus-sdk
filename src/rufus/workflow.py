@@ -12,7 +12,7 @@ from rufus.models import (
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
     WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
-    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep
+    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep, WasmWorkflowStep
 )
 
 
@@ -61,7 +61,8 @@ class Workflow:
                  workflow_builder: 'WorkflowBuilder' = None, # Still need type hint for mypy
                  expression_evaluator_cls: Type['ExpressionEvaluator'] = None, # Use string literal
                  template_engine_cls: Type['TemplateEngine'] = None, # Use string literal
-                 workflow_observer: 'WorkflowObserver' = None # Use string literal
+                 workflow_observer: 'WorkflowObserver' = None, # Use string literal
+                 wasm_runtime=None  # Optional WasmRuntime; required only for WASM steps
                  ):
         self.id = workflow_id or str(uuid.uuid4())
         self.workflow_steps = workflow_steps or []
@@ -131,6 +132,9 @@ class Workflow:
             raise ValueError(
                 "WorkflowObserver must be injected into Workflow")
         self.observer: 'WorkflowObserver' = workflow_observer # Use string literal
+
+        # Optional WASM runtime — only needed when workflow contains WASM steps
+        self.wasm_runtime = wasm_runtime
 
     @property
     def current_step_name(self) -> Optional[str]:
@@ -661,7 +665,8 @@ class Workflow:
 
             result = {}
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
-                                                 FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep))
+                                                 FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
+                                                 WasmWorkflowStep))
 
             if is_sync_step:
                 if isinstance(step, HumanWorkflowStep):
@@ -797,6 +802,17 @@ class Workflow:
                     if isinstance(result, dict) and "_sync_parallel_result" in result:
                         merged_result = result["_sync_parallel_result"]
                         self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
+
+            elif isinstance(step, WasmWorkflowStep):
+                if self.wasm_runtime is None:
+                    raise RuntimeError(
+                        f"WasmRuntime is not configured but step '{step.name}' requires it. "
+                        "Pass a WasmRuntime instance via wasm_runtime= when creating the Workflow."
+                    )
+                result = await self.wasm_runtime.execute(step.wasm_config, self.state.model_dump())
+                if isinstance(result, dict):
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
 
             elif isinstance(step, FireAndForgetWorkflowStep):
                 # FireAndForget uses the WorkflowEngine's builder and ExecutionProvider

@@ -92,6 +92,7 @@ app = FastAPI(
         {"name": "Authorization",    "description": "Authorization checks and approval workflows"},
         {"name": "Rate Limiting",    "description": "Rate limit status, quotas, and admin configuration"},
         {"name": "Monitoring",       "description": "Metrics, worker status, and system monitoring"},
+        {"name": "WASM",             "description": "WASM binary lifecycle: upload, download, and fleet distribution"},
     ]
 )
 app.state.limiter = limiter
@@ -123,6 +124,10 @@ from rufus_server.worker_service import WorkerService
 # --- Workflow Definition + Server Command Services ---
 from rufus_server.workflow_definition_service import WorkflowDefinitionService
 from rufus_server.server_command_service import ServerCommandService
+
+# --- WASM Component Routes ---
+from rufus_server.wasm_routes import router as wasm_router
+app.include_router(wasm_router)
 
 # --- Policy Engine ---
 from rufus_server.policy_engine import (

@@ -18,8 +18,8 @@ Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach
 
 | Tier | Engine | Tables | Managed By |
 |------|--------|--------|-----------|
-| Cloud (PostgreSQL) | asyncpg | 33 | Alembic (autogenerate from `database.py`) |
-| Edge (SQLite) | sqlite3 | 10 | `CREATE TABLE IF NOT EXISTS` in `sqlite.py` |
+| Cloud (PostgreSQL) | asyncpg | 34 | Alembic (autogenerate from `database.py`) |
+| Edge (SQLite) | sqlite3 | 12 | `CREATE TABLE IF NOT EXISTS` in `sqlite.py` |
 
 **Cloud schema changes:** Edit `database.py` → `alembic revision --autogenerate` → review → commit.
 **Edge schema changes:** Edit `SQLITE_SCHEMA` in `sqlite.py` — no Alembic needed.
@@ -133,6 +133,12 @@ alembic upgrade head --sql
 | `device_assignments` | Device-to-group/fleet assignments |
 | `policies` | Business rules and fraud policies |
 
+### WASM Component Registry (1)
+
+| Table | Description |
+|-------|-------------|
+| `wasm_components` | Pre-compiled WebAssembly binaries with metadata and disk path |
+
 ### Migration Tracking (1)
 
 | Table | Description |
@@ -157,13 +163,15 @@ Edge devices use SQLite. Tables are created automatically by `SQLitePersistenceP
 | `tasks` | Local task queue |
 | `compensation_log` | Saga rollback records |
 
-### Edge-Specific (3)
+### Edge-Specific (5)
 
 | Table | Description |
 |-------|-------------|
 | `saf_pending_transactions` | Payment transactions queued offline, pending sync |
 | `device_config_cache` | Cached configuration with ETag for change detection |
 | `edge_sync_state` | Last-sync timestamps and connection state |
+| `edge_workflow_cache` | Cached workflow YAML definitions (hot-deployed via `update_workflow` command) |
+| `device_wasm_cache` | Cached WASM binaries, keyed by SHA-256 hash (synced via `sync_wasm` command) |
 
 ---
 
@@ -354,6 +362,42 @@ rufus db validate
 # Show database statistics
 rufus db stats
 ```
+
+---
+
+### wasm_components
+
+Cloud registry for pre-compiled WebAssembly binaries. Managed by Alembic (migration `e1f2a3b4c5d6`).
+
+| Column | Type (PostgreSQL) | Constraints | Description |
+|--------|------------------|-------------|-------------|
+| `id` | VARCHAR(36) | PRIMARY KEY | UUID |
+| `name` | VARCHAR(200) | NOT NULL | Human-readable component name |
+| `version_tag` | VARCHAR(50) | NOT NULL | Semantic version tag (e.g. `v1.2.0`) |
+| `binary_hash` | VARCHAR(64) | NOT NULL, UNIQUE | SHA-256 hex digest of the `.wasm` file |
+| `blob_storage_path` | TEXT | NOT NULL | Absolute path to the `.wasm` file on disk |
+| `input_schema` | TEXT | — | JSON schema string documenting expected input |
+| `output_schema` | TEXT | — | JSON schema string documenting expected output |
+| `created_at` | TIMESTAMP | DEFAULT NOW() | Upload timestamp |
+| `updated_at` | TIMESTAMP | DEFAULT NOW() | Last update timestamp |
+
+**Indexes:** `ix_wasm_components_name`, `uq_wasm_components_binary_hash` (unique), `ix_wasm_components_hash`
+
+**Storage directory:** configured via `WASM_STORAGE_DIR` env var (default: `./wasm_storage`).
+
+---
+
+### device_wasm_cache (edge only)
+
+SQLite cache of WASM binaries on edge devices. Created at startup via `CREATE TABLE IF NOT EXISTS`. No Alembic required.
+
+| Column | Type (SQLite) | Constraints | Description |
+|--------|--------------|-------------|-------------|
+| `binary_hash` | TEXT | PRIMARY KEY | SHA-256 hex digest (matches cloud `wasm_components.binary_hash`) |
+| `binary_data` | BLOB | NOT NULL | Raw `.wasm` file bytes |
+| `last_accessed` | TEXT | DEFAULT CURRENT_TIMESTAMP | ISO-8601 timestamp of last use |
+
+**Populated by:** `sync_wasm` cloud command → `ConfigManager.handle_sync_wasm_command()`
 
 ---
 

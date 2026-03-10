@@ -48,6 +48,7 @@ class CommandType(str, Enum):
     # Artifact Management (NORMAL - heartbeat)
     UPDATE_ARTIFACT = "update_artifact"
     ROLLBACK_ARTIFACT = "rollback_artifact"
+    SYNC_WASM = "sync_wasm"
 
     # Critical Operations (CRITICAL - websocket)
     EMERGENCY_STOP = "emergency_stop"
@@ -87,6 +88,7 @@ COMMAND_ROUTING: Dict[CommandType, CommandPriority] = {
     # Artifact Management
     CommandType.UPDATE_ARTIFACT: CommandPriority.NORMAL,
     CommandType.ROLLBACK_ARTIFACT: CommandPriority.HIGH,
+    CommandType.SYNC_WASM: CommandPriority.LOW,
 
     # Critical Operations (WebSocket)
     CommandType.EMERGENCY_STOP: CommandPriority.CRITICAL,

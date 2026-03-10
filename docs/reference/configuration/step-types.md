@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rufus supports 9 step execution types. Each type controls how the step executes and what configuration options are available.
+Rufus supports 11 step execution types. Each type controls how the step executes and what configuration options are available.
 
 ## STANDARD
 
@@ -478,6 +478,117 @@ and custom inference providers.
 | `CRON_SCHEDULE` | Scheduled | No | No | Recurring workflows |
 | `HUMAN_IN_LOOP` | Manual | Yes | No | Approvals |
 | `AI_INFERENCE` | Sync | No | No | On-device ML inference |
+| `WASM` | Sync (sandboxed) | No | No | Polyglot edge logic |
+
+---
+
+## WASM
+
+Executes a pre-compiled WebAssembly binary in a WASI sandbox. State is passed as JSON on stdin; the module writes its result as JSON to stdout. Works with any language that compiles to WASM (Rust, C, Go, AssemblyScript, etc.).
+
+Requires the `wasmtime` Python package: `pip install wasmtime`
+
+### Configuration
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"WASM"` | Yes | Step type identifier |
+| `wasm_config.wasm_hash` | `string` | Yes | SHA-256 hex digest of the `.wasm` binary |
+| `wasm_config.entrypoint` | `string` | No | Exported function to call (default: `"execute"`) |
+| `wasm_config.state_mapping` | `dict` | No | Workflow state keys → WASM input keys. Omit to pass the full state |
+| `wasm_config.timeout_ms` | `int` | No | Max execution time in ms (default: `5000`, range: 100–60000) |
+| `wasm_config.fallback_on_error` | `string` | No | `"fail"` (default) / `"skip"` / `"default"` |
+| `wasm_config.default_result` | `dict` | No | Returned when `fallback_on_error: "default"` |
+| `merge_strategy` | `string` | No | How to merge result into state (default: `"SHALLOW"`) |
+| `merge_conflict_behavior` | `string` | No | Conflict resolution (default: `"PREFER_NEW"`) |
+| `automate_next` | `boolean` | No | Auto-execute next step |
+
+### Example — Risk Scoring
+
+```yaml
+- name: "Score_Transaction_Risk"
+  type: "WASM"
+  wasm_config:
+    wasm_hash: "a3f5c2d1e4b6f8901234567890abcdef1234567890abcdef1234567890abcdef12"
+    entrypoint: "execute"
+    state_mapping:
+      transaction_amount: "amount"
+      card_country: "country"
+      merchant_category: "mcc"
+    timeout_ms: 2000
+    fallback_on_error: "default"
+    default_result:
+      risk_score: 0.5
+      risk_label: "UNKNOWN"
+  merge_strategy: "SHALLOW"
+  automate_next: true
+```
+
+### WASM Module Contract
+
+Your WebAssembly module must:
+
+1. Read JSON from **stdin** — the input is either the full workflow state dict or the mapped keys from `state_mapping`
+2. Write a JSON **object** to **stdout** — the keys are merged into workflow state
+3. Exit with code **0** on success; any other exit code is treated as an error
+
+**Minimal Rust example:**
+
+```rust
+use std::io::{self, Read};
+use serde_json::{json, Value};
+
+fn main() {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input).unwrap();
+    let state: Value = serde_json::from_str(&input).unwrap();
+
+    let amount = state["amount"].as_f64().unwrap_or(0.0);
+    let risk_score = if amount > 10_000.0 { 0.9 } else { 0.1 };
+
+    let result = json!({
+        "risk_score": risk_score,
+        "risk_label": if risk_score > 0.7 { "HIGH" } else { "LOW" }
+    });
+    print!("{}", result);
+}
+```
+
+Compile to WASM:
+
+```bash
+rustup target add wasm32-wasi
+cargo build --target wasm32-wasi --release
+# Binary: target/wasm32-wasi/release/risk_scorer.wasm
+```
+
+### Behavior
+
+- Executes synchronously in the workflow process via `asyncio.run_in_executor` (non-blocking)
+- WASI sandbox — the module cannot access the filesystem, network, or environment variables unless explicitly granted
+- SHA-256 of the binary is verified before every execution
+- Binary resolved from:
+  - **Cloud**: local disk via `wasm_components.blob_storage_path`
+  - **Edge**: SQLite `device_wasm_cache.binary_data`
+- `fallback_on_error: "skip"` → returns `{}` and continues; `"default"` → returns `default_result`
+
+### Edge Distribution
+
+WASM binaries are pushed to edge devices via the `sync_wasm` command broadcast. When the cloud sends a `sync_wasm` command with a `binary_hash`, the edge agent:
+
+1. Checks `device_wasm_cache` (idempotent — skips if already cached)
+2. Downloads from `GET /api/v1/wasm-components/{hash}/download`
+3. Verifies SHA-256
+4. Stores the binary blob in SQLite
+
+On device startup, `load_local_workflow_definitions()` scans all cached workflow YAMLs for `type: WASM` steps and prefetches any missing binaries in the background.
+
+### Use Cases
+
+- **Fraud scoring** — sub-2ms Rust risk model running offline on a POS terminal
+- **Validation logic** — complex business rules compiled from a strongly-typed language
+- **Data transformation** — format conversion or normalization without Python overhead
+- **Cryptographic operations** — WASM-safe implementations of hashing or encoding
 
 ---
 

@@ -56,6 +56,7 @@ EDGE_SPECIFIC_TABLES = [
     "device_config_cache",       # Device config cache (ConfigManager, v0.7.7+)
     "edge_sync_state",           # Sync cursor / progress tracking
     "edge_workflow_cache",       # Workflow YAML cache (ConfigManager, v0.7.7+)
+    "device_wasm_cache",         # WASM binary cache (binary_hash → BLOB, v0.8.0+)
 ]
 
 # All edge tables
@@ -111,5 +112,11 @@ CREATE TABLE IF NOT EXISTS edge_workflow_cache (
     yaml_content  TEXT NOT NULL,
     version       TEXT,
     updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS device_wasm_cache (
+    binary_hash   TEXT PRIMARY KEY,
+    binary_data   BLOB NOT NULL,
+    last_accessed TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
