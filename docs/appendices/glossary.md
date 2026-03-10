@@ -233,6 +233,18 @@ A security vulnerability where malicious scripts are injected into web applicati
 
 ## Z
 
+### WASI (WebAssembly System Interface)
+A standard interface that gives WebAssembly modules safe, sandboxed access to system primitives (stdin, stdout, filesystem, clock). Rufus uses WASI to pass state to WASM modules via stdin and collect results from stdout.
+
+### WASM (WebAssembly)
+A portable binary instruction format that runs in a sandboxed environment. Rufus supports `WASM` as a first-class workflow step type, enabling step logic written in any language that compiles to WASM (Rust, C, Go, AssemblyScript). See: [WASM Step Type](/docs/reference/configuration/step-types.md#wasm)
+
+### WasmBinaryResolver
+A Protocol (interface) in `rufus.implementations.execution.wasm_runtime` that abstracts WASM binary lookup. Two implementations: `DiskWasmBinaryResolver` (cloud — reads from disk via `wasm_components` DB table) and `SqliteWasmBinaryResolver` (edge — reads BLOB from `device_wasm_cache`).
+
+### WasmRuntime
+The helper class in `rufus.implementations.execution.wasm_runtime` that instantiates a `wasmtime` WASI engine, executes a WASM module, and returns its JSON stdout as a dict. Injected into `Workflow` via the `wasm_runtime=` parameter.
+
 ### Zombie Workflow
 A workflow stuck in `RUNNING` status because the worker process crashed without updating the database. Detected via stale heartbeats and automatically marked `FAILED_WORKER_CRASH`. See: [Zombie Recovery](/docs/explanation/zombie-recovery.md)
 

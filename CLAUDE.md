@@ -192,8 +192,11 @@ All external integrations are abstracted via Python Protocol interfaces:
 | `FIRE_AND_FORGET` | Async execution without waiting *(Phase 8)* |
 | `CRON_SCHEDULE` | Schedule step at specific times/intervals *(Phase 8)* |
 | `HUMAN_IN_LOOP` | Pauses workflow, raises `WorkflowPauseDirective` |
+| `AI_INFERENCE` | On-device ML inference (TFLite, ONNX) |
+| `WASM` | Execute a pre-compiled WebAssembly binary via WASI; state passed as JSON on stdin, result read from stdout. Requires `wasmtime`. |
 
 → See [TECHNICAL_INFORMATION.md §1](/.claude/TECHNICAL_INFORMATION.md) for full YAML + Python examples.
+→ See [TECHNICAL_INFORMATION.md §15](/.claude/TECHNICAL_INFORMATION.md) for WASM runtime details, module contract, and edge distribution.
 
 ---
 

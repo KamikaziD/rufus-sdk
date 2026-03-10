@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **WASM step type** — Execute pre-compiled WebAssembly binaries as workflow steps via the WASI stdin/stdout interface. Any language that compiles to WASM (Rust, C, Go) can implement step logic with full sandbox isolation. Requires `pip install wasmtime`.
+  - `WasmConfig` + `WasmWorkflowStep` models in `rufus.models`
+  - `WasmRuntime` helper with `DiskWasmBinaryResolver` (cloud) and `SqliteWasmBinaryResolver` (edge)
+  - Builder parses `type: "WASM"` steps from workflow YAML
+  - `Workflow` accepts optional `wasm_runtime=` parameter
+- **WASM component registry** — Cloud control plane APIs for binary lifecycle management:
+  - `POST /api/v1/admin/wasm-components` — upload `.wasm` binary (computes SHA-256, stores to disk)
+  - `GET /api/v1/wasm-components/{hash}/download` — stream binary to edge devices
+  - `GET /api/v1/wasm-components` — list registered components
+  - `GET /api/v1/wasm-components/{hash}` — fetch component metadata
+- **WASM edge distribution** — new `SYNC_WASM` command type (LOW priority, heartbeat). `ConfigManager.handle_sync_wasm_command()` downloads, verifies SHA-256, and caches to `device_wasm_cache`. Startup prefetch scans workflow YAMLs for missing WASM hashes.
+- **New DB tables**: `wasm_components` (cloud, Alembic migration `e1f2a3b4c5d6`) and `device_wasm_cache` (edge SQLite, `CREATE TABLE IF NOT EXISTS`).
+
 ---
 
 ## [0.7.9] - 2026-03-09
