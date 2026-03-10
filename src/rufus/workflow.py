@@ -259,6 +259,23 @@ class Workflow:
 
     async def _notify_status_change(self, old_status: str, new_status: str, current_step_name: Optional[str], final_result: Optional[Dict[str, Any]] = None):
         """Helper to centralize status change notifications."""
+        _STATUS_TO_EVENT = {
+            'COMPLETED':        'WORKFLOW_COMPLETED',
+            'FAILED':           'WORKFLOW_FAILED',
+            'FAILED_ROLLED_BACK': 'WORKFLOW_FAILED',
+            'CANCELLED':        'WORKFLOW_CANCELLED',
+            'PAUSED':           'WORKFLOW_PAUSED',
+            'WAITING_HUMAN':    'WORKFLOW_PAUSED',
+            'PENDING':          'WORKFLOW_CREATED',
+        }
+        event_type = _STATUS_TO_EVENT.get(new_status, 'STATUS_CHANGED')
+        try:
+            await self.persistence.log_audit_event(
+                self.id, event_type, step_name=current_step_name,
+                old_state={'status': old_status}, new_state={'status': new_status}
+            )
+        except Exception:
+            pass  # audit is non-fatal
         await self.observer.on_workflow_status_changed(
             self.id, old_status, new_status, current_step_name)
         if self.parent_execution_id:
