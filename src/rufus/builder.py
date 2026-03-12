@@ -547,7 +547,8 @@ class WorkflowBuilder:
                         data_region: Optional[str] = None,
                         priority: Optional[int] = None,
                         idempotency_key: Optional[str] = None,
-                        metadata: Optional[Dict[str, Any]] = None
+                        metadata: Optional[Dict[str, Any]] = None,
+                        wasm_binary_resolver=None  # Optional WasmBinaryResolver; auto-creates ComponentStepRuntime for WASM steps
                         ) -> 'Workflow': # Changed return type hint to string literal
 
         if any(p is None for p in [persistence_provider, execution_provider, workflow_builder,
@@ -578,6 +579,13 @@ class WorkflowBuilder:
         # Import Workflow locally to avoid circular import at the top level
         from rufus.workflow import Workflow
 
+        # Auto-create ComponentStepRuntime when a resolver is provided.
+        # ComponentStepRuntime handles both Component Model and legacy core modules.
+        wasm_runtime = None
+        if wasm_binary_resolver is not None:
+            from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+            wasm_runtime = ComponentStepRuntime(wasm_binary_resolver)
+
         return Workflow(
             workflow_type=workflow_type,
             workflow_version=workflow_version,
@@ -598,7 +606,8 @@ class WorkflowBuilder:
             workflow_builder=workflow_builder,
             expression_evaluator_cls=expression_evaluator_cls,
             template_engine_cls=template_engine_cls,
-            workflow_observer=workflow_observer
+            workflow_observer=workflow_observer,
+            wasm_runtime=wasm_runtime
         )
 
     def get_all_task_modules(self) -> List[str]:
