@@ -181,7 +181,7 @@ CLOUD                               EDGE (SQLite)
 | `CRON_SCHEDULE` | Scheduled recurring execution |
 | `HUMAN_IN_LOOP` | Pause workflow for manual approval |
 | `AI_INFERENCE` | On-device ML inference via TFLite or ONNX |
-| `WASM` | Execute a pre-compiled WebAssembly binary via WASI stdin/stdout *(unreleased)* |
+| `WASM` | Execute a WebAssembly binary — WASI stdin/stdout (core) or Component Model typed interface (v0.8.0) |
 
 ### Provider Pattern
 
@@ -269,7 +269,7 @@ See [Dashboard Guide](docs/how-to-guides/dashboard.md) for deploy instructions, 
 
 ### Polyglot Execution
 - **HTTP steps** — orchestrate services written in Go, Rust, Node.js, or any language via REST
-- **WASM steps** — run pre-compiled WebAssembly binaries sandboxed via WASI stdin/stdout *(unreleased — requires `wasmtime>=15.0`)*
+- **WASM steps** — run pre-compiled WebAssembly binaries via WASI stdin/stdout or the Component Model typed interface; runs natively, in-browser (Pyodide), or as a compiled WASI 0.3 target (requires `wasmtime>=15.0`)
 - **AI_INFERENCE steps** — on-device ML inference via TFLite or ONNX without a network call
 
 ### Performance
@@ -478,7 +478,9 @@ MIT License — See [LICENSE](LICENSE) file for details.
 pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.8.0
 
 # Optional extras
-pip install 'rufus-sdk[wasm]'    # WASM step type — requires wasmtime>=15.0 (unreleased)
+pip install 'rufus-sdk[wasm]'                  # WASM steps (core module, wasmtime>=15.0)
+pip install 'rufus-sdk-edge[browser]'          # Browser target (Pyodide + wa-sqlite)
+pip install 'rufus-sdk-edge[wasi]'             # WASI 0.3 compiled target
 ```
 
 ---
