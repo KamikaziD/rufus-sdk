@@ -223,6 +223,13 @@ userinfo: {
   5. Fix: ensure the migration file is visible to Alembic (bind-mount the versions/ directory in test compose) then re-run `alembic upgrade head`
 **Verification:** `SELECT version_num FROM alembic_version` matches the HEAD revision ID; error disappears without any code changes
 
+## Pattern: SQLite INTEGER → PostgreSQL String Mismatch on Edge Sync INSERT
+**Context:** `POST /api/v1/devices/{device_id}/sync/workflows` — inserting SQLite-sourced rows into PostgreSQL via asyncpg
+**Anti-Pattern:** Passing `wf.get("current_step", 0)` (int) directly to asyncpg for a `String(200)` PG column → `DataError: invalid input for query argument $5: 0 (expected str, got int)`
+**Root Cause:** SQLite schema has `current_step INTEGER`; PostgreSQL schema has `current_step String(200)` (stores step *name*, not index). `SELECT *` from SQLite returns Python int, which asyncpg rejects for a varchar column.
+**Correction:** Cast to string: `str(wf.get("current_step", 0))` before passing to asyncpg
+**Verification:** `POST /sync/workflows` returns 200; edge logs show `[WorkflowSync] Synced N workflows`
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
