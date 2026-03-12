@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.0] - 2026-03-12
+
+### Added
+- **Platform I/O abstraction** — `PlatformAdapter` protocol with three concrete implementations:
+  `NativePlatformAdapter` (standard CPython), `PyodidePlatformAdapter` (browser/JSPI),
+  and `WasiPlatformAdapter` (WASI 0.3). Step functions call `platform.read_stdin()` /
+  `platform.write_stdout()` and remain target-agnostic.
+- **Component Model WASM executor** — `ComponentStepRuntime` drives the
+  `wasmtime` Component Model API; `step.wit` defines the canonical
+  `run-step(input: string) -> string` interface shared by all WASM step components.
+- **Browser target** — `PyodidePlatformAdapter` + JSPI async bridge; `wa-sqlite`
+  replaces native SQLite in browser context; `browser_loader.js` bootstraps the
+  Pyodide runtime and mounts the Rufus wheel.
+- **WASI 0.3 native target** — `wasi_main.py` entry-point reads workflow state from
+  stdin and writes result JSON to stdout; `build_wasi.sh` compiles the edge agent to
+  a portable WASI component using `componentize-py`.
+- **`WorkflowBuilder` `wasm_binary_resolver` param** — callers can inject a custom
+  resolver (e.g. `SqliteWasmBinaryResolver`, `HttpWasmBinaryResolver`) so the builder
+  fetches `.wasm` binaries at workflow creation time without tight coupling to storage.
+- **TECHNICAL_INFORMATION.md §20** — full reference for Component Model contract,
+  WIT interface, browser bootstrapping, WASI build pipeline, and cross-target testing.
+
+---
+
 ## [Unreleased]
 
 ### Added
