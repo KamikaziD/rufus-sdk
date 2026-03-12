@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
@@ -60,19 +61,20 @@ def is_apple_silicon() -> bool:
     if machine in ("arm64", "aarch64"):
         return True
 
-    # Double-check with sysctl for processor brand
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            brand = result.stdout.strip().lower()
-            return "apple" in brand
-    except Exception:
-        pass
+    # Double-check with sysctl for processor brand (not available in WASM)
+    if sys.platform != "wasm32":
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                brand = result.stdout.strip().lower()
+                return "apple" in brand
+        except Exception:
+            pass
 
     return False
 
@@ -123,17 +125,18 @@ def has_cuda() -> bool:
         if path and os.path.exists(os.path.join(path, "lib64", "libcudart.so")):
             return True
 
-    # Try to detect via nvidia-smi
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True,
-            timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return True
-    except Exception:
-        pass
+    # Try to detect via nvidia-smi (not available in WASM)
+    if sys.platform != "wasm32":
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+        except Exception:
+            pass
 
     return False
 
@@ -145,6 +148,9 @@ def has_edge_tpu() -> bool:
     Returns:
         True if Edge TPU is detected.
     """
+    if sys.platform == "wasm32":
+        return False
+
     try:
         # Check for Edge TPU library
         if os.path.exists("/usr/lib/libedgetpu.so.1"):

@@ -19,6 +19,13 @@ Usage:
     resolver = DiskWasmBinaryResolver(db_conn)
     runtime = WasmRuntime(resolver)
     result = await runtime.execute(wasm_config, state_data)
+
+.. deprecated::
+    ``WasmRuntime`` uses the legacy stdin/stdout interface.  New modules should
+    be compiled as WASI 0.3 Component Model binaries and will be handled
+    automatically by ``ComponentStepRuntime`` (same ``execute`` signature).
+    ``WasmRuntime`` is retained for backward compatibility; it will not be
+    removed in the 0.x series.
 """
 
 import asyncio
@@ -107,12 +114,18 @@ class WasmRuntime:
 
     Requires the `wasmtime` package: pip install wasmtime
 
+    .. deprecated::
+        Use ``ComponentStepRuntime`` for new modules.  Component Model binaries
+        are dispatched automatically; this class handles legacy core modules.
+
     Args:
         resolver: A WasmBinaryResolver that provides raw .wasm bytes.
     """
 
     def __init__(self, resolver: WasmBinaryResolver):
         self._resolver = resolver
+        # Lazily-created ComponentStepRuntime for CM binary detection
+        self._component_runtime = None
 
     async def execute(
         self,
@@ -137,9 +150,26 @@ class WasmRuntime:
             RuntimeError: On WASM execution error when fallback_on_error='fail'.
             FileNotFoundError: If the binary cannot be resolved.
         """
+        # Peek at the binary to decide whether to use the Component Model path
+        try:
+            binary = await self._resolver.resolve(wasm_config.wasm_hash)
+        except Exception as exc:
+            return self._handle_error(wasm_config, exc)
+
+        from rufus.implementations.execution.component_runtime import is_component
+        if is_component(binary):
+            # Delegate to ComponentStepRuntime; avoid resolving the binary twice
+            # by wrapping it in a trivial resolver
+            if self._component_runtime is None:
+                from rufus.implementations.execution.component_runtime import (
+                    ComponentStepRuntime,
+                )
+                self._component_runtime = ComponentStepRuntime(self._resolver)
+            return await self._component_runtime.execute(wasm_config, state_data)
+
         try:
             return await asyncio.wait_for(
-                self._run(wasm_config, state_data),
+                self._run_with_binary(binary, wasm_config, state_data),
                 timeout=wasm_config.timeout_ms / 1000,
             )
         except asyncio.TimeoutError:
@@ -150,6 +180,12 @@ class WasmRuntime:
             return self._handle_error(wasm_config, RuntimeError(msg))
 
     async def _run(self, wasm_config, state_data: Dict[str, Any]) -> Dict[str, Any]:
+        binary = await self._resolver.resolve(wasm_config.wasm_hash)
+        return await self._run_with_binary(binary, wasm_config, state_data)
+
+    async def _run_with_binary(
+        self, binary: bytes, wasm_config, state_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         try:
             from wasmtime import Engine, Linker, Module, Store, WasiConfig
         except ImportError as exc:
@@ -157,7 +193,6 @@ class WasmRuntime:
                 "wasmtime is required for WASM steps. Install it with: pip install wasmtime"
             ) from exc
 
-        binary = await self._resolver.resolve(wasm_config.wasm_hash)
 
         # Verify hash integrity
         actual_hash = hashlib.sha256(binary).hexdigest()

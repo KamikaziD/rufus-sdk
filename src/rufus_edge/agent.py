@@ -31,6 +31,7 @@ from rufus_edge.models import (
 from rufus_edge.sync_manager import SyncManager
 from rufus_edge.config_manager import ConfigManager
 from rufus_edge.workflow_sync import EdgeWorkflowSyncer
+from rufus_edge.platform.base import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class RufusEdgeAgent:
         sync_interval: int = 30,
         heartbeat_interval: int = 60,
         workflow_sync_enabled: bool = True,
+        platform_adapter: Optional[PlatformAdapter] = None,
     ):
         """
         Initialize the edge agent.
@@ -94,6 +96,7 @@ class RufusEdgeAgent:
         self.sync_interval = sync_interval
         self.heartbeat_interval = heartbeat_interval
         self.workflow_sync_enabled = workflow_sync_enabled
+        self._platform_adapter: Optional[PlatformAdapter] = platform_adapter
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -134,6 +137,7 @@ class RufusEdgeAgent:
             api_key=self.api_key,
             poll_interval_seconds=self.config_poll_interval,
             persistence=self.persistence,
+            adapter=self._platform_adapter,
         )
         await self.config_manager.initialize()
 
@@ -143,6 +147,7 @@ class RufusEdgeAgent:
             sync_url=self.cloud_url,
             device_id=self.device_id,
             api_key=self.api_key,
+            adapter=self._platform_adapter,
         )
         await self.sync_manager.initialize()
 

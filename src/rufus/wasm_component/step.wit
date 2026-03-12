@@ -1,0 +1,41 @@
+/// WIT interface for Rufus WASM step components.
+///
+/// A step component must export the `execute` function defined in the
+/// `rufus:step/runner` interface.  The host passes the current workflow
+/// state as a JSON string and the step name; the component returns a
+/// JSON string (dict) to be merged into the state, or a `step-error` on
+/// failure.
+///
+/// Build target: `wasm32-wasip2` (WASI 0.3 / Component Model)
+/// Toolchain:    `componentize-py` or `cargo-component` + `wit-bindgen`
+
+package rufus:step@0.1.0;
+
+/// Errors that a step component can return.
+record step-error {
+    /// Machine-readable code (e.g. "VALIDATION_FAILED", "TIMEOUT").
+    code: string,
+    /// Human-readable description for logs.
+    message: string,
+}
+
+/// Core runner interface — every Rufus step component must export this.
+interface runner {
+    /// Execute one workflow step.
+    ///
+    /// Parameters
+    /// ----------
+    /// state-json : serialized current workflow state (JSON object string)
+    /// step-name  : the name of the step being executed
+    ///
+    /// Returns
+    /// -------
+    /// ok(string)  : JSON object string to be merged into workflow state
+    /// err(step-error) : structured failure; handled by fallback_on_error policy
+    execute: func(state-json: string, step-name: string) -> result<string, step-error>;
+}
+
+/// The world that a Rufus step component must implement.
+world rufus-step {
+    export runner;
+}
