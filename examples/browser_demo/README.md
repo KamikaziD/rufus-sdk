@@ -46,6 +46,41 @@ Four demo workflows, each illustrating different SDK patterns:
 
 ---
 
+## Sharing this demo
+
+### Option A — Public URL (no setup required)
+
+Open or share:
+**<https://kamikazid.github.io/rufus-sdk/>**
+
+The demo is hosted on GitHub Pages and auto-deploys on every push to `main`.
+Nothing to install, no server to run.
+
+### Option B — Two-file share
+
+Send `index.html` + `worker.js` from this directory. The recipient uploads them
+to any static host:
+
+- **Netlify Drop**: drag both files to https://app.netlify.com/drop
+- **Vercel**: `npx vercel --public` in the folder containing the two files
+- **itch.io / GitHub Gist**: upload as an HTML project
+
+Without a co-located wheel the demo automatically installs `rufus-sdk==0.8.0`
+from TestPyPI on first load (~5–10 s extra). All other dependencies (pydantic,
+jinja2, etc.) come from PyPI as normal.
+
+### Option C — Local server (for developers)
+
+```bash
+cd /path/to/rufus-sdk
+python examples/browser_demo/serve.py 8080
+# open http://localhost:8080/examples/browser_demo/
+```
+
+Uses the pre-built local wheel — fastest option, no CDN dependency.
+
+---
+
 ## Quick start
 
 ```bash

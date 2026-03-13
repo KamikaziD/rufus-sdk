@@ -978,13 +978,30 @@ async function init() {
     self.postMessage({ type: "status", message: "Installing packages…" });
     await pyodide.loadPackage("micropip");
 
-    const BASE = self.location.origin;
-    _wheelUrl = `${BASE}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+    // Probe for a co-located wheel (works for local dev AND GitHub Pages / any
+    // host that serves the wheel alongside the demo).  Falls back to TestPyPI
+    // when no wheel is found at the same origin (bare two-file share scenario).
+    try {
+        const probe = await fetch(
+            `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`,
+            { method: "HEAD" }
+        );
+        if (probe.ok) {
+            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+        }
+    } catch (_) {
+        // network error or CORS block → leave _wheelUrl as null → TestPyPI path
+    }
+
+    const _usingLocalWheel = _wheelUrl !== null;
+    self.postMessage({ type: "status", message: _usingLocalWheel
+        ? "Installing rufus-sdk from local wheel…"
+        : "Installing rufus-sdk from TestPyPI…" });
+
     pyodide.globals.set("_wheel_url", _wheelUrl);
     // Mock native-code packages that have no WASM wheel so micropip's dependency
     // resolver sees them as satisfied without trying to download them.
-    // Then install the rufus-sdk wheel normally — micropip resolves all the
-    // remaining pure-Python deps (pydantic, jinja2, alembic, sqlalchemy…) from PyPI.
+    // Then install the rufus-sdk wheel (or fetch from TestPyPI as fallback).
     await pyodide.runPythonAsync(`
 import micropip
 
@@ -998,8 +1015,16 @@ for _pkg, _ver in [
 ]:
     micropip.add_mock_package(_pkg, _ver)
 
-# Install the rufus-sdk wheel; micropip resolves pure-Python deps from PyPI.
-await micropip.install(_wheel_url, keep_going=True)
+if _wheel_url:
+    # Local dev or Pages deploy: load from co-located wheel (fast, no CDN needed)
+    await micropip.install(_wheel_url, keep_going=True)
+else:
+    # Bare two-file share: install rufus-sdk from TestPyPI; pure-Python deps from PyPI
+    await micropip.install(
+        "rufus-sdk==0.8.0",
+        index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
+        keep_going=True,
+    )
 `);
 
     self.postMessage({ type: "status", message: "Initialising Python workflow engine…" });
