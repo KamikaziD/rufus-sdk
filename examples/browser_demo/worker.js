@@ -22,6 +22,9 @@ const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "w
 let _extractor = null;
 let _summariser = null;
 let _pipeline = null;   // set after dynamic import
+let _activeModel  = null;              // "extractor" | "summariser" | null
+let _modelMutex   = Promise.resolve(); // promise-chain mutex (no SharedArrayBuffer needed)
+let _workflowRunning = false;          // busy flag — prevents concurrent workflow runs
 
 // ─── Preflight tracking ───────────────────────────────────────────────────────
 let _loadedPyodideUrl = null;
@@ -29,27 +32,60 @@ let _loadedTransformersUrl = null;
 let _wheelUrl = null;
 
 /**
+ * Low-level model loader — caller must hold the mutex before calling this.
+ * Unloads the currently resident model (if different) then loads `which`.
+ */
+async function _loadModel(which) {
+    if (_activeModel === which) return;   // fast path
+
+    // Unload whichever model is currently resident
+    if (_activeModel === "extractor" && _extractor) {
+        self.postMessage({ type: "model_unloading", model: "extractor",
+                           message: "Unloading MiniLM to free memory…" });
+        try { await _extractor.dispose(); } catch (_) {}
+        _extractor = null; _activeModel = null;
+        self.postMessage({ type: "model_unloaded", model: "extractor" });
+    } else if (_activeModel === "summariser" && _summariser) {
+        self.postMessage({ type: "model_unloading", model: "summariser",
+                           message: "Unloading T5 model to free memory…" });
+        try { await _summariser.dispose(); } catch (_) {}
+        _summariser = null; _activeModel = null;
+        self.postMessage({ type: "model_unloaded", model: "summariser" });
+    }
+
+    // Load the requested model
+    if (which === "extractor") {
+        self.postMessage({ type: "model_loading" });
+        _extractor = await _pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2",
+                                     { device: _gpuDevice });
+        _activeModel = "extractor";
+        self.postMessage({ type: "model_ready", device: _gpuDevice });
+    } else if (which === "summariser") {
+        self.postMessage({ type: "summariser_loading" });
+        _summariser = await _pipeline("text2text-generation", "Xenova/flan-t5-small",
+                                      { device: _gpuDevice, dtype: "q8" });
+        _activeModel = "summariser";
+        self.postMessage({ type: "summariser_ready", device: _gpuDevice });
+    }
+}
+
+/**
  * Called from Python via `from js import runWebGPUInference`.
  * Returns a plain JS object: { embedding: TypedArray, latency_ms, device_used }
  */
 globalThis.runWebGPUInference = async (text) => {
     if (!_pipeline) throw new Error("Transformers.js not loaded");
-    const t0 = performance.now();
-    if (!_extractor) {
-        self.postMessage({ type: "model_loading" });
-        _extractor = await _pipeline(
-            "feature-extraction",
-            "Xenova/all-MiniLM-L6-v2",
-            { device: _gpuDevice }
-        );
-        self.postMessage({ type: "model_ready", device: _gpuDevice });
-    }
-    const out = await _extractor(text, { pooling: "mean", normalize: true });
-    return {
-        embedding: out.data,
-        latency_ms: performance.now() - t0,
-        device_used: _gpuDevice,
-    };
+    let release;
+    const prev  = _modelMutex;
+    _modelMutex = new Promise(r => { release = r; });
+    await prev;
+    try {
+        await _loadModel("extractor");
+        const t0  = performance.now();
+        const out = await _extractor(text, { pooling: "mean", normalize: true });
+        return { embedding: out.data, latency_ms: performance.now() - t0,
+                 device_used: _gpuDevice };
+    } finally { release(); }
 };
 
 // ─── Python → JS callbacks ────────────────────────────────────────────────────
@@ -71,27 +107,25 @@ globalThis.notifyGpuFallback = () => {
 
 globalThis.runSummarisation = async (text) => {
     if (!_pipeline) throw new Error("Transformers.js not loaded");
-    if (!_summariser) {
-        self.postMessage({ type: "summariser_loading" });
-        _summariser = await _pipeline(
-            "text2text-generation",
-            "Xenova/t5-small",
-            { device: _gpuDevice, dtype: "q8" }
-        );
-        self.postMessage({ type: "summariser_ready", device: _gpuDevice });
-    }
-    const t0 = performance.now();
-    const truncated = text.substring(0, 1500);
-    const result = await _summariser(`summarize: ${truncated}`, {
-        max_new_tokens: 100,
-        min_length: 20,
-        num_beams: 1,
-    });
-    return {
-        summary: result[0].generated_text,
-        latency_ms: performance.now() - t0,
-        device_used: _gpuDevice,
-    };
+    let release;
+    const prev  = _modelMutex;
+    _modelMutex = new Promise(r => { release = r; });
+    await prev;
+    try {
+        await _loadModel("summariser");
+        const t0     = performance.now();
+        const prompt = `Summarize the following passage in 2-3 sentences: ${text.substring(0, 1500)}`;
+        const result = await _summariser(prompt, {
+            max_new_tokens:       80,
+            min_length:           20,
+            num_beams:            2,
+            repetition_penalty:   3.0,
+            no_repeat_ngram_size: 4,
+            early_stopping:       true,
+        });
+        return { summary: result[0].generated_text, latency_ms: performance.now() - t0,
+                 device_used: _gpuDevice };
+    } finally { release(); }
 };
 
 // ─── IndexedDB helpers (exposed to Python via Pyodide FFI) ───────────────────
@@ -866,10 +900,32 @@ def extract_keywords(state: DocumentState, context: StepContext, **_):
 
 
 def quality_decision(state: DocumentState, context: StepContext, **_):
-    summary_words = len(state.summary.split()) if state.summary else 0
-    ratio = round(summary_words / max(state.word_count, 1), 3)
-    if summary_words < 10 or ratio < 0.05:
+    summary = state.summary or ""
+    words   = summary.split()
+
+    # Gate 1 — too short
+    if len(words) < 10:
         raise WorkflowJumpDirective(target_step_name="FallbackExtract")
+
+    # Gate 2 — garbage / multilingual hallucination
+    # Flag if more than 12% of characters are non-ASCII
+    non_ascii = sum(1 for c in summary if ord(c) > 127)
+    if non_ascii / max(len(summary), 1) > 0.12:
+        raise WorkflowJumpDirective(target_step_name="FallbackExtract")
+
+    # Gate 3 — repetition loop (any 4-gram appearing > 2 times)
+    lower = [w.lower() for w in words]
+    ngrams = [" ".join(lower[i:i+4]) for i in range(len(lower) - 3)]
+    if ngrams and max(ngrams.count(g) for g in set(ngrams)) > 2:
+        raise WorkflowJumpDirective(target_step_name="FallbackExtract")
+
+    # Gate 4 — hallucination check (< 20% of summary words in source)
+    src_words  = set(state.raw_text.lower().split())
+    summ_words = set(lower)
+    if summ_words and len(summ_words & src_words) / len(summ_words) < 0.20:
+        raise WorkflowJumpDirective(target_step_name="FallbackExtract")
+
+    ratio = round(len(words) / max(state.word_count, 1), 3)
     return {"compression_ratio": ratio, "quality": "GOOD"}
 
 
@@ -1050,8 +1106,7 @@ async function gatherPreflight() {
         pyodide_version:   pyodide ? pyodide.version : null,
         transformers_url:  _loadedTransformersUrl,
         webgpu:            _gpuDevice,
-        model_in_memory:   _extractor !== null,
-        summariser_in_memory: _summariser !== null,
+        active_model:      _activeModel,
         wheel_url:         _wheelUrl,
         storage_usage:     est?.usageBytes ?? null,
         storage_quota:     est?.quotaBytes ?? null,
@@ -1116,8 +1171,15 @@ self.onmessage = async (e) => {
     const { type, workflowType, data } = e.data;
 
     if (type === "run_workflow") {
+        if (_workflowRunning) {
+            self.postMessage({ type: "workflow_error", workflowType,
+                               message: "A workflow is already running — please wait." });
+            return;
+        }
+        _workflowRunning = true;
         self.postMessage({ type: "workflow_start", workflowType });
-        const TIMEOUT_MS = 30_000;
+        const TIMEOUT_MS = { TransactionRiskScoring: 60_000,
+                             DocumentSummarisation:  90_000 }[workflowType] ?? 30_000;
         let timedOut = false;
         const timeoutId = setTimeout(() => {
             timedOut = true;
@@ -1135,6 +1197,7 @@ self.onmessage = async (e) => {
             }
         } finally {
             clearTimeout(timeoutId);
+            _workflowRunning = false;
         }
 
     } else if (type === "preflight_check") {
