@@ -966,6 +966,11 @@ function handleWorkerMessage(e) {
       }
       break;
 
+    case "model_unloading":
+      log(msg.message, "info");
+      setBadge("badge-model", "wasm", "unloading…");
+      break;
+
     case "model_loading":
       document.getElementById("model-overlay").classList.add("visible");
       log("Downloading all-MiniLM-L6-v2 (~23 MB)…", "model");
@@ -1079,18 +1084,18 @@ function handleWorkerMessage(e) {
     case "summariser_loading": {
       document.getElementById("model-overlay-wf4").classList.add("visible");
       document.getElementById("badge-summariser").style.display = "";
-      log("Downloading Xenova/t5-small (~90 MB, first run only)…", "model");
-      setBadge("badge-summariser", "wasm", "T5: downloading…");
+      log("Downloading Xenova/flan-t5-small (~80 MB, first run only)…", "model");
+      setBadge("badge-summariser", "wasm", "FLAN-T5: downloading…");
       const bsc = document.getElementById("badge-summariser-card");
       if (bsc) bsc.textContent = "downloading…";
       break;
     }
     case "summariser_ready": {
       document.getElementById("model-overlay-wf4").classList.remove("visible");
-      log(`T5-small ready on ${msg.device}`, "gpu");
+      log(`FLAN-T5-small ready on ${msg.device}`, "gpu");
       setBadge("badge-summariser",
                msg.device === "webgpu" ? "gpu" : "wasm",
-               msg.device === "webgpu" ? "T5: WebGPU ✓" : "T5: WASM");
+               msg.device === "webgpu" ? "FLAN-T5: WebGPU ✓" : "FLAN-T5: WASM");
       const bsc2 = document.getElementById("badge-summariser-card");
       if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback";
       break;
@@ -1458,8 +1463,9 @@ function renderPreflight(data) {
     ["Pyodide URL",       runtime.pyodide_url || "—"],
     ["Transformers.js URL", runtime.transformers_url || "not loaded"],
     ["Inference backend", runtime.webgpu === "webgpu" ? "WebGPU ✓" : "WASM"],
-    ["Model in memory",   runtime.model_in_memory ? "✓ loaded" : "✗ not loaded"],
-    ["Summariser in memory", runtime.summariser_in_memory ? "✓ loaded" : "✗ not loaded"],
+    ["Active model", runtime.active_model
+        ? `✓ ${runtime.active_model === "extractor" ? "MiniLM" : "FLAN-T5"}`
+        : "✗ none loaded"],
     ["rufus-sdk wheel",   runtime.wheel_url || "—"],
     ["Storage usage",     storageStr],
   ];
