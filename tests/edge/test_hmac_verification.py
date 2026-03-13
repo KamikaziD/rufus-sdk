@@ -8,10 +8,12 @@ Validates that:
 4. Missing HMAC signatures are rejected
 """
 
+import json
 import pytest
 import hmac
 import hashlib
-from unittest.mock import AsyncMock, MagicMock
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 from rufus_edge.sync_manager import SyncManager
@@ -47,7 +49,12 @@ class TestHMACAuthentication:
     def device_service(self):
         """Create DeviceService instance for testing."""
         persistence = AsyncMock()
-        persistence.pool = AsyncMock()
+        # pool.acquire() must be an async context manager
+        conn_mock = AsyncMock()
+        acquire_cm = MagicMock()
+        acquire_cm.__aenter__ = AsyncMock(return_value=conn_mock)
+        acquire_cm.__aexit__ = AsyncMock(return_value=False)
+        persistence.pool.acquire = MagicMock(return_value=acquire_cm)
         return DeviceService(persistence=persistence)
 
     def test_hmac_calculation(self, sync_manager):
@@ -136,29 +143,37 @@ class TestHMACAuthentication:
     @pytest.mark.asyncio
     async def test_sync_payload_includes_hmac(self, sync_manager):
         """Test that sync payloads include HMAC signatures."""
-        # Create test transaction
+        # SAFTransaction requires all mandatory fields
         transaction = SAFTransaction(
             transaction_id="test-txn-001",
             workflow_id="wf-001",
             idempotency_key="test-key-001",
             encrypted_payload=b"encrypted-data",
             encryption_key_id="key-001",
+            device_id="test-device-001",
+            merchant_id="merchant-001",
+            amount=Decimal("25.00"),
+            card_token="tok_test_001",
+            card_last_four="4242",
         )
 
-        # Mock HTTP client
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"accepted": [], "rejected": []}
-
-        sync_manager._http_client = AsyncMock()
-        sync_manager._http_client.post = AsyncMock(return_value=mock_response)
+        # SyncManager now uses _adapter.http_post (not _http_client.post)
+        from rufus_edge.platform.base import HttpResponse
+        mock_response = HttpResponse(
+            status_code=200,
+            body=json.dumps({"accepted": [], "rejected": []}).encode(),
+        )
+        mock_adapter = AsyncMock()
+        mock_adapter.http_post = AsyncMock(return_value=mock_response)
+        sync_manager._adapter = mock_adapter
 
         # Sync the transaction
         await sync_manager._sync_batch([transaction])
 
         # Verify HMAC was included in payload
-        call_args = sync_manager._http_client.post.call_args
-        payload = call_args.kwargs['json']
+        call_args = mock_adapter.http_post.call_args
+        # http_post receives body=<bytes>, parse it back to dict
+        payload = json.loads(call_args.kwargs.get('body') or call_args.args[1])
 
         assert 'transactions' in payload
         assert len(payload['transactions']) == 1
@@ -204,9 +219,6 @@ class TestHMACAuthentication:
                 "hmac": "invalid_hmac_signature_123456789abcdef0123456789abcdef0123456",
             }
         ]
-
-        # Mock database connection
-        device_service.persistence.pool.acquire = AsyncMock()
 
         result = await device_service.sync_transactions(
             device_id="test-device",

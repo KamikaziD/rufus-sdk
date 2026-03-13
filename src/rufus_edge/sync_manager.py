@@ -16,9 +16,9 @@ import json
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-import httpx
 
 from rufus_edge.models import SAFTransaction, SyncReport, SyncStatus, TransactionStatus
+from rufus_edge.platform.base import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class SyncManager:
         batch_size: int = 50,
         max_retries: int = 3,
         retry_delay_seconds: int = 5,
+        adapter: Optional[PlatformAdapter] = None,
     ):
         self.persistence = persistence
         self.sync_url = sync_url
@@ -57,24 +58,24 @@ class SyncManager:
 
         self._sync_in_progress = False
         self._last_sync_at: Optional[datetime] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._adapter: Optional[PlatformAdapter] = adapter
 
     async def initialize(self):
         """Initialize the sync manager."""
-        self._http_client = httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "X-API-Key": self.api_key,
-                "X-Device-ID": self.device_id,
-                "Content-Type": "application/json",
-            }
-        )
+        if self._adapter is None:
+            from rufus_edge.platform import detect_platform
+            self._adapter = detect_platform(
+                default_headers={
+                    "X-API-Key": self.api_key,
+                    "X-Device-ID": self.device_id,
+                }
+            )
         logger.info(f"SyncManager initialized for device {self.device_id}")
 
     async def close(self):
         """Close the sync manager."""
-        if self._http_client:
-            await self._http_client.aclose()
+        if self._adapter is not None and hasattr(self._adapter, "aclose"):
+            await self._adapter.aclose()
 
     async def queue_for_sync(self, transaction: SAFTransaction) -> str:
         """
@@ -252,8 +253,8 @@ class SyncManager:
             "errors": [],
         }
 
-        if not self._http_client:
-            result["errors"].append({"message": "HTTP client not initialized"})
+        if not self._adapter:
+            result["errors"].append({"message": "Platform adapter not initialized"})
             result["failed"] = len(transactions)
             return result
 
@@ -281,11 +282,16 @@ class SyncManager:
         }
 
         # Attempt sync with retry
+        payload_bytes = json.dumps(payload).encode("utf-8")
         for attempt in range(self.max_retries):
             try:
-                response = await self._http_client.post(
+                response = await self._adapter.http_post(
                     f"{self.sync_url}/api/v1/devices/{self.device_id}/sync",
-                    json=payload
+                    body=payload_bytes,
+                    headers={
+                        "X-API-Key": self.api_key,
+                        "X-Device-ID": self.device_id,
+                    },
                 )
 
                 if response.status_code == 200:
@@ -322,7 +328,7 @@ class SyncManager:
                     result["failed"] = len(transactions)
                     return result
 
-            except httpx.RequestError as e:
+            except Exception as e:
                 logger.warning(f"Network error on attempt {attempt + 1}: {e}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay_seconds * (attempt + 1))
@@ -417,13 +423,17 @@ class SyncManager:
 
     async def check_connectivity(self) -> bool:
         """Check if cloud control plane is reachable."""
-        if not self._http_client:
+        if not self._adapter:
             return False
 
         try:
-            response = await self._http_client.get(
+            response = await self._adapter.http_get(
                 f"{self.sync_url}/health",
-                timeout=5.0
+                headers={
+                    "X-API-Key": self.api_key,
+                    "X-Device-ID": self.device_id,
+                },
+                timeout=5.0,
             )
             return response.status_code == 200
         except Exception:

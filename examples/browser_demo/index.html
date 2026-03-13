@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rufus — Browser Runtime Demo</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --surface2:  #1c2230;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+    --gold:      #e3b341;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --purple:    #bc8cff;
+    --orange:    #f0883e;
+    --cyan:      #79c0ff;
+    --radius:    10px;
+    --mono:      "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    --sans:      -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Layout ───────────────────────────────────────────────────────────── */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .header-title span { color: var(--accent); }
+
+  .badges { display: flex; gap: 8px; margin-left: auto; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+  }
+  .badge.ready  { border-color: var(--green);  color: var(--green); }
+  .badge.error  { border-color: var(--red);    color: var(--red); }
+  .badge.gpu    { border-color: var(--purple); color: var(--purple); }
+  .badge.wasm   { border-color: var(--orange); color: var(--orange); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  main {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+
+  .intro {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .intro h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .intro p { color: var(--muted); max-width: 600px; margin: 0 auto; }
+
+  /* ── Cards ────────────────────────────────────────────────────────────── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .card-meta h3 { font-size: 14px; font-weight: 600; }
+  .card-meta p  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .card-body { padding: 16px 18px; flex: 1; }
+
+  /* ── Step pipeline ────────────────────────────────────────────────────── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+
+  .pipe-step {
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--mono);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+  }
+
+  .pipe-step.active   { background: #2d2200; border-color: var(--gold);  color: var(--gold); }
+  .pipe-step.done     { background: #0d2b19; border-color: var(--green); color: var(--green); }
+  .pipe-step.jumped   { background: #1a0d2e; border-color: var(--purple); color: var(--purple); }
+  .pipe-step.skipped  { opacity: 0.35; }
+
+  .pipe-arrow {
+    color: var(--muted);
+    font-size: 12px;
+    user-select: none;
+  }
+
+  /* ── Run button ───────────────────────────────────────────────────────── */
+  .card-footer {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-run {
+    padding: 7px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--accent);
+    color: #0d1117;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn-run:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+  .btn-run:active:not(:disabled) { transform: translateY(0); }
+  .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-run.running  { background: var(--gold); }
+
+  .run-meta { font-size: 11px; color: var(--muted); }
+
+  /* ── Result panel ─────────────────────────────────────────────────────── */
+  .result-panel {
+    margin: 0 18px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+  }
+  .result-panel.visible { display: block; }
+
+  .result-header {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-pill {
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .status-pill.COMPLETED { background: #0d2b19; color: var(--green); }
+  .status-pill.FAILED    { background: #2d0d0d; color: var(--red); }
+  .status-pill.ACTIVE    { background: #2d2200; color: var(--gold); }
+
+  .result-fields { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+
+  .result-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 12px;
+  }
+  .field-key   { color: var(--muted); flex-shrink: 0; }
+  .field-value {
+    color: var(--text);
+    font-family: var(--mono);
+    text-align: right;
+    word-break: break-all;
+    max-width: 220px;
+  }
+  .field-value.green  { color: var(--green); }
+  .field-value.red    { color: var(--red); }
+  .field-value.gold   { color: var(--gold); }
+  .field-value.purple { color: var(--purple); }
+  .field-value.orange { color: var(--orange); }
+
+  /* Model loading overlay */
+  .model-overlay {
+    display: none;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--gold);
+    border-bottom: 1px solid var(--border);
+    background: #2d220066;
+  }
+  .model-overlay.visible { display: flex; align-items: center; gap: 8px; }
+
+  /* ── Spinner ──────────────────────────────────────────────────────────── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  /* ── Console panel ────────────────────────────────────────────────────── */
+  .console-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .console-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .btn-clear {
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .btn-clear:hover { border-color: var(--text); color: var(--text); }
+
+  #console-output {
+    height: 220px;
+    overflow-y: auto;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .log-line { display: flex; gap: 10px; }
+  .log-time  { color: var(--border); min-width: 60px; flex-shrink: 0; }
+  .log-info  { color: var(--text); }
+  .log-step  { color: var(--cyan); }
+  .log-done  { color: var(--green); }
+  .log-error { color: var(--red); }
+  .log-gpu   { color: var(--purple); }
+  .log-model { color: var(--gold); }
+
+  /* ── History panel ────────────────────────────────────────────────────── */
+  .history-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+
+  .history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .history-header:hover { color: var(--text); }
+
+  .history-header-left { display: flex; align-items: center; gap: 8px; }
+
+  .history-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .history-count.has-entries { background: #0d2b19; border-color: var(--green); color: var(--green); }
+
+  .history-chevron {
+    font-size: 10px;
+    transition: transform 0.2s;
+    color: var(--muted);
+  }
+  .history-section.open .history-chevron { transform: rotate(180deg); }
+
+  .history-body { display: none; }
+  .history-section.open .history-body { display: block; }
+
+  .history-empty {
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .history-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .history-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .history-table tr:last-child td { border-bottom: none; }
+  .history-table tbody tr { cursor: pointer; transition: background 0.1s; }
+  .history-table tbody tr:hover { background: var(--surface2); }
+
+  .history-table tbody tr.expanded { background: var(--surface2); }
+
+  .history-detail-row td {
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-detail-row pre {
+    margin: 0;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    overflow-x: auto;
+    background: #0d1117;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .hist-status { font-family: var(--mono); font-weight: 600; }
+  .hist-status.COMPLETED { color: var(--green); }
+  .hist-status.FAILED    { color: var(--red); }
+  .hist-status.ACTIVE    { color: var(--gold); }
+
+  .hist-type { font-family: var(--mono); font-size: 11px; color: var(--cyan); }
+  .hist-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+  /* ── Inspect button ───────────────────────────────────────────────────── */
+  .btn-inspect {
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-inspect:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn-inspect:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Preflight modal ──────────────────────────────────────────────────── */
+  #preflight-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  #preflight-backdrop.open { display: flex; }
+
+  #preflight-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-width: 640px;
+    width: calc(100vw - 32px);
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+  }
+
+  .pf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .pf-header h2 { font-size: 14px; font-weight: 600; }
+
+  .pf-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .pf-close:hover { color: var(--text); }
+
+  .pf-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 20px; }
+
+  .pf-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+
+  .pf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .pf-table th {
+    text-align: left;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .pf-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    word-break: break-all;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .pf-table tr:last-child td { border-bottom: none; }
+  .pf-table td:first-child { color: var(--muted); font-family: var(--sans); white-space: nowrap; }
+
+  .pf-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .pf-stat {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .pf-stat-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .pf-stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-family: var(--mono); }
+
+  .pf-spinner { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+
+  .badge-mock {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    background: #1c1c24;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-left: 4px;
+    font-family: var(--sans);
+  }
+
+  .pf-highlight { border-color: var(--purple) !important; }
+  .pf-highlight td:first-child { color: var(--purple); }
+
+  /* ── Responsiveness ───────────────────────────────────────────────────── */
+  @media (max-width: 720px) {
+    .cards { grid-template-columns: 1fr; }
+    .header { flex-wrap: wrap; }
+    .badges { margin-left: 0; }
+  }
+
+  /* ── Toast notifications ──────────────────────────────────────────────── */
+  #toast-container {
+    position: fixed; bottom: 20px; right: 20px; z-index: 300;
+    display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); font-size: 12px; line-height: 1.5;
+    max-width: 320px; pointer-events: auto;
+    animation: toast-in 0.2s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .toast.warn  { border-color: var(--orange); }
+  .toast.error { border-color: var(--red); }
+  .toast.info  { border-color: var(--accent); }
+  .toast-icon  { flex-shrink: 0; font-size: 14px; }
+  .toast-body  { flex: 1; }
+  .toast-title { font-weight: 600; margin-bottom: 2px; }
+  .toast-msg   { color: var(--muted); }
+  .toast-close {
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; line-height: 1; padding: 0 0 0 4px;
+    flex-shrink: 0; align-self: flex-start;
+  }
+  .toast-close:hover { color: var(--text); }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Storage bar (in Inspect panel) ──────────────────────────────────── */
+  .storage-bar-wrap {
+    height: 6px; background: var(--surface2); border-radius: 3px;
+    overflow: hidden; margin: 8px 0 4px;
+  }
+  .storage-bar-fill {
+    height: 100%; border-radius: 3px; background: var(--green); transition: width 0.4s;
+  }
+  .storage-bar-fill.warn   { background: var(--orange); }
+  .storage-bar-fill.danger { background: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-title">Rufus <span>·</span> Browser Runtime</div>
+  <div style="font-size:12px;color:var(--muted)">Python workflows, zero backend</div>
+  <div class="badges">
+    <span class="badge" id="badge-pyodide">
+      <span class="dot"></span> Pyodide: initialising…
+    </span>
+    <span class="badge" id="badge-webgpu">
+      <span class="dot"></span> WebGPU: detecting…
+    </span>
+    <span class="badge" id="badge-storage" style="display:none">
+      <span class="dot"></span> Storage: —
+    </span>
+    <span class="badge" id="badge-summariser" style="display:none;font-size:10px">T5: not loaded</span>
+    <button class="btn-inspect" id="btn-inspect" disabled onclick="openPreflight()">⚡ Inspect</button>
+  </div>
+</header>
+
+<!-- ── Preflight modal ──────────────────────────────────────────────────────── -->
+<div id="preflight-backdrop" onclick="handleBackdropClick(event)">
+  <div id="preflight-panel" role="dialog" aria-modal="true" aria-label="Environment Inspector">
+    <div class="pf-header">
+      <h2>⚡ Environment Inspector</h2>
+      <button class="pf-close" onclick="closePreflight()" aria-label="Close">✕</button>
+    </div>
+    <div class="pf-body" id="preflight-body">
+      <div class="pf-spinner"><span class="spinner"></span> Gathering runtime info…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main>
+  <div class="intro">
+    <h2>Edge → Cloud → Browser</h2>
+    <p>
+      The same Python step functions that run on a POS terminal or cloud worker
+      run here, natively in your browser tab via Pyodide + WebAssembly.
+    </p>
+  </div>
+
+  <div class="cards">
+
+    <!-- ── Card 1: Order Fulfillment ─────────────────────────────────────── -->
+    <div class="card" id="card-wf1">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0e2a1a">📦</div>
+        <div class="card-meta">
+          <h3>Order Fulfillment</h3>
+          <p>STANDARD · PARALLEL fan-out · WorkflowJumpDirective</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf1">
+          <span class="pipe-step" data-step="ValidateOrder">ValidateOrder</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="CheckInventory">CheckInventory</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="FulfillmentDecision">FulfillmentDecision</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ProcessPayment">ProcessPayment</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="SendConfirmation">SendConfirmation</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="BackorderNotice">BackorderNotice</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">
+          Validates items and totals, fans out to two warehouse APIs in parallel,
+          then either ships or places a backorder based on stock availability.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf1">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf1"></span>
+        </div>
+        <div class="result-fields" id="fields-wf1"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf1" disabled onclick="runWorkflow('OrderFulfillment')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf1"></span>
+      </div>
+    </div>
+
+    <!-- ── Card 2: IoT Sensor Pipeline ───────────────────────────────────── -->
+    <div class="card" id="card-wf2">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0a1e2e">📡</div>
+        <div class="card-meta">
+          <h3>IoT Sensor Pipeline</h3>
+          <p>STANDARD · loop logic · anomaly detection · health jump</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf2">
+          <span class="pipe-step" data-step="InitPipeline">InitPipeline</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="CollectSensorData">CollectSensorData</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ProcessReadings">ProcessReadings</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ComputeStatistics">ComputeStatistics</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="HealthDecision">HealthDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="SendAlert">SendAlert</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">
+          Generates 10 synthetic sensor readings with injected anomalies, computes
+          statistics, and branches to an alert if the anomaly rate or σ is high.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf2">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf2"></span>
+        </div>
+        <div class="result-fields" id="fields-wf2"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf2" disabled onclick="runWorkflow('IoTSensorPipeline')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf2"></span>
+      </div>
+    </div>
+
+    <!-- ── Card 3: Transaction Risk Scoring ──────────────────────────────── -->
+    <div class="card" id="card-wf3">
+      <div class="card-header">
+        <div class="card-icon" style="background:#1c0e2e">💳</div>
+        <div class="card-meta">
+          <h3>Transaction Risk Scoring</h3>
+          <p>STANDARD · WebGPU embedding · cosine similarity · decision jump</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf3">
+          <span class="pipe-step" data-step="ExtractFeatures">ExtractFeatures</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="GPUEmbedding">GPUEmbedding</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ComputeRiskScore">ComputeRiskScore</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ScoreDecision">ScoreDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="RecordOutcome">RecordOutcome</span>
+        </div>
+
+        <!-- Model info row -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">Model: all-MiniLM-L6-v2 (23 MB)</span>
+          <span class="badge" id="badge-model" style="font-size:10px">not loaded</span>
+        </div>
+
+        <!-- Model loading overlay -->
+        <div class="model-overlay" id="model-overlay">
+          <span class="spinner"></span>
+          Downloading model weights (~23 MB) — cached after first run…
+        </div>
+
+        <p style="font-size:12px;color:var(--muted)">
+          Embeds the transaction description using a sentence transformer model
+          running on WebGPU (or WASM fallback), scores against risk pattern
+          embeddings via cosine similarity, then approves, flags, or declines.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf3">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf3"></span>
+        </div>
+        <div class="result-fields" id="fields-wf3"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf3" disabled onclick="runWorkflow('TransactionRiskScoring')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf3"></span>
+      </div>
+    </div>
+
+    <!-- ── Card 4: Document Summarisation ────────────────────────────────── -->
+    <div class="card" id="card-wf4">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0e1e2e">📄</div>
+        <div class="card-meta">
+          <h3>Document Summarisation</h3>
+          <p>STANDARD · T5-small text2text · DECISION quality gate · extractive fallback</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf4">
+          <span class="pipe-step" data-step="IngestDocument">IngestDocument</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="PreprocessText">PreprocessText</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="GenerateSummary">GenerateSummary</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ExtractKeywords">ExtractKeywords</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="QualityDecision">QualityDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="FallbackExtract">FallbackExtract</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">Model: Xenova/t5-small (~90 MB, q8)</span>
+          <span class="badge" id="badge-summariser-card" style="font-size:10px">not loaded</span>
+        </div>
+
+        <div class="model-overlay" id="model-overlay-wf4">
+          <span class="spinner"></span>
+          Downloading T5-small weights (~90 MB) — cached after first run…
+        </div>
+
+        <p style="font-size:12px;color:var(--muted)">
+          Abstractive summarisation using a quantised T5-small model. A DECISION step
+          validates compression ratio; if the LLM output is too short it jumps to an
+          extractive sentence fallback — a workflow-level quality gate.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf4">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf4"></span>
+        </div>
+        <div class="result-fields" id="fields-wf4"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf4" disabled onclick="runWorkflow('DocumentSummarisation')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf4"></span>
+      </div>
+    </div>
+
+  </div><!-- /cards -->
+
+  <!-- ── Run History ──────────────────────────────────────────────────────── -->
+  <section class="history-section" id="history-panel">
+    <div class="history-header" onclick="toggleHistory()">
+      <div class="history-header-left">
+        <span>Run History</span>
+        <span class="history-count" id="history-count">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn-clear" id="btn-clear-history"
+                onclick="event.stopPropagation(); clearHistory()"
+                style="display:none">Clear</button>
+        <span class="history-chevron">▼</span>
+      </div>
+    </div>
+    <div class="history-body" id="history-body">
+      <div class="history-empty" id="history-empty">
+        No previous runs — run a workflow to start recording history
+      </div>
+      <table class="history-table" id="history-table" style="display:none">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Key Result</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Console ──────────────────────────────────────────────────────────── -->
+  <div class="console-section">
+    <div class="console-header">
+      <span>Worker Log</span>
+      <button class="btn-clear" onclick="clearConsole()">Clear</button>
+    </div>
+    <div id="console-output"></div>
+  </div>
+</main>
+
+<div id="toast-container"></div>
+
+<script type="module">
+// ── State ─────────────────────────────────────────────────────────────────────
+const WORKFLOW_STEPS = {
+  OrderFulfillment:        ["ValidateOrder","CheckInventory","FulfillmentDecision","ProcessPayment","SendConfirmation","BackorderNotice"],
+  IoTSensorPipeline:       ["InitPipeline","CollectSensorData","ProcessReadings","ComputeStatistics","HealthDecision","SendAlert"],
+  TransactionRiskScoring:  ["ExtractFeatures","GPUEmbedding","ComputeRiskScore","ScoreDecision","RecordOutcome"],
+  DocumentSummarisation:   ["IngestDocument","PreprocessText","GenerateSummary","ExtractKeywords","QualityDecision","FallbackExtract"],
+};
+
+const WF_ID = {
+  OrderFulfillment:       "wf1",
+  IoTSensorPipeline:      "wf2",
+  TransactionRiskScoring: "wf3",
+  DocumentSummarisation:  "wf4",
+};
+
+let worker = null;
+let runStartTimes = {};   // workflowType → Date.now()
+let currentWfType = null; // for tracking active run
+
+// ── Worker ────────────────────────────────────────────────────────────────────
+function startWorker() {
+  worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = (e) => {
+    log(`Worker error: ${e.message}`, "error");
+    setBadge("badge-pyodide", "error", "Pyodide: error");
+  };
+}
+
+function handleWorkerMessage(e) {
+  const msg = e.data;
+
+  switch (msg.type) {
+
+    case "status":
+      log(msg.message, "info");
+      setBadge("badge-pyodide", "", `⏳ ${msg.message}`);
+      break;
+
+    case "ready":
+      setBadge("badge-pyodide", "ready", "Pyodide: ready ✓");
+      enableButtons();
+      document.getElementById("btn-inspect").disabled = false;
+      log("Pyodide ready — all workflow buttons enabled", "done");
+      worker.postMessage({ type: "get_history" });
+      break;
+
+    case "init_error":
+      log(`Init failed: ${msg.message}`, "error");
+      setBadge("badge-pyodide", "error", "Pyodide: failed");
+      break;
+
+    case "webgpu_status":
+      if (msg.supported) {
+        setBadge("badge-webgpu", "gpu", "WebGPU: ✓");
+        log("WebGPU detected — GPU inference enabled", "gpu");
+      } else {
+        setBadge("badge-webgpu", "wasm", "WebGPU: ✗ (WASM)");
+        log("WebGPU unavailable — WASM fallback active", "info");
+      }
+      break;
+
+    case "model_loading":
+      document.getElementById("model-overlay").classList.add("visible");
+      log("Downloading all-MiniLM-L6-v2 (~23 MB)…", "model");
+      setBadge("badge-model", "wasm", "downloading…");
+      break;
+
+    case "model_ready":
+      document.getElementById("model-overlay").classList.remove("visible");
+      log(`Model ready on ${msg.device}`, "gpu");
+      setBadge("badge-model", msg.device === "webgpu" ? "gpu" : "wasm",
+               msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback");
+      break;
+
+    case "workflow_start":
+      currentWfType = msg.workflowType;
+      runStartTimes[msg.workflowType] = performance.now();
+      resetPipeline(msg.workflowType);
+      setButton(msg.workflowType, true, "Running…");
+      log(`▶ Starting ${msg.workflowType}`, "info");
+      break;
+
+    case "step_done":
+      markStep(currentWfType, msg.stepName, "done");
+      const fields = summariseStep(msg.stepName, msg.result);
+      if (fields) log(`  ✓ ${msg.stepName}: ${fields}`, "step");
+      else        log(`  ✓ ${msg.stepName}`, "step");
+      break;
+
+    case "workflow_done": {
+      const wfType = currentWfType;
+      const elapsed = ((performance.now() - runStartTimes[wfType]) / 1000).toFixed(2);
+      setButton(wfType, false, "Run");
+      showResult(wfType, msg.state, elapsed);
+      log(`✅ ${wfType} completed in ${elapsed}s`, "done");
+      currentWfType = null;
+      // Refresh history panel after a short delay (IDB write is async)
+      setTimeout(() => worker && worker.postMessage({ type: "get_history" }), 400);
+      break;
+    }
+
+    case "workflow_error": {
+      const wfType = msg.workflowType || currentWfType;
+      log(`❌ ${wfType}: ${msg.message}`, "error");
+      setButton(wfType, false, "Run");
+      currentWfType = null;
+      break;
+    }
+
+    case "preflight_result":
+      renderPreflight(msg.data);
+      break;
+
+    case "history_data":
+      renderHistory(msg.workflows || []);
+      break;
+
+    case "history_cleared":
+      renderHistory([]);
+      log("Run history cleared", "info");
+      break;
+
+    case "storage_warning":
+      updateStorageBadge(msg.usageBytes, msg.quotaBytes, msg.pct);
+      if (!window._storageWarnShown) {
+        window._storageWarnShown = true;
+        showToast(
+          "Storage usage high",
+          `IndexedDB is ${fmtPct(msg.pct)} full (${(msg.usageBytes / (1024*1024)).toFixed(1)} MB / ${(msg.quotaBytes / (1024*1024)).toFixed(0)} MB). Older runs may be pruned automatically.`,
+          "warn",
+          8000
+        );
+      }
+      break;
+
+    case "storage_quota_exceeded":
+      updateStorageBadge(null, null, 1.0);
+      showToast(
+        "Storage quota exceeded",
+        `Pruned ${msg.pruned} old run(s) from IndexedDB and retried.`,
+        "error",
+        10000
+      );
+      log(`⚠ Storage quota exceeded — pruned ${msg.pruned} record(s) from ${msg.store}`, "error");
+      break;
+
+    case "workflow_timeout": {
+      const wfType = msg.workflowType || currentWfType;
+      showToast(
+        "Workflow timed out",
+        `${wfType} did not complete within 30 s. The run button has been re-enabled.`,
+        "error",
+        0
+      );
+      log(`⏱ ${wfType} timed out after 30 s`, "error");
+      setButton(wfType, false, "Run");
+      currentWfType = null;
+      break;
+    }
+
+    case "gpu_fallback":
+      showToast(
+        "GPU inference unavailable",
+        "Using CPU pseudo-embeddings as fallback for Workflow 3.",
+        "info",
+        5000
+      );
+      log("⚠ GPU inference unavailable — CPU pseudo-embedding fallback active", "info");
+      setBadge("badge-webgpu", "wasm", "WebGPU: ✗ (fallback)");
+      break;
+
+    case "summariser_loading": {
+      document.getElementById("model-overlay-wf4").classList.add("visible");
+      document.getElementById("badge-summariser").style.display = "";
+      log("Downloading Xenova/t5-small (~90 MB, first run only)…", "model");
+      setBadge("badge-summariser", "wasm", "T5: downloading…");
+      const bsc = document.getElementById("badge-summariser-card");
+      if (bsc) bsc.textContent = "downloading…";
+      break;
+    }
+    case "summariser_ready": {
+      document.getElementById("model-overlay-wf4").classList.remove("visible");
+      log(`T5-small ready on ${msg.device}`, "gpu");
+      setBadge("badge-summariser",
+               msg.device === "webgpu" ? "gpu" : "wasm",
+               msg.device === "webgpu" ? "T5: WebGPU ✓" : "T5: WASM");
+      const bsc2 = document.getElementById("badge-summariser-card");
+      if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback";
+      break;
+    }
+  }
+}
+
+// ── Workflow runner ───────────────────────────────────────────────────────────
+window.runWorkflow = function(workflowType) {
+  if (!worker) return;
+  const defaultData = {
+    OrderFulfillment: {
+      items: [
+        { name: "Widget A", price: 29.99, qty: 2 },
+        { name: "Widget B", price: 14.50, qty: 1 },
+      ],
+    },
+    IoTSensorPipeline: { device_id: "sensor-42" },
+    TransactionRiskScoring: {
+      amount: Math.round(Math.random() * 1900 + 100),
+      merchant_category: ["retail", "crypto-exchange", "grocery", "streaming"][Math.floor(Math.random() * 4)],
+      location: ["London", "New York", "Singapore", "unknown"][Math.floor(Math.random() * 4)],
+    },
+    DocumentSummarisation: {},   // raw_text omitted → Python picks random _DEMO_TEXTS entry
+  };
+  worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {} });
+};
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function enableButtons() {
+  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4"].forEach(id => {
+    document.getElementById(id).disabled = false;
+  });
+}
+
+function setButton(wfType, running, label) {
+  const id = `btn-${WF_ID[wfType]}`;
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.textContent = running ? label : "Run";
+  btn.disabled = running;
+  btn.classList.toggle("running", running);
+}
+
+function resetPipeline(wfType) {
+  const id = WF_ID[wfType];
+  const container = document.getElementById(`pipeline-${id}`);
+  if (!container) return;
+  container.querySelectorAll(".pipe-step").forEach(el => {
+    el.className = "pipe-step";
+  });
+  // Hide result panel
+  const panel = document.getElementById(`result-${id}`);
+  if (panel) panel.classList.remove("visible");
+}
+
+function markStep(wfType, stepName, cls) {
+  if (!wfType) return;
+  const id = WF_ID[wfType];
+  const container = document.getElementById(`pipeline-${id}`);
+  if (!container) return;
+  const el = container.querySelector(`[data-step="${stepName}"]`);
+  if (el) { el.className = "pipe-step " + cls; }
+}
+
+function showResult(wfType, state, elapsed) {
+  const id = WF_ID[wfType];
+  const panel = document.getElementById(`result-${id}`);
+  const statusEl = document.getElementById(`status-${id}`);
+  const fieldsEl = document.getElementById(`fields-${id}`);
+  const metaEl   = document.getElementById(`meta-${id}`);
+  if (!panel) return;
+
+  const wfStatus = state._status || "COMPLETED";
+  if (statusEl) {
+    statusEl.textContent = "COMPLETED";
+    statusEl.className = "status-pill COMPLETED";
+  }
+
+  if (metaEl) metaEl.textContent = `${elapsed}s`;
+
+  const rows = buildResultRows(wfType, state);
+  if (fieldsEl) {
+    fieldsEl.innerHTML = rows.map(([k, v, cls]) =>
+      `<div class="result-field">
+         <span class="field-key">${k}</span>
+         <span class="field-value ${cls || ""}">${v}</span>
+       </div>`
+    ).join("");
+  }
+
+  panel.classList.add("visible");
+}
+
+function buildResultRows(wfType, s) {
+  if (wfType === "OrderFulfillment") {
+    const shipped = s.status === "SHIPPED";
+    return [
+      ["order_id",    s.order_id || "—", ""],
+      ["total",       s.total != null ? `$${s.total.toFixed(2)}` : "—", ""],
+      ["stock_uk",    s.stock_uk ? "✓ in stock" : "✗ out of stock", s.stock_uk ? "green" : "red"],
+      ["stock_eu",    s.stock_eu ? "✓ in stock" : "✗ out of stock", s.stock_eu ? "green" : "red"],
+      ["payment_ref", s.payment_ref || "—", ""],
+      ["status",      s.status || "—", shipped ? "green" : "orange"],
+    ];
+  }
+  if (wfType === "IoTSensorPipeline") {
+    const cls = s.health_status === "HEALTHY" ? "green"
+              : s.health_status === "WARNING"  ? "orange"
+              : "red";
+    return [
+      ["device_id",    s.device_id || "—", ""],
+      ["readings",     (s.readings || []).length + " samples", ""],
+      ["anomalies",    (s.anomalies || []).length + " detected", s.anomalies?.length ? "red" : "green"],
+      ["mean",         s.mean != null ? s.mean.toFixed(3) : "—", ""],
+      ["stddev",       s.stddev != null ? `σ=${s.stddev.toFixed(3)}` : "—", ""],
+      ["anomaly_rate", s.anomaly_rate != null ? `${(s.anomaly_rate * 100).toFixed(1)}%` : "—", ""],
+      ["health",       s.health_status || "—", cls],
+    ];
+  }
+  if (wfType === "TransactionRiskScoring") {
+    const dcls = s.decision === "APPROVED" ? "green"
+               : s.decision === "DECLINED" ? "red"
+               : "orange";
+    return [
+      ["txn_id",       s.txn_id || "—", ""],
+      ["amount",       s.amount != null ? `$${s.amount}` : "—", ""],
+      ["merchant",     s.merchant_category || "—", ""],
+      ["risk_score",   s.risk_score != null ? s.risk_score.toFixed(3) : "—",
+                       s.risk_score > 0.65 ? "red" : s.risk_score > 0.4 ? "orange" : "green"],
+      ["decision",     s.decision || "—", dcls],
+      ["inference",    s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—", ""],
+      ["device",       s.device_used || "—", s.device_used === "webgpu" ? "purple" : "orange"],
+      ["explanation",  s.explanation || "—", ""],
+    ];
+  }
+  if (wfType === "DocumentSummarisation") {
+    const qcls = s.quality === "GOOD" ? "green" : s.quality === "FALLBACK" ? "orange" : "";
+    const preview = s.summary
+      ? (s.summary.length > 120 ? s.summary.substring(0, 120) + "…" : s.summary)
+      : "—";
+    return [
+      ["doc_type",    s.doc_type || "—",                                                          "cyan"],
+      ["words",       s.word_count ? `${s.word_count} → ${(s.summary||"").split(" ").length} words` : "—", ""],
+      ["compression", s.compression_ratio ? `${(s.compression_ratio * 100).toFixed(1)}%` : "—",  ""],
+      ["quality",     s.quality || "—",                                                            qcls],
+      ["method",      s.method || "—",      s.method === "llm-abstractive" ? "purple" : "orange"],
+      ["inference",   s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—",                   ""],
+      ["keywords",    (s.keywords || []).slice(0, 5).join(", ") || "—",                            ""],
+      ["summary",     preview,                                                                      ""],
+    ];
+  }
+  return Object.entries(s).slice(0, 8).map(([k, v]) => [k, JSON.stringify(v), ""]);
+}
+
+function summariseStep(stepName, result) {
+  if (!result || !Object.keys(result).length) return null;
+  const entries = Object.entries(result).slice(0, 3);
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+}
+
+// ── Console ───────────────────────────────────────────────────────────────────
+function log(msg, cls = "info") {
+  const out = document.getElementById("console-output");
+  const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML = `<span class="log-time">${time}</span><span class="log-${cls}">${escHtml(msg)}</span>`;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+window.clearConsole = function() {
+  document.getElementById("console-output").innerHTML = "";
+};
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(title, msg, variant = "info", durationMs = 5000) {
+  const container = document.getElementById("toast-container");
+  const icons = { warn: "⚠️", error: "🔴", info: "ℹ️" };
+  const toast = document.createElement("div");
+  toast.className = `toast ${variant}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[variant] || "ℹ️"}</span>
+    <div class="toast-body">
+      <div class="toast-title">${escHtml(title)}</div>
+      ${msg ? `<div class="toast-msg">${escHtml(msg)}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.closest('.toast').remove()">✕</button>`;
+  container.appendChild(toast);
+  if (durationMs > 0) setTimeout(() => toast.remove(), durationMs);
+}
+
+function fmtPct(pct) {
+  return (pct * 100).toFixed(1) + "%";
+}
+
+function updateStorageBadge(usageBytes, quotaBytes, pct) {
+  const el = document.getElementById("badge-storage");
+  if (!el) return;
+  if (usageBytes == null) { el.style.display = "none"; return; }
+  const used = (usageBytes / (1024 * 1024)).toFixed(1);
+  const total = quotaBytes ? (quotaBytes / (1024 * 1024)).toFixed(0) : "?";
+  const cls = pct >= 0.90 ? "error" : pct >= 0.80 ? "warn" : "ready";
+  el.className = `badge ${cls}`;
+  el.style.display = "";
+  el.innerHTML = `<span class="dot"></span> Storage: ${used} MB / ${total} MB (${fmtPct(pct)})`;
+}
+
+// ── Badge ─────────────────────────────────────────────────────────────────────
+function setBadge(id, cls, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "badge" + (cls ? " " + cls : "");
+  if (id === "badge-model") {
+    el.textContent = text;
+  } else {
+    el.innerHTML = `<span class="dot"></span> ${escHtml(text)}`;
+  }
+}
+
+// ── History panel ─────────────────────────────────────────────────────────────
+function renderHistory(workflows) {
+  const countEl  = document.getElementById("history-count");
+  const emptyEl  = document.getElementById("history-empty");
+  const tableEl  = document.getElementById("history-table");
+  const tbodyEl  = document.getElementById("history-tbody");
+  const clearBtn = document.getElementById("btn-clear-history");
+  const panel    = document.getElementById("history-panel");
+
+  const n = workflows.length;
+  countEl.textContent = n;
+  countEl.className   = "history-count" + (n > 0 ? " has-entries" : "");
+  clearBtn.style.display = n > 0 ? "" : "none";
+
+  if (n === 0) {
+    emptyEl.style.display = "";
+    tableEl.style.display = "none";
+    return;
+  }
+
+  emptyEl.style.display = "none";
+  tableEl.style.display = "";
+
+  // Auto-expand when entries arrive for the first time
+  if (!panel.classList.contains("open")) {
+    panel.classList.add("open");
+  }
+
+  tbodyEl.innerHTML = "";
+  workflows.forEach((wf, idx) => {
+    const wfType   = wf.workflow_type || "—";
+    const status   = wf.status || "—";
+    const created  = wf.created_at
+      ? new Date(wf.created_at).toLocaleTimeString("en-GB", { hour12: false })
+      : "—";
+    const keyResult = historyKeyResult(wf);
+
+    // Data row
+    const tr = document.createElement("tr");
+    tr.dataset.idx = idx;
+    tr.innerHTML = `
+      <td class="hist-type">${escHtml(wfType)}</td>
+      <td><span class="hist-status ${escHtml(status)}">${escHtml(status)}</span></td>
+      <td style="color:var(--muted)">${escHtml(keyResult)}</td>
+      <td class="hist-time">${escHtml(created)}</td>
+    `;
+    tr.addEventListener("click", () => toggleDetailRow(tr, wf));
+    tbodyEl.appendChild(tr);
+  });
+}
+
+function historyKeyResult(wf) {
+  const s = wf.state || wf;
+  const wfType = wf.workflow_type || "";
+  if (wfType === "OrderFulfillment")
+    return s.status ? `status=${s.status}` : s.order_id || "—";
+  if (wfType === "IoTSensorPipeline")
+    return s.health_status ? `health=${s.health_status}` : "—";
+  if (wfType === "TransactionRiskScoring")
+    return s.decision ? `decision=${s.decision}` : "—";
+  if (wfType === "DocumentSummarisation")
+    return s.quality ? `quality=${s.quality}, method=${s.method||"—"}` : "—";
+  const entries = Object.entries(s).filter(([k]) => !k.startsWith("_")).slice(0, 2);
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ") || "—";
+}
+
+function toggleDetailRow(tr, wf) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains("history-detail-row")) {
+    existing.remove();
+    tr.classList.remove("expanded");
+    return;
+  }
+  tr.classList.add("expanded");
+  const detailTr = document.createElement("tr");
+  detailTr.className = "history-detail-row";
+  const colCount = tr.cells.length;
+  detailTr.innerHTML = `<td colspan="${colCount}"><pre>${escHtml(JSON.stringify(wf, null, 2))}</pre></td>`;
+  tr.parentNode.insertBefore(detailTr, tr.nextSibling);
+}
+
+window.toggleHistory = function() {
+  document.getElementById("history-panel").classList.toggle("open");
+};
+
+window.clearHistory = function() {
+  if (!worker) return;
+  worker.postMessage({ type: "clear_history" });
+};
+
+// ── Preflight modal ───────────────────────────────────────────────────────────
+const MOCK_PACKAGES = new Set(["cryptography", "orjson", "uvloop", "asyncpg"]);
+
+window.openPreflight = function() {
+  if (!worker) return;
+  const body = document.getElementById("preflight-body");
+  body.innerHTML = '<div class="pf-spinner"><span class="spinner"></span> Gathering runtime info…</div>';
+  document.getElementById("preflight-backdrop").classList.add("open");
+  worker.postMessage({ type: "preflight_check" });
+};
+
+window.closePreflight = function() {
+  document.getElementById("preflight-backdrop").classList.remove("open");
+};
+
+window.handleBackdropClick = function(e) {
+  if (e.target === document.getElementById("preflight-backdrop")) closePreflight();
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closePreflight();
+});
+
+function fmtBytes(n) {
+  if (!n) return "—";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function renderPreflight(data) {
+  const body = document.getElementById("preflight-body");
+  if (!data) {
+    body.innerHTML = '<div class="pf-spinner" style="color:var(--red)">Failed to gather runtime info.</div>';
+    return;
+  }
+
+  const { runtime, packages, cacheStores, idb } = data;
+
+  // ── Runtime section ────────────────────────────────────────────────────
+  const storagePct = runtime.storage_pct;
+  const storageStr = runtime.storage_usage != null
+    ? `${(runtime.storage_usage / (1024*1024)).toFixed(1)} MB / ${(runtime.storage_quota / (1024*1024)).toFixed(0)} MB (${fmtPct(storagePct)})`
+    : "—";
+  const runtimeRows = [
+    ["Pyodide version",   runtime.pyodide_version || "—"],
+    ["Pyodide URL",       runtime.pyodide_url || "—"],
+    ["Transformers.js URL", runtime.transformers_url || "not loaded"],
+    ["Inference backend", runtime.webgpu === "webgpu" ? "WebGPU ✓" : "WASM"],
+    ["Model in memory",   runtime.model_in_memory ? "✓ loaded" : "✗ not loaded"],
+    ["Summariser in memory", runtime.summariser_in_memory ? "✓ loaded" : "✗ not loaded"],
+    ["rufus-sdk wheel",   runtime.wheel_url || "—"],
+    ["Storage usage",     storageStr],
+  ];
+  if (runtime.storage_usage != null) {
+    updateStorageBadge(runtime.storage_usage, runtime.storage_quota, storagePct);
+  }
+  const runtimeHtml = `
+    <div class="pf-section">
+      <h3>Runtime</h3>
+      <table class="pf-table">
+        <tbody>
+          ${runtimeRows.map(([k, v]) => `
+            <tr>
+              <td>${escHtml(k)}</td>
+              <td style="color:${
+                v.includes("✓") ? "var(--green)" :
+                v === "✗ not loaded" || v === "not loaded" ? "var(--muted)" :
+                "var(--text)"
+              }">${escHtml(String(v))}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+
+  // ── Packages section ───────────────────────────────────────────────────
+  const pkgEntries = Object.entries(packages).sort((a, b) => a[0].localeCompare(b[0]));
+  const pkgsHtml = `
+    <div class="pf-section">
+      <h3>Python packages (${pkgEntries.length})</h3>
+      <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <table class="pf-table">
+          <thead><tr><th>Package</th><th>Version</th><th>Source</th></tr></thead>
+          <tbody>
+            ${pkgEntries.length === 0
+              ? '<tr><td colspan="3" style="color:var(--muted);font-family:var(--sans)">No packages found</td></tr>'
+              : pkgEntries.map(([name, info]) => {
+                  const isMock = MOCK_PACKAGES.has(name);
+                  return `<tr>
+                    <td style="font-family:var(--mono);${isMock ? "color:var(--muted)" : ""}">
+                      ${escHtml(name)}${isMock ? '<span class="badge-mock">mock</span>' : ""}
+                    </td>
+                    <td style="${isMock ? "color:var(--muted)" : ""}">${escHtml(info.version || "—")}</td>
+                    <td style="color:var(--muted);word-break:break-all">${escHtml(info.source || "—")}</td>
+                  </tr>`;
+                }).join("")
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // ── Cache stores section ───────────────────────────────────────────────
+  const cacheHtml = `
+    <div class="pf-section">
+      <h3>Browser cache (${cacheStores.length} store${cacheStores.length !== 1 ? "s" : ""})</h3>
+      ${cacheStores.length === 0
+        ? '<p style="font-size:12px;color:var(--muted)">No cache stores found.</p>'
+        : `<table class="pf-table">
+            <thead><tr><th>Cache name</th><th>Entries</th><th>Est. size</th></tr></thead>
+            <tbody>
+              ${cacheStores.map(c => {
+                const isModel = c.name.toLowerCase().includes("minilm") ||
+                                c.name.toLowerCase().includes("transformers");
+                return `<tr class="${isModel ? "pf-highlight" : ""}">
+                  <td style="font-family:var(--mono)">${escHtml(c.name)}</td>
+                  <td>${c.count}</td>
+                  <td>${fmtBytes(c.size_bytes)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>`
+      }
+    </div>`;
+
+  // ── IndexedDB section ──────────────────────────────────────────────────
+  const barPct = runtime.storage_pct != null ? runtime.storage_pct : null;
+  const barCls = barPct >= 0.90 ? "danger" : barPct >= 0.80 ? "warn" : "";
+  const barWidth = barPct != null ? Math.min(100, barPct * 100).toFixed(1) : 0;
+  const storageBarHtml = barPct != null ? `
+    <div class="storage-bar-wrap">
+      <div class="storage-bar-fill ${barCls}" style="width:${barWidth}%"></div>
+    </div>
+    <div style="font-size:11px;color:${barPct >= 0.90 ? "var(--red)" : barPct >= 0.80 ? "var(--orange)" : "var(--muted)"}">
+      ${(runtime.storage_usage / (1024*1024)).toFixed(1)} MB used of ${(runtime.storage_quota / (1024*1024)).toFixed(0)} MB quota (${fmtPct(barPct)})
+    </div>` : "";
+  const idbHtml = `
+    <div class="pf-section">
+      <h3>IndexedDB — rufus-demo</h3>
+      <div class="pf-stats">
+        <div class="pf-stat">
+          <div class="pf-stat-label">Workflows stored</div>
+          <div class="pf-stat-value" style="color:var(--accent)">${idb.workflows}</div>
+        </div>
+        <div class="pf-stat">
+          <div class="pf-stat-label">Audit events</div>
+          <div class="pf-stat-value" style="color:var(--cyan)">${idb.audit_events}</div>
+        </div>
+      </div>
+      ${storageBarHtml}
+    </div>`;
+
+  body.innerHTML = runtimeHtml + pkgsHtml + cacheHtml + idbHtml;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+startWorker();
+log("Worker started — loading Pyodide…", "info");
+</script>
+</body>
+</html>

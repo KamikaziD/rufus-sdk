@@ -1,0 +1,50 @@
+name: Deploy Browser Demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build rufus-sdk wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist
+          ls -lh dist/
+
+      - name: Assemble demo site
+        run: |
+          mkdir -p _site/dist
+          cp dist/rufus_sdk-*.whl _site/dist/
+          cp examples/browser_demo/index.html _site/index.html
+          cp examples/browser_demo/worker.js  _site/worker.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - uses: actions/deploy-pages@v4
+        id: deploy

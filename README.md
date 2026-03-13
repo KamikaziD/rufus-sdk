@@ -1,8 +1,6 @@
-# Rufus — Workflow Runtime for Autonomous Edge Systems
+# Rufus — Workflow Runtime for Edge and Cloud
 
-**The runtime that keeps working when the network doesn't.**
-
-Rufus is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device also powers the cloud control plane that manages that device — four layers, one runtime, no magic paths.
+Rufus is a Python workflow engine built around provider-based dependency injection. The same SDK runs on a constrained edge device (SQLite, offline-first) and on a cloud control plane (PostgreSQL, Celery, distributed) — different backends, identical step functions and YAML definitions.
 
 ```
 DEVICE RUNTIME   │  CLOUD WORKER  │  CONTROL PLANE  │  DASHBOARD
@@ -13,33 +11,14 @@ Offline-first    │  Horizontal    │  Fleet & policy  │  9-page UI
 
 ---
 
-## The Self-Hosting Insight
+## Deployment Contexts
 
-Rufus orchestrates itself: the same SDK running on a POS terminal also powers the control plane managing that terminal. Configuration rollout, audit aggregation, and policy enforcement are themselves Rufus workflows — battle-tested by their own use. There are no magic paths, no special cases, no separate orchestration tier.
-
----
-
-## Built for Anywhere the Network Is Unreliable
-
-- **Robotics & drones** — deterministic mission plans, air-gapped from ground control
-- **Surgical devices & medical wearables** — sterile procedure logs without cloud dependency
-- **Industrial IoT & factory automation** — local ML inference, no connectivity required
-- **Fleet intelligence & field operations** — resilient mobile data collection
-- **POS terminals, ATMs, mobile readers** — offline payments with store-and-forward
-- **Autonomous vehicles** — edge-computed decision workflows
-
----
-
-## Three Pillars
-
-### 1. Air-Gapped Brain
-SQLite WAL, offline-first architecture, resume-from-disk without any cloud check-in. Workflows survive network loss, process restarts, and hardware reboots.
-
-### 2. Three Roles / One Runtime
-Device Runtime → Cloud Worker → Control Plane. Same SDK, same YAML, same step functions. Only the persistence and execution backends differ.
-
-### 3. Unbrickable Fleet
-ETag-based config push for hot-deploy without firmware updates. Definition snapshots protect running workflows from YAML changes. Heartbeat-based crash recovery detects and marks zombie workflows automatically.
+- **Robotics & autonomous systems** — deterministic mission plans that survive connectivity loss
+- **Medical devices & wearables** — air-gapped procedure logs with guaranteed local persistence
+- **Industrial IoT & factory automation** — local processing and ML inference without cloud dependency
+- **Field operations & logistics** — resilient mobile workflows with automatic sync on reconnect
+- **Point-of-sale & payment terminals** — offline transaction queuing with store-and-forward
+- **Any environment** where local execution, intermittent connectivity, or fleet management matters
 
 ---
 
@@ -49,7 +28,7 @@ Rufus ships as five composable layers. Deploy only what you need.
 
 | Layer | Package | Runtime | Purpose |
 |-------|---------|---------|---------|
-| **Core SDK** | `rufus-sdk` | Any Python app | Workflow engine, providers, 9 step types |
+| **Core SDK** | `rufus-sdk` | Any Python app | Workflow engine, providers, 11 step types |
 | **CLI** | `rufus-sdk` | Terminal | Local run / validate / manage |
 | **Edge Agent** | `rufus-sdk-edge` | Device (SQLite) | Offline-first runtime, SAF, config sync |
 | **Cloud Server** | `rufus-sdk-server` | Docker / K8s | REST API, fleet commands, 86 endpoints |
@@ -72,24 +51,24 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:0.7.9
+    image: ruhfuskdev/rufus-server:0.8.0
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:0.7.9
+    image: ruhfuskdev/rufus-worker:0.8.0
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:0.7.9
+    image: ruhfuskdev/rufus-flower:0.8.0
     ports: ["5555:5555"]
 
   rufus-dashboard:
-    image: ruhfuskdev/rufus-dashboard:0.7.9
+    image: ruhfuskdev/rufus-dashboard:0.8.0
     ports: ["3000:3000"]
     environment:
       NEXTAUTH_URL: http://localhost:3000
@@ -117,12 +96,12 @@ API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs` · 
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.9
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.8.0
 ```
 
 ```python
 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.execution.sync import SyncExecutor
 from rufus.builder import WorkflowBuilder
 
 def validate_payment(state, context, **_):
@@ -134,7 +113,7 @@ def process_charge(state, context, **_):
 
 builder = WorkflowBuilder(
     persistence_provider=SQLitePersistenceProvider(db_path=":memory:"),
-    execution_provider=SyncExecutionProvider(),
+    execution_provider=SyncExecutor(),
 )
 builder.register_workflow_inline("Payment", steps=[
     {"name": "Validate", "type": "STANDARD", "function": validate_payment},
@@ -188,7 +167,7 @@ CLOUD                               EDGE (SQLite)
 └── Celery Workers (Redis)
 ```
 
-### Step Types (9 built-in)
+### Step Types (11 built-in)
 
 | Type | Description |
 |------|-------------|
@@ -201,6 +180,8 @@ CLOUD                               EDGE (SQLite)
 | `FIRE_AND_FORGET` | Non-blocking async for notifications/audit |
 | `CRON_SCHEDULE` | Scheduled recurring execution |
 | `HUMAN_IN_LOOP` | Pause workflow for manual approval |
+| `AI_INFERENCE` | On-device ML inference via TFLite or ONNX |
+| `WASM` | Execute a WebAssembly binary — WASI stdin/stdout (core) or Component Model typed interface (v0.8.0) |
 
 ### Provider Pattern
 
@@ -216,7 +197,7 @@ builder = WorkflowBuilder(
 
 ## Rufus Dashboard
 
-The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:0.7.9`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
+The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:0.8.0`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
 
 ### Pages
 
@@ -286,6 +267,11 @@ See [Dashboard Guide](docs/how-to-guides/dashboard.md) for deploy instructions, 
 - Audit log table captures every workflow event
 - CLI metrics: `rufus metrics`, `rufus logs <id>`
 
+### Polyglot Execution
+- **HTTP steps** — orchestrate services written in Go, Rust, Node.js, or any language via REST
+- **WASM steps** — run pre-compiled WebAssembly binaries via WASI stdin/stdout or the Component Model typed interface; runs natively, in-browser (Pyodide), or as a compiled WASI 0.3 target (requires `wasmtime>=15.0`)
+- **AI_INFERENCE steps** — on-device ML inference via TFLite or ONNX without a network call
+
 ### Performance
 - uvloop — 2–4× faster async I/O
 - orjson — 3–5× faster JSON serialization
@@ -296,7 +282,7 @@ See [Dashboard Guide](docs/how-to-guides/dashboard.md) for deploy instructions, 
 
 ## Use Cases
 
-### Fintech — Offline Payment Terminal
+### Saga Pattern — Compensatable Steps
 
 ```yaml
 steps:
@@ -396,8 +382,8 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 | Reference | Contains |
 |-----------|----------|
 | [YAML Schema](docs/reference/configuration/yaml-schema.md) | Complete workflow YAML spec |
-| [Step Types](docs/reference/configuration/step-types.md) | All 9 step types |
-| [Database Schema](docs/reference/configuration/database-schema.md) | 33 cloud + 10 edge tables |
+| [Step Types](docs/reference/configuration/step-types.md) | All 11 step types |
+| [Database Schema](docs/reference/configuration/database-schema.md) | 34 cloud + 12 edge tables |
 | [Configuration](docs/reference/configuration/configuration.md) | All environment variables |
 | [CLI Commands](docs/reference/configuration/cli-commands.md) | All 26 CLI commands |
 
@@ -422,7 +408,7 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 
 ### Appendices
 
-- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.7.4
+- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.8.0 + [Unreleased]
 - [Roadmap](docs/appendices/roadmap.md)
 - [Migration Notes](docs/appendices/migration-notes.md)
 - [Glossary](docs/appendices/glossary.md)
@@ -483,16 +469,21 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:0.7.9` · `ruhfuskdev/rufus-worker:0.7.9` · `ruhfuskdev/rufus-flower:0.7.9` · `ruhfuskdev/rufus-dashboard:0.7.9`
+**Docker Hub:** `ruhfuskdev/rufus-server:0.8.0` · `ruhfuskdev/rufus-worker:0.8.0` · `ruhfuskdev/rufus-flower:0.8.0` · `ruhfuskdev/rufus-dashboard:0.8.0`
 
 > Dashboard auth requires Keycloak (included in `docker/docker-compose.keycloak.yml`) or any OIDC provider configured via `KEYCLOAK_ISSUER`, `KEYCLOAK_ID`, and `KEYCLOAK_SECRET`.
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.7.9
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.8.0
+
+# Optional extras
+pip install 'rufus-sdk[wasm]'                  # WASM steps (core module, wasmtime>=15.0)
+pip install 'rufus-sdk-edge[browser]'          # Browser target (Pyodide + wa-sqlite)
+pip install 'rufus-sdk-edge[wasi]'             # WASI 0.3 compiled target
 ```
 
 ---
 
-**Current Version:** v0.7.9
+**Current Version:** v0.8.0
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

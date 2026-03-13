@@ -62,7 +62,7 @@ class Workflow:
                  expression_evaluator_cls: Type['ExpressionEvaluator'] = None, # Use string literal
                  template_engine_cls: Type['TemplateEngine'] = None, # Use string literal
                  workflow_observer: 'WorkflowObserver' = None, # Use string literal
-                 wasm_runtime=None  # Optional WasmRuntime; required only for WASM steps
+                 wasm_runtime=None  # Optional WasmRuntime or ComponentStepRuntime; auto-created for WASM steps
                  ):
         self.id = workflow_id or str(uuid.uuid4())
         self.workflow_steps = workflow_steps or []
@@ -823,9 +823,12 @@ class Workflow:
             elif isinstance(step, WasmWorkflowStep):
                 if self.wasm_runtime is None:
                     raise RuntimeError(
-                        f"WasmRuntime is not configured but step '{step.name}' requires it. "
-                        "Pass a WasmRuntime instance via wasm_runtime= when creating the Workflow."
+                        f"WasmRuntime (or ComponentStepRuntime) is not configured but step '{step.name}' requires it. "
+                        "Pass a runtime instance via wasm_runtime= when creating the Workflow, "
+                        "or use WorkflowBuilder which auto-wires ComponentStepRuntime when a resolver is available."
                     )
+                # ComponentStepRuntime and WasmRuntime share the same execute() signature.
+                # ComponentStepRuntime auto-detects Component Model vs legacy core modules.
                 result = await self.wasm_runtime.execute(step.wasm_config, self.state.model_dump())
                 if isinstance(result, dict):
                     self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)

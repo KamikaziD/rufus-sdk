@@ -1,3 +1,58 @@
+# WASM/Browser/WASI Edge Agent — Component Model + Dual Target
+
+**Branch:** `claude/plan-session-EBu8w`
+**Spec:** `.claude/tasks/spec.md`
+
+## Phase 1 — Platform I/O Abstraction (shared foundation)
+
+- [ ] Create `src/rufus_edge/platform/base.py` — `PlatformAdapter` Protocol + `HttpResponse` + `NullSystemMetrics`
+- [ ] Create `src/rufus_edge/platform/native.py` — `NativePlatformAdapter` (wraps `httpx`, `psutil`)
+- [ ] Create `src/rufus_edge/platform/pyodide.py` — `PyodidePlatformAdapter` (`js.fetch`, stub metrics, `wa-sqlite` note)
+- [ ] Create `src/rufus_edge/platform/wasi.py` — `WasiPlatformAdapter` (wasi:http shim, stub metrics)
+- [ ] Create `src/rufus_edge/platform/__init__.py` — `detect_platform()` auto-selector
+- [ ] Refactor `SyncManager`: accept `adapter: PlatformAdapter = None`; replace `httpx` calls with adapter
+- [ ] Refactor `ConfigManager`: accept `adapter: PlatformAdapter = None`; replace `httpx` calls with adapter
+- [ ] Guard `subprocess.run` calls in `src/rufus/utils/platform.py` behind `sys.platform != 'wasm32'`
+- [ ] Update `RufusEdgeAgent.__init__` to accept optional `platform_adapter` and pass it down
+
+## Phase 2 — Component Model WASM Executor
+
+- [ ] Create `src/rufus/wasm_component/step.wit` — WIT interface (`rufus:step@0.1.0` world)
+- [ ] Create `src/rufus/wasm_component/__init__.py`
+- [ ] Create `src/rufus/implementations/execution/component_runtime.py` — `ComponentStepRuntime`
+  - `_is_component(binary)` — detect CM magic bytes vs core module
+  - `_run_component()` — native: `wasmtime.component`; browser: `js.WebAssembly`
+  - `_run_legacy_wasi()` — delegates to existing `WasmRuntime._execute_wasi()`
+  - Keep `WasmRuntime` unchanged (backward compat)
+- [ ] Update `workflow.py` WASM step dispatch to use `ComponentStepRuntime` by default
+
+## Phase 3 — Browser Target (Pyodide + JSPI)
+
+- [ ] Create `scripts/browser_loader.js` — Pyodide bootstrap, wa-sqlite init, edge agent start
+- [ ] Implement `PyodideSQLiteProvider` shim (thin adapter over wa-sqlite JS API) — note in `pyodide.py`
+- [ ] Document Pyodide constraints in `TECHNICAL_INFORMATION.md` (new §20)
+- [ ] Add `browser` extra to `packages/rufus-sdk-edge/pyproject.toml` (no psutil, no websockets, no httpx)
+
+## Phase 4 — WASI 0.3 Native Target
+
+- [ ] Create `src/rufus_edge/wasi_main.py` — WASI entrypoint (no asyncio.run; use wasi event loop)
+- [ ] Create `scripts/build_wasi.sh` — py2wasm build script with WASI target
+- [ ] Add `wasi` extra to `packages/rufus-sdk-edge/pyproject.toml` (zero extra deps)
+- [ ] Add `native` extra for wasmtime Component Model on native Python
+
+## Phase 5 — Tests
+
+- [ ] `tests/edge/test_platform_adapters.py` — unit tests for all 3 adapters (mock HTTP)
+- [ ] `tests/edge/test_component_runtime.py` — unit tests for `ComponentStepRuntime` (mock binary)
+- [ ] Regression: run `pytest tests/` and ensure existing tests pass
+
+## Phase 6 — Commit & Push
+
+- [ ] Stage and commit all changes with descriptive message
+- [ ] Push to `claude/plan-session-EBu8w`
+
+---
+
 # v0.7.4 Release — Version Bump, Wheels, Docker Images, Docs ✅
 
 ## Release Checklist
