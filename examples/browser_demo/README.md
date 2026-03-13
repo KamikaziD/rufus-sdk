@@ -8,22 +8,33 @@ workflow via a Python → JS FFI bridge.
 ## Quick start
 
 ```bash
-# From the repo root (wheels must be served from there)
-python -m http.server 8080
+# Recommended: compressed server (gzip by default; brotli if installed)
+python examples/browser_demo/serve.py 8080
+
+# Optional brotli (~15% smaller than gzip):
+pip install brotli
+python examples/browser_demo/serve.py 8080
+
+# Fallback: plain http.server (no compression)
+python -m http.server 8080   # must be run from repo root
 
 # Open in Chrome (best WebGPU support) or Firefox
 open http://localhost:8080/examples/browser_demo/
 ```
 
 First load: ~8–15 s (Pyodide runtime + pure-Python packages downloaded from CDN).
+With gzip compression the rufus-sdk wheel transfers as ~155 KB instead of 201 KB.
 Workflow 3 first run: additional ~5–10 s (23 MB model download, cached by the browser after that).
 
 ## Files
 
 ```
 examples/browser_demo/
-├── index.html   — Dark-themed SPA: three workflow cards, step pipeline visualiser, console log
-└── worker.js    — ES-module Web Worker: Pyodide + Transformers.js + all Python workflow code
+├── index.html   — Dark-themed SPA: three workflow cards, step pipeline visualiser,
+│                  run history panel, console log
+├── worker.js    — ES-module Web Worker: Pyodide + Transformers.js + all Python workflow code;
+│                  IndexedDB persistence helpers (idbPutWorkflow, idbListWorkflows, …)
+└── serve.py     — Compressed static server; gzip by default, brotli if `pip install brotli`
 ```
 
 No existing SDK files are modified.
@@ -41,7 +52,7 @@ index.html  (main thread — UI only)
   └─ worker.js  (ES-module Web Worker)
        ├─ Pyodide v0.26.x  (Python 3.12 runtime, WASM)
        │    ├─ rufus-sdk 0.8.0 wheel  (served from /dist/)
-       │    ├─ InMemoryPersistence    (no SQLite, no disk I/O)
+       │    ├─ IndexedDBPersistence  (InMemoryPersistence + IDB mirror for cross-refresh history)
        │    ├─ BrowserSyncExecutor   (SyncExecutor subclass, no ThreadPoolExecutor)
        │    ├─ BrowserObserver       (WorkflowObserver → js FFI → postMessage)
        │    └─ WorkflowBuilder + 3 inline Workflow definitions

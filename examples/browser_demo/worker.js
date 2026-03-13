@@ -59,6 +59,106 @@ globalThis.notifyWorkflowError = (msg) => {
     self.postMessage({ type: "workflow_error", message: msg });
 };
 
+// ─── IndexedDB helpers (exposed to Python via Pyodide FFI) ───────────────────
+const IDB_NAME    = "rufus-demo";
+const IDB_VERSION = 1;
+
+function openIDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains("workflows")) {
+                const ws = db.createObjectStore("workflows", { keyPath: "id" });
+                ws.createIndex("by_type",    "workflow_type", { unique: false });
+                ws.createIndex("by_created", "created_at",    { unique: false });
+            }
+            if (!db.objectStoreNames.contains("audit_events")) {
+                const as = db.createObjectStore("audit_events", { autoIncrement: true });
+                as.createIndex("by_workflow", "workflow_id", { unique: false });
+            }
+        };
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror   = (e) => reject(e.target.error);
+    });
+}
+
+globalThis.idbPutWorkflow = async (json) => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx  = db.transaction("workflows", "readwrite");
+        tx.objectStore("workflows").put(JSON.parse(json));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
+globalThis.idbGetWorkflow = async (id) => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx  = db.transaction("workflows", "readonly");
+        const req = tx.objectStore("workflows").get(id);
+        req.onsuccess = (e) => {
+            db.close();
+            resolve(e.target.result ? JSON.stringify(e.target.result) : null);
+        };
+        req.onerror = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
+globalThis.idbListWorkflows = async () => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx  = db.transaction("workflows", "readonly");
+        const req = tx.objectStore("workflows").getAll();
+        req.onsuccess = (e) => {
+            db.close();
+            const sorted = (e.target.result || []).sort(
+                (a, b) => (b.created_at || "").localeCompare(a.created_at || "")
+            );
+            resolve(JSON.stringify(sorted));
+        };
+        req.onerror = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
+globalThis.idbLogAudit = async (json) => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction("audit_events", "readwrite");
+        tx.objectStore("audit_events").add(JSON.parse(json));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
+globalThis.idbGetHistory = async (n) => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx  = db.transaction("workflows", "readonly");
+        const req = tx.objectStore("workflows").getAll();
+        req.onsuccess = (e) => {
+            db.close();
+            const sorted = (e.target.result || []).sort(
+                (a, b) => (b.created_at || "").localeCompare(a.created_at || "")
+            );
+            resolve(JSON.stringify(sorted.slice(0, n)));
+        };
+        req.onerror = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
+globalThis.idbClear = async () => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(["workflows", "audit_events"], "readwrite");
+        tx.objectStore("workflows").clear();
+        tx.objectStore("audit_events").clear();
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = (e) => { db.close(); reject(e.target.error); };
+    });
+};
+
 // ─── Python setup string ──────────────────────────────────────────────────────
 const PYTHON_SETUP = `
 import os
@@ -165,8 +265,70 @@ class BrowserObserver:
     async def close(self): pass
 
 
+# ── IndexedDBPersistence ───────────────────────────────────────────────────────
+class IndexedDBPersistence(InMemoryPersistence):
+    """InMemoryPersistence that mirrors workflow state and audit events to IndexedDB."""
+
+    async def save_workflow(self, workflow_id: str, workflow_data):
+        await super().save_workflow(workflow_id, workflow_data)
+        try:
+            import time as _t
+            from js import idbPutWorkflow
+            await idbPutWorkflow(json.dumps({
+                **workflow_data,
+                "created_at": workflow_data.get("created_at") or
+                              _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
+            }))
+        except Exception:
+            pass
+
+    async def load_workflow(self, workflow_id: str):
+        result = await super().load_workflow(workflow_id)
+        if result:
+            return result
+        try:
+            from js import idbGetWorkflow
+            raw = await idbGetWorkflow(workflow_id)
+            if raw:
+                data = json.loads(str(raw))
+                await super().save_workflow(workflow_id, data)
+                return data
+        except Exception:
+            pass
+        return None
+
+    async def list_workflows(self, **filters):
+        results = await super().list_workflows(**filters)
+        if results:
+            return results
+        try:
+            from js import idbListWorkflows
+            all_wfs = json.loads(str(await idbListWorkflows()))
+            for key, val in filters.items():
+                all_wfs = [w for w in all_wfs if w.get(key) == val]
+            return all_wfs
+        except Exception:
+            return []
+
+    async def log_audit_event(self, workflow_id: str, event_type: str,
+                              step_name=None, **kwargs):
+        await super().log_audit_event(
+            workflow_id, event_type, step_name=step_name, **kwargs)
+        try:
+            import time as _t
+            from js import idbLogAudit
+            await idbLogAudit(json.dumps({
+                "workflow_id": workflow_id,
+                "event_type": event_type,
+                "step_name": step_name,
+                "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
+            }))
+        except Exception:
+            pass
+
+
 # ── Shared providers ───────────────────────────────────────────────────────────
-_persistence = InMemoryPersistence()
+_persistence = IndexedDBPersistence()
 _executor = BrowserSyncExecutor()
 _observer = BrowserObserver()
 _builder = WorkflowBuilder({}, SimpleExpressionEvaluator, Jinja2TemplateEngine)
@@ -616,20 +778,38 @@ await micropip.install(_wheel_url, keep_going=True)
 // ─── Message dispatcher ───────────────────────────────────────────────────────
 self.onmessage = async (e) => {
     const { type, workflowType, data } = e.data;
-    if (type !== "run_workflow") return;
 
-    self.postMessage({ type: "workflow_start", workflowType });
-    try {
-        pyodide.globals.set("_wf_type", workflowType);
-        pyodide.globals.set("_wf_data", JSON.stringify(data || {}));
-        await pyodide.runPythonAsync("await run_workflow(_wf_type, _wf_data)");
-        // result dispatched inside Python via notifyWorkflowDone / notifyWorkflowError
-    } catch (err) {
-        self.postMessage({
-            type: "workflow_error",
-            workflowType,
-            message: err.message || String(err),
-        });
+    if (type === "run_workflow") {
+        self.postMessage({ type: "workflow_start", workflowType });
+        try {
+            pyodide.globals.set("_wf_type", workflowType);
+            pyodide.globals.set("_wf_data", JSON.stringify(data || {}));
+            await pyodide.runPythonAsync("await run_workflow(_wf_type, _wf_data)");
+            // result dispatched inside Python via notifyWorkflowDone / notifyWorkflowError
+        } catch (err) {
+            self.postMessage({
+                type: "workflow_error",
+                workflowType,
+                message: err.message || String(err),
+            });
+        }
+
+    } else if (type === "get_history") {
+        try {
+            const jsonStr = await pyodide.runPythonAsync(
+                "import json as _j; _j.dumps(await _persistence.list_workflows())"
+            );
+            self.postMessage({ type: "history_data", workflows: JSON.parse(jsonStr || "[]") });
+        } catch (_) {
+            self.postMessage({ type: "history_data", workflows: [] });
+        }
+
+    } else if (type === "clear_history") {
+        try {
+            await idbClear();
+            await pyodide.runPythonAsync("_persistence._workflows.clear(); _persistence._audit_events.clear()");
+        } catch (_) {}
+        self.postMessage({ type: "history_cleared" });
     }
 };
 

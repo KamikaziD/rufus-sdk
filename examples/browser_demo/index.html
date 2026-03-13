@@ -325,6 +325,118 @@
   .log-gpu   { color: var(--purple); }
   .log-model { color: var(--gold); }
 
+  /* ── History panel ────────────────────────────────────────────────────── */
+  .history-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+
+  .history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .history-header:hover { color: var(--text); }
+
+  .history-header-left { display: flex; align-items: center; gap: 8px; }
+
+  .history-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .history-count.has-entries { background: #0d2b19; border-color: var(--green); color: var(--green); }
+
+  .history-chevron {
+    font-size: 10px;
+    transition: transform 0.2s;
+    color: var(--muted);
+  }
+  .history-section.open .history-chevron { transform: rotate(180deg); }
+
+  .history-body { display: none; }
+  .history-section.open .history-body { display: block; }
+
+  .history-empty {
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .history-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .history-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .history-table tr:last-child td { border-bottom: none; }
+  .history-table tbody tr { cursor: pointer; transition: background 0.1s; }
+  .history-table tbody tr:hover { background: var(--surface2); }
+
+  .history-table tbody tr.expanded { background: var(--surface2); }
+
+  .history-detail-row td {
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-detail-row pre {
+    margin: 0;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    overflow-x: auto;
+    background: #0d1117;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .hist-status { font-family: var(--mono); font-weight: 600; }
+  .hist-status.COMPLETED { color: var(--green); }
+  .hist-status.FAILED    { color: var(--red); }
+  .hist-status.ACTIVE    { color: var(--gold); }
+
+  .hist-type { font-family: var(--mono); font-size: 11px; color: var(--cyan); }
+  .hist-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
   /* ── Responsiveness ───────────────────────────────────────────────────── */
   @media (max-width: 720px) {
     .cards { grid-template-columns: 1fr; }
@@ -501,6 +613,38 @@
 
   </div><!-- /cards -->
 
+  <!-- ── Run History ──────────────────────────────────────────────────────── -->
+  <section class="history-section" id="history-panel">
+    <div class="history-header" onclick="toggleHistory()">
+      <div class="history-header-left">
+        <span>Run History</span>
+        <span class="history-count" id="history-count">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn-clear" id="btn-clear-history"
+                onclick="event.stopPropagation(); clearHistory()"
+                style="display:none">Clear</button>
+        <span class="history-chevron">▼</span>
+      </div>
+    </div>
+    <div class="history-body" id="history-body">
+      <div class="history-empty" id="history-empty">
+        No previous runs — run a workflow to start recording history
+      </div>
+      <table class="history-table" id="history-table" style="display:none">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Key Result</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ── Console ──────────────────────────────────────────────────────────── -->
   <div class="console-section">
     <div class="console-header">
@@ -553,6 +697,7 @@ function handleWorkerMessage(e) {
       setBadge("badge-pyodide", "ready", "Pyodide: ready ✓");
       enableButtons();
       log("Pyodide ready — all workflow buttons enabled", "done");
+      worker.postMessage({ type: "get_history" });
       break;
 
     case "init_error":
@@ -605,6 +750,8 @@ function handleWorkerMessage(e) {
       showResult(wfType, msg.state, elapsed);
       log(`✅ ${wfType} completed in ${elapsed}s`, "done");
       currentWfType = null;
+      // Refresh history panel after a short delay (IDB write is async)
+      setTimeout(() => worker && worker.postMessage({ type: "get_history" }), 400);
       break;
     }
 
@@ -615,6 +762,15 @@ function handleWorkerMessage(e) {
       currentWfType = null;
       break;
     }
+
+    case "history_data":
+      renderHistory(msg.workflows || []);
+      break;
+
+    case "history_cleared":
+      renderHistory([]);
+      log("Run history cleared", "info");
+      break;
   }
 }
 
@@ -788,6 +944,94 @@ function setBadge(id, cls, text) {
     el.innerHTML = `<span class="dot"></span> ${escHtml(text)}`;
   }
 }
+
+// ── History panel ─────────────────────────────────────────────────────────────
+function renderHistory(workflows) {
+  const countEl  = document.getElementById("history-count");
+  const emptyEl  = document.getElementById("history-empty");
+  const tableEl  = document.getElementById("history-table");
+  const tbodyEl  = document.getElementById("history-tbody");
+  const clearBtn = document.getElementById("btn-clear-history");
+  const panel    = document.getElementById("history-panel");
+
+  const n = workflows.length;
+  countEl.textContent = n;
+  countEl.className   = "history-count" + (n > 0 ? " has-entries" : "");
+  clearBtn.style.display = n > 0 ? "" : "none";
+
+  if (n === 0) {
+    emptyEl.style.display = "";
+    tableEl.style.display = "none";
+    return;
+  }
+
+  emptyEl.style.display = "none";
+  tableEl.style.display = "";
+
+  // Auto-expand when entries arrive for the first time
+  if (!panel.classList.contains("open")) {
+    panel.classList.add("open");
+  }
+
+  tbodyEl.innerHTML = "";
+  workflows.forEach((wf, idx) => {
+    const wfType   = wf.workflow_type || "—";
+    const status   = wf.status || "—";
+    const created  = wf.created_at
+      ? new Date(wf.created_at).toLocaleTimeString("en-GB", { hour12: false })
+      : "—";
+    const keyResult = historyKeyResult(wf);
+
+    // Data row
+    const tr = document.createElement("tr");
+    tr.dataset.idx = idx;
+    tr.innerHTML = `
+      <td class="hist-type">${escHtml(wfType)}</td>
+      <td><span class="hist-status ${escHtml(status)}">${escHtml(status)}</span></td>
+      <td style="color:var(--muted)">${escHtml(keyResult)}</td>
+      <td class="hist-time">${escHtml(created)}</td>
+    `;
+    tr.addEventListener("click", () => toggleDetailRow(tr, wf));
+    tbodyEl.appendChild(tr);
+  });
+}
+
+function historyKeyResult(wf) {
+  const s = wf.state || wf;
+  const wfType = wf.workflow_type || "";
+  if (wfType === "OrderFulfillment")
+    return s.status ? `status=${s.status}` : s.order_id || "—";
+  if (wfType === "IoTSensorPipeline")
+    return s.health_status ? `health=${s.health_status}` : "—";
+  if (wfType === "TransactionRiskScoring")
+    return s.decision ? `decision=${s.decision}` : "—";
+  const entries = Object.entries(s).filter(([k]) => !k.startsWith("_")).slice(0, 2);
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ") || "—";
+}
+
+function toggleDetailRow(tr, wf) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains("history-detail-row")) {
+    existing.remove();
+    tr.classList.remove("expanded");
+    return;
+  }
+  tr.classList.add("expanded");
+  const detailTr = document.createElement("tr");
+  detailTr.className = "history-detail-row";
+  const colCount = tr.cells.length;
+  detailTr.innerHTML = `<td colspan="${colCount}"><pre>${escHtml(JSON.stringify(wf, null, 2))}</pre></td>`;
+  tr.parentNode.insertBefore(detailTr, tr.nextSibling);
+}
+
+window.toggleHistory = function() {
+  document.getElementById("history-panel").classList.toggle("open");
+};
+
+window.clearHistory = function() {
+  if (!worker) return;
+  worker.postMessage({ type: "clear_history" });
+};
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 startWorker();
