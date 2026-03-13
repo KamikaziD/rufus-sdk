@@ -20,6 +20,7 @@ const TRANSFORMERS_CDNS = [
 
 const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "webgpu" : "wasm";
 let _extractor = null;
+let _summariser = null;
 let _pipeline = null;   // set after dynamic import
 
 // ─── Preflight tracking ───────────────────────────────────────────────────────
@@ -66,6 +67,31 @@ globalThis.notifyWorkflowError = (msg) => {
 
 globalThis.notifyGpuFallback = () => {
     self.postMessage({ type: "gpu_fallback" });
+};
+
+globalThis.runSummarisation = async (text) => {
+    if (!_pipeline) throw new Error("Transformers.js not loaded");
+    if (!_summariser) {
+        self.postMessage({ type: "summariser_loading" });
+        _summariser = await _pipeline(
+            "text2text-generation",
+            "Xenova/t5-small",
+            { device: _gpuDevice, dtype: "q8" }
+        );
+        self.postMessage({ type: "summariser_ready", device: _gpuDevice });
+    }
+    const t0 = performance.now();
+    const truncated = text.substring(0, 1500);
+    const result = await _summariser(`summarize: ${truncated}`, {
+        max_new_tokens: 100,
+        min_length: 20,
+        num_beams: 1,
+    });
+    return {
+        summary: result[0].generated_text,
+        latency_ms: performance.now() - t0,
+        device_used: _gpuDevice,
+    };
 };
 
 // ─── IndexedDB helpers (exposed to Python via Pyodide FFI) ───────────────────
@@ -749,6 +775,129 @@ wf3_steps = [
 ]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# WORKFLOW 4 — Document Summarisation Pipeline
+# Steps: IngestDocument → PreprocessText → GenerateSummary → ExtractKeywords
+#         → QualityDecision → [jump if low quality] → FallbackExtract
+# ══════════════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+_DEMO_TEXTS = [
+    """OpenAI has unveiled GPT-5, its most advanced language model to date, representing a significant leap forward in artificial intelligence capabilities. The new model demonstrates unprecedented reasoning abilities, scoring in the top percentile across a wide range of professional and academic benchmarks including law, medicine, and mathematics. GPT-5 features a context window of one million tokens, enabling it to process entire codebases or legal documents in a single pass. The model introduces a novel mixture-of-experts architecture that allows it to selectively activate specialised sub-networks depending on the task at hand, dramatically improving efficiency. Enterprise customers will have access to fine-tuning capabilities that allow the model to adapt to proprietary datasets while maintaining strict data isolation guarantees. The release has prompted immediate reactions from competitors, with Google and Anthropic announcing accelerated development timelines for their own frontier models. Regulatory bodies in the European Union have indicated they will scrutinise the deployment under the AI Act framework, particularly around transparency and high-risk use cases.""",
+
+    """Revenue for the quarter exceeded analyst expectations by a substantial margin, growing 18 percent year-over-year to reach 4.2 billion dollars. The company attributed the outperformance to strong demand in its enterprise software segment, which expanded 31 percent driven by new customer acquisitions and higher average contract values. Gross margins improved by 240 basis points to 68.4 percent, reflecting continued operational leverage and a favourable shift in product mix toward higher-margin subscription offerings. Operating cash flow reached 1.1 billion dollars, enabling the board to authorise an additional share buyback programme of 500 million dollars. The CFO highlighted that international markets, particularly Southeast Asia and Latin America, contributed disproportionately to growth, accounting for 38 percent of new bookings despite representing only 22 percent of the installed base. Looking ahead, management raised full-year guidance to a revenue range of 16.5 to 17.0 billion dollars, implying approximately 15 percent growth at the midpoint.""",
+
+    """Researchers at MIT's Computer Science and Artificial Intelligence Laboratory have developed a breakthrough method for training neural networks that reduces energy consumption by up to 94 percent compared to conventional approaches. The technique, called Sparse Activation with Momentum Reuse, exploits temporal redundancy in sequential data by reusing intermediate computations across adjacent time steps rather than recalculating them from scratch. In benchmark experiments on image recognition and natural language processing tasks, the method achieved accuracy within 0.3 percentage points of the dense baseline while consuming a fraction of the computational resources. The researchers demonstrated the approach on edge hardware including a modified Raspberry Pi and a custom RISC-V chip, showing that inference latency dropped below 15 milliseconds for a 7-billion-parameter language model. Industry observers have noted that the findings could have significant implications for on-device AI in smartphones, medical devices, and autonomous vehicles where battery life and thermal constraints are critical.""",
+]
+
+
+class DocumentState(BaseModel):
+    raw_text: str = ""
+    doc_type: str = ""
+    word_count: int = 0
+    sentence_count: int = 0
+    summary: str = ""
+    keywords: list = []
+    compression_ratio: float = 0.0
+    quality: str = ""
+    inference_ms: float = 0.0
+    device_used: str = ""
+    method: str = ""
+
+
+def ingest_document(state: DocumentState, context: StepContext, **_):
+    text = (state.raw_text or random.choice(_DEMO_TEXTS)).strip()
+    words = text.split()
+    lower = text.lower()
+    doc_type = "news"
+    if any(w in lower for w in ["revenue", "profit", "earnings", "quarter", "shares", "cfo", "bookings"]):
+        doc_type = "financial"
+    elif any(w in lower for w in ["researchers", "study", "findings", "experiment", "benchmark", "published"]):
+        doc_type = "scientific"
+    elif any(w in lower for w in ["model", "ai", "software", "architecture", "inference", "neural"]):
+        doc_type = "technology"
+    return {"raw_text": text, "doc_type": doc_type, "word_count": len(words)}
+
+
+def preprocess_text(state: DocumentState, context: StepContext, **_):
+    text = _re.sub(r'\\s+', ' ', state.raw_text).strip()
+    sentences = _re.split(r'(?<=[.!?])\\s+', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+    return {"sentence_count": len(sentences), "raw_text": text}
+
+
+async def generate_summary(state: DocumentState, context: StepContext, **_):
+    try:
+        from js import runSummarisation
+        result = await runSummarisation(state.raw_text)
+        return {
+            "summary": str(result.summary),
+            "inference_ms": round(float(result.latency_ms), 1),
+            "device_used": str(result.device_used),
+            "method": "llm-abstractive",
+        }
+    except Exception:
+        sentences = _re.split(r'(?<=[.!?])\\s+', state.raw_text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+        summary = " ".join(sentences[:2]) if sentences else state.raw_text[:200]
+        return {
+            "summary": summary,
+            "inference_ms": 0.0,
+            "device_used": "cpu-extractive",
+            "method": "extractive-fallback",
+        }
+
+
+def extract_keywords(state: DocumentState, context: StepContext, **_):
+    _sw = {"the","a","an","is","in","of","to","and","for","with","that","this","are",
+           "was","were","be","been","have","has","from","at","by","or","but","not","on",
+           "as","it","its","their","they","we","he","she","his","her","which","who","will",
+           "can","more","also","into","over","such","through","these","those","about","than",
+           "up","after","before","between","each","no","some","our","your","all","per",
+           "while","when","other","even","both","just","yet","still","new"}
+    text = (state.summary + " " + state.raw_text).lower()
+    words = _re.findall(r'\\b[a-zA-Z]{4,}\\b', text)
+    freq = {}
+    for w in words:
+        if w not in _sw:
+            freq[w] = freq.get(w, 0) + 1
+    return {"keywords": sorted(freq, key=freq.get, reverse=True)[:8]}
+
+
+def quality_decision(state: DocumentState, context: StepContext, **_):
+    summary_words = len(state.summary.split()) if state.summary else 0
+    ratio = round(summary_words / max(state.word_count, 1), 3)
+    if summary_words < 10 or ratio < 0.05:
+        raise WorkflowJumpDirective(target_step_name="FallbackExtract")
+    return {"compression_ratio": ratio, "quality": "GOOD"}
+
+
+def fallback_extract(state: DocumentState, context: StepContext, **_):
+    if state.quality == "GOOD":
+        return {}  # normal path — no-op
+    sentences = _re.split(r'(?<=[.!?])\\s+', state.raw_text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+    summary = " ".join(sentences[:3])
+    ratio = round(len(summary.split()) / max(state.word_count, 1), 3)
+    return {
+        "summary": summary,
+        "compression_ratio": ratio,
+        "quality": "FALLBACK",
+        "method": "extractive-sentence",
+    }
+
+
+wf4_steps = [
+    WorkflowStep(name="IngestDocument",  func=ingest_document,  automate_next=True),
+    WorkflowStep(name="PreprocessText",  func=preprocess_text,  automate_next=True),
+    WorkflowStep(name="GenerateSummary", func=generate_summary, automate_next=True),
+    WorkflowStep(name="ExtractKeywords", func=extract_keywords, automate_next=True),
+    WorkflowStep(name="QualityDecision", func=quality_decision, automate_next=True),
+    WorkflowStep(name="FallbackExtract", func=fallback_extract, automate_next=False),
+]
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 async def run_workflow(wf_type: str, data_json: str) -> str:
     data = json.loads(data_json) if data_json else {}
@@ -759,6 +908,8 @@ async def run_workflow(wf_type: str, data_json: str) -> str:
         wf = await _make_workflow(wf_type, wf2_steps, SensorState, data)
     elif wf_type == "TransactionRiskScoring":
         wf = await _make_workflow(wf_type, wf3_steps, TransactionState, data)
+    elif wf_type == "DocumentSummarisation":
+        wf = await _make_workflow(wf_type, wf4_steps, DocumentState, data)
     else:
         raise ValueError(f"Unknown workflow type: {wf_type}")
 
@@ -869,6 +1020,7 @@ async function gatherPreflight() {
         transformers_url:  _loadedTransformersUrl,
         webgpu:            _gpuDevice,
         model_in_memory:   _extractor !== null,
+        summariser_in_memory: _summariser !== null,
         wheel_url:         _wheelUrl,
         storage_usage:     est?.usageBytes ?? null,
         storage_quota:     est?.quotaBytes ?? null,

@@ -635,6 +635,7 @@
     <span class="badge" id="badge-storage" style="display:none">
       <span class="dot"></span> Storage: —
     </span>
+    <span class="badge" id="badge-summariser" style="display:none;font-size:10px">T5: not loaded</span>
     <button class="btn-inspect" id="btn-inspect" disabled onclick="openPreflight()">⚡ Inspect</button>
   </div>
 </header>
@@ -802,6 +803,60 @@
       </div>
     </div>
 
+    <!-- ── Card 4: Document Summarisation ────────────────────────────────── -->
+    <div class="card" id="card-wf4">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0e1e2e">📄</div>
+        <div class="card-meta">
+          <h3>Document Summarisation</h3>
+          <p>STANDARD · T5-small text2text · DECISION quality gate · extractive fallback</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf4">
+          <span class="pipe-step" data-step="IngestDocument">IngestDocument</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="PreprocessText">PreprocessText</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="GenerateSummary">GenerateSummary</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ExtractKeywords">ExtractKeywords</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="QualityDecision">QualityDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="FallbackExtract">FallbackExtract</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">Model: Xenova/t5-small (~90 MB, q8)</span>
+          <span class="badge" id="badge-summariser-card" style="font-size:10px">not loaded</span>
+        </div>
+
+        <div class="model-overlay" id="model-overlay-wf4">
+          <span class="spinner"></span>
+          Downloading T5-small weights (~90 MB) — cached after first run…
+        </div>
+
+        <p style="font-size:12px;color:var(--muted)">
+          Abstractive summarisation using a quantised T5-small model. A DECISION step
+          validates compression ratio; if the LLM output is too short it jumps to an
+          extractive sentence fallback — a workflow-level quality gate.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf4">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf4"></span>
+        </div>
+        <div class="result-fields" id="fields-wf4"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf4" disabled onclick="runWorkflow('DocumentSummarisation')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf4"></span>
+      </div>
+    </div>
+
   </div><!-- /cards -->
 
   <!-- ── Run History ──────────────────────────────────────────────────────── -->
@@ -854,12 +909,14 @@ const WORKFLOW_STEPS = {
   OrderFulfillment:        ["ValidateOrder","CheckInventory","FulfillmentDecision","ProcessPayment","SendConfirmation","BackorderNotice"],
   IoTSensorPipeline:       ["InitPipeline","CollectSensorData","ProcessReadings","ComputeStatistics","HealthDecision","SendAlert"],
   TransactionRiskScoring:  ["ExtractFeatures","GPUEmbedding","ComputeRiskScore","ScoreDecision","RecordOutcome"],
+  DocumentSummarisation:   ["IngestDocument","PreprocessText","GenerateSummary","ExtractKeywords","QualityDecision","FallbackExtract"],
 };
 
 const WF_ID = {
   OrderFulfillment:       "wf1",
   IoTSensorPipeline:      "wf2",
   TransactionRiskScoring: "wf3",
+  DocumentSummarisation:  "wf4",
 };
 
 let worker = null;
@@ -1018,6 +1075,26 @@ function handleWorkerMessage(e) {
       log("⚠ GPU inference unavailable — CPU pseudo-embedding fallback active", "info");
       setBadge("badge-webgpu", "wasm", "WebGPU: ✗ (fallback)");
       break;
+
+    case "summariser_loading": {
+      document.getElementById("model-overlay-wf4").classList.add("visible");
+      document.getElementById("badge-summariser").style.display = "";
+      log("Downloading Xenova/t5-small (~90 MB, first run only)…", "model");
+      setBadge("badge-summariser", "wasm", "T5: downloading…");
+      const bsc = document.getElementById("badge-summariser-card");
+      if (bsc) bsc.textContent = "downloading…";
+      break;
+    }
+    case "summariser_ready": {
+      document.getElementById("model-overlay-wf4").classList.remove("visible");
+      log(`T5-small ready on ${msg.device}`, "gpu");
+      setBadge("badge-summariser",
+               msg.device === "webgpu" ? "gpu" : "wasm",
+               msg.device === "webgpu" ? "T5: WebGPU ✓" : "T5: WASM");
+      const bsc2 = document.getElementById("badge-summariser-card");
+      if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback";
+      break;
+    }
   }
 }
 
@@ -1037,13 +1114,14 @@ window.runWorkflow = function(workflowType) {
       merchant_category: ["retail", "crypto-exchange", "grocery", "streaming"][Math.floor(Math.random() * 4)],
       location: ["London", "New York", "Singapore", "unknown"][Math.floor(Math.random() * 4)],
     },
+    DocumentSummarisation: {},   // raw_text omitted → Python picks random _DEMO_TEXTS entry
   };
   worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {} });
 };
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function enableButtons() {
-  ["btn-wf1", "btn-wf2", "btn-wf3"].forEach(id => {
+  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4"].forEach(id => {
     document.getElementById(id).disabled = false;
   });
 }
@@ -1147,6 +1225,22 @@ function buildResultRows(wfType, s) {
       ["inference",    s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—", ""],
       ["device",       s.device_used || "—", s.device_used === "webgpu" ? "purple" : "orange"],
       ["explanation",  s.explanation || "—", ""],
+    ];
+  }
+  if (wfType === "DocumentSummarisation") {
+    const qcls = s.quality === "GOOD" ? "green" : s.quality === "FALLBACK" ? "orange" : "";
+    const preview = s.summary
+      ? (s.summary.length > 120 ? s.summary.substring(0, 120) + "…" : s.summary)
+      : "—";
+    return [
+      ["doc_type",    s.doc_type || "—",                                                          "cyan"],
+      ["words",       s.word_count ? `${s.word_count} → ${(s.summary||"").split(" ").length} words` : "—", ""],
+      ["compression", s.compression_ratio ? `${(s.compression_ratio * 100).toFixed(1)}%` : "—",  ""],
+      ["quality",     s.quality || "—",                                                            qcls],
+      ["method",      s.method || "—",      s.method === "llm-abstractive" ? "purple" : "orange"],
+      ["inference",   s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—",                   ""],
+      ["keywords",    (s.keywords || []).slice(0, 5).join(", ") || "—",                            ""],
+      ["summary",     preview,                                                                      ""],
     ];
   }
   return Object.entries(s).slice(0, 8).map(([k, v]) => [k, JSON.stringify(v), ""]);
@@ -1285,6 +1379,8 @@ function historyKeyResult(wf) {
     return s.health_status ? `health=${s.health_status}` : "—";
   if (wfType === "TransactionRiskScoring")
     return s.decision ? `decision=${s.decision}` : "—";
+  if (wfType === "DocumentSummarisation")
+    return s.quality ? `quality=${s.quality}, method=${s.method||"—"}` : "—";
   const entries = Object.entries(s).filter(([k]) => !k.startsWith("_")).slice(0, 2);
   return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ") || "—";
 }
@@ -1363,6 +1459,7 @@ function renderPreflight(data) {
     ["Transformers.js URL", runtime.transformers_url || "not loaded"],
     ["Inference backend", runtime.webgpu === "webgpu" ? "WebGPU ✓" : "WASM"],
     ["Model in memory",   runtime.model_in_memory ? "✓ loaded" : "✗ not loaded"],
+    ["Summariser in memory", runtime.summariser_in_memory ? "✓ loaded" : "✗ not loaded"],
     ["rufus-sdk wheel",   runtime.wheel_url || "—"],
     ["Storage usage",     storageStr],
   ];

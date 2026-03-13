@@ -27,13 +27,14 @@ index.html (main thread)
   └── UI — 3 workflow cards, step pipeline visualiser, run history, console log
 ```
 
-Three demo workflows, each illustrating different SDK patterns:
+Four demo workflows, each illustrating different SDK patterns:
 
 | # | Name | SDK patterns |
 |---|------|-------------|
 | 1 | Order Fulfillment | STANDARD + PARALLEL fan-out + `WorkflowJumpDirective` |
 | 2 | IoT Sensor Pipeline | STANDARD + inline loop logic + health jump |
 | 3 | Transaction Risk Scoring | STANDARD + async WebGPU embedding via JS FFI |
+| 4 | Document Summarisation | STANDARD + T5-small text generation + DECISION quality gate + extractive fallback |
 
 ---
 
@@ -62,6 +63,7 @@ open http://localhost:8080/examples/browser_demo/
 
 First load: ~8–15 s (Pyodide + pure-Python deps from CDN).
 Workflow 3 first run: additional ~5–10 s (23 MB model, cached thereafter).
+Workflow 4 first run: additional ~20–40 s (90 MB T5-small q8 model, cached thereafter). If the 30 s timeout fires, just click Run again — the model is already cached.
 
 ---
 
@@ -596,3 +598,9 @@ python -m http.server 8080   # correct — wheel at /dist/rufus_sdk-0.8.0-py3-no
 
 **Storage quota toast appears immediately**
 → DevTools → Application → Storage has a custom quota set. Clear it or click the toast to dismiss.
+
+**Workflow 4 times out on first run (30 s timeout)**
+→ The T5-small q8 model is ~90 MB and may take 30–60 s to download on a slow connection. The timeout fires naturally and re-enables the Run button. Click Run again — the model is already cached in the browser and the second run completes in ~2–5 s.
+
+**Workflow 4 shows `quality=FALLBACK`**
+→ This is normal if the T5 model produces a very short output. The `QualityDecision` step jumps to `FallbackExtract`, which uses extractive sentence selection instead.
