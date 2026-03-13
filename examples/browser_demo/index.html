@@ -437,12 +437,186 @@
   .hist-type { font-family: var(--mono); font-size: 11px; color: var(--cyan); }
   .hist-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
 
+  /* ── Inspect button ───────────────────────────────────────────────────── */
+  .btn-inspect {
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-inspect:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn-inspect:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Preflight modal ──────────────────────────────────────────────────── */
+  #preflight-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  #preflight-backdrop.open { display: flex; }
+
+  #preflight-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-width: 640px;
+    width: calc(100vw - 32px);
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+  }
+
+  .pf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .pf-header h2 { font-size: 14px; font-weight: 600; }
+
+  .pf-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .pf-close:hover { color: var(--text); }
+
+  .pf-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 20px; }
+
+  .pf-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+
+  .pf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .pf-table th {
+    text-align: left;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .pf-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    word-break: break-all;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .pf-table tr:last-child td { border-bottom: none; }
+  .pf-table td:first-child { color: var(--muted); font-family: var(--sans); white-space: nowrap; }
+
+  .pf-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .pf-stat {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .pf-stat-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .pf-stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-family: var(--mono); }
+
+  .pf-spinner { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+
+  .badge-mock {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    background: #1c1c24;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-left: 4px;
+    font-family: var(--sans);
+  }
+
+  .pf-highlight { border-color: var(--purple) !important; }
+  .pf-highlight td:first-child { color: var(--purple); }
+
   /* ── Responsiveness ───────────────────────────────────────────────────── */
   @media (max-width: 720px) {
     .cards { grid-template-columns: 1fr; }
     .header { flex-wrap: wrap; }
     .badges { margin-left: 0; }
   }
+
+  /* ── Toast notifications ──────────────────────────────────────────────── */
+  #toast-container {
+    position: fixed; bottom: 20px; right: 20px; z-index: 300;
+    display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); font-size: 12px; line-height: 1.5;
+    max-width: 320px; pointer-events: auto;
+    animation: toast-in 0.2s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .toast.warn  { border-color: var(--orange); }
+  .toast.error { border-color: var(--red); }
+  .toast.info  { border-color: var(--accent); }
+  .toast-icon  { flex-shrink: 0; font-size: 14px; }
+  .toast-body  { flex: 1; }
+  .toast-title { font-weight: 600; margin-bottom: 2px; }
+  .toast-msg   { color: var(--muted); }
+  .toast-close {
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; line-height: 1; padding: 0 0 0 4px;
+    flex-shrink: 0; align-self: flex-start;
+  }
+  .toast-close:hover { color: var(--text); }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Storage bar (in Inspect panel) ──────────────────────────────────── */
+  .storage-bar-wrap {
+    height: 6px; background: var(--surface2); border-radius: 3px;
+    overflow: hidden; margin: 8px 0 4px;
+  }
+  .storage-bar-fill {
+    height: 100%; border-radius: 3px; background: var(--green); transition: width 0.4s;
+  }
+  .storage-bar-fill.warn   { background: var(--orange); }
+  .storage-bar-fill.danger { background: var(--red); }
 </style>
 </head>
 <body>
@@ -458,8 +632,25 @@
     <span class="badge" id="badge-webgpu">
       <span class="dot"></span> WebGPU: detecting…
     </span>
+    <span class="badge" id="badge-storage" style="display:none">
+      <span class="dot"></span> Storage: —
+    </span>
+    <button class="btn-inspect" id="btn-inspect" disabled onclick="openPreflight()">⚡ Inspect</button>
   </div>
 </header>
+
+<!-- ── Preflight modal ──────────────────────────────────────────────────────── -->
+<div id="preflight-backdrop" onclick="handleBackdropClick(event)">
+  <div id="preflight-panel" role="dialog" aria-modal="true" aria-label="Environment Inspector">
+    <div class="pf-header">
+      <h2>⚡ Environment Inspector</h2>
+      <button class="pf-close" onclick="closePreflight()" aria-label="Close">✕</button>
+    </div>
+    <div class="pf-body" id="preflight-body">
+      <div class="pf-spinner"><span class="spinner"></span> Gathering runtime info…</div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Main ────────────────────────────────────────────────────────────────── -->
 <main>
@@ -655,6 +846,8 @@
   </div>
 </main>
 
+<div id="toast-container"></div>
+
 <script type="module">
 // ── State ─────────────────────────────────────────────────────────────────────
 const WORKFLOW_STEPS = {
@@ -696,6 +889,7 @@ function handleWorkerMessage(e) {
     case "ready":
       setBadge("badge-pyodide", "ready", "Pyodide: ready ✓");
       enableButtons();
+      document.getElementById("btn-inspect").disabled = false;
       log("Pyodide ready — all workflow buttons enabled", "done");
       worker.postMessage({ type: "get_history" });
       break;
@@ -763,6 +957,10 @@ function handleWorkerMessage(e) {
       break;
     }
 
+    case "preflight_result":
+      renderPreflight(msg.data);
+      break;
+
     case "history_data":
       renderHistory(msg.workflows || []);
       break;
@@ -770,6 +968,55 @@ function handleWorkerMessage(e) {
     case "history_cleared":
       renderHistory([]);
       log("Run history cleared", "info");
+      break;
+
+    case "storage_warning":
+      updateStorageBadge(msg.usageBytes, msg.quotaBytes, msg.pct);
+      if (!window._storageWarnShown) {
+        window._storageWarnShown = true;
+        showToast(
+          "Storage usage high",
+          `IndexedDB is ${fmtPct(msg.pct)} full (${(msg.usageBytes / (1024*1024)).toFixed(1)} MB / ${(msg.quotaBytes / (1024*1024)).toFixed(0)} MB). Older runs may be pruned automatically.`,
+          "warn",
+          8000
+        );
+      }
+      break;
+
+    case "storage_quota_exceeded":
+      updateStorageBadge(null, null, 1.0);
+      showToast(
+        "Storage quota exceeded",
+        `Pruned ${msg.pruned} old run(s) from IndexedDB and retried.`,
+        "error",
+        10000
+      );
+      log(`⚠ Storage quota exceeded — pruned ${msg.pruned} record(s) from ${msg.store}`, "error");
+      break;
+
+    case "workflow_timeout": {
+      const wfType = msg.workflowType || currentWfType;
+      showToast(
+        "Workflow timed out",
+        `${wfType} did not complete within 30 s. The run button has been re-enabled.`,
+        "error",
+        0
+      );
+      log(`⏱ ${wfType} timed out after 30 s`, "error");
+      setButton(wfType, false, "Run");
+      currentWfType = null;
+      break;
+    }
+
+    case "gpu_fallback":
+      showToast(
+        "GPU inference unavailable",
+        "Using CPU pseudo-embeddings as fallback for Workflow 3.",
+        "info",
+        5000
+      );
+      log("⚠ GPU inference unavailable — CPU pseudo-embedding fallback active", "info");
+      setBadge("badge-webgpu", "wasm", "WebGPU: ✗ (fallback)");
       break;
   }
 }
@@ -933,6 +1180,39 @@ function escHtml(s) {
     .replace(/>/g, "&gt;");
 }
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(title, msg, variant = "info", durationMs = 5000) {
+  const container = document.getElementById("toast-container");
+  const icons = { warn: "⚠️", error: "🔴", info: "ℹ️" };
+  const toast = document.createElement("div");
+  toast.className = `toast ${variant}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[variant] || "ℹ️"}</span>
+    <div class="toast-body">
+      <div class="toast-title">${escHtml(title)}</div>
+      ${msg ? `<div class="toast-msg">${escHtml(msg)}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.closest('.toast').remove()">✕</button>`;
+  container.appendChild(toast);
+  if (durationMs > 0) setTimeout(() => toast.remove(), durationMs);
+}
+
+function fmtPct(pct) {
+  return (pct * 100).toFixed(1) + "%";
+}
+
+function updateStorageBadge(usageBytes, quotaBytes, pct) {
+  const el = document.getElementById("badge-storage");
+  if (!el) return;
+  if (usageBytes == null) { el.style.display = "none"; return; }
+  const used = (usageBytes / (1024 * 1024)).toFixed(1);
+  const total = quotaBytes ? (quotaBytes / (1024 * 1024)).toFixed(0) : "?";
+  const cls = pct >= 0.90 ? "error" : pct >= 0.80 ? "warn" : "ready";
+  el.className = `badge ${cls}`;
+  el.style.display = "";
+  el.innerHTML = `<span class="dot"></span> Storage: ${used} MB / ${total} MB (${fmtPct(pct)})`;
+}
+
 // ── Badge ─────────────────────────────────────────────────────────────────────
 function setBadge(id, cls, text) {
   const el = document.getElementById(id);
@@ -1032,6 +1312,160 @@ window.clearHistory = function() {
   if (!worker) return;
   worker.postMessage({ type: "clear_history" });
 };
+
+// ── Preflight modal ───────────────────────────────────────────────────────────
+const MOCK_PACKAGES = new Set(["cryptography", "orjson", "uvloop", "asyncpg"]);
+
+window.openPreflight = function() {
+  if (!worker) return;
+  const body = document.getElementById("preflight-body");
+  body.innerHTML = '<div class="pf-spinner"><span class="spinner"></span> Gathering runtime info…</div>';
+  document.getElementById("preflight-backdrop").classList.add("open");
+  worker.postMessage({ type: "preflight_check" });
+};
+
+window.closePreflight = function() {
+  document.getElementById("preflight-backdrop").classList.remove("open");
+};
+
+window.handleBackdropClick = function(e) {
+  if (e.target === document.getElementById("preflight-backdrop")) closePreflight();
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closePreflight();
+});
+
+function fmtBytes(n) {
+  if (!n) return "—";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function renderPreflight(data) {
+  const body = document.getElementById("preflight-body");
+  if (!data) {
+    body.innerHTML = '<div class="pf-spinner" style="color:var(--red)">Failed to gather runtime info.</div>';
+    return;
+  }
+
+  const { runtime, packages, cacheStores, idb } = data;
+
+  // ── Runtime section ────────────────────────────────────────────────────
+  const storagePct = runtime.storage_pct;
+  const storageStr = runtime.storage_usage != null
+    ? `${(runtime.storage_usage / (1024*1024)).toFixed(1)} MB / ${(runtime.storage_quota / (1024*1024)).toFixed(0)} MB (${fmtPct(storagePct)})`
+    : "—";
+  const runtimeRows = [
+    ["Pyodide version",   runtime.pyodide_version || "—"],
+    ["Pyodide URL",       runtime.pyodide_url || "—"],
+    ["Transformers.js URL", runtime.transformers_url || "not loaded"],
+    ["Inference backend", runtime.webgpu === "webgpu" ? "WebGPU ✓" : "WASM"],
+    ["Model in memory",   runtime.model_in_memory ? "✓ loaded" : "✗ not loaded"],
+    ["rufus-sdk wheel",   runtime.wheel_url || "—"],
+    ["Storage usage",     storageStr],
+  ];
+  if (runtime.storage_usage != null) {
+    updateStorageBadge(runtime.storage_usage, runtime.storage_quota, storagePct);
+  }
+  const runtimeHtml = `
+    <div class="pf-section">
+      <h3>Runtime</h3>
+      <table class="pf-table">
+        <tbody>
+          ${runtimeRows.map(([k, v]) => `
+            <tr>
+              <td>${escHtml(k)}</td>
+              <td style="color:${
+                v.includes("✓") ? "var(--green)" :
+                v === "✗ not loaded" || v === "not loaded" ? "var(--muted)" :
+                "var(--text)"
+              }">${escHtml(String(v))}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+
+  // ── Packages section ───────────────────────────────────────────────────
+  const pkgEntries = Object.entries(packages).sort((a, b) => a[0].localeCompare(b[0]));
+  const pkgsHtml = `
+    <div class="pf-section">
+      <h3>Python packages (${pkgEntries.length})</h3>
+      <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <table class="pf-table">
+          <thead><tr><th>Package</th><th>Version</th><th>Source</th></tr></thead>
+          <tbody>
+            ${pkgEntries.length === 0
+              ? '<tr><td colspan="3" style="color:var(--muted);font-family:var(--sans)">No packages found</td></tr>'
+              : pkgEntries.map(([name, info]) => {
+                  const isMock = MOCK_PACKAGES.has(name);
+                  return `<tr>
+                    <td style="font-family:var(--mono);${isMock ? "color:var(--muted)" : ""}">
+                      ${escHtml(name)}${isMock ? '<span class="badge-mock">mock</span>' : ""}
+                    </td>
+                    <td style="${isMock ? "color:var(--muted)" : ""}">${escHtml(info.version || "—")}</td>
+                    <td style="color:var(--muted);word-break:break-all">${escHtml(info.source || "—")}</td>
+                  </tr>`;
+                }).join("")
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // ── Cache stores section ───────────────────────────────────────────────
+  const cacheHtml = `
+    <div class="pf-section">
+      <h3>Browser cache (${cacheStores.length} store${cacheStores.length !== 1 ? "s" : ""})</h3>
+      ${cacheStores.length === 0
+        ? '<p style="font-size:12px;color:var(--muted)">No cache stores found.</p>'
+        : `<table class="pf-table">
+            <thead><tr><th>Cache name</th><th>Entries</th><th>Est. size</th></tr></thead>
+            <tbody>
+              ${cacheStores.map(c => {
+                const isModel = c.name.toLowerCase().includes("minilm") ||
+                                c.name.toLowerCase().includes("transformers");
+                return `<tr class="${isModel ? "pf-highlight" : ""}">
+                  <td style="font-family:var(--mono)">${escHtml(c.name)}</td>
+                  <td>${c.count}</td>
+                  <td>${fmtBytes(c.size_bytes)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>`
+      }
+    </div>`;
+
+  // ── IndexedDB section ──────────────────────────────────────────────────
+  const barPct = runtime.storage_pct != null ? runtime.storage_pct : null;
+  const barCls = barPct >= 0.90 ? "danger" : barPct >= 0.80 ? "warn" : "";
+  const barWidth = barPct != null ? Math.min(100, barPct * 100).toFixed(1) : 0;
+  const storageBarHtml = barPct != null ? `
+    <div class="storage-bar-wrap">
+      <div class="storage-bar-fill ${barCls}" style="width:${barWidth}%"></div>
+    </div>
+    <div style="font-size:11px;color:${barPct >= 0.90 ? "var(--red)" : barPct >= 0.80 ? "var(--orange)" : "var(--muted)"}">
+      ${(runtime.storage_usage / (1024*1024)).toFixed(1)} MB used of ${(runtime.storage_quota / (1024*1024)).toFixed(0)} MB quota (${fmtPct(barPct)})
+    </div>` : "";
+  const idbHtml = `
+    <div class="pf-section">
+      <h3>IndexedDB — rufus-demo</h3>
+      <div class="pf-stats">
+        <div class="pf-stat">
+          <div class="pf-stat-label">Workflows stored</div>
+          <div class="pf-stat-value" style="color:var(--accent)">${idb.workflows}</div>
+        </div>
+        <div class="pf-stat">
+          <div class="pf-stat-label">Audit events</div>
+          <div class="pf-stat-value" style="color:var(--cyan)">${idb.audit_events}</div>
+        </div>
+      </div>
+      ${storageBarHtml}
+    </div>`;
+
+  body.innerHTML = runtimeHtml + pkgsHtml + cacheHtml + idbHtml;
+}
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 startWorker();

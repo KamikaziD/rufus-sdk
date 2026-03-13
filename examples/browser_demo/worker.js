@@ -22,6 +22,11 @@ const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "w
 let _extractor = null;
 let _pipeline = null;   // set after dynamic import
 
+// ─── Preflight tracking ───────────────────────────────────────────────────────
+let _loadedPyodideUrl = null;
+let _loadedTransformersUrl = null;
+let _wheelUrl = null;
+
 /**
  * Called from Python via `from js import runWebGPUInference`.
  * Returns a plain JS object: { embedding: TypedArray, latency_ms, device_used }
@@ -59,6 +64,10 @@ globalThis.notifyWorkflowError = (msg) => {
     self.postMessage({ type: "workflow_error", message: msg });
 };
 
+globalThis.notifyGpuFallback = () => {
+    self.postMessage({ type: "gpu_fallback" });
+};
+
 // ─── IndexedDB helpers (exposed to Python via Pyodide FFI) ───────────────────
 const IDB_NAME    = "rufus-demo";
 const IDB_VERSION = 1;
@@ -84,13 +93,26 @@ function openIDB() {
 }
 
 globalThis.idbPutWorkflow = async (json) => {
-    const db = await openIDB();
-    return new Promise((resolve, reject) => {
-        const tx  = db.transaction("workflows", "readwrite");
-        tx.objectStore("workflows").put(JSON.parse(json));
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror    = (e) => { db.close(); reject(e.target.error); };
-    });
+    const attempt = async () => {
+        const db = await openIDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("workflows", "readwrite");
+            tx.objectStore("workflows").put(JSON.parse(json));
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror    = (e) => { db.close(); reject(e.target.error); };
+        });
+    };
+    try {
+        await attempt();
+        await checkStorageQuota();   // proactive warning after successful write
+    } catch (err) {
+        if (err?.name === "QuotaExceededError") {
+            const pruned = await idbPruneOldest().catch(() => 0);
+            self.postMessage({ type: "storage_quota_exceeded", store: "workflows", pruned });
+            try { await attempt(); } catch (_) { /* give up after one retry */ }
+        }
+        // Non-quota errors: silently swallow (IDB is best-effort mirror)
+    }
 };
 
 globalThis.idbGetWorkflow = async (id) => {
@@ -124,12 +146,24 @@ globalThis.idbListWorkflows = async () => {
 
 globalThis.idbLogAudit = async (json) => {
     const db = await openIDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction("audit_events", "readwrite");
-        tx.objectStore("audit_events").add(JSON.parse(json));
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror    = (e) => { db.close(); reject(e.target.error); };
-    });
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction("audit_events", "readwrite");
+            tx.objectStore("audit_events").add(JSON.parse(json));
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror    = (e) => { db.close(); reject(e.target.error); };
+        });
+    } catch (err) {
+        if (err?.name === "QuotaExceededError") {
+            const db2 = await openIDB();
+            await new Promise((res) => {
+                const tx = db2.transaction("audit_events", "readwrite");
+                tx.objectStore("audit_events").clear();
+                tx.oncomplete = () => { db2.close(); res(); };
+                tx.onerror    = () => { db2.close(); res(); };
+            });
+        }
+    }
 };
 
 globalThis.idbGetHistory = async (n) => {
@@ -158,6 +192,43 @@ globalThis.idbClear = async () => {
         tx.onerror    = (e) => { db.close(); reject(e.target.error); };
     });
 };
+
+// ─── Storage quota helpers ────────────────────────────────────────────────────
+const STORAGE_WARN_PCT  = 0.80;
+const IDB_MAX_WORKFLOWS = 50;
+let _lastStorageWarnPct = 0;
+
+async function checkStorageQuota() {
+    if (!navigator.storage?.estimate) return null;
+    const { usage, quota } = await navigator.storage.estimate();
+    const pct = quota > 0 ? usage / quota : 0;
+    if (pct >= STORAGE_WARN_PCT && Math.floor(pct * 20) > Math.floor(_lastStorageWarnPct * 20)) {
+        _lastStorageWarnPct = pct;
+        self.postMessage({ type: "storage_warning", usageBytes: usage, quotaBytes: quota, pct });
+    }
+    return { usageBytes: usage, quotaBytes: quota, pct };
+}
+
+async function idbPruneOldest() {
+    const db = await openIDB();
+    const all = await new Promise((res, rej) => {
+        const tx = db.transaction("workflows", "readonly");
+        const req = tx.objectStore("workflows").getAll();
+        req.onsuccess = (e) => { db.close(); res(e.target.result || []); };
+        req.onerror   = (e) => { db.close(); rej(e.target.error); };
+    });
+    all.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    const toDelete = all.slice(0, Math.max(0, all.length - IDB_MAX_WORKFLOWS + 5));
+    if (!toDelete.length) return 0;
+    const db2 = await openIDB();
+    return new Promise((res, rej) => {
+        const tx = db2.transaction("workflows", "readwrite");
+        const store = tx.objectStore("workflows");
+        toDelete.forEach(w => store.delete(w.id));
+        tx.oncomplete = () => { db2.close(); res(toDelete.length); };
+        tx.onerror    = (e) => { db2.close(); rej(e.target.error); };
+    });
+}
 
 // ─── Python setup string ──────────────────────────────────────────────────────
 const PYTHON_SETUP = `
@@ -270,6 +341,11 @@ class IndexedDBPersistence(InMemoryPersistence):
     """InMemoryPersistence that mirrors workflow state and audit events to IndexedDB."""
 
     async def save_workflow(self, workflow_id: str, workflow_data):
+        # Evict oldest entry when at capacity (insertion-order dict, Python 3.7+)
+        MAX_MEM = 50
+        if len(self._workflows) >= MAX_MEM:
+            oldest_key = next(iter(self._workflows))
+            del self._workflows[oldest_key]
         await super().save_workflow(workflow_id, workflow_data)
         try:
             import time as _t
@@ -568,7 +644,12 @@ async def gpu_embedding(state: TransactionState, context: StepContext, **_):
             "inference_ms": round(result.latency_ms, 1),
             "device_used": result.device_used,
         }
-    except Exception as e:
+    except Exception:
+        try:
+            from js import notifyGpuFallback
+            notifyGpuFallback()
+        except Exception:
+            pass
         # Fallback: deterministic pseudo-embedding
         random.seed(hash(state.feature_text) % (2**32))
         embedding = [random.gauss(0, 0.1) for _ in range(384)]
@@ -708,6 +789,7 @@ async function loadPyodideDynamic() {
             const mod = await import(url);
             // indexURL is the directory containing the mjs file
             const indexURL = url.replace(/[^/]+$/, "");
+            _loadedPyodideUrl = url;
             return { loadPyodide: mod.loadPyodide, indexURL };
         } catch (_) {
             // try next version
@@ -731,6 +813,7 @@ async function init() {
         try {
             const tfMod = await import(url);
             _pipeline = tfMod.pipeline;
+            _loadedTransformersUrl = url;
             if (tfMod.env) {
                 tfMod.env.allowLocalModels = false;
                 tfMod.env.useBrowserCache = true;
@@ -745,7 +828,8 @@ async function init() {
     await pyodide.loadPackage("micropip");
 
     const BASE = self.location.origin;
-    pyodide.globals.set("_wheel_url", `${BASE}/dist/rufus_sdk-0.8.0-py3-none-any.whl`);
+    _wheelUrl = `${BASE}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+    pyodide.globals.set("_wheel_url", _wheelUrl);
     // Mock native-code packages that have no WASM wheel so micropip's dependency
     // resolver sees them as satisfied without trying to download them.
     // Then install the rufus-sdk wheel normally — micropip resolves all the
@@ -775,23 +859,107 @@ await micropip.install(_wheel_url, keep_going=True)
     self.postMessage({ type: "ready" });
 }
 
+// ─── Preflight inspector ──────────────────────────────────────────────────────
+async function gatherPreflight() {
+    // runtime section
+    const est = await checkStorageQuota().catch(() => null);
+    const runtime = {
+        pyodide_url:       _loadedPyodideUrl,
+        pyodide_version:   pyodide ? pyodide.version : null,
+        transformers_url:  _loadedTransformersUrl,
+        webgpu:            _gpuDevice,
+        model_in_memory:   _extractor !== null,
+        wheel_url:         _wheelUrl,
+        storage_usage:     est?.usageBytes ?? null,
+        storage_quota:     est?.quotaBytes ?? null,
+        storage_pct:       est?.pct        ?? null,
+    };
+
+    // packages — from micropip.list() in Python
+    let packages = {};
+    if (pyodide) {
+        try {
+            const raw = await pyodide.runPythonAsync(
+                "import micropip, json; json.dumps({k: {'version': str(v.version), 'source': str(getattr(v, 'source', '') or '')} for k, v in micropip.list().items()})"
+            );
+            packages = JSON.parse(raw);
+        } catch (_) {}
+    }
+
+    // cache stores — iterate Cache Storage, sum Content-Length headers (no body reads)
+    let cacheStores = [];
+    try {
+        const cacheNames = await caches.keys();
+        for (const name of cacheNames) {
+            try {
+                const cache = await caches.open(name);
+                const requests = await cache.keys();
+                let sizeBytes = 0;
+                for (const req of requests) {
+                    try {
+                        const resp = await cache.match(req);
+                        if (resp) {
+                            const cl = resp.headers.get("Content-Length");
+                            if (cl) sizeBytes += parseInt(cl, 10);
+                        }
+                    } catch (_) {}
+                }
+                cacheStores.push({ name, count: requests.length, size_bytes: sizeBytes });
+            } catch (_) {}
+        }
+    } catch (_) {}
+
+    // IndexedDB counts
+    let idb = { workflows: 0, audit_events: 0 };
+    try {
+        const db = await openIDB();
+        await new Promise((resolve) => {
+            const tx = db.transaction(["workflows", "audit_events"], "readonly");
+            const wReq = tx.objectStore("workflows").count();
+            const aReq = tx.objectStore("audit_events").count();
+            let done = 0;
+            const check = () => { if (++done === 2) { db.close(); resolve(); } };
+            wReq.onsuccess = () => { idb.workflows    = wReq.result; check(); };
+            aReq.onsuccess = () => { idb.audit_events = aReq.result; check(); };
+            wReq.onerror = aReq.onerror = () => { check(); };
+        });
+    } catch (_) {}
+
+    return { runtime, packages, cacheStores, idb };
+}
+
 // ─── Message dispatcher ───────────────────────────────────────────────────────
 self.onmessage = async (e) => {
     const { type, workflowType, data } = e.data;
 
     if (type === "run_workflow") {
         self.postMessage({ type: "workflow_start", workflowType });
+        const TIMEOUT_MS = 30_000;
+        let timedOut = false;
+        const timeoutId = setTimeout(() => {
+            timedOut = true;
+            self.postMessage({ type: "workflow_timeout", workflowType });
+        }, TIMEOUT_MS);
         try {
             pyodide.globals.set("_wf_type", workflowType);
             pyodide.globals.set("_wf_data", JSON.stringify(data || {}));
             await pyodide.runPythonAsync("await run_workflow(_wf_type, _wf_data)");
             // result dispatched inside Python via notifyWorkflowDone / notifyWorkflowError
         } catch (err) {
-            self.postMessage({
-                type: "workflow_error",
-                workflowType,
-                message: err.message || String(err),
-            });
+            if (!timedOut) {
+                self.postMessage({ type: "workflow_error", workflowType,
+                                   message: err.message || String(err) });
+            }
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+    } else if (type === "preflight_check") {
+        try {
+            const data = await gatherPreflight();
+            self.postMessage({ type: "preflight_result", data });
+        } catch (err) {
+            self.postMessage({ type: "preflight_result", data: null, error: err.message });
         }
 
     } else if (type === "get_history") {
