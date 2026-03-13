@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rufus — Browser Runtime Demo</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --surface2:  #1c2230;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+    --gold:      #e3b341;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --purple:    #bc8cff;
+    --orange:    #f0883e;
+    --cyan:      #79c0ff;
+    --radius:    10px;
+    --mono:      "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    --sans:      -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Layout ───────────────────────────────────────────────────────────── */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .header-title span { color: var(--accent); }
+
+  .badges { display: flex; gap: 8px; margin-left: auto; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+  }
+  .badge.ready  { border-color: var(--green);  color: var(--green); }
+  .badge.error  { border-color: var(--red);    color: var(--red); }
+  .badge.gpu    { border-color: var(--purple); color: var(--purple); }
+  .badge.wasm   { border-color: var(--orange); color: var(--orange); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  main {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+
+  .intro {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .intro h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .intro p { color: var(--muted); max-width: 600px; margin: 0 auto; }
+
+  /* ── Cards ────────────────────────────────────────────────────────────── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .card-meta h3 { font-size: 14px; font-weight: 600; }
+  .card-meta p  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .card-body { padding: 16px 18px; flex: 1; }
+
+  /* ── Step pipeline ────────────────────────────────────────────────────── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+
+  .pipe-step {
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--mono);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+  }
+
+  .pipe-step.active   { background: #2d2200; border-color: var(--gold);  color: var(--gold); }
+  .pipe-step.done     { background: #0d2b19; border-color: var(--green); color: var(--green); }
+  .pipe-step.jumped   { background: #1a0d2e; border-color: var(--purple); color: var(--purple); }
+  .pipe-step.skipped  { opacity: 0.35; }
+
+  .pipe-arrow {
+    color: var(--muted);
+    font-size: 12px;
+    user-select: none;
+  }
+
+  /* ── Run button ───────────────────────────────────────────────────────── */
+  .card-footer {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-run {
+    padding: 7px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--accent);
+    color: #0d1117;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn-run:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+  .btn-run:active:not(:disabled) { transform: translateY(0); }
+  .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-run.running  { background: var(--gold); }
+
+  .run-meta { font-size: 11px; color: var(--muted); }
+
+  /* ── Result panel ─────────────────────────────────────────────────────── */
+  .result-panel {
+    margin: 0 18px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+  }
+  .result-panel.visible { display: block; }
+
+  .result-header {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-pill {
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .status-pill.COMPLETED { background: #0d2b19; color: var(--green); }
+  .status-pill.FAILED    { background: #2d0d0d; color: var(--red); }
+  .status-pill.ACTIVE    { background: #2d2200; color: var(--gold); }
+
+  .result-fields { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+
+  .result-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 12px;
+  }
+  .field-key   { color: var(--muted); flex-shrink: 0; }
+  .field-value {
+    color: var(--text);
+    font-family: var(--mono);
+    text-align: right;
+    word-break: break-all;
+    max-width: 220px;
+  }
+  .field-value.green  { color: var(--green); }
+  .field-value.red    { color: var(--red); }
+  .field-value.gold   { color: var(--gold); }
+  .field-value.purple { color: var(--purple); }
+  .field-value.orange { color: var(--orange); }
+
+  /* Model loading overlay */
+  .model-overlay {
+    display: none;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--gold);
+    border-bottom: 1px solid var(--border);
+    background: #2d220066;
+  }
+  .model-overlay.visible { display: flex; align-items: center; gap: 8px; }
+
+  /* ── Spinner ──────────────────────────────────────────────────────────── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  /* ── Console panel ────────────────────────────────────────────────────── */
+  .console-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .console-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .btn-clear {
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .btn-clear:hover { border-color: var(--text); color: var(--text); }
+
+  #console-output {
+    height: 220px;
+    overflow-y: auto;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .log-line { display: flex; gap: 10px; }
+  .log-time  { color: var(--border); min-width: 60px; flex-shrink: 0; }
+  .log-info  { color: var(--text); }
+  .log-step  { color: var(--cyan); }
+  .log-done  { color: var(--green); }
+  .log-error { color: var(--red); }
+  .log-gpu   { color: var(--purple); }
+  .log-model { color: var(--gold); }
+
+  /* ── Responsiveness ───────────────────────────────────────────────────── */
+  @media (max-width: 720px) {
+    .cards { grid-template-columns: 1fr; }
+    .header { flex-wrap: wrap; }
+    .badges { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-title">Rufus <span>·</span> Browser Runtime</div>
+  <div style="font-size:12px;color:var(--muted)">Python workflows, zero backend</div>
+  <div class="badges">
+    <span class="badge" id="badge-pyodide">
+      <span class="dot"></span> Pyodide: initialising…
+    </span>
+    <span class="badge" id="badge-webgpu">
+      <span class="dot"></span> WebGPU: detecting…
+    </span>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main>
+  <div class="intro">
+    <h2>Edge → Cloud → Browser</h2>
+    <p>
+      The same Python step functions that run on a POS terminal or cloud worker
+      run here, natively in your browser tab via Pyodide + WebAssembly.
+    </p>
+  </div>
+
+  <div class="cards">
+
+    <!-- ── Card 1: Order Fulfillment ─────────────────────────────────────── -->
+    <div class="card" id="card-wf1">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0e2a1a">📦</div>
+        <div class="card-meta">
+          <h3>Order Fulfillment</h3>
+          <p>STANDARD · PARALLEL fan-out · WorkflowJumpDirective</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf1">
+          <span class="pipe-step" data-step="ValidateOrder">ValidateOrder</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="CheckInventory">CheckInventory</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="FulfillmentDecision">FulfillmentDecision</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ProcessPayment">ProcessPayment</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="SendConfirmation">SendConfirmation</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="BackorderNotice">BackorderNotice</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">
+          Validates items and totals, fans out to two warehouse APIs in parallel,
+          then either ships or places a backorder based on stock availability.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf1">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf1"></span>
+        </div>
+        <div class="result-fields" id="fields-wf1"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf1" disabled onclick="runWorkflow('OrderFulfillment')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf1"></span>
+      </div>
+    </div>
+
+    <!-- ── Card 2: IoT Sensor Pipeline ───────────────────────────────────── -->
+    <div class="card" id="card-wf2">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0a1e2e">📡</div>
+        <div class="card-meta">
+          <h3>IoT Sensor Pipeline</h3>
+          <p>STANDARD · loop logic · anomaly detection · health jump</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf2">
+          <span class="pipe-step" data-step="InitPipeline">InitPipeline</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="CollectSensorData">CollectSensorData</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ProcessReadings">ProcessReadings</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ComputeStatistics">ComputeStatistics</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="HealthDecision">HealthDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="SendAlert">SendAlert</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">
+          Generates 10 synthetic sensor readings with injected anomalies, computes
+          statistics, and branches to an alert if the anomaly rate or σ is high.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf2">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf2"></span>
+        </div>
+        <div class="result-fields" id="fields-wf2"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf2" disabled onclick="runWorkflow('IoTSensorPipeline')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf2"></span>
+      </div>
+    </div>
+
+    <!-- ── Card 3: Transaction Risk Scoring ──────────────────────────────── -->
+    <div class="card" id="card-wf3">
+      <div class="card-header">
+        <div class="card-icon" style="background:#1c0e2e">💳</div>
+        <div class="card-meta">
+          <h3>Transaction Risk Scoring</h3>
+          <p>STANDARD · WebGPU embedding · cosine similarity · decision jump</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf3">
+          <span class="pipe-step" data-step="ExtractFeatures">ExtractFeatures</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="GPUEmbedding">GPUEmbedding</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ComputeRiskScore">ComputeRiskScore</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="ScoreDecision">ScoreDecision</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="RecordOutcome">RecordOutcome</span>
+        </div>
+
+        <!-- Model info row -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">Model: all-MiniLM-L6-v2 (23 MB)</span>
+          <span class="badge" id="badge-model" style="font-size:10px">not loaded</span>
+        </div>
+
+        <!-- Model loading overlay -->
+        <div class="model-overlay" id="model-overlay">
+          <span class="spinner"></span>
+          Downloading model weights (~23 MB) — cached after first run…
+        </div>
+
+        <p style="font-size:12px;color:var(--muted)">
+          Embeds the transaction description using a sentence transformer model
+          running on WebGPU (or WASM fallback), scores against risk pattern
+          embeddings via cosine similarity, then approves, flags, or declines.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf3">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf3"></span>
+        </div>
+        <div class="result-fields" id="fields-wf3"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf3" disabled onclick="runWorkflow('TransactionRiskScoring')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf3"></span>
+      </div>
+    </div>
+
+  </div><!-- /cards -->
+
+  <!-- ── Console ──────────────────────────────────────────────────────────── -->
+  <div class="console-section">
+    <div class="console-header">
+      <span>Worker Log</span>
+      <button class="btn-clear" onclick="clearConsole()">Clear</button>
+    </div>
+    <div id="console-output"></div>
+  </div>
+</main>
+
+<script type="module">
+// ── State ─────────────────────────────────────────────────────────────────────
+const WORKFLOW_STEPS = {
+  OrderFulfillment:        ["ValidateOrder","CheckInventory","FulfillmentDecision","ProcessPayment","SendConfirmation","BackorderNotice"],
+  IoTSensorPipeline:       ["InitPipeline","CollectSensorData","ProcessReadings","ComputeStatistics","HealthDecision","SendAlert"],
+  TransactionRiskScoring:  ["ExtractFeatures","GPUEmbedding","ComputeRiskScore","ScoreDecision","RecordOutcome"],
+};
+
+const WF_ID = {
+  OrderFulfillment:       "wf1",
+  IoTSensorPipeline:      "wf2",
+  TransactionRiskScoring: "wf3",
+};
+
+let worker = null;
+let runStartTimes = {};   // workflowType → Date.now()
+let currentWfType = null; // for tracking active run
+
+// ── Worker ────────────────────────────────────────────────────────────────────
+function startWorker() {
+  worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = (e) => {
+    log(`Worker error: ${e.message}`, "error");
+    setBadge("badge-pyodide", "error", "Pyodide: error");
+  };
+}
+
+function handleWorkerMessage(e) {
+  const msg = e.data;
+
+  switch (msg.type) {
+
+    case "status":
+      log(msg.message, "info");
+      setBadge("badge-pyodide", "", `⏳ ${msg.message}`);
+      break;
+
+    case "ready":
+      setBadge("badge-pyodide", "ready", "Pyodide: ready ✓");
+      enableButtons();
+      log("Pyodide ready — all workflow buttons enabled", "done");
+      break;
+
+    case "init_error":
+      log(`Init failed: ${msg.message}`, "error");
+      setBadge("badge-pyodide", "error", "Pyodide: failed");
+      break;
+
+    case "webgpu_status":
+      if (msg.supported) {
+        setBadge("badge-webgpu", "gpu", "WebGPU: ✓");
+        log("WebGPU detected — GPU inference enabled", "gpu");
+      } else {
+        setBadge("badge-webgpu", "wasm", "WebGPU: ✗ (WASM)");
+        log("WebGPU unavailable — WASM fallback active", "info");
+      }
+      break;
+
+    case "model_loading":
+      document.getElementById("model-overlay").classList.add("visible");
+      log("Downloading all-MiniLM-L6-v2 (~23 MB)…", "model");
+      setBadge("badge-model", "wasm", "downloading…");
+      break;
+
+    case "model_ready":
+      document.getElementById("model-overlay").classList.remove("visible");
+      log(`Model ready on ${msg.device}`, "gpu");
+      setBadge("badge-model", msg.device === "webgpu" ? "gpu" : "wasm",
+               msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback");
+      break;
+
+    case "workflow_start":
+      currentWfType = msg.workflowType;
+      runStartTimes[msg.workflowType] = performance.now();
+      resetPipeline(msg.workflowType);
+      setButton(msg.workflowType, true, "Running…");
+      log(`▶ Starting ${msg.workflowType}`, "info");
+      break;
+
+    case "step_done":
+      markStep(currentWfType, msg.stepName, "done");
+      const fields = summariseStep(msg.stepName, msg.result);
+      if (fields) log(`  ✓ ${msg.stepName}: ${fields}`, "step");
+      else        log(`  ✓ ${msg.stepName}`, "step");
+      break;
+
+    case "workflow_done": {
+      const wfType = currentWfType;
+      const elapsed = ((performance.now() - runStartTimes[wfType]) / 1000).toFixed(2);
+      setButton(wfType, false, "Run");
+      showResult(wfType, msg.state, elapsed);
+      log(`✅ ${wfType} completed in ${elapsed}s`, "done");
+      currentWfType = null;
+      break;
+    }
+
+    case "workflow_error": {
+      const wfType = msg.workflowType || currentWfType;
+      log(`❌ ${wfType}: ${msg.message}`, "error");
+      setButton(wfType, false, "Run");
+      currentWfType = null;
+      break;
+    }
+  }
+}
+
+// ── Workflow runner ───────────────────────────────────────────────────────────
+window.runWorkflow = function(workflowType) {
+  if (!worker) return;
+  const defaultData = {
+    OrderFulfillment: {
+      items: [
+        { name: "Widget A", price: 29.99, qty: 2 },
+        { name: "Widget B", price: 14.50, qty: 1 },
+      ],
+    },
+    IoTSensorPipeline: { device_id: "sensor-42" },
+    TransactionRiskScoring: {
+      amount: Math.round(Math.random() * 1900 + 100),
+      merchant_category: ["retail", "crypto-exchange", "grocery", "streaming"][Math.floor(Math.random() * 4)],
+      location: ["London", "New York", "Singapore", "unknown"][Math.floor(Math.random() * 4)],
+    },
+  };
+  worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {} });
+};
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function enableButtons() {
+  ["btn-wf1", "btn-wf2", "btn-wf3"].forEach(id => {
+    document.getElementById(id).disabled = false;
+  });
+}
+
+function setButton(wfType, running, label) {
+  const id = `btn-${WF_ID[wfType]}`;
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.textContent = running ? label : "Run";
+  btn.disabled = running;
+  btn.classList.toggle("running", running);
+}
+
+function resetPipeline(wfType) {
+  const id = WF_ID[wfType];
+  const container = document.getElementById(`pipeline-${id}`);
+  if (!container) return;
+  container.querySelectorAll(".pipe-step").forEach(el => {
+    el.className = "pipe-step";
+  });
+  // Hide result panel
+  const panel = document.getElementById(`result-${id}`);
+  if (panel) panel.classList.remove("visible");
+}
+
+function markStep(wfType, stepName, cls) {
+  if (!wfType) return;
+  const id = WF_ID[wfType];
+  const container = document.getElementById(`pipeline-${id}`);
+  if (!container) return;
+  const el = container.querySelector(`[data-step="${stepName}"]`);
+  if (el) { el.className = "pipe-step " + cls; }
+}
+
+function showResult(wfType, state, elapsed) {
+  const id = WF_ID[wfType];
+  const panel = document.getElementById(`result-${id}`);
+  const statusEl = document.getElementById(`status-${id}`);
+  const fieldsEl = document.getElementById(`fields-${id}`);
+  const metaEl   = document.getElementById(`meta-${id}`);
+  if (!panel) return;
+
+  const wfStatus = state._status || "COMPLETED";
+  if (statusEl) {
+    statusEl.textContent = "COMPLETED";
+    statusEl.className = "status-pill COMPLETED";
+  }
+
+  if (metaEl) metaEl.textContent = `${elapsed}s`;
+
+  const rows = buildResultRows(wfType, state);
+  if (fieldsEl) {
+    fieldsEl.innerHTML = rows.map(([k, v, cls]) =>
+      `<div class="result-field">
+         <span class="field-key">${k}</span>
+         <span class="field-value ${cls || ""}">${v}</span>
+       </div>`
+    ).join("");
+  }
+
+  panel.classList.add("visible");
+}
+
+function buildResultRows(wfType, s) {
+  if (wfType === "OrderFulfillment") {
+    const shipped = s.status === "SHIPPED";
+    return [
+      ["order_id",    s.order_id || "—", ""],
+      ["total",       s.total != null ? `$${s.total.toFixed(2)}` : "—", ""],
+      ["stock_uk",    s.stock_uk ? "✓ in stock" : "✗ out of stock", s.stock_uk ? "green" : "red"],
+      ["stock_eu",    s.stock_eu ? "✓ in stock" : "✗ out of stock", s.stock_eu ? "green" : "red"],
+      ["payment_ref", s.payment_ref || "—", ""],
+      ["status",      s.status || "—", shipped ? "green" : "orange"],
+    ];
+  }
+  if (wfType === "IoTSensorPipeline") {
+    const cls = s.health_status === "HEALTHY" ? "green"
+              : s.health_status === "WARNING"  ? "orange"
+              : "red";
+    return [
+      ["device_id",    s.device_id || "—", ""],
+      ["readings",     (s.readings || []).length + " samples", ""],
+      ["anomalies",    (s.anomalies || []).length + " detected", s.anomalies?.length ? "red" : "green"],
+      ["mean",         s.mean != null ? s.mean.toFixed(3) : "—", ""],
+      ["stddev",       s.stddev != null ? `σ=${s.stddev.toFixed(3)}` : "—", ""],
+      ["anomaly_rate", s.anomaly_rate != null ? `${(s.anomaly_rate * 100).toFixed(1)}%` : "—", ""],
+      ["health",       s.health_status || "—", cls],
+    ];
+  }
+  if (wfType === "TransactionRiskScoring") {
+    const dcls = s.decision === "APPROVED" ? "green"
+               : s.decision === "DECLINED" ? "red"
+               : "orange";
+    return [
+      ["txn_id",       s.txn_id || "—", ""],
+      ["amount",       s.amount != null ? `$${s.amount}` : "—", ""],
+      ["merchant",     s.merchant_category || "—", ""],
+      ["risk_score",   s.risk_score != null ? s.risk_score.toFixed(3) : "—",
+                       s.risk_score > 0.65 ? "red" : s.risk_score > 0.4 ? "orange" : "green"],
+      ["decision",     s.decision || "—", dcls],
+      ["inference",    s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—", ""],
+      ["device",       s.device_used || "—", s.device_used === "webgpu" ? "purple" : "orange"],
+      ["explanation",  s.explanation || "—", ""],
+    ];
+  }
+  return Object.entries(s).slice(0, 8).map(([k, v]) => [k, JSON.stringify(v), ""]);
+}
+
+function summariseStep(stepName, result) {
+  if (!result || !Object.keys(result).length) return null;
+  const entries = Object.entries(result).slice(0, 3);
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+}
+
+// ── Console ───────────────────────────────────────────────────────────────────
+function log(msg, cls = "info") {
+  const out = document.getElementById("console-output");
+  const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML = `<span class="log-time">${time}</span><span class="log-${cls}">${escHtml(msg)}</span>`;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+window.clearConsole = function() {
+  document.getElementById("console-output").innerHTML = "";
+};
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── Badge ─────────────────────────────────────────────────────────────────────
+function setBadge(id, cls, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "badge" + (cls ? " " + cls : "");
+  if (id === "badge-model") {
+    el.textContent = text;
+  } else {
+    el.innerHTML = `<span class="dot"></span> ${escHtml(text)}`;
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+startWorker();
+log("Worker started — loading Pyodide…", "info");
+</script>
+</body>
+</html>
