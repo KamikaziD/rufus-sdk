@@ -1019,7 +1019,13 @@ if _wheel_url:
     # Local dev or Pages deploy: load from co-located wheel (fast, no CDN needed)
     await micropip.install(_wheel_url, keep_going=True)
 else:
-    # Bare two-file share: install rufus-sdk from TestPyPI; pure-Python deps from PyPI
+    # Bare two-file share: TestPyPI doesn't carry all transitive deps, so
+    # pre-install the ones that only exist on PyPI, then pull rufus-sdk itself
+    # from TestPyPI (micropip skips deps it already sees as satisfied).
+    await micropip.install(
+        ["anyio", "alembic", "typer", "aiosqlite", "python-dotenv", "croniter"],
+        keep_going=True,
+    )
     await micropip.install(
         "rufus-sdk==0.8.0",
         index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
