@@ -28,9 +28,15 @@ class EventPublisherObserver(WorkflowObserver):
     """
     An implementation of WorkflowObserver that publishes workflow events to Redis Streams (for persistence)
     and Redis Pub/Sub (for real-time updates).
+
+    Stream keys:
+      rufus:workflow_lifecycle   — started, completed, failed, rolled_back
+      rufus:workflow_status_changes — status_changed
+      rufus:step_events          — step.executed, step.failed
+      rufus:saga_events          — compensation_started, compensation_completed
     """
 
-    def __init__(self, redis_url: str = None, persistence_provider = None):
+    def __init__(self, redis_url: str = None, persistence_provider=None):
         if redis_url:
             self.redis_url = redis_url
         else:
@@ -67,7 +73,7 @@ class EventPublisherObserver(WorkflowObserver):
 
     async def _publish_event(self, stream_key: Optional[str], event_type: str, payload: Dict[str, Any], use_pubsub: bool = True):
         if not self._initialized or not self._redis_client:
-            await self.initialize() # Attempt to initialize if not done
+            await self.initialize()
 
         if not self._redis_client:
             logger.error("Redis client not initialized for event publishing.")
@@ -81,7 +87,7 @@ class EventPublisherObserver(WorkflowObserver):
         }
 
         # Metrics
-        if WORKFLOW_EVENTS_TOTAL: # Check if metric was successfully initialized
+        if WORKFLOW_EVENTS_TOTAL:
             try:
                 WORKFLOW_EVENTS_TOTAL.labels(event_type=event_type).inc()
             except Exception as e:
@@ -96,9 +102,9 @@ class EventPublisherObserver(WorkflowObserver):
 
         # 2. Publish to Pub/Sub (Real-time)
         if use_pubsub:
-            workflow_id = payload.get("workflow_id") or payload.get("id")
+            workflow_id = payload.get("workflow_id") or payload.get("id") or payload.get("parent_id")
             if workflow_id:
-                channel = f"rufus:events:{workflow_id}" # Use rufus specific channel
+                channel = f"rufus:events:{workflow_id}"
                 pubsub_message = {
                     "event_type": event_type,
                     "timestamp": timestamp,
@@ -116,10 +122,8 @@ class EventPublisherObserver(WorkflowObserver):
             return
 
         try:
-            # Fetch complete workflow from persistence
             workflow_dict = await self._persistence.load_workflow(workflow_id)
 
-            # Format to match what UI expects
             full_state = {
                 "id": workflow_dict.get("id"),
                 "status": workflow_dict.get("status"),
@@ -132,7 +136,6 @@ class EventPublisherObserver(WorkflowObserver):
                 "skipped_steps": (workflow_dict.get("metadata") or {}).get("skipped_steps", [])
             }
 
-            # Publish to WebSocket channel
             channel = f"rufus:events:{workflow_id}"
             if self._redis_client:
                 await self._redis_client.publish(channel, json.dumps(full_state))
@@ -148,17 +151,27 @@ class EventPublisherObserver(WorkflowObserver):
         }
         await self._publish_event('rufus:workflow_lifecycle', 'workflow.started', payload)
 
-    async def on_step_executed(self, workflow_id: str, step_name: str, step_index: int, status: str, result: Optional[Dict[str, Any]], current_state: Any):
-        payload = {
+    async def on_step_executed(
+        self,
+        workflow_id: str,
+        step_name: str,
+        step_index: int,
+        status: str,
+        result: Optional[Dict[str, Any]],
+        current_state: Any,
+        duration_ms: Optional[float] = None,
+    ):
+        payload: Dict[str, Any] = {
             "workflow_id": workflow_id,
             "step_name": step_name,
             "step_index": step_index,
             "status": status,
             "result": result,
-            "current_state": current_state.model_dump() if hasattr(current_state, 'model_dump') else current_state
+            "current_state": current_state.model_dump() if hasattr(current_state, 'model_dump') else current_state,
         }
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
         await self._publish_event('rufus:step_events', 'step.executed', payload)
-        # Publish full workflow state for UI updates
         await self._publish_full_workflow_state(workflow_id)
 
     async def on_workflow_completed(self, workflow_id: str, workflow_type: str, final_state: Any):
@@ -168,7 +181,6 @@ class EventPublisherObserver(WorkflowObserver):
             "final_state": final_state.model_dump() if hasattr(final_state, 'model_dump') else final_state
         }
         await self._publish_event('rufus:workflow_lifecycle', 'workflow.completed', payload)
-        # Publish full workflow state for UI updates
         await self._publish_full_workflow_state(workflow_id)
 
     async def on_workflow_failed(self, workflow_id: str, workflow_type: str, error_message: str, current_state: Any):
@@ -179,7 +191,6 @@ class EventPublisherObserver(WorkflowObserver):
             "current_state": current_state.model_dump() if hasattr(current_state, 'model_dump') else current_state
         }
         await self._publish_event('rufus:workflow_lifecycle', 'workflow.failed', payload)
-        # Publish full workflow state for UI updates
         await self._publish_full_workflow_state(workflow_id)
 
     async def on_workflow_status_changed(self, workflow_id: str, old_status: str, new_status: str, current_step_name: Optional[str], final_result: Optional[Dict[str, Any]] = None):
@@ -190,9 +201,7 @@ class EventPublisherObserver(WorkflowObserver):
             "current_step_name": current_step_name,
             "final_result": final_result
         }
-        # Publish to Pub/Sub for real-time, Stream for audit
         await self._publish_event('rufus:workflow_status_changes', 'workflow.status_changed', payload)
-        # Publish full workflow state for UI updates
         await self._publish_full_workflow_state(workflow_id)
 
     async def on_workflow_rolled_back(self, workflow_id: str, workflow_type: str, message: str, current_state: Any, completed_steps_stack: List[Dict[str, Any]]):
@@ -215,6 +224,51 @@ class EventPublisherObserver(WorkflowObserver):
         }
         await self._publish_event('rufus:step_events', 'step.failed', payload)
 
+    # --- New lifecycle events (v1.0) ----------------------------------------
+
+    async def on_workflow_paused(self, workflow_id: str, step_name: str, reason: str):
+        payload = {
+            "workflow_id": workflow_id,
+            "step_name": step_name,
+            "reason": reason,
+        }
+        await self._publish_event('rufus:workflow_lifecycle', 'workflow.paused', payload)
+
+    async def on_workflow_resumed(self, workflow_id: str, step_name: str, resume_data: Optional[Dict[str, Any]]):
+        payload = {
+            "workflow_id": workflow_id,
+            "step_name": step_name,
+            "resume_data": resume_data,
+        }
+        await self._publish_event('rufus:workflow_lifecycle', 'workflow.resumed', payload)
+
+    async def on_compensation_started(self, workflow_id: str, step_name: str, step_index: int):
+        payload = {
+            "workflow_id": workflow_id,
+            "step_name": step_name,
+            "step_index": step_index,
+        }
+        await self._publish_event('rufus:saga_events', 'compensation.started', payload)
+
+    async def on_compensation_completed(self, workflow_id: str, step_name: str, success: bool, error: Optional[str] = None):
+        payload: Dict[str, Any] = {
+            "workflow_id": workflow_id,
+            "step_name": step_name,
+            "success": success,
+        }
+        if error:
+            payload["error"] = error
+        await self._publish_event('rufus:saga_events', 'compensation.completed', payload)
+
+    async def on_child_workflow_started(self, parent_id: str, child_id: str, child_type: str):
+        payload = {
+            "parent_id": parent_id,
+            "child_id": child_id,
+            "child_type": child_type,
+            "workflow_id": parent_id,  # for pub/sub channel routing
+        }
+        await self._publish_event('rufus:workflow_lifecycle', 'workflow.child_started', payload)
+
 
 # Global instance (can be replaced/configured by DI framework)
 _event_publisher_instance: Optional[EventPublisherObserver] = None
@@ -223,5 +277,4 @@ def get_event_publisher_observer(redis_url: str = None) -> EventPublisherObserve
     global _event_publisher_instance
     if _event_publisher_instance is None:
         _event_publisher_instance = EventPublisherObserver(redis_url)
-        # Assuming initialize will be called externally
     return _event_publisher_instance

@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — v1.0 Roadmap Sprints
+
+### Sprint 1 — Provider Interface Contract Freeze
+
+#### Added
+- **Domain DTOs** (`src/rufus/providers/dtos.py`) — `WorkflowRecord`, `TaskRecord`, `AuditLogRecord`, `MetricRecord`, `SyncStateRecord` typed dataclasses (slots=True) replacing `Dict[str,Any]` in new code
+- **Typed exceptions** — `PersistenceError`, `WorkflowNotFoundError`, `DuplicateIdempotencyKeyError`, `TaskNotFoundError` in `persistence.py`
+- **`CompatibilityMixin`** — moves `_sync` suffix methods out of abstract interface; `PersistenceProvider` now has ~16 abstract methods (was 24)
+- **5 edge sync abstract methods** on `PersistenceProvider`: `get_pending_sync_workflows`, `get_audit_logs_for_workflows`, `delete_synced_workflows`, `get_edge_sync_state(key) -> Optional[str]`, `set_edge_sync_state`
+- **`ExecutionContext` dataclass** (`execution.py`) — `trace_id`, `workflow_id`, `step_name`, `attempt`, `actor_id`; added to `dispatch_async_task` / `dispatch_parallel_tasks`
+- **`WorkflowObserver` → ABC** (was `Protocol`): partial implementations now fail at instantiation; all methods have default async no-op bodies
+- **5 new observer lifecycle events**: `on_workflow_paused`, `on_workflow_resumed`, `on_compensation_started`, `on_compensation_completed`, `on_child_workflow_started`
+- **`duration_ms: Optional[float] = None`** on `on_step_executed()` (backward-compatible default)
+- **Provider compliance test suites** (`tests/providers/`) — `base_persistence_compliance.py`, `base_execution_compliance.py`, `base_observer_compliance.py`, SQLite/InMemory compliance tests, observer ordering tests
+
+### Sprint 2 — Offline Resilience
+
+#### Added
+- **Monotonic sequence counter** — `device_sequence` SQLite table; `SyncManager._next_sequence()` uses `BEGIN IMMEDIATE` for atomic increment; replaces hardcoded `"device_sequence": 0` in SAF payloads
+- **Process-safe sync lock** — `sync_lock` SQLite table with stale-lock detection (>5 min); replaces in-memory `_sync_in_progress` flag (broken in multi-process)
+- **`mark_rejected(transaction_ids)`** on `SyncManager` — sets tasks to `FAILED` after cloud rejection; ends infinite retry cycle
+- **Audit log pagination** — `get_audit_logs_for_workflows(limit_per_workflow=50)`; 5 MB hard cap in `workflow_sync.py` (drops audit logs when exceeded, syncs workflow records only)
+- **Tests**: `tests/edge/test_sequence_counter.py`, `test_sync_lock.py`, `test_sync_conflict_resolution.py`, `test_audit_pagination.py`
+
+### Sprint 3 — Observability
+
+#### Added
+- **Step timing** (`workflow.py`) — `time.monotonic()` wrap around sync step execution; `duration_ms` passed to `observer.on_step_executed()` and `persistence.record_metric()`
+- **Structured JSON logging** (`logging.py`) — `StructuredLogFormatter`; all `LoggingObserver` methods use `logger.info("event.name", extra={...})` pattern for Fluent Bit / syslog aggregators
+- **`OtelObserver`** (`src/rufus/implementations/observability/otel.py`) — parent span per workflow, child span per step; graceful no-op if `opentelemetry-sdk` not installed; add `pip install 'rufus-sdk[otel]'`
+- **`EventPublisherObserver`** updates — `duration_ms` in `step.executed` stream event; 5 new lifecycle events; saga events to `rufus:saga_events` stream
+- **Tests**: `tests/providers/test_otel_observer.py`, `test_logging_observer.py`, `tests/sdk/test_step_timing.py`
+
+### Sprint 4 — Security Hardening
+
+#### Added
+- **Ed25519 payload signing** — `SyncManager._sync_batch()` signs `json.dumps(payload, sort_keys=True)` and adds `X-Payload-Signature` header (base64-encoded); `_ed25519_private_key` field on `SyncManager`
+- **API key rotation** — `DeviceService.rotate_api_key(device_id, current_api_key)` endpoint `POST /api/v1/devices/{device_id}/rotate-key`; `api_key_rotated_at` column added to `edge_devices` via Alembic migration `f1a2b3c4d5e6`
+- **Graduated heartbeat failure logging** — `RufusEdgeAgent`: warning on 1st consecutive failure, error on every 10th; counter resets on success
+- **Device bootstrap** — `RufusEdgeAgent.bootstrap(device_type, merchant_id, firmware_version) -> bool`; reads stored API key from `edge_sync_state`; auto-registers with cloud if absent; `start()` calls `bootstrap()` when `api_key` is empty
+- **Alembic migration** `f1a2b3c4d5e6` — adds `last_device_sequence INTEGER DEFAULT 0` and `api_key_rotated_at TIMESTAMP` to `edge_devices`
+- **Tests**: `tests/edge/test_payload_signing.py`, `test_api_key_rotation.py`, `test_device_bootstrap.py`
+
+### Known Test Environment Notes
+- `annotated_types.Not` `AttributeError` in `tests/test_server_endpoints.py` and `tests/integration/test_webhook_integration.py` — pre-existing pydantic/fastapi version mismatch in dev venv; tests are guarded with `pytestmark = pytest.mark.skipif(not _FASTAPI_AVAILABLE, ...)`
+- `AsyncWorkflowStep` IS a subclass of `WorkflowStep` (inherits from it); `is_sync_step` in `workflow.py` is determined by `not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ...))` — not by `isinstance(step, WorkflowStep)`
+- `get_edge_sync_state(key)` returns `Optional[str]` (plain string), not `Optional[SyncStateRecord]`; access the returned value directly, not via `.value`
+- Direct `Workflow()` instantiation requires all 6 providers; in tests use `MagicMock()` for `workflow_builder` and pass `SimpleExpressionEvaluator` / `Jinja2TemplateEngine` as classes
+
+---
+
 ## [0.8.0] - 2026-03-12
 
 ### Added

@@ -40,6 +40,9 @@ class EdgeWorkflowSyncer:
         self.api_key = api_key or ""
         self.batch_size = batch_size
 
+    # 5 MB hard cap — if payload exceeds this, drop audit logs and sync workflow records only
+    _MAX_PAYLOAD_BYTES = 5 * 1024 * 1024
+
     async def sync(self) -> dict:
         """One sync cycle: query → push → purge. Returns summary dict.
 
@@ -52,13 +55,25 @@ class EdgeWorkflowSyncer:
             return {"synced": 0, "purged": 0}
 
         workflow_ids = [w["id"] for w in workflows]
-        audit_logs = await self.persistence.get_audit_logs_for_workflows(workflow_ids)
+        audit_logs = await self.persistence.get_audit_logs_for_workflows(
+            workflow_ids, limit_per_workflow=50
+        )
+
+        import json as _json
+        payload = {"workflows": workflows, "audit_logs": audit_logs}
+        payload_bytes = _json.dumps(payload).encode()
+        if len(payload_bytes) > self._MAX_PAYLOAD_BYTES:
+            logger.warning(
+                f"[WorkflowSync] Payload {len(payload_bytes)} bytes exceeds 5 MB cap — "
+                "dropping audit logs to reduce size"
+            )
+            payload = {"workflows": workflows, "audit_logs": []}
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{self.cloud_url}/api/v1/devices/{self.device_id}/sync/workflows",
-                    json={"workflows": workflows, "audit_logs": audit_logs},
+                    json=payload,
                     headers={"X-API-Key": self.api_key},
                 )
 

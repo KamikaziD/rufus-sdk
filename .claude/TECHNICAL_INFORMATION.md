@@ -929,6 +929,97 @@ def test_workflow_executor_portable(executor):
     ...
 ```
 
+### Direct `Workflow()` Instantiation in Tests
+
+`Workflow.__init__` requires **all 6 providers** — it raises `ValueError` if any is `None`:
+`persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, `template_engine_cls`.
+
+The recommended approach is `WorkflowBuilder.create_workflow()` which handles wiring. For tests that need direct `Workflow` access:
+
+```python
+from unittest.mock import MagicMock
+from rufus.workflow import Workflow
+from rufus.implementations.persistence.memory import InMemoryPersistence
+from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+
+wf = Workflow(
+    workflow_id="test-wf",
+    workflow_steps=[step],
+    initial_state_model=MyState(),
+    workflow_type="MyType",
+    persistence_provider=InMemoryPersistence(),
+    execution_provider=SyncExecutor(),
+    workflow_observer=observer,            # MagicMock() if not under test
+    workflow_builder=MagicMock(),          # MagicMock() is fine for most tests
+    expression_evaluator_cls=SimpleExpressionEvaluator,
+    template_engine_cls=Jinja2TemplateEngine,
+)
+```
+
+### SAFTransaction Required Fields
+
+When writing test data that exercises the `SyncManager._get_pending_transactions()` path, the `task_data` stored in the tasks table **must** contain a `"transaction"` key with all required `SAFTransaction` fields:
+
+```python
+task_data = {
+    "transaction": {
+        "transaction_id": "txn-001",
+        "idempotency_key": "key-001",
+        "device_id": "device-001",       # required
+        "merchant_id": "merch-001",      # required
+        "amount": "9.99",                # required (Decimal-compatible string)
+        "currency": "USD",               # optional, defaults to "USD"
+        "card_token": "tok_test",        # required
+        "card_last_four": "4242",        # required
+    }
+}
+```
+
+Malformed transactions are silently skipped (logged as WARNING), so tests that assert on pending transaction counts will silently get 0 if required fields are missing.
+
+### `get_edge_sync_state` Return Value
+
+`get_edge_sync_state(key: str) -> Optional[str]` returns a **plain string** (or `None`), not a `SyncStateRecord`. Access the result directly:
+
+```python
+stored = await persistence.get_edge_sync_state("api_key")
+if stored:
+    api_key = stored  # already a str, no .value attribute
+```
+
+### FastAPI Import Guard in Test Files
+
+The dev venv has a `pydantic`/`fastapi` version mismatch (`annotated_types.Not` AttributeError). Any test file that imports FastAPI at module level must be guarded:
+
+```python
+try:
+    from fastapi.testclient import TestClient
+    from rufus_server.main import app
+    _FASTAPI_AVAILABLE = True
+except Exception:
+    TestClient = None
+    app = None
+    _FASTAPI_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _FASTAPI_AVAILABLE,
+    reason="FastAPI/server dependencies not available in this environment",
+)
+```
+
+### `AsyncWorkflowStep` Hierarchy
+
+`AsyncWorkflowStep` **inherits** from `WorkflowStep` — `isinstance(step, WorkflowStep)` is `True` for it. Whether a step uses sync timing in `workflow.py` is determined by:
+
+```python
+is_sync_step = not isinstance(step, (
+    AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
+    FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, WasmWorkflowStep
+))
+```
+
 ---
 
 ## §8 Performance Optimizations (Code)
