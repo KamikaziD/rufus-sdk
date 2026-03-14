@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0rc1] — 2026-03-14
+
+### Breaking Changes
+- **`WorkflowBuilder.__init__()` — 4 params only**: `workflow_registry`, `expression_evaluator_cls`, `template_engine_cls`, `config_dir`. Removed `persistence_provider`, `execution_provider`, `observer` from constructor — these now go to `create_workflow()`.
+- **`Workflow.next_step()` replaces `execute_next_step()`**: rename all call sites.
+- **`WorkflowObserver` is now an ABC** (was `Protocol`): partial implementations fail at instantiation rather than silently at runtime.
+- **`workflow_observer=` param name** in `create_workflow()` (was `observer=`).
+
+### Added
+- **CLI fixed**: `workflow_cmd.py`, `interactive.py`, `main.py` fully migrated to `WorkflowBuilder.create_workflow()` — `rufus start`, `rufus retry --auto`, `rufus interactive run` all functional.
+- **`automate_start` attribute** on `Workflow` — `WorkflowEngine.start_workflow()` respects it; mock tests updated.
+- **5 new `WorkflowObserver` lifecycle events**: `on_workflow_paused`, `on_workflow_resumed`, `on_compensation_started`, `on_compensation_completed`, `on_child_workflow_started`.
+- **`OtelObserver`** — OpenTelemetry parent/child spans; graceful no-op when `opentelemetry-sdk` absent; install via `pip install 'rufus-sdk[otel]'`.
+- **`ExecutionContext` dataclass** — `trace_id`, `workflow_id`, `step_name`, `attempt`, `actor_id`; additive param on `dispatch_async_task` / `dispatch_parallel_tasks`.
+- **Ed25519 server-side verification** — `DeviceService.sync_transactions()` verifies `X-Payload-Signature` for devices with a registered public key; falls back to HMAC-only for unregistered devices.
+- **WASM Component Model + Browser/WASI targets** — `PlatformAdapter` Protocol with Native/Pyodide/WASI implementations; `ComponentStepRuntime`; `WIT` interface; `PyodideSQLiteProvider`; `bootstrap_wasi()`.
+- **Browser demo** (`examples/browser_demo/`) — 3 demo workflows running Pyodide + Transformers.js (WebGPU); summariser model updated to `Qwen2.5-0.5B-Instruct` (q4).
+- **`annotated-types>=0.7.0`** — bumped from `>=0.5` to fix `annotated_types.Not` in Pydantic v2 advanced validators.
+
+### Fixed
+- `test_start_workflow_success` — mock `Workflow` now sets `automate_start = False`.
+- `test_validate_policy_passes_valid_data`, `test_persist_policy_inserts_and_syncs` — resolved by `annotated-types` bump.
+
+---
+
 ## [Unreleased] — v1.0 Roadmap Sprints
 
 ### Sprint 1 — Provider Interface Contract Freeze

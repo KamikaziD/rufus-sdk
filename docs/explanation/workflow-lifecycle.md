@@ -102,7 +102,7 @@ Let's explore each state and what it means.
 
 **What's happening**:
 - Workflow is in a runnable state
-- Next call to `execute_next_step()` will process a step
+- Next call to `next_step(user_input={})` will process a step
 - Step may execute immediately or transition to another state
 
 **Next state**:
@@ -250,15 +250,15 @@ Let's explore each state and what it means.
 1. create_workflow("OrderProcessing", data)
    → State: ACTIVE
 
-2. execute_next_step()  # Validate_Order (STANDARD step)
+2. next_step(user_input={})  # Validate_Order (STANDARD step)
    → Executes inline
    → State: ACTIVE (ready for next step)
 
-3. execute_next_step()  # Charge_Payment (STANDARD step)
+3. next_step(user_input={})  # Charge_Payment (STANDARD step)
    → Executes inline
    → State: ACTIVE
 
-4. execute_next_step()  # Ship_Order (STANDARD step)
+4. next_step(user_input={})  # Ship_Order (STANDARD step)
    → Executes inline
    → No more steps
    → State: COMPLETED
@@ -270,7 +270,7 @@ Let's explore each state and what it means.
 1. create_workflow("EmailCampaign", data)
    → State: ACTIVE
 
-2. execute_next_step()  # Send_Emails (ASYNC step)
+2. next_step(user_input={})  # Send_Emails (ASYNC step)
    → Dispatch to Celery worker
    → State: PENDING_ASYNC
 
@@ -279,7 +279,7 @@ Let's explore each state and what it means.
 3. Worker completes task, calls complete_async_task()
    → State: ACTIVE
 
-4. execute_next_step()  # Track_Results (STANDARD step)
+4. next_step(user_input={})  # Track_Results (STANDARD step)
    → Executes inline
    → State: COMPLETED
 ```
@@ -290,11 +290,11 @@ Let's explore each state and what it means.
 1. create_workflow("LoanApproval", data)
    → State: ACTIVE
 
-2. execute_next_step()  # Calculate_Risk (STANDARD step)
+2. next_step(user_input={})  # Calculate_Risk (STANDARD step)
    → Executes inline, calculates risk score
    → State: ACTIVE
 
-3. execute_next_step()  # Manager_Approval (STANDARD step)
+3. next_step(user_input={})  # Manager_Approval (STANDARD step)
    → Raises WorkflowPauseDirective(result={"awaiting_approval": True})
    → State: WAITING_HUMAN_INPUT
 
@@ -303,7 +303,7 @@ Let's explore each state and what it means.
 4. resume_workflow(workflow_id, input={"approved": True})
    → State: ACTIVE
 
-5. execute_next_step()  # Disburse_Loan (STANDARD step)
+5. next_step(user_input={})  # Disburse_Loan (STANDARD step)
    → Executes inline
    → State: COMPLETED
 ```
@@ -314,7 +314,7 @@ Let's explore each state and what it means.
 1. create_workflow("OrderProcessing", data)
    → State: ACTIVE
 
-2. execute_next_step()  # Allocate_Inventory (triggers sub-workflow)
+2. next_step(user_input={})  # Allocate_Inventory (triggers sub-workflow)
    → Raises StartSubWorkflowDirective(workflow_type="InventoryAllocation")
    → Creates child workflow
    → State: PENDING_SUB_WORKFLOW
@@ -326,7 +326,7 @@ Let's explore each state and what it means.
    → Merges child results into parent state
    → State: ACTIVE
 
-5. execute_next_step()  # Ship_Order
+5. next_step(user_input={})  # Ship_Order
    → State: COMPLETED
 ```
 
@@ -337,15 +337,15 @@ Let's explore each state and what it means.
    → Enable saga mode
    → State: ACTIVE
 
-2. execute_next_step()  # Reserve_Flight (compensatable)
+2. next_step(user_input={})  # Reserve_Flight (compensatable)
    → Executes inline, reserves seat
    → State: ACTIVE
 
-3. execute_next_step()  # Reserve_Hotel (compensatable)
+3. next_step(user_input={})  # Reserve_Hotel (compensatable)
    → Executes inline, reserves room
    → State: ACTIVE
 
-4. execute_next_step()  # Charge_Payment (compensatable)
+4. next_step(user_input={})  # Charge_Payment (compensatable)
    → Fails! Card declined
    → Saga triggered
    → State: Executing compensation...

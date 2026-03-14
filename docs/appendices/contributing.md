@@ -345,10 +345,14 @@ async def test_workflow_execution_with_postgres(postgres_persistence):
     """Test complete workflow execution with PostgreSQL."""
     builder = WorkflowBuilder(
         config_dir="config/",
-        persistence_provider=postgres_persistence
     )
-    workflow = await builder.create_workflow("TestWorkflow", {"user_id": "123"})
-    await workflow.execute_next_step()
+    workflow = await builder.create_workflow(
+        workflow_type="TestWorkflow",
+        persistence_provider=postgres_persistence,
+        workflow_builder=builder,
+        initial_data={"user_id": "123"},
+    )
+    await workflow.next_step(user_input={})
     assert workflow.status == WorkflowStatus.COMPLETED
 ```
 

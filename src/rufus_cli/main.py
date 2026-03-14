@@ -11,7 +11,6 @@ import asyncio
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from rufus.builder import WorkflowBuilder
-from rufus.engine import WorkflowEngine
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
@@ -20,7 +19,6 @@ from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 from rufus.providers.persistence import PersistenceProvider
 from rufus.providers.execution import ExecutionProvider
 from rufus.providers.observer import WorkflowObserver
-from rufus.models import WorkflowStep # Import WorkflowStep to analyze its structure
 
 # Import new command modules
 from rufus_cli.commands import config_cmd, workflow_cmd, db_cmd, interactive
@@ -132,13 +130,13 @@ def cancel_alias(
     workflow_cmd.cancel_workflow(workflow_id, force, reason)
 
 
-async def get_configured_engine(
+async def _create_providers_for_run(
     workflow_registry_config: Dict[str, Any],
     persistence_provider: Optional[PersistenceProvider] = None,
     execution_provider: Optional[ExecutionProvider] = None,
     observer: Optional[WorkflowObserver] = None
-) -> WorkflowEngine:
-    """Configures and returns a WorkflowEngine instance."""
+) -> tuple:
+    """Create and initialize providers plus a WorkflowBuilder for the run command."""
 
     if persistence_provider is None:
         persistence_provider = InMemoryPersistence()
@@ -146,22 +144,16 @@ async def get_configured_engine(
         execution_provider = SyncExecutor()
     if observer is None:
         observer = LoggingObserver()
-    
-    # Initialize providers (especially for async ones)
+
     await persistence_provider.initialize()
     await observer.initialize()
 
-    # WorkflowBuilder is now initialized by the WorkflowEngine
-    engine = WorkflowEngine(
-        persistence=persistence_provider,
-        executor=execution_provider,
-        observer=observer,
+    builder = WorkflowBuilder(
         workflow_registry=workflow_registry_config,
         expression_evaluator_cls=SimpleExpressionEvaluator,
-        template_engine_cls=Jinja2TemplateEngine
+        template_engine_cls=Jinja2TemplateEngine,
     )
-    # The executor's initialize method will be called within WorkflowEngine's __init__ if present.
-    return engine
+    return persistence_provider, execution_provider, observer, builder
 
 
 @app.command()
@@ -281,36 +273,47 @@ def run(
             typer.echo(f"Error: Invalid JSON for initial data: {e}", err=True)
             raise typer.Exit(code=1)
 
+        persistence = None
+        execution = None
+        observer = None
         try:
             with open(workflow_file, "r") as f:
                 workflow_config = yaml.safe_load(f)
-            
+
             if "workflow_type" not in workflow_config:
                 typer.echo(f"Error: 'workflow_type' missing in {workflow_file}", err=True)
                 raise typer.Exit(code=1)
 
             workflow_type = workflow_config["workflow_type"]
-            
+
             # Create a minimal registry containing only the workflow to be run
             workflow_registry_for_cli = {
-                workflow_type:
-                    {
-                        "initial_state_model_path": workflow_config.get("initial_state_model_path", "pydantic.BaseModel"),
-                        "steps": workflow_config.get("steps", []),
-                        "parameters": workflow_config.get("parameters", {}),
-                        "env": workflow_config.get("env", {})
-                    }
+                workflow_type: {
+                    "initial_state_model_path": workflow_config.get("initial_state_model_path", "pydantic.BaseModel"),
+                    "steps": workflow_config.get("steps", []),
+                    "parameters": workflow_config.get("parameters", {}),
+                    "env": workflow_config.get("env", {})
+                }
             }
 
-            engine = await get_configured_engine(workflow_registry_for_cli)
-            
+            persistence, execution, observer, builder = await _create_providers_for_run(workflow_registry_for_cli)
+
             typer.echo(f"Running workflow from {workflow_file} with initial data: {data}")
-            
-            # Start workflow through the engine
-            workflow = await engine.start_workflow(
+
+            workflow = await builder.create_workflow(
                 workflow_type=workflow_type,
-                initial_data=data
+                persistence_provider=persistence,
+                execution_provider=execution,
+                workflow_builder=builder,
+                expression_evaluator_cls=SimpleExpressionEvaluator,
+                template_engine_cls=Jinja2TemplateEngine,
+                workflow_observer=observer,
+                initial_data=data,
             )
+            await persistence.save_workflow(workflow.id, workflow.to_dict())
+            await observer.on_workflow_started(workflow.id, workflow.workflow_type, workflow.state)
+            if workflow.automate_start:
+                await workflow.next_step(user_input={})
 
             typer.echo(f"Workflow ID: {workflow.id}")
             typer.echo(f"Initial Status: {workflow.status}")
@@ -319,13 +322,11 @@ def run(
             while workflow.status not in ["COMPLETED", "FAILED", "FAILED_ROLLED_BACK"]:
                 typer.echo(f"\n--- Current Step: {workflow.current_step_name} ({workflow.status}) ---")
                 typer.echo(f"Current State: {workflow.state.model_dump()}")
-                
-                # For CLI run, we assume no human input for now, just auto-advance
-                # In real scenario, input would be prompted or provided.
+
                 result, next_step_name = await workflow.next_step(user_input={})
-                
+
                 typer.echo(f"Step Result: {result}")
-                await engine.persistence.save_workflow(workflow.id, workflow.to_dict()) # Save state after each step
+                await persistence.save_workflow(workflow.id, workflow.to_dict())
 
             typer.echo(f"\n--- Workflow Finished ({workflow.status}) ---")
             typer.echo(f"Final State: {workflow.state.model_dump()}")
@@ -335,22 +336,19 @@ def run(
             else:
                 typer.secho(f"Workflow {workflow.id} finished with status {workflow.status}", fg=typer.colors.RED, err=True)
                 raise typer.Exit(code=1)
-        
+
         except Exception as e:
             typer.echo(f"An error occurred during workflow execution: {e}", err=True)
             import traceback
             traceback.print_exc()
             raise typer.Exit(code=1)
         finally:
-            # Ensure providers are closed
-            # Some providers might not have close() method, handle gracefully
-            if hasattr(engine.persistence, 'close'):
-                await engine.persistence.close()
-            if hasattr(engine.observer, 'close'):
-                await engine.observer.close()
-            # executor.close() might be a no-op for SyncExecutor
-            if hasattr(engine.executor, 'close'):
-                await engine.executor.close()
+            if persistence and hasattr(persistence, 'close'):
+                await persistence.close()
+            if observer and hasattr(observer, 'close'):
+                await observer.close()
+            if execution and hasattr(execution, 'close'):
+                await execution.close()
 
 
     asyncio.run(_run_workflow())

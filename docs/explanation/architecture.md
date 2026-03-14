@@ -164,7 +164,7 @@ Rufus uses a four-layer architecture, inherited from Confucius and enhanced with
 Here's what happens when a workflow executes a step:
 
 ```
-1. Client calls workflow.execute_next_step()
+1. Client calls workflow.next_step(user_input={})
                 ↓
 2. Workflow (Engine Layer) identifies next step based on current state
                 ↓

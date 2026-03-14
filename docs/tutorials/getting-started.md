@@ -124,20 +124,21 @@ async def main():
     # Create builder
     builder = WorkflowBuilder(
         config_dir="config/",
-        persistence_provider=persistence,
-        execution_provider=SyncExecutionProvider(),
-        observer=LoggingObserver()
     )
 
     # Start workflow
     workflow = await builder.create_workflow(
         workflow_type="HelloWorkflow",
+        persistence_provider=persistence,
+        execution_provider=SyncExecutionProvider(),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
         initial_data={"name": "Alice"}
     )
 
     # Execute all steps
     while workflow.status == "ACTIVE":
-        await workflow.execute_next_step()
+        await workflow.next_step(user_input={})
 
     print(f"Workflow completed! Final state: {workflow.state}")
 

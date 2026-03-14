@@ -111,7 +111,7 @@ def approval_step(state: BaseModel, context: StepContext) -> dict:
 ```python
 # Via API or CLI
 workflow = await builder.load_workflow(workflow_id)
-result = await workflow.execute_next_step(
+result = await workflow.next_step(
     user_input={"approved": True, "manager_notes": "Looks good"}
 )
 ```

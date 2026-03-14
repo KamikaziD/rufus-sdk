@@ -47,7 +47,7 @@ async function _loadModel(which) {
         self.postMessage({ type: "model_unloaded", model: "extractor" });
     } else if (_activeModel === "summariser" && _summariser) {
         self.postMessage({ type: "model_unloading", model: "summariser",
-                           message: "Unloading T5 model to free memory…" });
+                           message: "Unloading Qwen2.5 model to free memory…" });
         try { await _summariser.dispose(); } catch (_) {}
         _summariser = null; _activeModel = null;
         self.postMessage({ type: "model_unloaded", model: "summariser" });
@@ -62,8 +62,8 @@ async function _loadModel(which) {
         self.postMessage({ type: "model_ready", device: _gpuDevice });
     } else if (which === "summariser") {
         self.postMessage({ type: "summariser_loading" });
-        _summariser = await _pipeline("text2text-generation", "Xenova/flan-t5-small",
-                                      { device: _gpuDevice, dtype: "q8" });
+        _summariser = await _pipeline("text-generation", "onnx-community/Qwen2.5-0.5B-Instruct",
+                                      { device: _gpuDevice, dtype: "q4" });
         _activeModel = "summariser";
         self.postMessage({ type: "summariser_ready", device: _gpuDevice });
     }
@@ -113,18 +113,24 @@ globalThis.runSummarisation = async (text) => {
     await prev;
     try {
         await _loadModel("summariser");
-        const t0     = performance.now();
-        const prompt = `Summarize the following passage in 2-3 sentences: ${text.substring(0, 1500)}`;
-        const result = await _summariser(prompt, {
-            max_new_tokens:       80,
-            min_length:           20,
-            num_beams:            2,
-            repetition_penalty:   3.0,
-            no_repeat_ngram_size: 4,
-            early_stopping:       true,
+        const t0 = performance.now();
+        // Qwen2.5-Instruct uses chat messages; Transformers.js v3 returns
+        // generated_text as an array of message dicts when given an array input.
+        const messages = [
+            { role: "system", content: "You are a concise summarizer. Respond only with the summary." },
+            { role: "user",   content: `Summarize the following in 2-3 sentences:\n\n${text.substring(0, 1500)}` },
+        ];
+        const result = await _summariser(messages, {
+            max_new_tokens:     100,
+            do_sample:          false,
+            repetition_penalty: 1.1,
         });
-        return { summary: result[0].generated_text, latency_ms: performance.now() - t0,
-                 device_used: _gpuDevice };
+        // result[0].generated_text is an array of messages; last entry is the assistant reply
+        const generated = result[0].generated_text;
+        const summary = Array.isArray(generated)
+            ? (generated.at(-1)?.content ?? "")
+            : generated;
+        return { summary, latency_ms: performance.now() - t0, device_used: _gpuDevice };
     } finally { release(); }
 };
 

@@ -364,7 +364,7 @@ workflow_duration = Histogram(
 
 # Measure
 with workflow_duration.time():
-    await workflow.execute_next_step()
+    await workflow.next_step(user_input={})
 ```
 
 **Step Execution**:
