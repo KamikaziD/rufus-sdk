@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import logging
+import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -56,9 +57,12 @@ class SyncManager:
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
 
-        self._sync_in_progress = False
         self._last_sync_at: Optional[datetime] = None
         self._adapter: Optional[PlatformAdapter] = adapter
+        # Stale-lock threshold: locks older than this are forcibly taken
+        self._lock_stale_seconds: int = 300
+        # Optional Ed25519 private key for payload signing (Sprint 4)
+        self._ed25519_private_key = None
 
     async def initialize(self):
         """Initialize the sync manager."""
@@ -117,6 +121,112 @@ class SyncManager:
             logger.error(f"Failed to get pending count: {e}")
             return 0
 
+    async def _acquire_sync_lock(self) -> bool:
+        """
+        Acquire a process-safe sync advisory lock backed by SQLite.
+
+        Returns True if the lock was acquired, False if another process holds it.
+        Stale locks (older than _lock_stale_seconds) are forcibly taken.
+        """
+        holder_id = str(uuid.uuid4())
+        now_iso = datetime.utcnow().isoformat()
+        stale_threshold = (
+            datetime.utcnow() - timedelta(seconds=self._lock_stale_seconds)
+        ).isoformat()
+
+        try:
+            # Try to insert a new lock row — fails if one already exists
+            await self.persistence.conn.execute(
+                "BEGIN IMMEDIATE",
+            )
+            async with self.persistence.conn.execute(
+                "SELECT holder_id, acquired_at FROM sync_lock WHERE lock_key = 'saf_sync'"
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:
+                # No lock held — acquire it
+                await self.persistence.conn.execute(
+                    "INSERT INTO sync_lock (lock_key, holder_id, acquired_at) VALUES ('saf_sync', ?, ?)",
+                    (holder_id, now_iso),
+                )
+                await self.persistence.conn.commit()
+                self._lock_holder_id = holder_id
+                return True
+
+            _, acquired_at = row
+            if acquired_at < stale_threshold:
+                # Stale lock — forcibly take it
+                logger.warning(
+                    f"Forcibly taking stale sync lock (acquired_at={acquired_at})"
+                )
+                await self.persistence.conn.execute(
+                    "UPDATE sync_lock SET holder_id = ?, acquired_at = ? WHERE lock_key = 'saf_sync'",
+                    (holder_id, now_iso),
+                )
+                await self.persistence.conn.commit()
+                self._lock_holder_id = holder_id
+                return True
+
+            await self.persistence.conn.execute("ROLLBACK")
+            return False
+
+        except Exception as e:
+            try:
+                await self.persistence.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            logger.error(f"Failed to acquire sync lock: {e}")
+            return False
+
+    async def _release_sync_lock(self):
+        """Release the sync advisory lock."""
+        try:
+            await self.persistence.conn.execute(
+                "DELETE FROM sync_lock WHERE lock_key = 'saf_sync' AND holder_id = ?",
+                (getattr(self, "_lock_holder_id", ""),),
+            )
+            await self.persistence.conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to release sync lock: {e}")
+
+    async def _next_sequence(self) -> int:
+        """
+        Atomically increment and return the device's monotonic sequence counter.
+
+        Uses BEGIN IMMEDIATE to prevent concurrent increments from multiple processes.
+        """
+        now_iso = datetime.utcnow().isoformat()
+        try:
+            await self.persistence.conn.execute("BEGIN IMMEDIATE")
+            async with self.persistence.conn.execute(
+                "SELECT last_sequence FROM device_sequence WHERE device_id = ?",
+                (self.device_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:
+                new_seq = 1
+                await self.persistence.conn.execute(
+                    "INSERT INTO device_sequence (device_id, last_sequence, updated_at) VALUES (?, ?, ?)",
+                    (self.device_id, new_seq, now_iso),
+                )
+            else:
+                new_seq = row[0] + 1
+                await self.persistence.conn.execute(
+                    "UPDATE device_sequence SET last_sequence = ?, updated_at = ? WHERE device_id = ?",
+                    (new_seq, now_iso, self.device_id),
+                )
+            await self.persistence.conn.commit()
+            return new_seq
+        except Exception as e:
+            try:
+                await self.persistence.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            logger.error(f"Failed to get next sequence: {e}")
+            return 0
+
     async def sync_all_pending(self) -> SyncReport:
         """
         Sync all pending transactions to the cloud.
@@ -124,15 +234,15 @@ class SyncManager:
         Returns:
             SyncReport with results
         """
-        if self._sync_in_progress:
-            logger.warning("Sync already in progress, skipping")
+        lock_acquired = await self._acquire_sync_lock()
+        if not lock_acquired:
+            logger.warning("Sync already in progress (process-safe lock), skipping")
             return SyncReport(
                 status=SyncStatus.FAILED,
                 started_at=datetime.utcnow(),
                 errors=[{"message": "Sync already in progress"}]
             )
 
-        self._sync_in_progress = True
         report = SyncReport(
             status=SyncStatus.IN_PROGRESS,
             started_at=datetime.utcnow()
@@ -164,6 +274,10 @@ class SyncManager:
             if report.synced_ids:
                 await self.mark_synced(report.synced_ids)
 
+            # Mark rejected transactions as FAILED (ends infinite retry cycle)
+            if report.failed_ids:
+                await self.mark_rejected(report.failed_ids)
+
             # Determine final status
             if report.failed_count == 0:
                 report.status = SyncStatus.COMPLETED
@@ -190,7 +304,7 @@ class SyncManager:
             return report
 
         finally:
-            self._sync_in_progress = False
+            await self._release_sync_lock()
 
     async def _get_pending_transactions(self) -> List[SAFTransaction]:
         """Get all transactions pending sync from the local task queue."""
@@ -277,21 +391,31 @@ class SyncManager:
         # Prepare full payload
         payload = {
             "transactions": signed_transactions,
-            "device_sequence": 0,  # TODO: Track sequence
+            "device_sequence": await self._next_sequence(),
             "device_timestamp": datetime.utcnow().isoformat(),
         }
 
         # Attempt sync with retry
-        payload_bytes = json.dumps(payload).encode("utf-8")
+        payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+        request_headers = {
+            "X-API-Key": self.api_key,
+            "X-Device-ID": self.device_id,
+        }
+        # Ed25519 payload signing (if private key is configured)
+        if hasattr(self, "_ed25519_private_key") and self._ed25519_private_key:
+            try:
+                import base64
+                signature = self._ed25519_private_key.sign(payload_bytes)
+                request_headers["X-Payload-Signature"] = base64.b64encode(signature).decode()
+            except Exception as sign_err:
+                logger.warning(f"Ed25519 signing failed: {sign_err}")
+
         for attempt in range(self.max_retries):
             try:
                 response = await self._adapter.http_post(
                     f"{self.sync_url}/api/v1/devices/{self.device_id}/sync",
                     body=payload_bytes,
-                    headers={
-                        "X-API-Key": self.api_key,
-                        "X-Device-ID": self.device_id,
-                    },
+                    headers=request_headers,
                 )
 
                 if response.status_code == 200:
@@ -365,6 +489,39 @@ class SyncManager:
                         break
             except Exception as e:
                 logger.error(f"Failed to mark transaction {tid} as synced: {e}")
+
+    async def mark_rejected(self, transaction_ids: List[str]):
+        """
+        Mark server-rejected transactions as FAILED in local database.
+
+        This ends the infinite retry cycle: a transaction that the cloud explicitly
+        rejects (4xx response) moves from PENDING → FAILED instead of being
+        re-queued on every sync cycle.
+        """
+        for tid in transaction_ids:
+            try:
+                async with self.persistence.conn.execute(
+                    """
+                    SELECT task_id, task_data FROM tasks
+                    WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
+                    """
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+                for row in rows:
+                    task_data = self.persistence._deserialize_json(row[1])
+                    if (task_data
+                            and "transaction" in task_data
+                            and task_data["transaction"].get("transaction_id") == tid):
+                        await self.persistence.update_task_status(
+                            task_id=row[0],
+                            status="FAILED",
+                            error_message="Rejected by cloud control plane",
+                        )
+                        logger.warning(f"Marked transaction {tid} as FAILED (cloud-rejected)")
+                        break
+            except Exception as e:
+                logger.error(f"Failed to mark transaction {tid} as rejected: {e}")
 
     async def resolve_conflicts(self, server_response: Dict[str, Any]) -> Dict[str, Any]:
         """

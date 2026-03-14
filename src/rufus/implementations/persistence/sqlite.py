@@ -238,6 +238,20 @@ CREATE TABLE IF NOT EXISTS device_wasm_cache (
     binary_data   BLOB NOT NULL,
     last_accessed TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Monotonic sequence counter for SAF sync (one row per device)
+CREATE TABLE IF NOT EXISTS device_sequence (
+    device_id     TEXT PRIMARY KEY,
+    last_sequence INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sync advisory lock (process-safe; replaces in-memory _sync_in_progress flag)
+CREATE TABLE IF NOT EXISTS sync_lock (
+    lock_key      TEXT PRIMARY KEY,
+    holder_id     TEXT NOT NULL,
+    acquired_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -345,6 +359,12 @@ class SQLitePersistenceProvider(PersistenceProvider):
 
             # Apply all migrations (silent mode for auto-init)
             await manager.init_fresh_database(silent=True)
+
+            # Also run embedded schema to ensure tables added after the migration
+            # baseline (e.g. device_sequence, sync_lock) exist.  All statements
+            # use CREATE TABLE IF NOT EXISTS so this is idempotent.
+            await self.conn.executescript(SQLITE_SCHEMA)
+            await self.conn.commit()
 
         except ImportError as e:
             logger.error(f"Failed to import MigrationManager: {e}")
@@ -1300,20 +1320,28 @@ class SQLitePersistenceProvider(PersistenceProvider):
             cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in rows]
 
-    async def get_audit_logs_for_workflows(self, workflow_ids: list[str]) -> list[dict]:
-        """Return all audit log rows for the given workflow IDs."""
+    async def get_audit_logs_for_workflows(
+        self, workflow_ids: list[str], limit_per_workflow: int = 50
+    ) -> list[dict]:
+        """Return up to limit_per_workflow audit log rows per workflow ID."""
         if not workflow_ids:
             return []
-        placeholders = ",".join("?" * len(workflow_ids))
-        async with self.conn.execute(
-            f"SELECT * FROM workflow_audit_log WHERE workflow_id IN ({placeholders})",
-            workflow_ids,
-        ) as cursor:
-            rows = await cursor.fetchall()
-            if not rows:
-                return []
-            cols = [d[0] for d in cursor.description]
-        return [dict(zip(cols, row)) for row in rows]
+        results: list[dict] = []
+        for wf_id in workflow_ids:
+            async with self.conn.execute(
+                """
+                SELECT * FROM workflow_audit_log
+                WHERE workflow_id = ?
+                ORDER BY recorded_at ASC
+                LIMIT ?
+                """,
+                (wf_id, limit_per_workflow),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                if rows:
+                    cols = [d[0] for d in cursor.description]
+                    results.extend(dict(zip(cols, row)) for row in rows)
+        return results
 
     async def delete_synced_workflows(self, workflow_ids: list[str]) -> int:
         """Delete synced workflows + their audit rows. Returns deleted workflow count.

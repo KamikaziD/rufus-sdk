@@ -2,7 +2,7 @@
 
 ## Overview
 
-Provider interfaces abstract external dependencies for persistence, execution, and observability. All providers use Python Protocol for duck typing.
+Provider interfaces abstract external dependencies for persistence, execution, and observability. `WorkflowObserver` uses ABC (abstract base class, v1.0+). All other providers use Python ABC with `@abstractmethod` declarations.
 
 **Module:** `rufus.providers`
 
@@ -213,12 +213,33 @@ async def close(self) -> None
 
 Close persistence connections.
 
+### Edge-only methods
+
+The following methods are declared in the base class but raise `NotImplementedError` unless the implementation supports them (currently: `SQLitePersistenceProvider` only).
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get_pending_sync_workflows` | `(limit: int) -> List[WorkflowRecord]` | Workflows not yet synced to cloud |
+| `get_audit_logs_for_workflows` | `(ids: List[str], limit_per_workflow: int = 50) -> List[AuditLogRecord]` | Audit logs for given workflow IDs |
+| `delete_synced_workflows` | `(ids: List[str]) -> int` | Delete workflows after successful sync |
+| `get_edge_sync_state` | `(key: str) -> Optional[str]` | Read a plain string sync state value |
+| `set_edge_sync_state` | `(key: str, value: str) -> None` | Write a plain string sync state value |
+
+### Typed exceptions
+
+```python
+class PersistenceError(RuntimeError): ...
+class WorkflowNotFoundError(PersistenceError): ...
+class DuplicateIdempotencyKeyError(PersistenceError): ...
+class TaskNotFoundError(PersistenceError): ...
+```
+
 ### Implementations
 
 | Provider | Module | Description |
 |----------|--------|-------------|
 | `PostgresPersistenceProvider` | `rufus.implementations.persistence.postgres` | PostgreSQL with JSONB |
-| `SQLitePersistenceProvider` | `rufus.implementations.persistence.sqlite` | SQLite with WAL mode |
+| `SQLitePersistenceProvider` | `rufus.implementations.persistence.sqlite` | SQLite with WAL mode; includes all edge-only methods |
 | `MemoryPersistenceProvider` | `rufus.implementations.persistence.memory` | In-memory (testing) |
 | `RedisPersistenceProvider` | `rufus.implementations.persistence.redis` | Redis-based |
 
@@ -229,6 +250,22 @@ Close persistence connections.
 Execution abstraction for sync, async, and parallel step execution.
 
 **Module:** `rufus.providers.execution`
+
+### `ExecutionContext` dataclass *(v1.0)*
+
+Carries cross-cutting context through task dispatch calls.
+
+```python
+@dataclass
+class ExecutionContext:
+    trace_id: Optional[str]
+    actor_id: Optional[str]
+    workflow_id: str
+    step_name: str
+    attempt: int = 1
+```
+
+Pass via `execution_context=` parameter on `dispatch_async_task()` and `dispatch_parallel_tasks()`.
 
 ### Methods
 
@@ -355,6 +392,22 @@ Execute step function synchronously.
 
 **Returns:** `dict` - Step execution result
 
+#### `get_task_status` *(v1.0)*
+
+```python
+async def get_task_status(self, task_id: str) -> str
+```
+
+Returns the current status string of a dispatched task.
+
+#### `cancel_task` *(v1.0)*
+
+```python
+async def cancel_task(self, task_id: str) -> bool
+```
+
+Request cancellation of a dispatched task. Returns `True` if cancellation was accepted.
+
 ### Implementations
 
 | Provider | Module | Description |
@@ -371,6 +424,10 @@ Execute step function synchronously.
 Observability hooks for workflow lifecycle events.
 
 **Module:** `rufus.providers.observer`
+
+**Type:** ABC (abstract base class, v1.0+). All methods have default async no-op implementations — subclasses only need to override the methods they care about. Existing subclasses continue to work without modification.
+
+**Migration note:** If you previously subclassed `WorkflowObserver` as a Protocol, change to `class MyObserver(WorkflowObserver):` — existing method implementations require no changes.
 
 ### Methods
 
@@ -393,11 +450,12 @@ async def on_step_executed(
     self,
     workflow_id: UUID,
     step_name: str,
-    result: dict
+    result: dict,
+    duration_ms: Optional[float] = None,
 ) -> None
 ```
 
-Called after step execution.
+Called after step execution. `duration_ms` is the wall-clock time for `STANDARD` steps; `None` for async/parallel dispatch (timing measured by the worker).
 
 #### `on_workflow_completed`
 
@@ -435,11 +493,102 @@ async def on_workflow_status_changed(
 
 Called when workflow status changes.
 
+#### `on_workflow_paused` *(v1.0)*
+
+```python
+async def on_workflow_paused(
+    self,
+    workflow_id: UUID,
+    step_name: str,
+    reason: str
+) -> None
+```
+
+Called when workflow is paused (e.g. `HUMAN_IN_LOOP` step raises `WorkflowPauseDirective`).
+
+#### `on_workflow_resumed` *(v1.0)*
+
+```python
+async def on_workflow_resumed(
+    self,
+    workflow_id: UUID,
+    step_name: str,
+    resume_data: dict
+) -> None
+```
+
+Called when a paused workflow is resumed with user input.
+
+#### `on_compensation_started` *(v1.0)*
+
+```python
+async def on_compensation_started(
+    self,
+    workflow_id: UUID,
+    step_name: str,
+    step_index: int
+) -> None
+```
+
+Called when Saga compensation begins for a step (triggered on workflow failure).
+
+#### `on_compensation_completed` *(v1.0)*
+
+```python
+async def on_compensation_completed(
+    self,
+    workflow_id: UUID,
+    step_name: str,
+    success: bool,
+    error: Optional[Exception] = None
+) -> None
+```
+
+Called after each Saga compensation function completes (success or failure).
+
+#### `on_child_workflow_started` *(v1.0)*
+
+```python
+async def on_child_workflow_started(
+    self,
+    parent_id: UUID,
+    child_id: UUID,
+    child_type: str
+) -> None
+```
+
+Called when a sub-workflow is launched from a parent workflow.
+
+### OtelObserver *(v1.0)*
+
+OpenTelemetry observer that creates parent spans per workflow and child spans per step.
+
+**Installation:**
+
+```bash
+pip install 'rufus-sdk[otel]'
+```
+
+**Usage:**
+
+```python
+from rufus.implementations.observability.otel import OtelObserver
+
+observer = OtelObserver(
+    tracer_provider=None,   # Optional: pass your TracerProvider; uses global if None
+    service_name="rufus",   # Span service.name attribute
+)
+```
+
+Auto no-ops when `opentelemetry-sdk` is not installed (safe to instantiate unconditionally).
+
 ### Implementations
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `LoggingObserver` | `rufus.implementations.observability.logging` | Console logging |
+| `LoggingObserver` | `rufus.implementations.observability.logging` | Structured console logging |
+| `OtelObserver` | `rufus.implementations.observability.otel` | OpenTelemetry spans (requires `[otel]` extra) |
+| `EventPublisherObserver` | `rufus.implementations.observability.events` | Redis Streams event publishing |
 | `NoopObserver` | `rufus.providers.observer` | No-op (default) |
 
 ---
@@ -486,7 +635,7 @@ result = evaluator.evaluate(
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `SimpleExpressionEvaluator` | `rufus.implementations.expression.simple` | Basic Python eval |
+| `SimpleExpressionEvaluator` | `rufus.implementations.expression_evaluator.simple` | Basic Python eval |
 
 ---
 

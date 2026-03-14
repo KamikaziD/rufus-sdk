@@ -144,18 +144,18 @@ async def main():
 
     # Create workflow builder
     print("Creating workflow builder...")
+    workflow_registry = {
+        "TaskApprovalWorkflow": {
+            "config_file": "workflow.yaml",
+            "initial_state_model_path": "examples.sqlite_task_manager.models.TaskState",
+        }
+    }
     builder = WorkflowBuilder(
-        registry_path=None,  # We'll load workflow directly
-        persistence_provider=persistence,
-        execution_provider=executor,
-        observer=observer,
+        workflow_registry=workflow_registry,
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
+        config_dir=str(Path(__file__).parent),
     )
-
-    # Load workflow definition
-    workflow_path = Path(__file__).parent / "workflow.yaml"
-    builder.load_workflow_config("TaskApprovalWorkflow", str(workflow_path))
     print("✓ Workflow configuration loaded\n")
 
     # Create a new task workflow
@@ -172,9 +172,15 @@ async def main():
         "requires_approval": True,
     }
 
-    workflow = builder.create_workflow(
-        "TaskApprovalWorkflow",
-        initial_data=initial_data
+    workflow = await builder.create_workflow(
+        workflow_type="TaskApprovalWorkflow",
+        persistence_provider=persistence,
+        execution_provider=executor,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=observer,
+        initial_data=initial_data,
     )
 
     print(f"✓ Workflow created: {workflow.id}\n")

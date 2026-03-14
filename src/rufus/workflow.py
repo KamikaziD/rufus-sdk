@@ -381,6 +381,8 @@ class Workflow:
                 step = self.workflow_steps[step_index]
 
                 if isinstance(step, CompensatableStep):
+                    await self.observer.on_compensation_started(
+                        self.id, step_name, step_index)
                     try:
                         print(
                             f"[SAGA] Compensating step {step_index}: {step_name}")
@@ -400,6 +402,8 @@ class Workflow:
                             state_before=state_snapshot,
                             state_after=self.state.model_dump() if self.state else {}
                         )
+                        await self.observer.on_compensation_completed(
+                            self.id, step_name, success=True)
 
                     except Exception as comp_error:
                         print(
@@ -415,6 +419,8 @@ class Workflow:
                             error_message=str(comp_error),
                             state_before=state_snapshot
                         )
+                        await self.observer.on_compensation_completed(
+                            self.id, step_name, success=False, error=str(comp_error))
 
                 else:
                     print(
@@ -469,6 +475,8 @@ class Workflow:
                 child_workflow.id, child_workflow.to_dict())
             await self._notify_status_change(
                 old_status, self.status, self.current_step_name)
+            await self.observer.on_child_workflow_started(
+                self.id, child_workflow.id, directive.workflow_type)
 
             print(
                 f"[SUB-WORKFLOW] Created child workflow {child_workflow.id}, parent {self.id} is now paused")
@@ -681,11 +689,13 @@ class Workflow:
                 raise WorkflowPauseDirective(result={})
 
             result = {}
+            _step_start: Optional[float] = None  # monotonic start for sync steps only
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
                                                  FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
                                                  WasmWorkflowStep))
 
             if is_sync_step:
+                _step_start = time.monotonic()
                 if isinstance(step, HumanWorkflowStep):
                     # Call func with user_input, or merge user_input directly into state
                     if step.func:
@@ -923,8 +933,17 @@ class Workflow:
                     'state_snapshot': state_snapshot_before
                 })
 
+            _step_duration_ms: Optional[float] = (
+                (time.monotonic() - _step_start) * 1000.0 if _step_start is not None else None
+            )
+            if _step_duration_ms is not None:
+                await self.persistence.record_metric(
+                    self.id, self.workflow_type or "", "step_duration_ms",
+                    _step_duration_ms, unit="ms", step_name=step.name
+                )
             await self.observer.on_step_executed( # Changed to await
-                self.id, step.name, self.current_step, "COMPLETED", result, self.state)
+                self.id, step.name, self.current_step, "COMPLETED", result, self.state,
+                duration_ms=_step_duration_ms)
 
             injection_occurred = self._process_dynamic_injection()
             if injection_occurred and isinstance(result, dict):
@@ -998,6 +1017,8 @@ class Workflow:
                 old_status, self.status, self.current_step_name)
             await self.observer.on_step_executed( # Changed to await
                 self.id, step.name, self.current_step, "PAUSED_HUMAN", e.result, self.state)
+            await self.observer.on_workflow_paused(
+                self.id, step.name, "HUMAN_IN_LOOP")
             raise e
 
 
@@ -1010,6 +1031,7 @@ class Workflow:
                                            "child_type": sub_directive.workflow_type}, self.state)
 
             return await self._handle_sub_workflow(sub_directive) # Changed to await
+
         except SagaWorkflowException as e:  # This is raised by _execute_saga_rollback
             raise e  # Re-raise after status is set
 

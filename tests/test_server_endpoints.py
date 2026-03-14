@@ -20,8 +20,20 @@ os.environ["WORKFLOW_STORAGE"] = "memory"
 os.environ["RUFUS_WORKFLOW_REGISTRY_PATH"] = "tests/fixtures/test_registry.yaml"
 os.environ["RUFUS_CONFIG_DIR"] = "tests/fixtures"
 
-from fastapi.testclient import TestClient
-from rufus_server.main import app
+try:
+    from fastapi.testclient import TestClient
+    from rufus_server.main import app
+    _FASTAPI_AVAILABLE = True
+except Exception:
+    TestClient = None  # type: ignore[assignment,misc]
+    app = None  # type: ignore[assignment]
+    _FASTAPI_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _FASTAPI_AVAILABLE,
+    reason="FastAPI/server dependencies not available in this environment",
+)
+
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver

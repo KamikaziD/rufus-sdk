@@ -1,4 +1,59 @@
-# WASM/Browser/WASI Edge Agent — Component Model + Dual Target
+# Rufus v1.0 Roadmap Implementation
+
+## Sprint 1 — Provider Interface Contract Freeze
+- [ ] Create `src/rufus/providers/dtos.py` — domain DTOs
+- [ ] Rewrite `persistence.py` — DTOs, CompatibilityMixin, 5 edge methods, claim_next_task, typed exceptions
+- [ ] Fix `execution.py` — StepContext typing, ExecutionContext dataclass, get_task_status, cancel_task
+- [ ] Fix `observer.py` — ABC not Protocol, duration_ms, 5 new event methods
+- [ ] Update `LoggingObserver` — all new methods
+- [ ] Update `NoopObserver` — all new methods
+- [ ] Update `EventPublisherObserver` — all new methods + duration_ms + saga stream
+- [ ] Create `tests/providers/` compliance test suite (6 files)
+
+## Sprint 2 — Offline Resilience
+- [ ] Add `device_sequence` table to SQLITE_SCHEMA in `sqlite.py`
+- [ ] Add `_next_sequence()` to `SyncManager`, replace hardcoded `"device_sequence": 0`
+- [ ] Replace in-memory `_sync_in_progress` with SQLite advisory lock
+- [ ] Add `mark_rejected()` call after `mark_synced()` in `sync_all_pending()`
+- [ ] Add `limit_per_workflow` param + 5 MB cap in `workflow_sync.py`
+- [ ] Update `device_service.py` to return real `server_sequence`
+- [ ] Create Sprint 2 tests (4 files)
+
+## Sprint 3 — Observability
+- [ ] Add step timing in `workflow.py`, pass `duration_ms` to `on_step_executed()`
+- [ ] Structured JSON logging in `LoggingObserver` + `StructuredLogFormatter`
+- [ ] Create `src/rufus/implementations/observability/otel.py`
+- [ ] Add `[otel]` extra to `pyproject.toml`
+- [ ] Create Sprint 3 tests (3 files)
+
+## Sprint 4 — Security Hardening
+- [ ] Ed25519 signing in `SyncManager._sync_batch()` (device-side, not yet done)
+- [x] Server-side Ed25519 signature verification in `device_service.sync_transactions()`
+- [x] `X-Payload-Signature` header threaded through `main.py` sync endpoint
+- [x] `rotate_api_key()` in `device_service.py` + endpoint in `main.py` (already done in prior session)
+- [ ] Graduated heartbeat failure counting in `agent.py`
+- [ ] `bootstrap()` method in `RufusEdgeAgent`
+- [x] `tests/server/test_signature_verification.py` — 3 tests (all passing)
+
+## Docs & Examples Accuracy Pass
+- [x] `examples/celery_workflows/run_example.py` — fixed WorkflowBuilder API (both functions)
+- [x] `examples/sqlite_task_manager/main.py` — fixed WorkflowBuilder + create_workflow + removed load_workflow_config
+- [x] `examples/loan_application/run_loan_sync.py` — added legacy API deprecation notice
+- [x] `examples/edge_deployment/run_edge_macbook.py` — sdk_version 0.7.6 → 0.8.0
+- [x] `examples/industrial_iot/demo.py` — no changes needed (uses MockMaintenanceProvider directly)
+- [x] `docs/reference/api/workflow-builder.md` — full rewrite: correct 4-param constructor, all 9 create_workflow params, removed load_workflow (doesn't exist), removed old provider params
+- [x] `docs/reference/api/workflow.md` — execute_next_step → next_step, correct return type tuple, direct instantiation note
+- [x] `docs/reference/api/providers.md` — WorkflowObserver: Protocol → ABC, duration_ms, 5 new v1.0 events, OtelObserver section, edge-only methods table, typed exceptions, ExecutionContext, get_task_status/cancel_task
+- [x] `docs/how-to-guides/create-workflow.md` — Step 5 fixed to new WorkflowBuilder API
+- [x] `docs/how-to-guides/testing.md` — integration test section fixed to new WorkflowBuilder API
+
+---
+
+# WASM/Browser/WASI Edge Agent — Component Model + Dual Target (COMPLETED)
+
+## Phase 1 — Platform I/O Abstraction (shared foundation)
+
+- [ ] Create `src/rufus_edge/platform/base.py` — `PlatformAdapter` Protocol + `HttpResponse` + `NullSystemMetrics`
 
 **Branch:** `claude/plan-session-EBu8w`
 **Spec:** `.claude/tasks/spec.md`

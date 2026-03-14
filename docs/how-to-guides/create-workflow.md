@@ -62,9 +62,10 @@ def validate_order(state: OrderState, context: StepContext) -> dict:
         state.status = "validated"
 
     # Return dict to update state
+    from datetime import datetime
     return {
         "status": state.status,
-        "validated_at": context.execution_time
+        "validated_at": datetime.utcnow().isoformat()
     }
 
 def process_payment(state: OrderState, context: StepContext) -> dict:
@@ -111,8 +112,8 @@ def step_name(state: YourStateModel, context: StepContext, **user_input) -> dict
 - `context.workflow_id` - Workflow UUID
 - `context.step_name` - Current step name
 - `context.previous_step_result` - Result from previous step
-- `context.execution_time` - Current timestamp
-- `context.loop_state` - Loop iteration state (if in loop)
+- `context.loop_item` - Current item in a LOOP step iteration
+- `context.loop_index` - Current index in a LOOP step iteration
 
 ## Step 3: Create workflow YAML
 
@@ -181,28 +182,42 @@ Create and run your workflow:
 import asyncio
 from rufus.builder import WorkflowBuilder
 from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 async def main():
     # Initialize providers
     persistence = SQLitePersistenceProvider(db_path=":memory:")
     await persistence.initialize()
 
-    execution = SyncExecutionProvider()
+    execution = SyncExecutor()
     observer = LoggingObserver()
 
-    # Create builder
+    # Create builder (providers are NOT constructor args — passed per-workflow below)
+    workflow_registry = {
+        "OrderProcessing": {
+            "config_file": "order_processing.yaml",
+            "initial_state_model_path": "my_workflow.state_models.OrderState",
+        }
+    }
     builder = WorkflowBuilder(
+        workflow_registry=workflow_registry,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
         config_dir="my_workflow/",
-        persistence_provider=persistence,
-        execution_provider=execution,
-        observer=observer
     )
 
     # Start workflow
     workflow = await builder.create_workflow(
         workflow_type="OrderProcessing",
+        persistence_provider=persistence,
+        execution_provider=execution,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=observer,
         initial_data={
             "order_id": "ORD-001",
             "customer_id": "CUST-123",

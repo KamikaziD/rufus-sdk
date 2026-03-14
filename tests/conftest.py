@@ -23,9 +23,15 @@ os.environ.setdefault("WORKFLOW_STORAGE", "memory")
 os.environ.setdefault("RUFUS_WORKFLOW_REGISTRY_PATH", "tests/fixtures/test_registry.yaml")
 os.environ.setdefault("RUFUS_CONFIG_DIR", "tests/fixtures")
 
-from fastapi.testclient import TestClient
+try:
+    from fastapi.testclient import TestClient
+    from rufus_server.main import app
+    _FASTAPI_AVAILABLE = True
+except Exception:
+    TestClient = None  # type: ignore[assignment,misc]
+    app = None  # type: ignore[assignment]
+    _FASTAPI_AVAILABLE = False
 
-from rufus_server.main import app
 from rufus.implementations.persistence.memory import InMemoryPersistence
 from rufus.implementations.execution.sync import SyncExecutor
 from rufus.implementations.observability.logging import LoggingObserver
@@ -51,6 +57,8 @@ def _make_mock_redis():
 @pytest.fixture
 def test_client():
     """Create a test client for the FastAPI app with Redis mocked out."""
+    if not _FASTAPI_AVAILABLE:
+        pytest.skip("FastAPI/server dependencies not available in this environment")
     mock_redis = _make_mock_redis()
     with patch("redis.asyncio.from_url", return_value=mock_redis):
         with TestClient(app) as client:
@@ -95,13 +103,13 @@ def setup_test_workflow():
     execution._engine = engine
     execution._thread_pool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-    import rufus_server.main as main_module
-
-    main_module.workflow_engine = engine
-    main_module.persistence_provider = persistence
-    main_module.execution_provider = execution
-    # Disable rate limiting in tests: rate_limit_check returns early when service is None,
-    # avoiding the `request.client.host` crash that occurs in TestClient (no client IP).
-    main_module.rate_limit_service = None
+    if _FASTAPI_AVAILABLE:
+        import rufus_server.main as main_module
+        main_module.workflow_engine = engine
+        main_module.persistence_provider = persistence
+        main_module.execution_provider = execution
+        # Disable rate limiting in tests: rate_limit_check returns early when service is None,
+        # avoiding the `request.client.host` crash that occurs in TestClient (no client IP).
+        main_module.rate_limit_service = None
 
     return engine, persistence

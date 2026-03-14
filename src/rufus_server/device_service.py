@@ -288,6 +288,8 @@ class DeviceService:
         device_id: str,
         transactions: List[Dict[str, Any]],
         api_key: Optional[str] = None,
+        device_sequence: int = 0,
+        payload_signature: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process synced transactions from edge device with HMAC verification.
@@ -302,6 +304,28 @@ class DeviceService:
         """
         accepted = []
         rejected = []
+
+        # Ed25519 payload verification (only when a signature header is present)
+        if payload_signature:
+            device_record = await self._get_device(device_id)
+            public_key_b64 = device_record.get("public_key") if device_record else None
+
+            if public_key_b64:
+                try:
+                    import base64 as _b64
+                    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                    pub_key_bytes = _b64.b64decode(public_key_b64)
+                    public_key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                    sig_bytes = _b64.b64decode(payload_signature)
+                    payload_bytes = json.dumps(transactions, sort_keys=True).encode()
+                    public_key.verify(sig_bytes, payload_bytes)
+                except Exception as e:
+                    logger.warning(f"Ed25519 signature verification failed for device {device_id}: {e}")
+                    return {
+                        "accepted": [],
+                        "rejected": [{"transaction_id": "unknown", "reason": "Ed25519 signature verification failed"}],
+                        "server_sequence": device_sequence,
+                    }
 
         # Get device to verify API key (if not provided)
         if not api_key:
@@ -424,7 +448,7 @@ class DeviceService:
         return {
             "accepted": accepted,
             "rejected": rejected,
-            "server_sequence": 0,  # TODO: Implement sequencing
+            "server_sequence": device_sequence,
         }
 
     async def _get_transaction_by_idempotency(
@@ -869,3 +893,53 @@ class DeviceService:
                 "retries_processed": retried_count,
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # API Key Rotation
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def rotate_api_key(
+        self,
+        device_id: str,
+        current_api_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Rotate the API key for a device.
+
+        Requires the current API key for possession proof. The new key is
+        returned in plaintext only once — the caller must store it immediately.
+
+        Returns the new key on success, None if the current key is invalid.
+        """
+        # Verify current key
+        is_valid = await self.authenticate_device(device_id, current_api_key)
+        if not is_valid:
+            logger.warning(f"rotate_api_key: invalid current key for device {device_id}")
+            return None
+
+        new_key = secrets.token_urlsafe(32)
+        new_key_hash = hashlib.sha256(new_key.encode()).hexdigest()
+        now = datetime.utcnow()
+
+        async with self.persistence.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE edge_devices
+                SET api_key_hash = $1,
+                    api_key_rotated_at = $2,
+                    updated_at = $2
+                WHERE device_id = $3
+                """,
+                new_key_hash, now, device_id,
+            )
+
+        if result == "UPDATE 0":
+            logger.error(f"rotate_api_key: device {device_id} not found during UPDATE")
+            return None
+
+        logger.info(f"API key rotated for device {device_id}")
+        return {
+            "device_id": device_id,
+            "new_api_key": new_key,  # Only time returned in plaintext
+            "rotated_at": now.isoformat(),
+        }

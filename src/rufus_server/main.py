@@ -1611,7 +1611,8 @@ async def device_heartbeat(
 async def sync_device_transactions(
     device_id: str,
     request_data: SyncRequest,
-    x_api_key: str = Header(..., alias="X-API-Key")
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    x_payload_signature: Optional[str] = Header(None, alias="X-Payload-Signature"),
 ):
     """
     Receive offline transactions from edge device (Store-and-Forward).
@@ -1642,6 +1643,8 @@ async def sync_device_transactions(
         device_id=device_id,
         transactions=transactions,
         api_key=x_api_key,  # Pass API key for HMAC verification
+        device_sequence=request_data.device_sequence if hasattr(request_data, "device_sequence") else 0,
+        payload_signature=x_payload_signature,
     )
 
     # Convert to response format
@@ -1652,6 +1655,27 @@ async def sync_device_transactions(
         server_sequence=result.get("server_sequence", 0),
         next_sync_delay=30,
     )
+
+
+@app.post("/api/v1/devices/{device_id}/rotate-key", tags=["Devices"])
+async def rotate_device_api_key(
+    device_id: str,
+    x_api_key: str = Header(..., alias="X-API-Key")
+):
+    """
+    Rotate the API key for a device.
+
+    Requires the current API key as proof of possession (X-API-Key header).
+    Returns the new key in plaintext — only returned once.
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    result = await device_service.rotate_api_key(device_id, x_api_key)
+    if result is None:
+        raise HTTPException(status_code=401, detail="Invalid current API key")
+
+    return result
 
 
 def _parse_edge_dt(s) -> Optional[datetime]:

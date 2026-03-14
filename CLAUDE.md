@@ -159,13 +159,15 @@ celery -A rufus.implementations.execution.celery worker --loglevel=info
 
 ### Provider Interfaces (`src/rufus/providers/`)
 
-All external integrations are abstracted via Python Protocol interfaces:
+All external integrations are abstracted via Python ABC interfaces (changed from Protocol in v1.0 — partial implementations now fail at instantiation instead of silently at runtime):
 
-- **PersistenceProvider** (`persistence.py`) — Workflow state, audit logs, task records. Methods: `save_workflow`, `get_workflow`, `claim_next_task`, etc.
+- **PersistenceProvider** (`persistence.py`) — Workflow state, audit logs, task records. Methods: `save_workflow`, `get_workflow`, `claim_next_task`, etc. Edge-only methods (`get_edge_sync_state`, `set_edge_sync_state`, etc.) raise `NotImplementedError` in the base class.
 - **ExecutionProvider** (`execution.py`) — Task execution environment. Methods: `dispatch_async_task`, `dispatch_parallel_tasks`, `dispatch_sub_workflow`, `report_child_status_to_parent`, `execute_sync_step_function`.
-- **WorkflowObserver** (`observer.py`) — Workflow event hooks. Methods: `on_workflow_started`, `on_step_executed`, `on_workflow_completed`, `on_workflow_failed`, `on_workflow_status_changed`.
+- **WorkflowObserver** (`observer.py`) — Workflow event hooks. ABC with no-op default implementations for all methods. v1.0 additions: `duration_ms: Optional[float]` on `on_step_executed`, plus `on_workflow_paused`, `on_workflow_resumed`, `on_compensation_started`, `on_compensation_completed`, `on_child_workflow_started`. `get_edge_sync_state(key) -> Optional[str]` returns a plain string, not a wrapped record.
 - **ExpressionEvaluator** (`expression_evaluator.py`) — Evaluates conditions for decision steps. Default: simple Python expression evaluation.
 - **TemplateEngine** (`template_engine.py`) — Renders dynamic content from workflow state. Default: Jinja2.
+
+> **`Workflow()` requires all 6 providers.** Direct instantiation needs `persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, and `template_engine_cls` — all raise `ValueError` if `None`. In tests, use `WorkflowBuilder.create_workflow()` (handles wiring) or pass `MagicMock()` for providers you don't need to exercise.
 
 ### Default Implementations (`src/rufus/implementations/`)
 
