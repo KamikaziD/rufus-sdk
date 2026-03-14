@@ -1045,11 +1045,11 @@ async function init() {
     // when no wheel is found at the same origin (bare two-file share scenario).
     try {
         const probe = await fetch(
-            `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`,
+            `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`,
             { method: "HEAD" }
         );
         if (probe.ok) {
-            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`;
         }
     } catch (_) {
         // network error or CORS block → leave _wheelUrl as null → TestPyPI path
@@ -1089,7 +1089,7 @@ else:
         keep_going=True,
     )
     await micropip.install(
-        "rufus-sdk==0.8.0",
+        "rufus-sdk==1.0.0rc1",
         index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
         keep_going=True,
     )
