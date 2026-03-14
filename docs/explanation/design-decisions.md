@@ -65,7 +65,7 @@ workflow = builder.create_workflow("MyWorkflow", data)
 
 # Application controls execution
 if condition:
-    await workflow.execute_next_step()
+    await workflow.next_step(user_input={})
 
 # Framework approach (alternative)
 # Rufus would control execution, application extends

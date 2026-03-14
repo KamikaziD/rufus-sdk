@@ -327,7 +327,6 @@ from my_observers.opentelemetry import OpenTelemetryObserver
 
 builder = WorkflowBuilder(
     config_dir="config/",
-    observer=OpenTelemetryObserver(service_name="payment-workflows")
 )
 ```
 

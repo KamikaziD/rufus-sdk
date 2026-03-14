@@ -378,18 +378,11 @@ async def main():
     print("="*70)
 
     # Create workflow builder
+    persistence = InMemoryPersistenceProvider()
     builder = WorkflowBuilder(
-        registry_path=None,
-        persistence_provider=InMemoryPersistenceProvider(),
-        execution_provider=SyncExecutor(),
-        observer=LoggingObserver(),
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
-
-    # Load workflow
-    workflow_path = Path(__file__).parent / "config" / "workflow.yaml"
-    builder.load_workflow_config("PaymentProcessing", str(workflow_path))
 
     # Create payment workflow
     print("\n" + "="*70)
@@ -403,9 +396,15 @@ async def main():
         "currency": "USD"
     }
 
-    workflow = builder.create_workflow(
-        "PaymentProcessing",
-        initial_data=initial_data
+    workflow = await builder.create_workflow(
+        workflow_type="PaymentProcessing",
+        persistence_provider=persistence,
+        execution_provider=SyncExecutor(),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        initial_data=initial_data,
     )
 
     # ========================================================================

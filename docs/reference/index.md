@@ -22,7 +22,7 @@ Load workflow definitions and create workflow instances.
 Main workflow orchestration class.
 
 **Key Methods:**
-- `execute_next_step()` - Execute next step
+- `next_step(user_input={})` - Execute next step
 - `enable_saga_mode()` - Enable Saga pattern
 - `cancel()` - Cancel workflow
 - `jump_to_step()` - Jump to specific step
@@ -56,7 +56,7 @@ Context object passed to step functions.
 - `workflow_id` - Workflow identifier
 - `step_name` - Current step name
 - `previous_step_result` - Previous step result
-- `loop_state` - Loop iteration state
+- `loop_item` - Loop iteration state
 - `parent_workflow_id` - Parent workflow (if sub-workflow)
 - `metadata` - Additional metadata
 

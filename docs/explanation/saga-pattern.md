@@ -85,9 +85,9 @@ workflow = await builder.create_workflow("BookingWorkflow", initial_data)
 workflow.enable_saga_mode()
 
 # Now execute workflow
-await workflow.execute_next_step()  # Reserve_Flight
-await workflow.execute_next_step()  # Reserve_Hotel
-await workflow.execute_next_step()  # Charge_Payment (fails)
+await workflow.next_step(user_input={})  # Reserve_Flight
+await workflow.next_step(user_input={})  # Reserve_Hotel
+await workflow.next_step(user_input={})  # Charge_Payment (fails)
 
 # Saga automatically triggered:
 # 1. Refund_Payment (no-op, payment never charged)

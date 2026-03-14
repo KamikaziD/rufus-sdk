@@ -81,6 +81,7 @@ async def test_start_workflow_success(mock_providers):
     mock_workflow_instance.id = "workflow-123"
     mock_workflow_instance.workflow_type = "test_workflow"
     mock_workflow_instance.state = MyStateModel()
+    mock_workflow_instance.automate_start = False
     mock_workflow_instance.to_dict.return_value = {"id": "workflow-123", "workflow_type": "test_workflow", "state": {}}
 
     engine.workflow_builder.create_workflow = AsyncMock(return_value=mock_workflow_instance)

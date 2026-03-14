@@ -407,17 +407,10 @@ async def main():
 
     # Create workflow builder
     builder = WorkflowBuilder(
-        registry_path=None,
-        persistence_provider=persistence,
-        execution_provider=SyncExecutor(),
-        observer=LoggingObserver(),
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
 
-    # Load workflow definition
-    workflow_path = Path(__file__).parent / "config" / "workflow.yaml"
-    builder.load_workflow_config("TaskApprovalWorkflow", str(workflow_path))
     print("✓ Workflow loaded\n")
 
     # Create a new task workflow
@@ -434,9 +427,15 @@ async def main():
         "requires_approval": True,
     }
 
-    workflow = builder.create_workflow(
-        "TaskApprovalWorkflow",
-        initial_data=initial_data
+    workflow = await builder.create_workflow(
+        workflow_type="TaskApprovalWorkflow",
+        persistence_provider=persistence,
+        execution_provider=SyncExecutor(),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        initial_data=initial_data,
     )
 
     print(f"✓ Workflow created: {workflow.id}\n")

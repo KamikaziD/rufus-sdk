@@ -46,7 +46,6 @@ def check_order_amount(state: OrderState, context: StepContext) -> dict:
     # Routing is handled by YAML conditions
     return {
         "amount_checked": True,
-        "check_timestamp": context.execution_time
     }
 ```
 

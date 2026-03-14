@@ -349,15 +349,16 @@ async def main():
     # Create workflow builder with custom provider
     builder = WorkflowBuilder(
         config_dir="config/",
-        persistence_provider=persistence,  # Custom provider!
-        execution_provider=SyncExecutor(),
-        observer=LoggingObserver()
     )
 
     # Use normally
-    workflow = builder.create_workflow(
-        "MyWorkflow",
-        initial_data={"user_id": "123"}
+    workflow = await builder.create_workflow(
+        workflow_type="MyWorkflow",
+        persistence_provider=persistence,  # Custom provider!
+        execution_provider=SyncExecutor(),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
+        initial_data={"user_id": "123"},
     )
 
     # Cleanup

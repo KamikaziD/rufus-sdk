@@ -176,13 +176,17 @@ observer = LoggingObserver()
 # Inject into builder
 builder = WorkflowBuilder(
     config_dir="config/",
-    persistence_provider=persistence,
-    execution_provider=execution,
-    observer=observer
 )
 
 # Create workflow with injected providers
-workflow = await builder.create_workflow("MyWorkflow", initial_data={"user_id": "123"})
+workflow = await builder.create_workflow(
+    workflow_type="MyWorkflow",
+    persistence_provider=persistence,
+    execution_provider=execution,
+    workflow_observer=observer,
+    workflow_builder=builder,
+    initial_data={"user_id": "123"},
+)
 ```
 
 Now the workflow uses SQLite for storage, synchronous execution, and console logging. To switch to production mode:
@@ -196,10 +200,8 @@ observer = PrometheusObserver()
 # Same code, different behavior
 builder = WorkflowBuilder(
     config_dir="config/",
-    persistence_provider=persistence,
-    execution_provider=execution,
-    observer=observer
 )
+# Pass providers to create_workflow() instead
 ```
 
 The workflow code doesn't change—only the providers.
@@ -220,11 +222,8 @@ async def test_persistence():
 def test_workflow_execution(test_persistence):
     builder = WorkflowBuilder(
         config_dir="config/",
-        persistence_provider=test_persistence,
-        execution_provider=SyncExecutionProvider(),
-        observer=NoOpObserver()
     )
-    # Test runs fast, no Redis/PostgreSQL required
+    # Pass providers to create_workflow() — test runs fast, no Redis/PostgreSQL required
 ```
 
 ### 2. Flexibility

@@ -18,7 +18,6 @@ from rufus_cli.config import get_config
 from rufus_cli.providers import create_providers, close_providers
 from rufus_cli.formatters import Formatter
 from rufus_cli.input_collector import InputCollector
-from rufus.engine import WorkflowEngine
 from rufus.workflow import Workflow
 from rufus.builder import WorkflowBuilder
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
@@ -103,22 +102,29 @@ def run_interactive(
                 border_style="cyan"
             ))
 
-            # Create workflow engine
-            engine = WorkflowEngine(
-                persistence=persistence,
-                executor=execution,
-                observer=observer,
+            # Create builder and workflow
+            builder = WorkflowBuilder(
                 workflow_registry=workflow_registry,
                 expression_evaluator_cls=SimpleExpressionEvaluator,
-                template_engine_cls=Jinja2TemplateEngine
+                template_engine_cls=Jinja2TemplateEngine,
             )
 
             # Start workflow
             formatter.print_info(f"\n🚀 Starting workflow: {workflow_type}")
-            workflow = await engine.start_workflow(
+            workflow = await builder.create_workflow(
                 workflow_type=workflow_type,
-                initial_data=initial_data
+                persistence_provider=persistence,
+                execution_provider=execution,
+                workflow_builder=builder,
+                expression_evaluator_cls=SimpleExpressionEvaluator,
+                template_engine_cls=Jinja2TemplateEngine,
+                workflow_observer=observer,
+                initial_data=initial_data,
             )
+            await persistence.save_workflow(workflow.id, workflow.to_dict())
+            await observer.on_workflow_started(workflow.id, workflow.workflow_type, workflow.state)
+            if workflow.automate_start:
+                await workflow.next_step(user_input={})
 
             formatter.print_success(f"Workflow started successfully")
             formatter.print(f"Workflow ID: [bold cyan]{workflow.id}[/bold cyan]")
