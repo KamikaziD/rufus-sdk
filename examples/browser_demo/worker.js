@@ -370,7 +370,7 @@ class BrowserSyncExecutor(SyncExecutor):
 class BrowserObserver:
     """Bridges workflow events to JS via Pyodide FFI."""
 
-    async def on_step_executed(self, wf_id, step_name, step_index, status, result, state):
+    async def on_step_executed(self, wf_id, step_name, step_index, status, result, state, duration_ms=None):
         try:
             from js import notifyStepDone
             notifyStepDone(step_name, json.dumps(result or {}))
