@@ -289,6 +289,7 @@ class DeviceService:
         transactions: List[Dict[str, Any]],
         api_key: Optional[str] = None,
         device_sequence: int = 0,
+        payload_signature: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process synced transactions from edge device with HMAC verification.
@@ -303,6 +304,28 @@ class DeviceService:
         """
         accepted = []
         rejected = []
+
+        # Ed25519 payload verification (only when a signature header is present)
+        if payload_signature:
+            device_record = await self._get_device(device_id)
+            public_key_b64 = device_record.get("public_key") if device_record else None
+
+            if public_key_b64:
+                try:
+                    import base64 as _b64
+                    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                    pub_key_bytes = _b64.b64decode(public_key_b64)
+                    public_key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                    sig_bytes = _b64.b64decode(payload_signature)
+                    payload_bytes = json.dumps(transactions, sort_keys=True).encode()
+                    public_key.verify(sig_bytes, payload_bytes)
+                except Exception as e:
+                    logger.warning(f"Ed25519 signature verification failed for device {device_id}: {e}")
+                    return {
+                        "accepted": [],
+                        "rejected": [{"transaction_id": "unknown", "reason": "Ed25519 signature verification failed"}],
+                        "server_sequence": device_sequence,
+                    }
 
         # Get device to verify API key (if not provided)
         if not api_key:

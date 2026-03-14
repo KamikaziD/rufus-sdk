@@ -1611,7 +1611,8 @@ async def device_heartbeat(
 async def sync_device_transactions(
     device_id: str,
     request_data: SyncRequest,
-    x_api_key: str = Header(..., alias="X-API-Key")
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    x_payload_signature: Optional[str] = Header(None, alias="X-Payload-Signature"),
 ):
     """
     Receive offline transactions from edge device (Store-and-Forward).
@@ -1643,6 +1644,7 @@ async def sync_device_transactions(
         transactions=transactions,
         api_key=x_api_key,  # Pass API key for HMAC verification
         device_sequence=request_data.device_sequence if hasattr(request_data, "device_sequence") else 0,
+        payload_signature=x_payload_signature,
     )
 
     # Convert to response format

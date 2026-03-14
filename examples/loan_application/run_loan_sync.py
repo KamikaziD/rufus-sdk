@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ⚠️  LEGACY API — This example uses WorkflowEngine (being migrated to WorkflowBuilder in v2.0).
+# For new projects use WorkflowBuilder.create_workflow() — see examples/payment_terminal/demo.py.
 """
 Synchronous execution script for the Loan Application workflow.
 Demonstrates complex workflow features:

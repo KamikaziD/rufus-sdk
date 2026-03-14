@@ -504,7 +504,10 @@ async def test_workflow_performance():
 ```python
 import pytest
 from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 from rufus.builder import WorkflowBuilder
 
 @pytest.mark.integration
@@ -518,18 +521,32 @@ async def test_postgres_workflow():
     )
     await persistence.initialize()
 
-    execution = SyncExecutionProvider()
+    execution = SyncExecutor()
 
+    # See .claude/TECHNICAL_INFORMATION.md §7 for direct Workflow() instantiation patterns in tests
+    workflow_registry = {
+        "OrderProcessing": {
+            "config_file": "order_processing.yaml",
+            "initial_state_model_path": "my_app.state_models.OrderState",
+        }
+    }
     builder = WorkflowBuilder(
+        workflow_registry=workflow_registry,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
         config_dir="config/",
-        persistence_provider=persistence,
-        execution_provider=execution
     )
 
-    # Create workflow
+    # Create workflow (providers injected per-workflow)
     workflow = await builder.create_workflow(
         workflow_type="OrderProcessing",
-        initial_data={"order_id": "ORD-001"}
+        persistence_provider=persistence,
+        execution_provider=execution,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=LoggingObserver(),
+        initial_data={"order_id": "ORD-001"},
     )
 
     # Execute

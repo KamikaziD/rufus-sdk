@@ -13,13 +13,10 @@
 ```python
 def __init__(
     self,
-    config_dir: str,
-    persistence_provider: PersistenceProvider,
-    execution_provider: ExecutionProvider,
-    observer: Optional[WorkflowObserver] = None,
-    expression_evaluator: Optional[ExpressionEvaluator] = None,
-    template_engine: Optional[TemplateEngine] = None,
-    registry_path: Optional[str] = None
+    workflow_registry: Dict[str, Any],
+    expression_evaluator_cls: Type[ExpressionEvaluator],
+    template_engine_cls: Type[TemplateEngine],
+    config_dir: Optional[str] = None,
 )
 ```
 
@@ -27,28 +24,44 @@ def __init__(
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `config_dir` | `str` | Yes | Path to directory containing workflow YAML files |
-| `persistence_provider` | `PersistenceProvider` | Yes | Persistence implementation (SQLite, PostgreSQL, etc.) |
-| `execution_provider` | `ExecutionProvider` | Yes | Execution implementation (sync, thread_pool, celery) |
-| `observer` | `WorkflowObserver` | No | Observability hook implementation |
-| `expression_evaluator` | `ExpressionEvaluator` | No | Expression evaluation implementation (default: simple) |
-| `template_engine` | `TemplateEngine` | No | Template rendering implementation (default: Jinja2) |
-| `registry_path` | `str` | No | Custom path to workflow_registry.yaml |
+| `workflow_registry` | `Dict[str, Any]` | Yes | Registry mapping workflow types to config. See format below. |
+| `expression_evaluator_cls` | `Type[ExpressionEvaluator]` | Yes | Expression evaluator class (e.g. `SimpleExpressionEvaluator`) |
+| `template_engine_cls` | `Type[TemplateEngine]` | Yes | Template engine class (e.g. `Jinja2TemplateEngine`) |
+| `config_dir` | `str` | No | Directory containing workflow YAML files (defaults to `os.getcwd()`) |
+
+**`workflow_registry` format:**
+
+```python
+{
+    "WorkflowType": {
+        "config_file": "my_workflow.yaml",           # YAML filename relative to config_dir
+        "initial_state_model_path": "my_app.state.MyState",  # Python import path to Pydantic model
+    },
+    ...
+}
+```
+
+**Note:** Providers (`persistence_provider`, `execution_provider`, `workflow_observer`) are **not** constructor parameters — they are passed per-workflow to `create_workflow()`. This allows a single builder to create workflows with different providers.
 
 **Example:**
 
 ```python
 from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
-persistence = SQLitePersistenceProvider(db_path="workflows.db")
-execution = SyncExecutionProvider()
+workflow_registry = {
+    "OrderProcessing": {
+        "config_file": "order_processing.yaml",
+        "initial_state_model_path": "my_app.state_models.OrderState",
+    }
+}
 
 builder = WorkflowBuilder(
+    workflow_registry=workflow_registry,
+    expression_evaluator_cls=SimpleExpressionEvaluator,
+    template_engine_cls=Jinja2TemplateEngine,
     config_dir="config/",
-    persistence_provider=persistence,
-    execution_provider=execution
 )
 ```
 
@@ -62,9 +75,20 @@ Create and initialize a new workflow instance.
 async def create_workflow(
     self,
     workflow_type: str,
-    initial_data: dict,
+    persistence_provider: PersistenceProvider,
+    execution_provider: ExecutionProvider,
+    workflow_builder: WorkflowBuilder,
+    expression_evaluator_cls: Type[ExpressionEvaluator],
+    template_engine_cls: Type[TemplateEngine],
+    workflow_observer: WorkflowObserver,
+    initial_data: Optional[dict] = None,
     owner_id: Optional[str] = None,
-    data_region: Optional[str] = None
+    org_id: Optional[str] = None,
+    data_region: Optional[str] = None,
+    priority: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    wasm_binary_resolver: Optional[Callable] = None,
 ) -> Workflow
 ```
 
@@ -73,9 +97,20 @@ async def create_workflow(
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `workflow_type` | `str` | Yes | Workflow type from registry |
-| `initial_data` | `dict` | Yes | Initial state data |
+| `persistence_provider` | `PersistenceProvider` | Yes | Persistence implementation for this workflow |
+| `execution_provider` | `ExecutionProvider` | Yes | Execution implementation for this workflow |
+| `workflow_builder` | `WorkflowBuilder` | Yes | Pass `builder` itself — stored for sub-workflow spawning |
+| `expression_evaluator_cls` | `Type[ExpressionEvaluator]` | Yes | Expression evaluator class |
+| `template_engine_cls` | `Type[TemplateEngine]` | Yes | Template engine class |
+| `workflow_observer` | `WorkflowObserver` | Yes | Observer for lifecycle events |
+| `initial_data` | `dict` | No | Initial state data (defaults to `None`) |
 | `owner_id` | `str` | No | Owner identifier for multi-tenancy |
+| `org_id` | `str` | No | Organisation identifier |
 | `data_region` | `str` | No | Data region for compliance/routing |
+| `priority` | `int` | No | Workflow priority |
+| `idempotency_key` | `str` | No | Idempotency key to prevent duplicate creation |
+| `metadata` | `dict` | No | Arbitrary metadata attached to this workflow |
+| `wasm_binary_resolver` | `Callable` | No | Resolver for WASM binaries (Component Model steps) |
 
 **Returns:** `Workflow` instance
 
@@ -86,42 +121,25 @@ async def create_workflow(
 **Example:**
 
 ```python
+from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from rufus.implementations.execution.sync import SyncExecutor
+from rufus.implementations.observability.logging import LoggingObserver
+
+persistence = SQLitePersistenceProvider(db_path=":memory:")
+await persistence.initialize()
+execution = SyncExecutor()
+observer = LoggingObserver()
+
 workflow = await builder.create_workflow(
     workflow_type="OrderProcessing",
+    persistence_provider=persistence,
+    execution_provider=execution,
+    workflow_builder=builder,
+    expression_evaluator_cls=SimpleExpressionEvaluator,
+    template_engine_cls=Jinja2TemplateEngine,
+    workflow_observer=observer,
     initial_data={"customer_id": "123", "amount": 99.99},
-    owner_id="tenant-abc"
-)
-```
-
-### `load_workflow`
-
-Load existing workflow from persistence.
-
-```python
-async def load_workflow(
-    self,
-    workflow_id: UUID
-) -> Workflow
-```
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `workflow_id` | `UUID` | Yes | Workflow identifier |
-
-**Returns:** `Workflow` instance
-
-**Raises:**
-- `ValueError` - If workflow not found
-
-**Example:**
-
-```python
-from uuid import UUID
-
-workflow = await builder.load_workflow(
-    workflow_id=UUID("550e8400-e29b-41d4-a716-446655440000")
+    owner_id="tenant-abc",
 )
 ```
 
@@ -152,23 +170,6 @@ def get_workflow_config(
 ```python
 config = builder.get_workflow_config("OrderProcessing")
 print(config['workflow_version'])  # "1.0.0"
-```
-
-### `list_available_workflows`
-
-List all registered workflow types.
-
-```python
-def list_available_workflows(self) -> list[str]
-```
-
-**Returns:** `list[str]` - List of workflow type names
-
-**Example:**
-
-```python
-workflows = builder.list_available_workflows()
-# ["OrderProcessing", "UserOnboarding", "DataPipeline"]
 ```
 
 ## Class Attributes

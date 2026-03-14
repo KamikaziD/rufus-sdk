@@ -20,6 +20,8 @@ from rufus.builder import WorkflowBuilder
 from rufus.implementations.execution.celery import CeleryExecutionProvider
 from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
 from rufus.implementations.observability.logging import LoggingObserver
+from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def run_order_processing_example():
@@ -53,18 +55,32 @@ async def run_order_processing_example():
     await execution.initialize(MockEngine())
 
     # Create workflow builder
+    workflow_registry = {
+        "OrderProcessing": {
+            "config_file": "order_processing.yaml",
+            "initial_state_model_path": "models.state_models.OrderState",
+        },
+        "SendNotifications": {
+            "config_file": "notification_workflow.yaml",
+            "initial_state_model_path": "models.state_models.NotificationState",
+        },
+    }
     builder = WorkflowBuilder(
+        workflow_registry=workflow_registry,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
         config_dir="config/",
-        persistence_provider=persistence,
-        execution_provider=execution,
-        observer=LoggingObserver()
     )
 
     # Start workflow
-    from models.state_models import OrderState
-
     workflow = await builder.create_workflow(
         workflow_type="OrderProcessing",
+        persistence_provider=persistence,
+        execution_provider=execution,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=LoggingObserver(),
         initial_data={
             "order_id": "ORD-12345",
             "customer_email": "customer@example.com",
@@ -129,16 +145,28 @@ async def run_payment_example():
     await execution.initialize(MockEngine())
 
     # Create workflow builder
+    workflow_registry = {
+        "PaymentProcessing": {
+            "config_file": "payment_workflow.yaml",
+            "initial_state_model_path": "models.state_models.PaymentState",
+        },
+    }
     builder = WorkflowBuilder(
+        workflow_registry=workflow_registry,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
         config_dir="config/",
-        persistence_provider=persistence,
-        execution_provider=execution,
-        observer=LoggingObserver()
     )
 
     # Start workflow
     workflow = await builder.create_workflow(
         workflow_type="PaymentProcessing",
+        persistence_provider=persistence,
+        execution_provider=execution,
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        workflow_observer=LoggingObserver(),
         initial_data={
             "payment_id": "PAY-67890",
             "card_number": "4532015112830366",

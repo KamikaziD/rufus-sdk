@@ -47,7 +47,7 @@ def __init__(
 | `owner_id` | `str` | No | Owner identifier |
 | `data_region` | `str` | No | Data region |
 
-**Note:** Typically created via `WorkflowBuilder.create_workflow()`, not directly.
+**Note:** Direct instantiation requires all 6 providers injected (`persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, `template_engine_cls`) — all raise `ValueError` if `None`. Use `WorkflowBuilder.create_workflow()` for normal usage; pass `MagicMock()` for providers you don't need in tests.
 
 ## Properties
 
@@ -118,37 +118,40 @@ Complete workflow YAML configuration snapshot.
 
 ## Methods
 
-### `execute_next_step`
+### `next_step`
 
 Execute the next workflow step.
 
 ```python
-async def execute_next_step(
+async def next_step(
     self,
-    user_input: Optional[dict] = None
-) -> dict
+    user_input: dict = {}
+) -> Tuple[Dict[str, Any], Optional[str]]
 ```
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `user_input` | `dict` | No | Input data for step execution |
+| `user_input` | `dict` | Yes | Input data for step execution (pass `{}` when no input needed) |
 
-**Returns:** `dict` - Step execution result
+**Returns:** `Tuple[Dict[str, Any], Optional[str]]`
+- First element: step result dict (merged into workflow state)
+- Second element: jump directive string (target step name) or `None` for normal sequential flow
+
+**Step timing:** For `STANDARD` steps, execution duration is measured and passed as `duration_ms` to `WorkflowObserver.on_step_executed()`. `duration_ms` is `None` for async/parallel dispatch steps (timing measured by the worker).
 
 **Raises:**
 - `ValueError` - If workflow already completed/failed
-- `WorkflowJumpDirective` - For control flow jumps
-- `WorkflowPauseDirective` - For pausing workflow
-- `StartSubWorkflowDirective` - For launching sub-workflows
 
 **Example:**
 
 ```python
-result = await workflow.execute_next_step(
-    user_input={"approved": True}
-)
+result, directive = await workflow.next_step(user_input={"approved": True})
+
+# Check if we jumped to a different step
+if directive:
+    print(f"Jumped to: {directive}")
 ```
 
 ### `enable_saga_mode`
@@ -212,7 +215,7 @@ async def save(self) -> None
 await workflow.save()
 ```
 
-**Note:** Automatically called by `execute_next_step()`. Manual saves rarely needed.
+**Note:** Automatically called by `next_step()`. Manual saves rarely needed.
 
 ### `jump_to_step`
 
@@ -260,8 +263,8 @@ When Saga mode enabled and workflow fails:
 await workflow.enable_saga_mode()
 
 # Execute steps
-result = await workflow.execute_next_step()  # Reserve_Inventory
-result = await workflow.execute_next_step()  # Charge_Payment (fails)
+result, _ = await workflow.next_step(user_input={})  # Reserve_Inventory
+result, _ = await workflow.next_step(user_input={})  # Charge_Payment (fails)
 
 # Automatic compensation:
 # 1. refund_payment() called
