@@ -18,7 +18,7 @@ const TRANSFORMERS_CDNS = [
     "https://cdn.jsdelivr.net/npm/@xenova/transformers@2/dist/transformers.min.js",
 ];
 
-const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "webgpu" : "cpu";
+const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "webgpu" : "wasm";
 let _extractor = null;
 let _summariser = null;
 let _summariserTask = "text-generation";  // updated if fallback loads FLAN-T5
