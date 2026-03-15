@@ -766,9 +766,25 @@ await _executor.initialize(None)
 # ── Workflow factory ───────────────────────────────────────────────────────────
 async def _make_workflow(wf_type, steps, state_class, initial_data=None):
     state = state_class(**(initial_data or {}))
+    # Synthesise a minimal definition snapshot and steps_config from the live
+    # step objects — there is no YAML in the browser, but these fields make the
+    # workflow history and result payload meaningful.
+    synth_steps_config = [
+        {"name": s.name, "type": "STANDARD", "automate_next": s.automate_next}
+        for s in steps
+    ]
+    synth_snapshot = {
+        "workflow_type": wf_type,
+        "initial_state_model": state_class.__name__,
+        "runtime": "browser/pyodide",
+        "steps": synth_steps_config,
+    }
     return Workflow(
         workflow_type=wf_type,
+        workflow_version="1.0.0rc2",
+        definition_snapshot=synth_snapshot,
         workflow_steps=steps,
+        steps_config=synth_steps_config,
         initial_state_model=state,
         state_model_path="__browser__",
         persistence_provider=_persistence,
@@ -1436,6 +1452,7 @@ async def full_paged_inference(state: PagedReasoningState, context: StepContext,
         payload = _json.dumps({"prompt": state.prompt or _PAGED_DEMO_PROMPTS[1], "threshold": 0.4})
         result = await runPagedInference(payload, 128)
         return {
+            "path_taken": "full_inference",
             "generated_text": str(result.text),
             "tokens_generated": int(result.tokens_generated),
             "shards_loaded": int(result.shards_loaded),
@@ -1444,6 +1461,7 @@ async def full_paged_inference(state: PagedReasoningState, context: StepContext,
     except Exception:
         # Fallback: simulate full inference output without wllama
         return {
+            "path_taken": "full_inference",
             "generated_text": (
                 "[Simulated full inference] Complex field diagnostic reasoning would appear here. "
                 "In a live deployment, 2–3 × 120 MB BitNet shards are loaded from OPFS and "
@@ -1457,15 +1475,20 @@ async def full_paged_inference(state: PagedReasoningState, context: StepContext,
 
 async def fast_path(state: PagedReasoningState, context: StepContext, **_):
     """Shard-0-only inference — fast path for simple queries."""
-    # Guard: normal path that didn't jump here (complexity >= 0.4)
+    # Guard: normal path passes through here with complexity_score already >= 0.4
     if state.complexity_score >= 0.4:
         return {}
+    # We arrived here via WorkflowJumpDirective — assess_complexity raised before
+    # returning, so complexity_score/path_taken are still at their defaults.
+    # Set them here where we know definitively which path was taken.
     try:
         from js import runPagedInference  # type: ignore[import]
         import json as _json
         payload = _json.dumps({"prompt": state.prompt or _PAGED_DEMO_PROMPTS[0], "threshold": 0.9})
         result = await runPagedInference(payload, 64)
         return {
+            "path_taken": "fast_path",
+            "complexity_score": round(float(result.complexity_score), 3),
             "generated_text": str(result.text),
             "tokens_generated": int(result.tokens_generated),
             "shards_loaded": int(result.shards_loaded),
@@ -1473,6 +1496,8 @@ async def fast_path(state: PagedReasoningState, context: StepContext, **_):
         }
     except Exception:
         return {
+            "path_taken": "fast_path",
+            "complexity_score": 0.2,
             "generated_text": (
                 "[Simulated fast path] Simple query resolved from shard-0 embedding + "
                 "first 2 transformer layers only. Latency ~1.5s, peak RAM ~140 MB."
