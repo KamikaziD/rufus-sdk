@@ -3,7 +3,7 @@ name = "rufus-sdk-server"
 version = "1.0.0rc2"
 description = "Rufus cloud control plane — REST API, device fleet management, Celery workers"
 authors = [{name = "Rufus Team", email = "team@rufus.dev"}]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 readme = "../../README.md"
 requires-python = ">=3.9"
 keywords = ["workflow", "fintech", "api", "server", "celery", "fleet-management"]
@@ -11,7 +11,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
