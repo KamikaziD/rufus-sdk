@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Rufus — Browser Runtime Demo</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#1f6feb">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
 <style>
   /* ── Reset & base ─────────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -263,6 +266,19 @@
     background: #2d220066;
   }
   .model-overlay.visible { display: flex; align-items: center; gap: 8px; }
+
+  /* ── W4 textarea input ────────────────────────────────────────────────── */
+  .wf4-input-wrap { margin-bottom: 10px; }
+  .wf4-textarea {
+    width: 100%; box-sizing: border-box;
+    background: var(--surface2); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; font-family: inherit;
+    resize: vertical; outline: none;
+  }
+  .wf4-textarea:focus { border-color: var(--accent); }
+  .wf4-wordcount { font-size: 11px; color: var(--muted); text-align: right; margin-top: 3px; }
+  .wf4-wordcount.over { color: var(--red); }
 
   /* ── Spinner ──────────────────────────────────────────────────────────── */
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -617,6 +633,38 @@
   }
   .storage-bar-fill.warn   { background: var(--orange); }
   .storage-bar-fill.danger { background: var(--red); }
+
+  /* ── Offline badge ────────────────────────────────────────────────────── */
+  .offline-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: #3d1a00; color: #e8895a; border: 1px solid #7a3a10;
+    font-weight: 600;
+  }
+
+  /* ── PWA install button ───────────────────────────────────────────────── */
+  .btn-install {
+    font-size: 11px; padding: 3px 10px; border-radius: 6px;
+    background: var(--accent); color: #fff; border: none; cursor: pointer;
+    font-weight: 600; transition: opacity 0.15s;
+  }
+  .btn-install:hover { opacity: 0.85; }
+
+  /* ── Model settings panel (W4) ───────────────────────────────────────── */
+  .model-settings { margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+  .model-settings summary { cursor: pointer; user-select: none; margin-bottom: 6px; }
+  .model-settings-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 6px 12px; padding: 6px 0;
+  }
+  .model-settings-grid label {
+    display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted);
+  }
+  .model-settings-grid input[type=number] {
+    background: var(--surface2); color: var(--fg, var(--text)); border: 1px solid var(--border);
+    border-radius: 4px; padding: 3px 6px; font-size: 12px; width: 100%;
+  }
+  .model-settings-grid input[type=range] { width: 100%; accent-color: var(--accent); }
+  .model-settings-grid input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
 </style>
 </head>
 <body>
@@ -636,6 +684,8 @@
       <span class="dot"></span> Storage: —
     </span>
     <span class="badge" id="badge-summariser" style="display:none;font-size:10px">T5: not loaded</span>
+    <span id="offline-badge" class="offline-badge" style="display:none">● offline</span>
+    <button id="btn-install" class="btn-install" style="display:none" onclick="installPWA()">⬇ Install</button>
     <button class="btn-inspect" id="btn-inspect" disabled onclick="openPreflight()">⚡ Inspect</button>
   </div>
 </header>
@@ -809,7 +859,7 @@
         <div class="card-icon" style="background:#0e1e2e">📄</div>
         <div class="card-meta">
           <h3>Document Summarisation</h3>
-          <p>STANDARD · T5-small text2text · DECISION quality gate · extractive fallback</p>
+          <p>Qwen2.5-0.5B-Instruct · DECISION quality gate · extractive fallback</p>
         </div>
       </div>
       <div class="card-body">
@@ -828,9 +878,41 @@
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--muted)">Model: Xenova/t5-small (~90 MB, q8)</span>
+          <span style="font-size:11px;color:var(--muted)" id="badge-summariser-label">Model: Qwen2.5-0.5B (~350 MB, q4)</span>
           <span class="badge" id="badge-summariser-card" style="font-size:10px">not loaded</span>
         </div>
+
+        <div class="wf4-input-wrap">
+          <textarea
+            id="text-input-wf4"
+            class="wf4-textarea"
+            placeholder="Paste your own text here (up to 250 words) — or leave blank to use a random demo document…"
+            rows="4"
+            spellcheck="false"
+            oninput="onWf4Input(this)"
+          ></textarea>
+          <div class="wf4-wordcount"><span id="wf4-wordcount">0</span> / 250 words</div>
+        </div>
+
+        <details class="model-settings" id="wf4-settings">
+          <summary>Model settings</summary>
+          <div class="model-settings-grid">
+            <label>Max tokens
+              <input type="number" id="wf4-max-tokens" value="200" min="50" max="800" step="10">
+            </label>
+            <label>Rep. penalty
+              <input type="number" id="wf4-rep-penalty" value="1.3" min="1.0" max="2.0" step="0.05">
+            </label>
+            <label>Sampling
+              <input type="checkbox" id="wf4-do-sample">
+            </label>
+            <label>Temperature <span id="wf4-temp-val">0.7</span>
+              <input type="range" id="wf4-temperature" min="0.1" max="1.5" step="0.05" value="0.7"
+                     oninput="document.getElementById('wf4-temp-val').textContent = this.value"
+                     disabled>
+            </label>
+          </div>
+        </details>
 
         <div class="model-overlay" id="model-overlay-wf4">
           <span class="spinner"></span>
@@ -838,9 +920,9 @@
         </div>
 
         <p style="font-size:12px;color:var(--muted)">
-          Abstractive summarisation using a quantised T5-small model. A DECISION step
-          validates compression ratio; if the LLM output is too short it jumps to an
-          extractive sentence fallback — a workflow-level quality gate.
+          Abstractive summarisation using Qwen2.5-0.5B-Instruct (q4). A DECISION step
+          validates compression ratio; if the output is too short it jumps to an extractive
+          sentence fallback — a workflow-level quality gate.
         </p>
       </div>
       <div class="result-panel" id="result-wf4">
@@ -1085,6 +1167,8 @@ function handleWorkerMessage(e) {
       document.getElementById("model-overlay-wf4").classList.add("visible");
       const sotEl = document.getElementById("summariser-overlay-text");
       if (sotEl) sotEl.textContent = "Downloading Qwen2.5-0.5B weights (~350 MB, q4) — cached after first run…";
+      const lblEl = document.getElementById("badge-summariser-label");
+      if (lblEl) lblEl.textContent = "Model: Qwen2.5-0.5B (~350 MB, q4)";
       document.getElementById("badge-summariser").style.display = "";
       log("Downloading onnx-community/Qwen2.5-0.5B-Instruct (~350 MB, first run only)…", "model");
       setBadge("badge-summariser", "wasm", "Qwen2.5: downloading…");
@@ -1102,6 +1186,8 @@ function handleWorkerMessage(e) {
     case "summariser_fallback": {
       const sotFb = document.getElementById("summariser-overlay-text");
       if (sotFb) sotFb.textContent = "Qwen2.5 unavailable — loading FLAN-T5-small fallback (~90 MB)…";
+      const lblFb = document.getElementById("badge-summariser-label");
+      if (lblFb) lblFb.textContent = "Model: FLAN-T5-small (~90 MB, q8)";
       log(`Qwen2.5 load failed (${msg.reason}) — falling back to FLAN-T5-small`, "warn");
       setBadge("badge-summariser", "wasm", "FLAN-T5: loading…");
       break;
@@ -1120,6 +1206,20 @@ function handleWorkerMessage(e) {
   }
 }
 
+// ── W4 textarea word counter ──────────────────────────────────────────────────
+window.onWf4Input = function(el) {
+  const words = el.value.trim() === "" ? [] : el.value.trim().split(/\s+/);
+  const count = words.length;
+  const countEl = document.getElementById("wf4-wordcount");
+  countEl.textContent = count;
+  countEl.parentElement.className = "wf4-wordcount" + (count > 250 ? " over" : "");
+  if (count > 250) {
+    el.value = words.slice(0, 250).join(" ");
+    countEl.textContent = 250;
+    countEl.parentElement.className = "wf4-wordcount";
+  }
+};
+
 // ── Workflow runner ───────────────────────────────────────────────────────────
 window.runWorkflow = function(workflowType) {
   if (!worker) return;
@@ -1136,9 +1236,19 @@ window.runWorkflow = function(workflowType) {
       merchant_category: ["retail", "crypto-exchange", "grocery", "streaming"][Math.floor(Math.random() * 4)],
       location: ["London", "New York", "Singapore", "unknown"][Math.floor(Math.random() * 4)],
     },
-    DocumentSummarisation: {},   // raw_text omitted → Python picks random _DEMO_TEXTS entry
+    DocumentSummarisation: (() => {
+      const ta = document.getElementById("text-input-wf4");
+      const v = ta ? ta.value.trim() : "";
+      return v ? { raw_text: v } : {};
+    })(),  // raw_text omitted → Python picks random _DEMO_TEXTS entry
   };
-  worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {} });
+  const modelSettings = workflowType === "DocumentSummarisation" ? {
+    max_new_tokens:     parseInt(document.getElementById("wf4-max-tokens")?.value  ?? "200"),
+    repetition_penalty: parseFloat(document.getElementById("wf4-rep-penalty")?.value ?? "1.3"),
+    do_sample:          document.getElementById("wf4-do-sample")?.checked ?? false,
+    temperature:        parseFloat(document.getElementById("wf4-temperature")?.value ?? "0.7"),
+  } : undefined;
+  worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {}, modelSettings });
 };
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -1586,6 +1696,48 @@ function renderPreflight(data) {
 
   body.innerHTML = runtimeHtml + pkgsHtml + cacheHtml + idbHtml;
 }
+
+// ── Service Worker registration ───────────────────────────────────────────────
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js", { scope: "./" })
+    .then(reg => {
+      reg.addEventListener("updatefound", () => {
+        log("Service worker updating — reload to apply", "info");
+      });
+    })
+    .catch(err => log(`SW registration failed: ${err}`, "warn"));
+}
+
+// ── Offline indicator ─────────────────────────────────────────────────────────
+function updateOnlineStatus() {
+  const badge = document.getElementById("offline-badge");
+  if (badge) badge.style.display = navigator.onLine ? "none" : "inline";
+}
+window.addEventListener("online",  updateOnlineStatus);
+window.addEventListener("offline", updateOnlineStatus);
+updateOnlineStatus();
+
+// ── PWA install prompt ────────────────────────────────────────────────────────
+let _installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  _installPrompt = e;
+  document.getElementById("btn-install").style.display = "inline-flex";
+});
+window.addEventListener("appinstalled", () => {
+  document.getElementById("btn-install").style.display = "none";
+  log("App installed — available offline after next full load", "info");
+});
+window.installPWA = function() {
+  if (!_installPrompt) return;
+  _installPrompt.prompt();
+  _installPrompt.userChoice.then(() => { _installPrompt = null; });
+};
+
+// ── W4 sampling toggle ────────────────────────────────────────────────────────
+document.getElementById("wf4-do-sample").addEventListener("change", function() {
+  document.getElementById("wf4-temperature").disabled = !this.checked;
+});
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 startWorker();
