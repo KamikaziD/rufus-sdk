@@ -602,7 +602,7 @@ def test_parallel_step():
     )
 
     workflow = builder.create_workflow("MyWorkflow", data)
-    workflow.execute_next_step()  # Parallel step runs sequentially
+    await workflow.next_step(user_input={})  # Parallel step runs sequentially
 
     # Assertions on merged result
     assert workflow.state.credit_approved is True

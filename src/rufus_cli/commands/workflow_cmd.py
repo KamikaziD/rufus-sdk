@@ -14,7 +14,7 @@ from pathlib import Path
 from rufus_cli.config import get_config
 from rufus_cli.providers import create_providers, close_providers
 from rufus_cli.formatters import WorkflowListFormatter, WorkflowDetailFormatter, Formatter
-from rufus.engine import WorkflowEngine
+from rufus.builder import WorkflowBuilder
 from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
 
@@ -54,12 +54,11 @@ async def _auto_execute_workflow(
             return
 
         # Create a minimal WorkflowBuilder for workflow reconstruction
-        # We don't need a full config directory since we have the snapshot
+        # We don't need a full registry since the workflow is reconstructed from its snapshot
         builder = WorkflowBuilder(
-            config_dir=None,  # Not needed - we have snapshot
-            persistence_provider=persistence,
-            execution_provider=execution,
-            observer=observer
+            workflow_registry={},
+            expression_evaluator_cls=SimpleExpressionEvaluator,
+            template_engine_cls=Jinja2TemplateEngine,
         )
 
         # Reconstruct workflow from persisted data
@@ -312,22 +311,29 @@ def start_workflow(
                 print(json.dumps(initial_data, indent=2))
                 return
 
-            # Create workflow engine
-            engine = WorkflowEngine(
-                persistence=persistence,
-                executor=execution,
-                observer=observer,
+            # Create builder and workflow
+            builder = WorkflowBuilder(
                 workflow_registry=workflow_registry,
                 expression_evaluator_cls=SimpleExpressionEvaluator,
-                template_engine_cls=Jinja2TemplateEngine
+                template_engine_cls=Jinja2TemplateEngine,
             )
 
             # Start workflow
             formatter.print_info(f"Starting workflow: {workflow_type}")
-            workflow = await engine.start_workflow(
+            workflow = await builder.create_workflow(
                 workflow_type=workflow_type,
-                initial_data=initial_data
+                persistence_provider=persistence,
+                execution_provider=execution,
+                workflow_builder=builder,
+                expression_evaluator_cls=SimpleExpressionEvaluator,
+                template_engine_cls=Jinja2TemplateEngine,
+                workflow_observer=observer,
+                initial_data=initial_data,
             )
+            await persistence.save_workflow(workflow.id, workflow.to_dict())
+            await observer.on_workflow_started(workflow.id, workflow.workflow_type, workflow.state)
+            if workflow.automate_start:
+                await workflow.next_step(user_input={})
 
             formatter.print_success(f"Workflow started successfully")
             formatter.print(f"\nWorkflow ID: [bold cyan]{workflow.id}[/bold cyan]")

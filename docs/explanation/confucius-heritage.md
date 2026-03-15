@@ -331,9 +331,8 @@ execution = CeleryExecutionProvider()
 
 builder = WorkflowBuilder(
     config_dir="config/",
-    persistence_provider=persistence,
-    execution_provider=execution
 )
+# Pass persistence_provider= and execution_provider= to builder.create_workflow()
 ```
 
 **Migration**: Add provider initialization (one-time change).

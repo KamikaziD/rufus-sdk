@@ -21,6 +21,7 @@ const TRANSFORMERS_CDNS = [
 const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "webgpu" : "wasm";
 let _extractor = null;
 let _summariser = null;
+let _summariserTask = "text-generation";  // updated if fallback loads FLAN-T5
 let _pipeline = null;   // set after dynamic import
 let _activeModel  = null;              // "extractor" | "summariser" | null
 let _modelMutex   = Promise.resolve(); // promise-chain mutex (no SharedArrayBuffer needed)
@@ -47,7 +48,7 @@ async function _loadModel(which) {
         self.postMessage({ type: "model_unloaded", model: "extractor" });
     } else if (_activeModel === "summariser" && _summariser) {
         self.postMessage({ type: "model_unloading", model: "summariser",
-                           message: "Unloading T5 model to free memory…" });
+                           message: `Unloading ${_summariserTask === "text-generation" ? "Qwen2.5" : "FLAN-T5"} model to free memory…` });
         try { await _summariser.dispose(); } catch (_) {}
         _summariser = null; _activeModel = null;
         self.postMessage({ type: "model_unloaded", model: "summariser" });
@@ -62,10 +63,39 @@ async function _loadModel(which) {
         self.postMessage({ type: "model_ready", device: _gpuDevice });
     } else if (which === "summariser") {
         self.postMessage({ type: "summariser_loading" });
-        _summariser = await _pipeline("text2text-generation", "Xenova/flan-t5-small",
-                                      { device: _gpuDevice, dtype: "q8" });
-        _activeModel = "summariser";
-        self.postMessage({ type: "summariser_ready", device: _gpuDevice });
+        const TIMEOUT_MS = 120_000;
+        let loaded = false;
+        try {
+            const modelPromise = _pipeline("text-generation", "onnx-community/Qwen2.5-0.5B-Instruct", {
+                device: _gpuDevice,
+                dtype: "q4",
+                progress_callback: ({ status, progress, file }) => {
+                    if (status === "progress" && progress != null) {
+                        self.postMessage({ type: "summariser_progress",
+                                           progress: Math.round(progress),
+                                           file: file ?? "" });
+                    }
+                },
+            });
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS)
+            );
+            _summariser = await Promise.race([modelPromise, timeoutPromise]);
+            _summariserTask = "text-generation";
+            loaded = true;
+        } catch (e) {
+            self.postMessage({ type: "summariser_fallback",
+                               reason: e.message === "timeout" ? "download timed out" : e.message });
+            _summariser = await _pipeline("text2text-generation", "Xenova/flan-t5-small",
+                                          { device: _gpuDevice, dtype: "q8" });
+            _summariserTask = "text2text-generation";
+            loaded = true;
+        }
+        if (loaded) {
+            _activeModel = "summariser";
+            self.postMessage({ type: "summariser_ready", device: _gpuDevice,
+                               model: _summariserTask === "text-generation" ? "Qwen2.5-0.5B" : "FLAN-T5-small" });
+        }
     }
 }
 
@@ -113,18 +143,37 @@ globalThis.runSummarisation = async (text) => {
     await prev;
     try {
         await _loadModel("summariser");
-        const t0     = performance.now();
-        const prompt = `Summarize the following passage in 2-3 sentences: ${text.substring(0, 1500)}`;
-        const result = await _summariser(prompt, {
-            max_new_tokens:       80,
-            min_length:           20,
-            num_beams:            2,
-            repetition_penalty:   3.0,
-            no_repeat_ngram_size: 4,
-            early_stopping:       true,
-        });
-        return { summary: result[0].generated_text, latency_ms: performance.now() - t0,
-                 device_used: _gpuDevice };
+        const t0 = performance.now();
+        let summary;
+        if (_summariserTask === "text-generation") {
+            // Qwen2.5-Instruct: chat template — returns array of messages
+            const messages = [
+                { role: "system", content: "You are a concise summarizer. Respond only with the summary." },
+                { role: "user",   content: `Summarize the following in 2-3 sentences:\n\n${text.substring(0, 1500)}` },
+            ];
+            const result = await _summariser(messages, {
+                max_new_tokens:     100,
+                do_sample:          false,
+                repetition_penalty: 1.1,
+            });
+            const generated = result[0].generated_text;
+            summary = Array.isArray(generated)
+                ? (generated.at(-1)?.content ?? "")
+                : generated;
+        } else {
+            // FLAN-T5-small fallback: text2text-generation
+            const prompt = `Summarize the following passage in 2-3 sentences: ${text.substring(0, 1500)}`;
+            const result = await _summariser(prompt, {
+                max_new_tokens:       80,
+                min_length:           20,
+                num_beams:            2,
+                repetition_penalty:   3.0,
+                no_repeat_ngram_size: 4,
+                early_stopping:       true,
+            });
+            summary = result[0].generated_text;
+        }
+        return { summary, latency_ms: performance.now() - t0, device_used: _gpuDevice };
     } finally { release(); }
 };
 
@@ -364,7 +413,7 @@ class BrowserSyncExecutor(SyncExecutor):
 class BrowserObserver:
     """Bridges workflow events to JS via Pyodide FFI."""
 
-    async def on_step_executed(self, wf_id, step_name, step_index, status, result, state):
+    async def on_step_executed(self, wf_id, step_name, step_index, status, result, state, duration_ms=None):
         try:
             from js import notifyStepDone
             notifyStepDone(step_name, json.dumps(result or {}))
@@ -1039,11 +1088,11 @@ async function init() {
     // when no wheel is found at the same origin (bare two-file share scenario).
     try {
         const probe = await fetch(
-            `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`,
+            `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`,
             { method: "HEAD" }
         );
         if (probe.ok) {
-            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`;
         }
     } catch (_) {
         // network error or CORS block → leave _wheelUrl as null → TestPyPI path
@@ -1083,7 +1132,7 @@ else:
         keep_going=True,
     )
     await micropip.install(
-        "rufus-sdk==0.8.0",
+        "rufus-sdk==1.0.0rc1",
         index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
         keep_going=True,
     )

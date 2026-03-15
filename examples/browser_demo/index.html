@@ -834,7 +834,7 @@
 
         <div class="model-overlay" id="model-overlay-wf4">
           <span class="spinner"></span>
-          Downloading T5-small weights (~90 MB) — cached after first run…
+          <span id="summariser-overlay-text">Downloading Qwen2.5-0.5B weights (~350 MB, q4) — cached after first run…</span>
         </div>
 
         <p style="font-size:12px;color:var(--muted)">
@@ -1083,21 +1083,38 @@ function handleWorkerMessage(e) {
 
     case "summariser_loading": {
       document.getElementById("model-overlay-wf4").classList.add("visible");
+      const sotEl = document.getElementById("summariser-overlay-text");
+      if (sotEl) sotEl.textContent = "Downloading Qwen2.5-0.5B weights (~350 MB, q4) — cached after first run…";
       document.getElementById("badge-summariser").style.display = "";
-      log("Downloading Xenova/flan-t5-small (~80 MB, first run only)…", "model");
-      setBadge("badge-summariser", "wasm", "FLAN-T5: downloading…");
+      log("Downloading onnx-community/Qwen2.5-0.5B-Instruct (~350 MB, first run only)…", "model");
+      setBadge("badge-summariser", "wasm", "Qwen2.5: downloading…");
       const bsc = document.getElementById("badge-summariser-card");
       if (bsc) bsc.textContent = "downloading…";
       break;
     }
+    case "summariser_progress": {
+      const pct = msg.progress;
+      const sotProg = document.getElementById("summariser-overlay-text");
+      if (sotProg) sotProg.textContent = `Downloading Qwen2.5-0.5B… ${pct}% — cached after first run`;
+      setBadge("badge-summariser", "wasm", `Qwen2.5: ${pct}%`);
+      break;
+    }
+    case "summariser_fallback": {
+      const sotFb = document.getElementById("summariser-overlay-text");
+      if (sotFb) sotFb.textContent = "Qwen2.5 unavailable — loading FLAN-T5-small fallback (~90 MB)…";
+      log(`Qwen2.5 load failed (${msg.reason}) — falling back to FLAN-T5-small`, "warn");
+      setBadge("badge-summariser", "wasm", "FLAN-T5: loading…");
+      break;
+    }
     case "summariser_ready": {
       document.getElementById("model-overlay-wf4").classList.remove("visible");
-      log(`FLAN-T5-small ready on ${msg.device}`, "gpu");
+      const modelName = msg.model ?? "summariser";
+      log(`${modelName} ready on ${msg.device}`, "gpu");
       setBadge("badge-summariser",
                msg.device === "webgpu" ? "gpu" : "wasm",
-               msg.device === "webgpu" ? "FLAN-T5: WebGPU ✓" : "FLAN-T5: WASM");
+               msg.device === "webgpu" ? `${modelName}: WebGPU ✓` : `${modelName}: CPU`);
       const bsc2 = document.getElementById("badge-summariser-card");
-      if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "WASM fallback";
+      if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "CPU";
       break;
     }
   }

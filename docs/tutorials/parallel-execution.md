@@ -373,18 +373,11 @@ async def main():
 
     # Create workflow builder with thread pool executor
     print("\n⚙️  Initializing with ThreadPoolExecutor (parallel execution)...")
+    persistence = InMemoryPersistenceProvider()
     builder = WorkflowBuilder(
-        registry_path=None,
-        persistence_provider=InMemoryPersistenceProvider(),
-        execution_provider=ThreadPoolExecutionProvider(max_workers=5),
-        observer=LoggingObserver(),
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
-
-    # Load workflow
-    workflow_path = Path(__file__).parent / "config" / "workflow.yaml"
-    builder.load_workflow_config("OrderProcessing", str(workflow_path))
     print("✓ Workflow loaded\n")
 
     # Create order
@@ -402,9 +395,15 @@ async def main():
         "total_amount": 209.97
     }
 
-    workflow = builder.create_workflow(
-        "OrderProcessing",
-        initial_data=initial_data
+    workflow = await builder.create_workflow(
+        workflow_type="OrderProcessing",
+        persistence_provider=persistence,
+        execution_provider=ThreadPoolExecutionProvider(max_workers=5),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
+        expression_evaluator_cls=SimpleExpressionEvaluator,
+        template_engine_cls=Jinja2TemplateEngine,
+        initial_data=initial_data,
     )
 
     # Measure execution time

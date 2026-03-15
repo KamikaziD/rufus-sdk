@@ -429,8 +429,8 @@ def test_v1_workflow_completes_after_v2_deploy():
     workflow = builder_v1.create_workflow("OrderProcessing", data)
 
     # Pause workflow
-    workflow.execute_next_step()  # Validate_Order
-    workflow.execute_next_step()  # Human_Approval (pauses)
+    workflow.next_step(user_input={})  # Validate_Order
+    workflow.next_step(user_input={})  # Human_Approval (pauses)
 
     # Deploy v2 YAML (removes Human_Approval)
     builder_v2 = WorkflowBuilder(config_dir="config/v2/")

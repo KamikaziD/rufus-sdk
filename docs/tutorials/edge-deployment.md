@@ -527,14 +527,18 @@ async def initialize_edge_database(db_path: str):
     return persistence
 
 
-async def process_payment(builder: WorkflowBuilder, sync_manager: SyncManager, transaction_data: dict):
+async def process_payment(builder: WorkflowBuilder, persistence, sync_manager: SyncManager, transaction_data: dict):
     """
     Process a payment transaction
     """
     # Create workflow
-    workflow = builder.create_workflow(
-        "EdgePayment",
-        initial_data=transaction_data
+    workflow = await builder.create_workflow(
+        workflow_type="EdgePayment",
+        persistence_provider=persistence,
+        execution_provider=SyncExecutor(),
+        workflow_observer=LoggingObserver(),
+        workflow_builder=builder,
+        initial_data=transaction_data,
     )
 
     print(f"\n{'='*70}")
@@ -568,17 +572,9 @@ async def main():
     # Create workflow builder
     print("\n⚙️  Initializing workflow engine...")
     builder = WorkflowBuilder(
-        registry_path=None,
-        persistence_provider=persistence,
-        execution_provider=SyncExecutionProvider(),
-        observer=LoggingObserver(),
         expression_evaluator_cls=SimpleExpressionEvaluator,
         template_engine_cls=Jinja2TemplateEngine,
     )
-
-    # Load workflow
-    workflow_path = Path(__file__).parent / "config" / "payment_workflow.yaml"
-    builder.load_workflow_config("EdgePayment", str(workflow_path))
     print("✓ Edge workflow loaded")
 
     # Create sync manager
@@ -625,7 +621,7 @@ async def main():
     # Process each transaction
     workflows = []
     for txn_data in transactions:
-        workflow = await process_payment(builder, sync_manager, txn_data)
+        workflow = await process_payment(builder, persistence, sync_manager, txn_data)
         workflows.append(workflow)
 
         # Small delay between transactions
