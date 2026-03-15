@@ -66,7 +66,7 @@ async function _loadModel(which) {
     if (which === "extractor") {
         self.postMessage({ type: "model_loading" });
         _extractor = await _pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2",
-                                     { device: _gpuDevice });
+                                     { device: _gpuDevice, dtype: "fp16" });
         _activeModel = "extractor";
         self.postMessage({ type: "model_ready", device: _gpuDevice });
     } else if (which === "summariser") {
@@ -164,46 +164,36 @@ globalThis.notifyGpuFallback = () => {
 // GGUF shards (llama-gguf-split --split-max-size 120M bitnet-2b.gguf shard).
 // wllama is loaded on first call and cached for subsequent runs.
 
-// Model configs — swap placeholder URLs for real CDN-hosted split-GGUF shards.
-// Produce shards with: llama-gguf-split --split-max-size 120M model.gguf shard
-// Then host them with CORS headers (HuggingFace resolve/main/ URLs work out of
-// the box).  Shard count = ceil(model_size / 120 MB).
-//
-// Q2_K  ≈ 600 MB  →  5 shards  ·  peak RAM ~180 MB  ·  fastest
-// Q3_K_S ≈ 750 MB  →  7 shards  ·  peak RAM ~260 MB  ·  higher quality
+// Real wllama-compatible models hosted on HuggingFace (CORS enabled natively).
+// wllama's built-in IndexedDB/OPFS cache handles persistence — no manual shard
+// fetching required.  To add BitNet later: split the 2.3 GB i2_s GGUF into
+// ~19 × 120 MB shards, host with CORS, add an entry with urls: [...shardUrls].
 const MODEL_CONFIGS = {
-    "Q2_K": {
-        label: "Q2_K (600 MB · ~180 MB RAM)",
-        shardSizeMb: 120,
-        // Replace with your real shard URLs (5 shards for a ~600 MB Q2_K model)
-        shards: [
-            "shard-q2k-00001-of-00005.gguf",
-            "shard-q2k-00002-of-00005.gguf",
-            "shard-q2k-00003-of-00005.gguf",
-            "shard-q2k-00004-of-00005.gguf",
-            "shard-q2k-00005-of-00005.gguf",
+    "SmolLM2-135M": {
+        label: "SmolLM2-135M (88 MB · fits everywhere · fast)",
+        urls: [
+            "https://huggingface.co/QuantFactory/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct.Q4_K_M.gguf"
         ],
+        ramMb: 120,    // model + KV cache headroom
     },
-    "Q3_K_S": {
-        label: "Q3_K_S (750 MB · ~260 MB RAM)",
-        shardSizeMb: 120,
-        // Replace with your real shard URLs (7 shards for a ~750 MB Q3_K_S model)
-        shards: [
-            "shard-q3ks-00001-of-00007.gguf",
-            "shard-q3ks-00002-of-00007.gguf",
-            "shard-q3ks-00003-of-00007.gguf",
-            "shard-q3ks-00004-of-00007.gguf",
-            "shard-q3ks-00005-of-00007.gguf",
-            "shard-q3ks-00006-of-00007.gguf",
-            "shard-q3ks-00007-of-00007.gguf",
+    "Qwen2.5-0.5B": {
+        label: "Qwen2.5-0.5B (395 MB · Chrome/Edge · better quality)",
+        urls: [
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
         ],
+        ramMb: 450,
     },
 };
 
-let _pagedModel = "Q2_K";   // default; changed by { type: "set_model", model: "Q3_K_S" }
+let _pagedModel = "SmolLM2-135M";   // default; changed by { type: "set_model", model: "Qwen2.5-0.5B" }
 
 // wllama CDN — loaded dynamically on first inference call
-const WLLAMA_CDN = "https://cdn.jsdelivr.net/npm/wllama@2/esm/wllama.js";
+const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/wllama@2/esm/wllama.js";
+const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/wllama@2/esm/";
+const WLLAMA_PATHS = {
+    "single-thread/wllama.wasm": WLLAMA_BASE + "single-thread/wllama.wasm",
+    "multi-thread/wllama.wasm":  WLLAMA_BASE + "multi-thread/wllama.wasm",
+};
 let _wllama = null;
 let _wllamaClass = null;
 
@@ -281,9 +271,6 @@ class ShardScheduler {
     }
 }
 
-// Scheduler is recreated when _pagedModel changes (via set_model message).
-let _shardScheduler = new ShardScheduler(MODEL_CONFIGS[_pagedModel].shards, 2, 1);
-
 /**
  * Lightweight complexity classifier — called from Python `assess_complexity` step.
  * Returns 0.0–1.0 complexity score.  0.0 = trivial (fast path); 1.0 = complex (full inference).
@@ -313,21 +300,17 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
         const complexity = await globalThis.classifyComplexity(prompt);
         const cfg = MODEL_CONFIGS[_pagedModel];
 
-        // Logic gate: use shard-0 only when prompt is simple
+        // Logic gate: fast path uses first URL only; full inference uses all URLs
         const useFastPath = complexity < threshold;
-        const shardIndices = useFastPath ? [0] : cfg.shards.map((_, i) => i);
+        const urlsToLoad = useFastPath ? [cfg.urls[0]] : cfg.urls;
 
         self.postMessage({
             type: "paged_shard_status",
             model: _pagedModel,
-            shardsTotal: cfg.shards.length,
-            shardsLoading: shardIndices.length,
+            ramMb: cfg.ramMb,
             fastPath: useFastPath,
+            urls: urlsToLoad,
         });
-
-        // Fetch active shard window (OPFS-backed)
-        const shardBuffers = await _shardScheduler.getWindow(0, shardIndices);
-        const loadedShards = shardBuffers.filter(Boolean).length;
 
         // Load wllama on first call
         if (!_wllamaClass) {
@@ -342,11 +325,19 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
         const t0 = performance.now();
         let text = "";
 
-        if (_wllamaClass && loadedShards > 0) {
-            // Real wllama inference path (requires actual GGUF shard files)
-            if (!_wllama) _wllama = new _wllamaClass({});
-            const blobs = shardBuffers.filter(Boolean).map(buf => new Blob([buf]));
-            await _wllama.loadModelFromBlob(blobs.length === 1 ? blobs[0] : blobs);
+        if (_wllamaClass) {
+            // Real wllama inference path — wllama's own cache handles persistence
+            if (!_wllama) _wllama = new _wllamaClass(WLLAMA_PATHS);
+            await _wllama.loadModelFromUrl(urlsToLoad.length === 1 ? urlsToLoad[0] : urlsToLoad, {
+                useCache: true,
+                progressCallback: ({ loaded, total }) => {
+                    self.postMessage({
+                        type: "paged_download_progress",
+                        loaded, total,
+                        model: _pagedModel,
+                    });
+                },
+            });
             await _wllama.createCompletion(prompt, {
                 nPredict: maxTokens,
                 onNewToken: (_, piece) => {
@@ -355,14 +346,12 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
                 },
             });
         } else {
-            // Simulation fallback — placeholder shards can't run real inference
-            const pathLabel = useFastPath ? "fast path (shard-0 only)" : "full inference";
+            // Simulation fallback — wllama CDN could not be loaded
             text = useFastPath
-                ? `[Demo] Simple query resolved via ${pathLabel}. `
-                  + `In production, ${_pagedModel} shard-0 (~120 MB) answers common lookups in ~1.5s.`
-                : `[Demo] Complex reasoning via ${pathLabel}. `
-                  + `In production, ${cfg.shards.length} × 120 MB ${_pagedModel} shards are loaded `
-                  + `from OPFS into a rolling 2-shard window, yielding full root-cause analysis.`;
+                ? `[Demo: no model loaded] ${_pagedModel} shard-0 fast path — ` +
+                  `update WLLAMA_PATHS and MODEL_CONFIGS to load a real GGUF.`
+                : `[Demo: no model loaded] ${_pagedModel} full inference — ` +
+                  `update WLLAMA_PATHS and MODEL_CONFIGS to load a real GGUF.`;
             // Simulate streaming tokens
             for (const word of text.split(" ")) {
                 self.postMessage({ type: "paged_token", piece: word + " " });
@@ -373,7 +362,7 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
         return {
             text: text.trim(),
             tokens_generated: text.trim().split(/\s+/).filter(Boolean).length,
-            shards_loaded: loadedShards || shardIndices.length,
+            shards_loaded: urlsToLoad.length,
             latency_ms,
             complexity_score: complexity,
         };
@@ -400,9 +389,9 @@ globalThis.runSummarisation = async (text) => {
             ];
             const s = _currentModelSettings;
             const genOpts = {
-                max_new_tokens:     s.max_new_tokens     ?? 200,
+                max_new_tokens:     s.max_new_tokens     ?? 350,
                 do_sample:          s.do_sample          ?? false,
-                repetition_penalty: s.repetition_penalty ?? 1.3,
+                repetition_penalty: s.repetition_penalty ?? 1.1,
             };
             if (genOpts.do_sample) genOpts.temperature = s.temperature ?? 0.7;
             const result = await _summariser(messages, genOpts);
@@ -1840,10 +1829,8 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "history_cleared" });
 
     } else if (type === "set_model") {
-        // Switch active BitNet quantisation level.
-        // Evicts the loaded wllama instance so next inference reloads with the
-        // new shard set.  OPFS cache is NOT cleared — previously fetched shards
-        // of the old model remain cached and can be reused if the user switches back.
+        // Switch active model. Evicts the loaded wllama instance so next
+        // inference reloads with the new model URL (wllama cache is preserved).
         const { model } = e.data;
         if (!MODEL_CONFIGS[model]) {
             self.postMessage({ type: "model_switch_error",
@@ -1851,7 +1838,6 @@ self.onmessage = async (e) => {
             return;
         }
         _pagedModel = model;
-        _shardScheduler = new ShardScheduler(MODEL_CONFIGS[model].shards, 2, 1);
         if (_wllama) {
             try { await _wllama.exit(); } catch (_) {}
             _wllama = null;

@@ -904,22 +904,22 @@
           <textarea
             id="text-input-wf4"
             class="wf4-textarea"
-            placeholder="Paste your own text here (up to 250 words) — or leave blank to use a random demo document…"
+            placeholder="Paste your own text here (up to 500 words) — or leave blank to use a random demo document…"
             rows="4"
             spellcheck="false"
             oninput="onWf4Input(this)"
           ></textarea>
-          <div class="wf4-wordcount"><span id="wf4-wordcount">0</span> / 250 words</div>
+          <div class="wf4-wordcount"><span id="wf4-wordcount">0</span> / 500 words</div>
         </div>
 
         <details class="model-settings" id="wf4-settings">
           <summary>Model settings</summary>
           <div class="model-settings-grid">
             <label>Max tokens
-              <input type="number" id="wf4-max-tokens" value="200" min="50" max="800" step="10">
+              <input type="number" id="wf4-max-tokens" value="350" min="50" max="800" step="10">
             </label>
             <label>Rep. penalty
-              <input type="number" id="wf4-rep-penalty" value="1.3" min="1.0" max="2.0" step="0.05">
+              <input type="number" id="wf4-rep-penalty" value="1.1" min="1.0" max="2.0" step="0.05">
             </label>
             <label>Sampling
               <input type="checkbox" id="wf4-do-sample">
@@ -1028,8 +1028,8 @@
       <div class="card-header">
         <div class="card-icon" style="background:#0a1a0a">🧠</div>
         <div class="card-meta">
-          <h3>Paged Reasoning <span style="color:var(--muted);font-weight:400;font-size:12px">(BitNet b1.58 2B)</span></h3>
-          <p>Shard-paged GGUF · OPFS cache · Logic-gate fast path · &lt;300 MB peak RAM</p>
+          <h3>Paged Reasoning <span style="color:var(--muted);font-weight:400;font-size:12px">(wllama GGUF)</span></h3>
+          <p>Q4_K_M GGUF via wllama · OPFS cache · Logic-gate fast path · real LLM output</p>
         </div>
       </div>
       <div class="card-body">
@@ -1059,20 +1059,20 @@
 
         <!-- Model selector -->
         <div style="margin:10px 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--muted);white-space:nowrap">Quantisation:</span>
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">Model:</span>
           <div style="display:flex;gap:4px" id="wf6-model-selector">
-            <button class="wf6-quant-btn active" data-model="Q2_K"
-                    onclick="selectQuantModel('Q2_K')"
-                    title="~600 MB · ~180 MB peak RAM · fastest">
-              Q2_K
+            <button class="wf6-quant-btn active" data-model="SmolLM2-135M"
+                    onclick="selectQuantModel('SmolLM2-135M')"
+                    title="88 MB · Q4_K_M · fits Safari · fast">
+              SmolLM2-135M
             </button>
-            <button class="wf6-quant-btn" data-model="Q3_K_S"
-                    onclick="selectQuantModel('Q3_K_S')"
-                    title="~750 MB · ~260 MB peak RAM · higher quality">
-              Q3_K_S
+            <button class="wf6-quant-btn" data-model="Qwen2.5-0.5B"
+                    onclick="selectQuantModel('Qwen2.5-0.5B')"
+                    title="395 MB · Q4_K_M · Chrome/Edge · better quality">
+              Qwen2.5-0.5B
             </button>
           </div>
-          <span id="wf6-model-meta" style="font-size:11px;color:var(--cyan)">600 MB · ~180 MB RAM</span>
+          <span id="wf6-model-meta" style="font-size:11px;color:var(--cyan)">88 MB Q4_K_M · works everywhere · fast</span>
         </div>
 
         <div class="wf4-input-wrap">
@@ -1098,9 +1098,9 @@
         </div>
 
         <p style="font-size:12px;color:var(--muted);margin-top:8px">
-          A complexity classifier routes simple queries to shard-0 only (~140 MB, ~1.5s).
-          Complex prompts load all shards via a 2-shard rolling window from OPFS (~260 MB).
-          Production deployment replaces placeholder URLs with real BitNet split-GGUF shards.
+          A complexity classifier routes simple queries to the fast path (first URL only).
+          Complex prompts trigger full inference. SmolLM2-135M (88 MB) fits everywhere including
+          Safari. Qwen2.5-0.5B (395 MB) gives higher quality on Chrome/Edge desktop.
         </p>
       </div>
       <div class="result-panel" id="result-wf6">
@@ -1414,16 +1414,15 @@ function handleWorkerMessage(e) {
     }
 
     case "paged_shard_status": {
-      const { model, shardsTotal, shardsLoading, fastPath } = msg;
-      const memMb = shardsLoading * 120;
-      const pct = Math.min(100, (memMb / 300) * 100);
+      const { model, ramMb, fastPath, urls } = msg;
+      const pct = Math.min(100, (ramMb / 300) * 100);
       const bar = document.getElementById("wf6-ram-bar");
       const label = document.getElementById("wf6-ram-label");
       if (bar) {
         bar.style.width = pct + "%";
         bar.style.background = pct > 80 ? "var(--orange)" : "var(--green)";
       }
-      if (label) label.textContent = `~${memMb} MB`;
+      if (label) label.textContent = `~${ramMb} MB`;
       const wrap = document.getElementById("wf6-stream-wrap");
       const meta = document.getElementById("wf6-stream-meta");
       const streamEl = document.getElementById("wf6-stream-text");
@@ -1431,9 +1430,21 @@ function handleWorkerMessage(e) {
       if (streamEl) streamEl.textContent = "";
       const modelTag = model ? `${model} · ` : "";
       if (meta) meta.textContent = fastPath
-        ? `(${modelTag}fast path · shard-0 only · ${shardsLoading}/${shardsTotal} shards)`
-        : `(${modelTag}full inference · ${shardsLoading}/${shardsTotal} shards)`;
-      log(`Paged inference [${model ?? "?"}]: ${shardsLoading}/${shardsTotal} shards · ~${memMb} MB · ${fastPath ? "fast path" : "full"}`, "info");
+        ? `(${modelTag}fast path · single file · ~${ramMb} MB)`
+        : `(${modelTag}full inference · ${(urls || []).length} URL(s) · ~${ramMb} MB)`;
+      log(`Paged inference [${model ?? "?"}]: ~${ramMb} MB · ${fastPath ? "fast path" : "full inference"}`, "info");
+      break;
+    }
+
+    case "paged_download_progress": {
+      const { loaded, total, model } = msg;
+      const pct = total ? Math.round((loaded / total) * 100) : 0;
+      const bar = document.getElementById("wf6-ram-bar");
+      const label = document.getElementById("wf6-ram-label");
+      if (bar) bar.style.width = pct + "%";
+      if (label) label.textContent = total
+        ? `Downloading ${model}: ${(loaded/1e6).toFixed(0)}/${(total/1e6).toFixed(0)} MB`
+        : `Downloading ${model}…`;
       break;
     }
 
@@ -1461,8 +1472,8 @@ function handleWorkerMessage(e) {
 // ── W4 textarea word counter ──────────────────────────────────────────────────
 // ── Wf6 model selector ────────────────────────────────────────────────────────
 const WF6_MODEL_META = {
-  "Q2_K":   "600 MB · ~180 MB RAM",
-  "Q3_K_S": "750 MB · ~260 MB RAM",
+  "SmolLM2-135M": "88 MB Q4_K_M · works everywhere · fast",
+  "Qwen2.5-0.5B": "395 MB Q4_K_M · Chrome/Edge · higher quality",
 };
 
 window.selectQuantModel = function(model) {
@@ -1472,7 +1483,7 @@ window.selectQuantModel = function(model) {
   const meta = document.getElementById("wf6-model-meta");
   if (meta) meta.textContent = WF6_MODEL_META[model] ?? "";
   worker.postMessage({ type: "set_model", model });
-  log(`BitNet model switched → ${model}`, "info");
+  log(`Model switched → ${model}`, "info");
 };
 
 window.onWf4Input = function(el) {
@@ -1480,10 +1491,10 @@ window.onWf4Input = function(el) {
   const count = words.length;
   const countEl = document.getElementById("wf4-wordcount");
   countEl.textContent = count;
-  countEl.parentElement.className = "wf4-wordcount" + (count > 250 ? " over" : "");
-  if (count > 250) {
-    el.value = words.slice(0, 250).join(" ");
-    countEl.textContent = 250;
+  countEl.parentElement.className = "wf4-wordcount" + (count > 500 ? " over" : "");
+  if (count > 500) {
+    el.value = words.slice(0, 500).join(" ");
+    countEl.textContent = 500;
     countEl.parentElement.className = "wf4-wordcount";
   }
 };
@@ -1521,8 +1532,8 @@ window.runWorkflow = function(workflowType) {
     })(),  // prompt omitted → Python picks from _PAGED_DEMO_PROMPTS
   };
   const modelSettings = workflowType === "DocumentSummarisation" ? {
-    max_new_tokens:     parseInt(document.getElementById("wf4-max-tokens")?.value  ?? "200"),
-    repetition_penalty: parseFloat(document.getElementById("wf4-rep-penalty")?.value ?? "1.3"),
+    max_new_tokens:     parseInt(document.getElementById("wf4-max-tokens")?.value  ?? "350"),
+    repetition_penalty: parseFloat(document.getElementById("wf4-rep-penalty")?.value ?? "1.1"),
     do_sample:          document.getElementById("wf4-do-sample")?.checked ?? false,
     temperature:        parseFloat(document.getElementById("wf4-temperature")?.value ?? "0.7"),
   } : undefined;
