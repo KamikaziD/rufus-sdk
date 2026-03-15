@@ -21,7 +21,7 @@
  *   - ML model weights (~350 MB Qwen, ~23 MB MiniLM)  → Transformers.js IndexedDB ✓
  */
 
-const VERSION = "2";
+const VERSION = "3";
 const CACHE   = `rufus-demo-sw-v${VERSION}`;
 
 // App shell — fetched at install time so they're available offline immediately.
@@ -35,6 +35,10 @@ const PRECACHE = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
 ];
+
+// Synthetic 204 response for favicon — avoids a 404 network round-trip that
+// can crash the SW when the server's statusText contains non-ISO-8859-1 chars.
+const FAVICON_RESPONSE = new Response(null, { status: 204, statusText: "No Content" });
 
 // ── Install: precache the app shell ──────────────────────────────────────────
 self.addEventListener("install", event => {
@@ -68,6 +72,14 @@ self.addEventListener("fetch", event => {
   if (request.method !== "GET") return;
   if (!isSameOrigin(request.url)) return;  // let browser HTTP cache handle CDN
 
+  // Short-circuit favicon — no icon file exists; return a silent 204 rather
+  // than letting the 404 propagate through (server statusText may contain
+  // non-ISO-8859-1 chars that crash the Response constructor).
+  if (new URL(request.url).pathname === "/favicon.ico") {
+    event.respondWith(Promise.resolve(FAVICON_RESPONSE.clone()));
+    return;
+  }
+
   event.respondWith(
     caches.open(CACHE).then(async cache => {
       // 1. Cache hit → return immediately (works offline)
@@ -80,10 +92,10 @@ self.addEventListener("fetch", event => {
         if (fresh.ok) cache.put(request, fresh.clone());
         return fresh;
       } catch {
-        // Offline and not cached → 503 stub so the worker/page can detect it
+        // Offline and not cached → plain ASCII statusText (ISO-8859-1 required)
         return new Response("offline", {
           status: 503,
-          statusText: "Service Unavailable — not cached",
+          statusText: "Service Unavailable",
           headers: { "Content-Type": "text/plain" },
         });
       }

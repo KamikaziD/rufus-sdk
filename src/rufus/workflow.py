@@ -12,7 +12,8 @@ from rufus.models import (
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
     WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
-    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep, WasmWorkflowStep
+    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep, WasmWorkflowStep,
+    AIInferenceWorkflowStep
 )
 
 
@@ -62,7 +63,8 @@ class Workflow:
                  expression_evaluator_cls: Type['ExpressionEvaluator'] = None, # Use string literal
                  template_engine_cls: Type['TemplateEngine'] = None, # Use string literal
                  workflow_observer: 'WorkflowObserver' = None, # Use string literal
-                 wasm_runtime=None  # Optional WasmRuntime or ComponentStepRuntime; auto-created for WASM steps
+                 wasm_runtime=None,  # Optional WasmRuntime or ComponentStepRuntime; auto-created for WASM steps
+                 inference_provider=None  # Optional InferenceProvider; required for AI_INFERENCE steps
                  ):
         self.id = workflow_id or str(uuid.uuid4())
         self.workflow_steps = workflow_steps or []
@@ -135,6 +137,9 @@ class Workflow:
 
         # Optional WASM runtime — only needed when workflow contains WASM steps
         self.wasm_runtime = wasm_runtime
+
+        # Optional inference provider — only needed when workflow contains AI_INFERENCE steps
+        self.inference_provider = inference_provider
 
     @property
     def current_step_name(self) -> Optional[str]:
@@ -302,6 +307,54 @@ class Workflow:
             step_name=step_name,
             metadata=metadata
         )
+
+    async def _execute_ai_inference_step(self, step: 'AIInferenceWorkflowStep', context: StepContext) -> Dict[str, Any]:
+        """Execute an AI_INFERENCE step using the injected InferenceProvider."""
+        cfg = step.ai_config
+        if self.inference_provider is None:
+            if cfg.fallback_on_error == "skip":
+                return {}
+            if cfg.fallback_on_error == "default" and cfg.default_result:
+                return {cfg.output_key: cfg.default_result}
+            raise RuntimeError(
+                f"InferenceProvider is not configured but step '{step.name}' requires it. "
+                "Pass an inference_provider= when creating the Workflow."
+            )
+
+        # Resolve input from state using dot-notation path
+        # Support both "state.field" and bare "field" paths
+        path = cfg.input_source
+        if path.startswith("state."):
+            path = path[len("state."):]
+        inputs = _resolve_state_path(self.state.model_dump(), path)
+        if inputs is None:
+            inputs = ""
+
+        try:
+            # Load model if not already loaded
+            if not self.inference_provider.is_model_loaded(cfg.model_name):
+                await self.inference_provider.load_model(
+                    path=cfg.model_path,
+                    name=cfg.model_name,
+                    version=cfg.model_version,
+                )
+
+            # Run inference
+            result = await self.inference_provider.run_inference(
+                model_name=cfg.model_name,
+                inputs=inputs,
+            )
+            output = result.outputs if hasattr(result, "outputs") else result
+
+            # Apply postprocessing hint (providers may handle this internally)
+            return {cfg.output_key: output}
+
+        except Exception as e:
+            if cfg.fallback_on_error == "skip":
+                return {}
+            if cfg.fallback_on_error == "default" and cfg.default_result:
+                return {cfg.output_key: cfg.default_result}
+            raise
 
     async def _execute_loop_step(self, step: LoopStep, state: BaseModel, context: StepContext) -> Dict[str, Any]:
         """Execute a LOOP step in either ITERATE or WHILE mode."""
@@ -692,7 +745,7 @@ class Workflow:
             _step_start: Optional[float] = None  # monotonic start for sync steps only
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
                                                  FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
-                                                 WasmWorkflowStep))
+                                                 WasmWorkflowStep, AIInferenceWorkflowStep))
 
             if is_sync_step:
                 _step_start = time.monotonic()
@@ -841,6 +894,12 @@ class Workflow:
                 # ComponentStepRuntime auto-detects Component Model vs legacy core modules.
                 result = await self.wasm_runtime.execute(step.wasm_config, self.state.model_dump())
                 if isinstance(result, dict):
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, AIInferenceWorkflowStep):
+                result = await self._execute_ai_inference_step(step, context)
+                if isinstance(result, dict) and result:
                     self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
                     await self.persistence.save_workflow(self.id, self.to_dict())
 

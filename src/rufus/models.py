@@ -164,6 +164,42 @@ class AIInferenceConfig(BaseModel):
         description="Maximum inference time in milliseconds"
     )
 
+    # Paged inference (shard-level paging for memory-constrained edge/browser)
+    paging_strategy: str = Field(
+        "none",
+        description="Paging strategy: 'none' (disabled), 'shard' (file-level), 'layer' (future)"
+    )
+    max_resident_shards: int = Field(
+        2,
+        ge=1,
+        description="Maximum number of GGUF shards resident in WASM/memory simultaneously"
+    )
+    prefetch_shards: int = Field(
+        1,
+        ge=0,
+        description="Number of shards to prefetch ahead of the active window"
+    )
+    shard_urls: Optional[List[str]] = Field(
+        None,
+        description="Explicit shard URLs for browser paging (required when paging_strategy='shard')"
+    )
+    shard_size_mb: int = Field(
+        120,
+        ge=10,
+        description="Target shard split size in MB (used when splitting model locally)"
+    )
+    logic_gate_threshold: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Complexity threshold below which only shard-0 is loaded (fast path). 0.0 = disabled."
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Maximum tokens to generate for generative steps"
+    )
+
     model_config = {"extra": "forbid", 'protected_namespaces': ()}
     # Allow model_ prefix for ML model fields
 

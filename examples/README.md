@@ -14,6 +14,7 @@ Complete working examples demonstrating Rufus workflows across different industr
 6. **[Industrial IoT](industrial_iot/)** ⭐⭐⭐ - Manufacturing automation (Advanced)
 7. **[Edge Deployment](edge_deployment/)** ⭐⭐⭐⭐ - Production edge setup (Expert)
 8. **[Celery Workflows](celery_workflows/)** ⭐⭐⭐⭐ - Distributed execution (Expert)
+9. **[Browser Demo](browser_demo/)** ⭐⭐⭐⭐ - In-browser Pyodide + WebGPU (Expert)
 
 ---
 
@@ -242,6 +243,34 @@ docker compose up --scale celery-worker=5
 
 ---
 
+#### [Browser Demo](browser_demo/)
+**Time:** 30 minutes to explore, 2+ hours to extend
+**What You'll Learn:**
+- Running Rufus workflows entirely in-browser via Pyodide
+- WebGPU-accelerated ML inference with Transformers.js
+- Shard-paged LLM inference for memory-constrained environments
+- Service Worker offline caching and PWA installation
+
+**Features Demonstrated:**
+- Pyodide runtime with InMemoryPersistenceProvider + BrowserSyncExecutor
+- 6 demo workflows: OrderFulfillment, IoTSensorPipeline, TransactionRiskScoring, DocumentSummarisation, FieldTechTriage (air-gapped NER + AI dispatch), PagedReasoning (BitNet shard paging)
+- Transformers.js WebGPU pipeline with WASM fallback
+- OPFS shard cache with double-buffer prefetch
+- Q2_K / Q3_K_S quantisation selector; logic-gate fast path (shard-0 only, ~1.5s)
+- Service Worker offline support (sw.js v3)
+
+**No install required — runs entirely in the browser:**
+```bash
+# Serve from repo root (worker.js fetches the wheel from /dist/)
+python -m http.server 8080
+# Open: http://localhost:8080/examples/browser_demo/
+```
+
+**Industry:** Cross-sector (field tech, IoT, fintech, logistics)
+**Use Case:** Air-gapped device with full ML inference and workflow orchestration in the browser
+
+---
+
 ## Examples by Feature
 
 ### Workflow Patterns
@@ -257,6 +286,8 @@ docker compose up --scale celery-worker=5
 | **FIRE_AND_FORGET** | Healthcare Wearable (alerts) |
 | **CRON_SCHEDULE** | Industrial IoT (periodic checks) |
 | **Human-in-the-Loop** | Loan Application (manual approval) |
+| **AI_INFERENCE** | Browser Demo (Paged Reasoning, FieldTechTriage) |
+| **WASM** | Browser Demo (Pyodide runtime) |
 
 ### Architectural Patterns
 
@@ -266,7 +297,7 @@ docker compose up --scale celery-worker=5
 | **Store-and-Forward** | Payment Terminal, Edge Deployment |
 | **Sub-Workflows** | Loan Application (KYC child) |
 | **Parallel Execution** | Loan Application, Industrial IoT |
-| **Offline-First** | Payment Terminal, Edge Deployment |
+| **Offline-First** | Payment Terminal, Edge Deployment, Browser Demo (SW + OPFS) |
 
 ### Infrastructure
 
@@ -291,6 +322,10 @@ docker compose up --scale celery-worker=5
 
 ### Manufacturing
 - **[Industrial IoT](industrial_iot/)** - Equipment monitoring
+
+### Field Operations / Industrial
+- **[Browser Demo — FieldTechTriage](browser_demo/)** - Air-gapped NER + AI triage in-browser
+- **[Browser Demo — PagedReasoning](browser_demo/)** - LLM paging for memory-constrained devices
 
 ### General Purpose
 - **[SQLite Task Manager](sqlite_task_manager/)** - Task management app

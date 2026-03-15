@@ -51,24 +51,24 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:0.8.0
+    image: ruhfuskdev/rufus-server:1.0.0rc2
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:0.8.0
+    image: ruhfuskdev/rufus-worker:1.0.0rc2
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:0.8.0
+    image: ruhfuskdev/rufus-flower:1.0.0rc2
     ports: ["5555:5555"]
 
   rufus-dashboard:
-    image: ruhfuskdev/rufus-dashboard:0.8.0
+    image: ruhfuskdev/rufus-dashboard:1.0.0rc2
     ports: ["3000:3000"]
     environment:
       NEXTAUTH_URL: http://localhost:3000
@@ -96,7 +96,7 @@ API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs` · 
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.8.0
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc2
 ```
 
 ```python
@@ -131,6 +131,9 @@ Or run a complete example:
 python examples/payment_terminal/terminal_simulator.py
 python examples/loan_application/run_loan_workflow.py
 python examples/healthcare_wearable/device_simulator.py
+
+# Browser demo (no Python install needed — runs entirely in-browser)
+python -m http.server 8080   # then open http://localhost:8080/examples/browser_demo/
 ```
 
 ---
@@ -180,7 +183,7 @@ CLOUD                               EDGE (SQLite)
 | `FIRE_AND_FORGET` | Non-blocking async for notifications/audit |
 | `CRON_SCHEDULE` | Scheduled recurring execution |
 | `HUMAN_IN_LOOP` | Pause workflow for manual approval |
-| `AI_INFERENCE` | On-device ML inference via TFLite or ONNX |
+| `AI_INFERENCE` | On-device ML inference — TFLite, ONNX, or shard-paged LLM via `PagedInferenceRuntime` |
 | `WASM` | Execute a WebAssembly binary — WASI stdin/stdout (core) or Component Model typed interface (v0.8.0) |
 
 ### Provider Pattern
@@ -270,7 +273,12 @@ See [Dashboard Guide](docs/how-to-guides/dashboard.md) for deploy instructions, 
 ### Polyglot Execution
 - **HTTP steps** — orchestrate services written in Go, Rust, Node.js, or any language via REST
 - **WASM steps** — run pre-compiled WebAssembly binaries via WASI stdin/stdout or the Component Model typed interface; runs natively, in-browser (Pyodide), or as a compiled WASI 0.3 target (requires `wasmtime>=15.0`)
-- **AI_INFERENCE steps** — on-device ML inference via TFLite or ONNX without a network call
+- **AI_INFERENCE steps** — on-device ML inference via TFLite, ONNX, or `PagedInferenceRuntime` (shard-paged LLM for browser + edge devices with <300 MB RAM budget)
+
+### Browser PWA — Pyodide + WebGPU
+- **Live demo** (`examples/browser_demo/`) — 6 demo workflows running in-browser via Pyodide + Transformers.js (WebGPU); no server required; installable as a PWA
+- `python -m http.server 8080` from repo root → `http://localhost:8080/examples/browser_demo/`
+- Workflow 6: Paged Reasoning — Q2_K / Q3_K_S model selector, logic-gate fast path (shard-0 only, ~1.5s), full paged inference (rolling 2-shard OPFS window, ~260 MB peak), live token streaming
 
 ### Performance
 - uvloop — 2–4× faster async I/O
@@ -408,7 +416,7 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 
 ### Appendices
 
-- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v0.8.0 + [Unreleased]
+- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v1.0.0rc2
 - [Roadmap](docs/appendices/roadmap.md)
 - [Migration Notes](docs/appendices/migration-notes.md)
 - [Glossary](docs/appendices/glossary.md)
@@ -469,21 +477,22 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:0.8.0` · `ruhfuskdev/rufus-worker:0.8.0` · `ruhfuskdev/rufus-flower:0.8.0` · `ruhfuskdev/rufus-dashboard:0.8.0`
+**Docker Hub:** `ruhfuskdev/rufus-server:1.0.0rc2` · `ruhfuskdev/rufus-worker:1.0.0rc2` · `ruhfuskdev/rufus-flower:1.0.0rc2` · `ruhfuskdev/rufus-dashboard:1.0.0rc2`
 
 > Dashboard auth requires Keycloak (included in `docker/docker-compose.keycloak.yml`) or any OIDC provider configured via `KEYCLOAK_ISSUER`, `KEYCLOAK_ID`, and `KEYCLOAK_SECRET`.
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==0.8.0
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc2
 
 # Optional extras
-pip install 'rufus-sdk[wasm]'                  # WASM steps (core module, wasmtime>=15.0)
+pip install 'rufus-sdk[wasm]'                  # WASM steps (wasmtime>=15.0)
+pip install 'rufus-sdk[otel]'                  # OpenTelemetry tracing (OtelObserver)
 pip install 'rufus-sdk-edge[browser]'          # Browser target (Pyodide + wa-sqlite)
 pip install 'rufus-sdk-edge[wasi]'             # WASI 0.3 compiled target
 ```
 
 ---
 
-**Current Version:** v0.8.0
+**Current Version:** v1.0.0rc2
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

@@ -2599,3 +2599,114 @@ wasmtime \
 pip install 'rufus-sdk-edge[wasi]'    # zero extra deps
 pip install 'rufus-sdk-edge[native-wasm]'  # adds wasmtime for CM on native Python
 ```
+
+---
+
+## §21 Paged Inference Runtime
+
+Running a 2B-parameter generative LLM on a memory-constrained browser or edge device requires keeping only a **rolling window of model shards** resident in memory. This section documents the shard-paged architecture in Rufus SDK.
+
+### Why Shard Paging?
+
+| Platform | WASM limit | Naive model footprint | With paging |
+|---|---|---|---|
+| Chrome/Edge desktop | ~4 GB | ~1.2 GB (ok) | ~360 MB (3 × 120 MB window) |
+| **Safari/iOS** | **~300 MB** | **1.2 GB → OOM** | **~260 MB (2 shards)** |
+| Edge device 512 MB RAM | N/A (native) | 1.2 GB → OOM | ~200 MB (llama.cpp mmap) |
+| Edge device 256 MB RAM | N/A (native) | OOM | ~140 MB (shard-0 fast path) |
+
+True layer-by-layer WASM streaming does not exist yet. The pragmatic approach implemented here is **shard-level paging** (file chunks via wllama's split-GGUF support) combined with an OPFS shard cache and a JS-side prefetch controller.
+
+### GGUF Shard Preparation
+
+Split a GGUF model into 120 MB shards using llama.cpp:
+
+```bash
+# Install llama.cpp tools
+pip install llama-cpp-python   # or build from source
+
+# Split BitNet 2B model into 120 MB shards
+llama-gguf-split --split-max-size 120M bitnet-b1.58-2B-3T-Q4_K_M.gguf shard
+# Produces: shard-00001-of-00010.gguf, shard-00002-of-00010.gguf, …
+
+# Serve shards locally with CORS headers (required — plain http.server lacks CORS)
+# Save as cors_server.py and run from the directory containing your shards:
+# python cors_server.py
+#
+# from http.server import HTTPServer, SimpleHTTPRequestHandler
+# class CORSHandler(SimpleHTTPRequestHandler):
+#     def end_headers(self):
+#         self.send_header("Access-Control-Allow-Origin", "*")
+#         super().end_headers()
+# HTTPServer(("", 9090), CORSHandler).serve_forever()
+```
+
+Set `shard_urls` in `AIInferenceConfig` to point to the shard files:
+```yaml
+- name: PagedReasoning
+  type: AI_INFERENCE
+  ai_config:
+    model_name: bitnet-2b
+    input_source: state.prompt
+    runtime: custom
+    paging_strategy: shard
+    max_resident_shards: 2
+    prefetch_shards: 1
+    shard_size_mb: 120
+    logic_gate_threshold: 0.4
+    max_tokens: 128
+    shard_urls:
+      - https://cdn.example.com/bitnet/shard-00001-of-00010.gguf
+      - https://cdn.example.com/bitnet/shard-00002-of-00010.gguf
+      # … remaining shards
+```
+
+### AIInferenceConfig Paging Fields
+
+| Field | Default | Description |
+|---|---|---|
+| `paging_strategy` | `"none"` | `"none"` (disabled) · `"shard"` (shard-level) · `"layer"` (future) |
+| `max_resident_shards` | `2` | Max shards in WASM at once (≥1). 2 = ~260 MB on Safari. |
+| `prefetch_shards` | `1` | Shards to load ahead of the active window (hidden by I/O overlap). |
+| `shard_urls` | `None` | Explicit CDN URLs for browser paging. |
+| `shard_size_mb` | `120` | Target split size in MB (used when splitting locally). |
+| `logic_gate_threshold` | `0.0` | Complexity below this → fast path (shard-0 only). 0.0 = disabled. |
+| `max_tokens` | `None` | Generation cap. |
+
+### Provider Selection
+
+**Browser (Pyodide):** Use `PagedBrowserInferenceProvider` — delegates to `globalThis.runPagedInference` (JS FFI). The JS controller manages OPFS caching and shard scheduling.
+
+**Native edge:** Use `LlamaCppPagedProvider` — wraps `llama-cli --mmap`. The OS pages layers automatically; no custom scheduler needed.
+
+`WorkflowBuilder.create_workflow()` auto-selects the right provider when `paged_inference_provider=` is not supplied:
+
+```python
+# Auto-selection (platform-aware)
+wf = await builder.create_workflow("PagedReasoning", ...)
+
+# Explicit override
+from rufus.implementations.inference.paged_browser import PagedBrowserInferenceProvider
+wf = await builder.create_workflow("PagedReasoning", ...,
+                                   paged_inference_provider=PagedBrowserInferenceProvider())
+```
+
+### Logic-Gate Fast Path
+
+60–70% of field tech queries (error code lookups, yes/no diagnostics, simple symptom queries) are **simple** and can be resolved from shard-0 alone.
+
+The `logic_gate_threshold` controls the cutoff:
+- `complexity_score < threshold` → load only shard-0 (~120 MB, ~1.5s latency)
+- `complexity_score ≥ threshold` → load all shards (full inference, ~9s Safari)
+
+Tune the threshold based on your query distribution. The built-in heuristic classifier (token count + keyword matching) is a starting point; swap in a DistilBERT classifier for production.
+
+### Known Limitations
+
+- **No true layer streaming:** WASM heap is flat; shard boundaries are at the file level, not the transformer layer level.
+- **Safari 2-shard hard limit:** ~260 MB peak (2 × 120 MB + runtime overhead). Avoid `max_resident_shards > 2` on Safari/iOS.
+- **OPFS availability:** Requires a secure context (HTTPS or localhost) and a modern browser. Falls back to re-fetching shards on every run if OPFS is unavailable.
+- **wllama dependency:** Browser path requires `wllama` NPM package. Placeholder shard URLs in the demo produce simulated output only; swap for real split-GGUF files.
+- **CORS required for shard fetches:** Shards must be served with `Access-Control-Allow-Origin: *`. Plain `python -m http.server` does not set this header; use a CORS-enabled server (see GGUF Shard Preparation above).
+- **Model selector (Q2_K / Q3_K_S):** Browser demo Card 6 includes a pill selector for quantisation level. `Q2_K` (~180 MB peak, faster) and `Q3_K_S` (~260 MB peak, higher quality). Both use placeholder URLs by default; update `MODEL_CONFIGS` in `worker.js` with your real CDN paths. Switching models evicts the wllama instance; OPFS-cached shards are preserved.
+- **LlamaCppPagedProvider:** Requires `llama-cli` binary on PATH. Windows mmap support is limited; recommend Linux/macOS for native edge deployment.
