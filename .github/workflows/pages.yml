@@ -37,8 +37,10 @@ jobs:
         run: |
           mkdir -p _site/dist
           cp dist/rufus_sdk-*.whl _site/dist/
-          cp examples/browser_demo/index.html _site/index.html
-          cp examples/browser_demo/worker.js  _site/worker.js
+          # Copy all browser demo assets (index.html, worker.js, sw.js, manifest.json, icons/)
+          cp -r examples/browser_demo/. _site/
+          # Remove dev-only files that don't belong in the site
+          rm -f _site/serve.py _site/README.md _site/README.pdf
 
       - uses: actions/configure-pages@v5
 
