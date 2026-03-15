@@ -110,7 +110,7 @@ async def register_device(hw_info=None) -> str:
                     "device_name": f"MacBook {DEVICE_ID}",
                     "merchant_id": "dev-merchant",
                     "firmware_version": "macOS-14",
-                    "sdk_version": "1.0.0rc2",
+                    "sdk_version": "1.0.0rc3",
                     "location": "local",
                     "capabilities": capabilities,
                 },
