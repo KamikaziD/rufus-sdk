@@ -2629,8 +2629,16 @@ pip install llama-cpp-python   # or build from source
 llama-gguf-split --split-max-size 120M bitnet-b1.58-2B-3T-Q4_K_M.gguf shard
 # Produces: shard-00001-of-00010.gguf, shard-00002-of-00010.gguf, …
 
-# Serve shards (local dev)
-python -m http.server 8080
+# Serve shards locally with CORS headers (required — plain http.server lacks CORS)
+# Save as cors_server.py and run from the directory containing your shards:
+# python cors_server.py
+#
+# from http.server import HTTPServer, SimpleHTTPRequestHandler
+# class CORSHandler(SimpleHTTPRequestHandler):
+#     def end_headers(self):
+#         self.send_header("Access-Control-Allow-Origin", "*")
+#         super().end_headers()
+# HTTPServer(("", 9090), CORSHandler).serve_forever()
 ```
 
 Set `shard_urls` in `AIInferenceConfig` to point to the shard files:
@@ -2699,4 +2707,6 @@ Tune the threshold based on your query distribution. The built-in heuristic clas
 - **Safari 2-shard hard limit:** ~260 MB peak (2 × 120 MB + runtime overhead). Avoid `max_resident_shards > 2` on Safari/iOS.
 - **OPFS availability:** Requires a secure context (HTTPS or localhost) and a modern browser. Falls back to re-fetching shards on every run if OPFS is unavailable.
 - **wllama dependency:** Browser path requires `wllama` NPM package. Placeholder shard URLs in the demo produce simulated output only; swap for real split-GGUF files.
+- **CORS required for shard fetches:** Shards must be served with `Access-Control-Allow-Origin: *`. Plain `python -m http.server` does not set this header; use a CORS-enabled server (see GGUF Shard Preparation above).
+- **Model selector (Q2_K / Q3_K_S):** Browser demo Card 6 includes a pill selector for quantisation level. `Q2_K` (~180 MB peak, faster) and `Q3_K_S` (~260 MB peak, higher quality). Both use placeholder URLs by default; update `MODEL_CONFIGS` in `worker.js` with your real CDN paths. Switching models evicts the wllama instance; OPFS-cached shards are preserved.
 - **LlamaCppPagedProvider:** Requires `llama-cli` binary on PATH. Windows mmap support is limited; recommend Linux/macOS for native edge deployment.

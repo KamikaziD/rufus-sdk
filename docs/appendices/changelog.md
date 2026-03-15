@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0rc2] — 2026-03-15
 
+### Added (post-tag fixes — same version)
+- **Browser demo Card 6 — Q2_K / Q3_K_S model selector** — pill selector above the prompt textarea; switching evicts the wllama instance and swaps the `ShardScheduler`; OPFS cache preserved for rollback; `paged_shard_status` message surfaces active model name in the streaming header.
+- **`MODEL_CONFIGS` map in `worker.js`** — replaces single `BITNET_SHARD_URLS` array; `Q2_K` (5 × 120 MB shards, ~180 MB peak) and `Q3_K_S` (7 × 120 MB shards, ~260 MB peak); `set_model` worker message handler.
+
+### Fixed (post-tag fixes — same version)
+- **Service Worker favicon crash** — `/favicon.ico` now short-circuits with a synthetic 204; removes em-dash from offline fallback `statusText` (ISO-8859-1 requirement); SW `VERSION` bumped `"2"` → `"3"` to force cache eviction.
+- **`path_taken` and `complexity_score` defaults** — `full_paged_inference` now sets `path_taken: "full_inference"` on both branches; `fast_path` sets both `path_taken` and `complexity_score` explicitly (since `assess_complexity` raises `WorkflowJumpDirective` before returning, leaving both fields at default).
+- **`definition_snapshot: null`** — `_make_workflow` now synthesises `definition_snapshot`, `steps_config`, and `workflow_version` from the live step objects (no YAML in browser).
+- **Complexity classifier** — `analyz` (American English) added alongside `analys` (British); keyword list extended with `agent`, `scrape`, `html`, `forced`, `popup`, `spam`; token-count threshold lowered 50 → 20.
+
 ### Added
 - **`PagedInferenceRuntime`** — shard-level LLM paging for memory-constrained browsers and edge devices. Keeps only a rolling window of GGUF shards resident in WASM/RAM, enabling a 1.2 GB BitNet 2B model to run within Safari's ~300 MB limit.
 - **`PagedBrowserInferenceProvider`** (`src/rufus/implementations/inference/paged_browser.py`) — Pyodide/browser provider; delegates to `globalThis.runPagedInference` via JS FFI.

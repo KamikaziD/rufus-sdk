@@ -200,7 +200,7 @@ const MODEL_CONFIGS = {
     },
 };
 
-let _activeModel = "Q2_K";   // default; changed by { type: "set_model", model: "Q3_K_S" }
+let _pagedModel = "Q2_K";   // default; changed by { type: "set_model", model: "Q3_K_S" }
 
 // wllama CDN — loaded dynamically on first inference call
 const WLLAMA_CDN = "https://cdn.jsdelivr.net/npm/wllama@2/esm/wllama.js";
@@ -281,8 +281,8 @@ class ShardScheduler {
     }
 }
 
-// Scheduler is recreated when _activeModel changes (via set_model message).
-let _shardScheduler = new ShardScheduler(MODEL_CONFIGS[_activeModel].shards, 2, 1);
+// Scheduler is recreated when _pagedModel changes (via set_model message).
+let _shardScheduler = new ShardScheduler(MODEL_CONFIGS[_pagedModel].shards, 2, 1);
 
 /**
  * Lightweight complexity classifier — called from Python `assess_complexity` step.
@@ -311,7 +311,7 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
     try {
         const { prompt, threshold = 0.5 } = JSON.parse(inputJson);
         const complexity = await globalThis.classifyComplexity(prompt);
-        const cfg = MODEL_CONFIGS[_activeModel];
+        const cfg = MODEL_CONFIGS[_pagedModel];
 
         // Logic gate: use shard-0 only when prompt is simple
         const useFastPath = complexity < threshold;
@@ -319,7 +319,7 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
 
         self.postMessage({
             type: "paged_shard_status",
-            model: _activeModel,
+            model: _pagedModel,
             shardsTotal: cfg.shards.length,
             shardsLoading: shardIndices.length,
             fastPath: useFastPath,
@@ -359,9 +359,9 @@ globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
             const pathLabel = useFastPath ? "fast path (shard-0 only)" : "full inference";
             text = useFastPath
                 ? `[Demo] Simple query resolved via ${pathLabel}. `
-                  + `In production, ${_activeModel} shard-0 (~120 MB) answers common lookups in ~1.5s.`
+                  + `In production, ${_pagedModel} shard-0 (~120 MB) answers common lookups in ~1.5s.`
                 : `[Demo] Complex reasoning via ${pathLabel}. `
-                  + `In production, ${cfg.shards.length} × 120 MB ${_activeModel} shards are loaded `
+                  + `In production, ${cfg.shards.length} × 120 MB ${_pagedModel} shards are loaded `
                   + `from OPFS into a rolling 2-shard window, yielding full root-cause analysis.`;
             // Simulate streaming tokens
             for (const word of text.split(" ")) {
@@ -1850,7 +1850,7 @@ self.onmessage = async (e) => {
                                message: `Unknown model key: ${model}` });
             return;
         }
-        _activeModel = model;
+        _pagedModel = model;
         _shardScheduler = new ShardScheduler(MODEL_CONFIGS[model].shards, 2, 1);
         if (_wllama) {
             try { await _wllama.exit(); } catch (_) {}
