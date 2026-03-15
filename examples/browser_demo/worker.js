@@ -259,8 +259,8 @@ const _shardScheduler = new ShardScheduler(BITNET_SHARD_URLS, 2, 1);
  */
 globalThis.classifyComplexity = async (prompt) => {
     const tokenEst = prompt.trim().split(/\s+/).length;
-    const complexRe = /diagnos|analys|explain|reason|troubleshoot|root cause|cascad|intermittent|multi.step/i;
-    const isComplex = tokenEst > 50 || complexRe.test(prompt);
+    const complexRe = /diagnos|analyz|analys|explain|reason|troubleshoot|root cause|cascad|intermittent|multi.step|instruct|agent|scrape|html|forced|popup|pop-up|spam/i;
+    const isComplex = tokenEst > 20 || complexRe.test(prompt);
     return isComplex ? 1.0 : 0.2;
 };
 
@@ -1432,8 +1432,9 @@ async def assess_complexity(state: PagedReasoningState, context: StepContext, **
         # Fallback: heuristic classifier (no JS runtime / FFI not registered)
         text = state.prompt or ""
         token_est = len(text.split())
-        complex_keywords = ["diagnos", "analys", "explain", "reason", "troubleshoot",
-                            "root cause", "cascad", "intermittent", "multi-step"]
+        complex_keywords = ["diagnos", "analyz", "analys", "explain", "reason", "troubleshoot",
+                            "root cause", "cascad", "intermittent", "multi-step",
+                            "instruct", "agent", "scrape", "html", "forced", "popup", "spam"]
         keyword_hit = any(kw in text.lower() for kw in complex_keywords)
         score = 1.0 if (token_est > 50 or keyword_hit) else 0.2
 
