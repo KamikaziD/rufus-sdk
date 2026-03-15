@@ -168,3 +168,60 @@ class OtelObserver(WorkflowObserver):
         ) as step_span:
             step_span.set_status(StatusCode.ERROR, description=error_message)
             step_span.record_exception(RuntimeError(error_message))
+
+    async def on_workflow_status_changed(
+        self,
+        workflow_id: str,
+        old_status: str,
+        new_status: str,
+        current_step_name,
+        final_result=None,
+    ):
+        span = self._active_spans.get(workflow_id)
+        if span and hasattr(span, "set_attribute"):
+            span.set_attribute("workflow.status", new_status)
+            if current_step_name:
+                span.set_attribute("workflow.current_step", current_step_name)
+
+    async def on_workflow_paused(self, workflow_id: str, step_name: str, reason: str):
+        span = self._active_spans.get(workflow_id)
+        if span and hasattr(span, "add_event"):
+            span.add_event("workflow.paused", attributes={
+                "step.name": step_name,
+                "pause.reason": reason,
+            })
+
+    async def on_workflow_resumed(self, workflow_id: str, step_name: str, resume_data):
+        span = self._active_spans.get(workflow_id)
+        if span and hasattr(span, "add_event"):
+            span.add_event("workflow.resumed", attributes={"step.name": step_name})
+
+    async def on_compensation_started(
+        self, workflow_id: str, step_name: str, step_index: int
+    ):
+        span = self._active_spans.get(workflow_id)
+        if span and hasattr(span, "add_event"):
+            span.add_event("saga.compensation_started", attributes={
+                "step.name": step_name,
+                "step.index": step_index,
+            })
+
+    async def on_compensation_completed(
+        self, workflow_id: str, step_name: str, success: bool, error=None
+    ):
+        span = self._active_spans.get(workflow_id)
+        if span and hasattr(span, "add_event"):
+            attrs = {"step.name": step_name, "compensation.success": success}
+            if error:
+                attrs["compensation.error"] = error
+            span.add_event("saga.compensation_completed", attributes=attrs)
+
+    async def on_child_workflow_started(
+        self, parent_id: str, child_id: str, child_type: str
+    ):
+        span = self._active_spans.get(parent_id)
+        if span and hasattr(span, "add_event"):
+            span.add_event("workflow.child_started", attributes={
+                "child.id": child_id,
+                "child.type": child_type,
+            })

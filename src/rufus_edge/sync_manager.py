@@ -227,9 +227,18 @@ class SyncManager:
             logger.error(f"Failed to get next sequence: {e}")
             return 0
 
-    async def sync_all_pending(self) -> SyncReport:
+    async def sync_all_pending(
+        self,
+        limit_per_workflow: Optional[int] = None,
+        max_payload_bytes: int = 5 * 1024 * 1024,  # 5 MB hard cap
+    ) -> SyncReport:
         """
         Sync all pending transactions to the cloud.
+
+        Args:
+            limit_per_workflow: Max transactions to sync per workflow_id in one pass.
+                                None means no per-workflow cap.
+            max_payload_bytes:  Hard cap on total serialised batch size (default 5 MB).
 
         Returns:
             SyncReport with results
@@ -251,6 +260,36 @@ class SyncManager:
         try:
             # Get pending transactions
             pending = await self._get_pending_transactions()
+
+            # Apply per-workflow limit
+            if limit_per_workflow is not None and limit_per_workflow > 0:
+                counts: Dict[str, int] = {}
+                capped: List[SAFTransaction] = []
+                for txn in pending:
+                    wf_id = txn.workflow_id or "__none__"
+                    if counts.get(wf_id, 0) < limit_per_workflow:
+                        capped.append(txn)
+                        counts[wf_id] = counts.get(wf_id, 0) + 1
+                pending = capped
+
+            # Apply 5 MB serialised payload cap
+            if max_payload_bytes > 0:
+                size_capped: List[SAFTransaction] = []
+                running_bytes = 0
+                for txn in pending:
+                    txn_size = len(
+                        json.dumps(txn.model_dump(mode="json")).encode("utf-8")
+                    )
+                    if running_bytes + txn_size > max_payload_bytes:
+                        logger.warning(
+                            f"Payload cap ({max_payload_bytes} B) reached after "
+                            f"{len(size_capped)} transactions — deferring the rest."
+                        )
+                        break
+                    size_capped.append(txn)
+                    running_bytes += txn_size
+                pending = size_capped
+
             report.total_transactions = len(pending)
 
             if not pending:
