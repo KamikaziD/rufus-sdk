@@ -21,9 +21,10 @@ const TRANSFORMERS_CDNS = [
 const _gpuDevice = (typeof navigator !== "undefined" && "gpu" in navigator) ? "webgpu" : "wasm";
 let _extractor = null;
 let _summariser = null;
+let _nerPipeline = null;
 let _summariserTask = "text-generation";  // updated if fallback loads FLAN-T5
 let _pipeline = null;   // set after dynamic import
-let _activeModel  = null;              // "extractor" | "summariser" | null
+let _activeModel  = null;              // "extractor" | "summariser" | "ner" | null
 let _modelMutex   = Promise.resolve(); // promise-chain mutex (no SharedArrayBuffer needed)
 let _workflowRunning = false;          // busy flag — prevents concurrent workflow runs
 let _currentModelSettings = {};       // model params forwarded from the main thread (W4)
@@ -53,6 +54,12 @@ async function _loadModel(which) {
         try { await _summariser.dispose(); } catch (_) {}
         _summariser = null; _activeModel = null;
         self.postMessage({ type: "model_unloaded", model: "summariser" });
+    } else if (_activeModel === "ner" && _nerPipeline) {
+        self.postMessage({ type: "model_unloading", model: "ner",
+                           message: "Unloading NER model to free memory…" });
+        try { await _nerPipeline.dispose(); } catch (_) {}
+        _nerPipeline = null; _activeModel = null;
+        self.postMessage({ type: "model_unloaded", model: "ner" });
     }
 
     // Load the requested model
@@ -97,6 +104,15 @@ async function _loadModel(which) {
             self.postMessage({ type: "summariser_ready", device: _gpuDevice,
                                model: _summariserTask === "text-generation" ? "Qwen2.5-0.5B" : "FLAN-T5-small" });
         }
+    } else if (which === "ner") {
+        self.postMessage({ type: "ner_model_loading" });
+        _nerPipeline = await _pipeline("token-classification", "Xenova/bert-base-NER", {
+            device: "wasm",  // NER runs efficiently on WASM without WebGPU
+            dtype: "q8",     // 8-bit quantized — ~27 MB
+            aggregation_strategy: "simple",
+        });
+        _activeModel = "ner";
+        self.postMessage({ type: "ner_model_ready" });
     }
 }
 
@@ -178,6 +194,28 @@ globalThis.runSummarisation = async (text) => {
             summary = result[0].generated_text;
         }
         return { summary, latency_ms: performance.now() - t0, device_used: _gpuDevice };
+    } finally { release(); }
+};
+
+/**
+ * Called from Python via `from js import runNERInference`.
+ * Returns a plain JS object: { entities_json: string, latency_ms }
+ * Uses bert-base-NER (q8, ~27 MB) for named entity recognition.
+ */
+globalThis.runNERInference = async (text) => {
+    if (!_pipeline) throw new Error("Transformers.js not loaded");
+    let release;
+    const prev  = _modelMutex;
+    _modelMutex = new Promise(r => { release = r; });
+    await prev;
+    try {
+        await _loadModel("ner");
+        const t0 = performance.now();
+        const entities = await _nerPipeline(text, { aggregation_strategy: "simple" });
+        return {
+            entities_json: JSON.stringify(entities),
+            latency_ms: performance.now() - t0,
+        };
     } finally { release(); }
 };
 
@@ -1009,6 +1047,144 @@ wf4_steps = [
 ]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# WORKFLOW 5 — Air-Gapped Field Tech Triage (PII Redaction + Semantic Routing)
+# Steps: CaptureReport → RunNERAnalysis → BuildRedactedPayload →
+#         RouteByPriority → LogStandard ⤷ EscalateIncident → StoreForForward
+# On-device NER strips PII before any SAF record is created.
+# ══════════════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+class FieldTechState(BaseModel):
+    raw_input: str = ""
+    severity: str = "UNKNOWN"
+    incident_type: str = "GENERAL"
+    redacted_text: str = ""
+    pii_entities: list = []
+    saf_record_id: str = ""
+    routed_to: str = ""
+    ner_latency_ms: float = 0.0
+
+
+_DEMO_REPORT = (
+    "The pressure valve on generator 4 is leaking heavily near building C. "
+    "John Smith (employee ID: 9982) was near the blast zone during the incident. "
+    "Sarah Connor (supervisor) has been notified. Requesting immediate hazmat cleanup "
+    "— chemical spill confirmed. CRITICAL: evacuate section B immediately."
+)
+
+_SEVERITY_KEYWORDS = {
+    "CRITICAL": ["critical", "emergency", "hazmat", "explosion", "fire", "fatality",
+                 "blast", "chemical spill", "spill", "leak", "evacuate", "evacuation",
+                 "immediate", "severe", "toxic"],
+    "HIGH":     ["injury", "hazard", "warning", "danger", "urgent", "toxic", "contamination"],
+}
+
+_INCIDENT_KEYWORDS = {
+    "HAZMAT":      ["hazmat", "chemical", "toxic", "spill", "contamination", "biohazard"],
+    "ELECTRICAL":  ["electrical", "power", "voltage", "electrocution", "short circuit"],
+    "MECHANICAL":  ["valve", "pressure", "pump", "generator", "equipment failure"],
+    "FIRE":        ["fire", "smoke", "flame", "burning", "combustion"],
+}
+
+
+def _classify_severity(text: str) -> str:
+    lower = text.lower()
+    for level in ("CRITICAL", "HIGH"):
+        if any(kw in lower for kw in _SEVERITY_KEYWORDS[level]):
+            return level
+    return "NORMAL"
+
+
+def _classify_incident_type(text: str) -> str:
+    lower = text.lower()
+    for itype, keywords in _INCIDENT_KEYWORDS.items():
+        if any(kw in lower for kw in keywords):
+            return itype
+    return "GENERAL"
+
+
+def capture_report(state: FieldTechState, context: StepContext, **inp):
+    text = inp.get("report_text") or state.raw_input or _DEMO_REPORT
+    return {"raw_input": text.strip()}
+
+
+async def run_ner_analysis(state: FieldTechState, context: StepContext, **_):
+    try:
+        from js import runNERInference
+        result = await runNERInference(state.raw_input)
+        entities_data = json.loads(str(result.entities_json))
+        # Filter to person names (PER) and miscellaneous IDs (MISC)
+        pii = [
+            e["word"] for e in entities_data
+            if e.get("entity_group") in ("PER", "MISC") and len(e.get("word", "")) > 1
+        ]
+        return {
+            "pii_entities": pii,
+            "ner_latency_ms": round(float(result.latency_ms), 1),
+        }
+    except Exception:
+        # Fallback: regex-based ID detection only (names missed without model)
+        ids = _re.findall(r'\b(?:employee\s+ID|ID)[:\s#]?\s*\d{4,}\b', state.raw_input, _re.IGNORECASE)
+        return {"pii_entities": ids, "ner_latency_ms": 0.0}
+
+
+def build_redacted_payload(state: FieldTechState, context: StepContext, **_):
+    redacted = state.raw_input
+    for entity in state.pii_entities:
+        if entity and len(entity.strip()) > 1:
+            redacted = redacted.replace(entity, "[REDACTED]")
+    # Also redact bare numeric IDs (e.g. "9982")
+    redacted = _re.sub(r'\b\d{4,5}\b', '[ID-REDACTED]', redacted)
+    severity = _classify_severity(state.raw_input)
+    incident_type = _classify_incident_type(state.raw_input)
+    return {
+        "redacted_text": redacted,
+        "severity": severity,
+        "incident_type": incident_type,
+    }
+
+
+def route_by_priority(state: FieldTechState, context: StepContext, **_):
+    if state.severity == "CRITICAL":
+        raise WorkflowJumpDirective(target_step_name="EscalateIncident")
+    return {}
+
+
+def log_standard_incident(state: FieldTechState, context: StepContext, **_):
+    return {
+        "routed_to": "standard",
+        "saf_record_id": f"SAF-{uuid.uuid4().hex[:8].upper()}",
+    }
+
+
+def escalate_incident(state: FieldTechState, context: StepContext, **_):
+    # Guard: normal path passes through here after LogStandard
+    if state.routed_to == "standard":
+        return {}
+    return {
+        "routed_to": "escalation",
+        "saf_record_id": f"ESC-{uuid.uuid4().hex[:8].upper()}",
+    }
+
+
+def store_for_forward(state: FieldTechState, context: StepContext, **_):
+    # SAF record ID is set by log or escalate — confirm sync-pending status
+    return {}
+
+
+wf5_steps = [
+    WorkflowStep(name="CaptureReport",        func=capture_report,        automate_next=True),
+    WorkflowStep(name="RunNERAnalysis",        func=run_ner_analysis,      automate_next=True),
+    WorkflowStep(name="BuildRedactedPayload",  func=build_redacted_payload, automate_next=True),
+    WorkflowStep(name="RouteByPriority",       func=route_by_priority,     automate_next=True),
+    WorkflowStep(name="LogStandard",           func=log_standard_incident, automate_next=True),
+    WorkflowStep(name="EscalateIncident",      func=escalate_incident,     automate_next=True),
+    WorkflowStep(name="StoreForForward",       func=store_for_forward,     automate_next=False),
+]
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 async def run_workflow(wf_type: str, data_json: str) -> str:
     data = json.loads(data_json) if data_json else {}
@@ -1021,6 +1197,8 @@ async def run_workflow(wf_type: str, data_json: str) -> str:
         wf = await _make_workflow(wf_type, wf3_steps, TransactionState, data)
     elif wf_type == "DocumentSummarisation":
         wf = await _make_workflow(wf_type, wf4_steps, DocumentState, data)
+    elif wf_type == "FieldTechTriage":
+        wf = await _make_workflow(wf_type, wf5_steps, FieldTechState, data)
     else:
         raise ValueError(f"Unknown workflow type: {wf_type}")
 
@@ -1235,7 +1413,8 @@ self.onmessage = async (e) => {
         _workflowRunning = true;
         self.postMessage({ type: "workflow_start", workflowType });
         const TIMEOUT_MS = { TransactionRiskScoring: 60_000,
-                             DocumentSummarisation:  90_000 }[workflowType] ?? 30_000;
+                             DocumentSummarisation:  90_000,
+                             FieldTechTriage:        60_000 }[workflowType] ?? 30_000;
         let timedOut = false;
         const timeoutId = setTimeout(() => {
             timedOut = true;

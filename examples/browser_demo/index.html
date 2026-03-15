@@ -939,6 +939,72 @@
       </div>
     </div>
 
+    <!-- ── Card 5: Air-Gapped Field Tech Triage ──────────────────────────── -->
+    <div class="card" id="card-wf5">
+      <div class="card-header">
+        <div class="card-icon" style="background:#1a0e0e">🔒</div>
+        <div class="card-meta">
+          <h3>Air-Gapped Field Triage</h3>
+          <p>bert-base-NER · On-device PII redaction · SAF routing · Zero-trust offline</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf5">
+          <span class="pipe-step" data-step="CaptureReport">CaptureReport</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="RunNERAnalysis">RunNERAnalysis</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="BuildRedactedPayload">BuildRedactedPayload</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="RouteByPriority">RouteByPriority</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="LogStandard">LogStandard</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="EscalateIncident">EscalateIncident</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="StoreForForward">StoreForForward</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">NER model: bert-base-NER (q8, ~27 MB)</span>
+          <span class="badge" id="badge-ner-card" style="font-size:10px">not loaded</span>
+        </div>
+
+        <div class="model-overlay" id="model-overlay-wf5">
+          <span class="spinner"></span>
+          Downloading bert-base-NER weights (~27 MB) — cached after first run…
+        </div>
+
+        <div class="wf4-input-wrap">
+          <textarea
+            id="text-input-wf5"
+            class="wf4-textarea"
+            placeholder="Paste a field incident report — or leave blank to use the demo Hazmat scenario…"
+            rows="4"
+            spellcheck="false"
+          ></textarea>
+        </div>
+
+        <p style="font-size:12px;color:var(--muted)">
+          A bert-base-NER model runs entirely on-device to strip person names and IDs from the
+          raw report. The redacted payload is severity-routed by the DECISION step and written
+          to local IndexedDB as a Store-and-Forward record — PII never touches the network.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf5">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf5"></span>
+        </div>
+        <div class="result-fields" id="fields-wf5"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf5" disabled onclick="runWorkflow('FieldTechTriage')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf5"></span>
+      </div>
+    </div>
+
   </div><!-- /cards -->
 
   <!-- ── Run History ──────────────────────────────────────────────────────── -->
@@ -992,6 +1058,7 @@ const WORKFLOW_STEPS = {
   IoTSensorPipeline:       ["InitPipeline","CollectSensorData","ProcessReadings","ComputeStatistics","HealthDecision","SendAlert"],
   TransactionRiskScoring:  ["ExtractFeatures","GPUEmbedding","ComputeRiskScore","ScoreDecision","RecordOutcome"],
   DocumentSummarisation:   ["IngestDocument","PreprocessText","GenerateSummary","ExtractKeywords","QualityDecision","FallbackExtract"],
+  FieldTechTriage:         ["CaptureReport","RunNERAnalysis","BuildRedactedPayload","RouteByPriority","LogStandard","EscalateIncident","StoreForForward"],
 };
 
 const WF_ID = {
@@ -999,6 +1066,7 @@ const WF_ID = {
   IoTSensorPipeline:      "wf2",
   TransactionRiskScoring: "wf3",
   DocumentSummarisation:  "wf4",
+  FieldTechTriage:        "wf5",
 };
 
 let worker = null;
@@ -1203,6 +1271,22 @@ function handleWorkerMessage(e) {
       if (bsc2) bsc2.textContent = msg.device === "webgpu" ? "WebGPU ✓" : "CPU";
       break;
     }
+
+    case "ner_model_loading": {
+      document.getElementById("model-overlay-wf5").classList.add("visible");
+      log("Downloading bert-base-NER (q8, ~27 MB)…", "model");
+      const nerBadge = document.getElementById("badge-ner-card");
+      if (nerBadge) nerBadge.textContent = "downloading…";
+      break;
+    }
+
+    case "ner_model_ready": {
+      document.getElementById("model-overlay-wf5").classList.remove("visible");
+      log("bert-base-NER ready (WASM) — PII detection active", "gpu");
+      const nerBadge2 = document.getElementById("badge-ner-card");
+      if (nerBadge2) nerBadge2.textContent = "ready ✓";
+      break;
+    }
   }
 }
 
@@ -1241,6 +1325,11 @@ window.runWorkflow = function(workflowType) {
       const v = ta ? ta.value.trim() : "";
       return v ? { raw_text: v } : {};
     })(),  // raw_text omitted → Python picks random _DEMO_TEXTS entry
+    FieldTechTriage: (() => {
+      const ta = document.getElementById("text-input-wf5");
+      const v = ta ? ta.value.trim() : "";
+      return v ? { report_text: v } : {};
+    })(),  // report_text omitted → Python uses the demo Hazmat scenario
   };
   const modelSettings = workflowType === "DocumentSummarisation" ? {
     max_new_tokens:     parseInt(document.getElementById("wf4-max-tokens")?.value  ?? "200"),
@@ -1253,7 +1342,7 @@ window.runWorkflow = function(workflowType) {
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function enableButtons() {
-  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4"].forEach(id => {
+  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4", "btn-wf5"].forEach(id => {
     document.getElementById(id).disabled = false;
   });
 }
@@ -1373,6 +1462,27 @@ function buildResultRows(wfType, s) {
       ["inference",   s.inference_ms ? `${s.inference_ms.toFixed(0)} ms` : "—",                   ""],
       ["keywords",    (s.keywords || []).slice(0, 5).join(", ") || "—",                            ""],
       ["summary",     preview,                                                                      ""],
+    ];
+  }
+  if (wfType === "FieldTechTriage") {
+    const scls = s.severity === "CRITICAL" ? "red"
+               : s.severity === "HIGH"     ? "orange"
+               : s.severity === "NORMAL"   ? "green" : "";
+    const rcls = s.routed_to === "escalation" ? "red"
+               : s.routed_to === "standard"   ? "green" : "";
+    const piiCount = (s.pii_entities || []).length;
+    const redactedPreview = s.redacted_text
+      ? (s.redacted_text.length > 100 ? s.redacted_text.substring(0, 100) + "…" : s.redacted_text)
+      : "—";
+    return [
+      ["severity",     s.severity     || "—",                                scls],
+      ["incident",     s.incident_type || "—",                               "cyan"],
+      ["pii_stripped", piiCount > 0 ? `${piiCount} entit${piiCount>1?"ies":"y"} redacted` : "none found",
+                       piiCount > 0 ? "orange" : "green"],
+      ["ner_latency",  s.ner_latency_ms ? `${s.ner_latency_ms.toFixed(0)} ms` : "—",  ""],
+      ["routed_to",    s.routed_to    || "—",                                rcls],
+      ["saf_record",   s.saf_record_id || "—",                               "purple"],
+      ["redacted",     redactedPreview,                                       ""],
     ];
   }
   return Object.entries(s).slice(0, 8).map(([k, v]) => [k, JSON.stringify(v), ""]);
@@ -1513,6 +1623,8 @@ function historyKeyResult(wf) {
     return s.decision ? `decision=${s.decision}` : "—";
   if (wfType === "DocumentSummarisation")
     return s.quality ? `quality=${s.quality}, method=${s.method||"—"}` : "—";
+  if (wfType === "FieldTechTriage")
+    return s.severity ? `severity=${s.severity}, route=${s.routed_to||"—"}` : "—";
   const entries = Object.entries(s).filter(([k]) => !k.startsWith("_")).slice(0, 2);
   return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ") || "—";
 }
