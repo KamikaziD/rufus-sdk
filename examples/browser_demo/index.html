@@ -269,6 +269,24 @@
 
   /* ── W4 textarea input ────────────────────────────────────────────────── */
   .wf4-input-wrap { margin-bottom: 10px; }
+  .wf6-quant-btn {
+    padding: 4px 12px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 11px;
+    font-family: var(--mono);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .wf6-quant-btn:hover { border-color: var(--accent); color: var(--fg); }
+  .wf6-quant-btn.active {
+    border-color: var(--cyan);
+    color: var(--cyan);
+    background: #001a1a;
+  }
+
   .wf4-textarea {
     width: 100%; box-sizing: border-box;
     background: var(--surface2); color: var(--fg);
@@ -1039,6 +1057,24 @@
           </div>
         </div>
 
+        <!-- Model selector -->
+        <div style="margin:10px 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">Quantisation:</span>
+          <div style="display:flex;gap:4px" id="wf6-model-selector">
+            <button class="wf6-quant-btn active" data-model="Q2_K"
+                    onclick="selectQuantModel('Q2_K')"
+                    title="~600 MB · ~180 MB peak RAM · fastest">
+              Q2_K
+            </button>
+            <button class="wf6-quant-btn" data-model="Q3_K_S"
+                    onclick="selectQuantModel('Q3_K_S')"
+                    title="~750 MB · ~260 MB peak RAM · higher quality">
+              Q3_K_S
+            </button>
+          </div>
+          <span id="wf6-model-meta" style="font-size:11px;color:var(--cyan)">600 MB · ~180 MB RAM</span>
+        </div>
+
         <div class="wf4-input-wrap">
           <textarea
             id="text-input-wf6"
@@ -1378,7 +1414,7 @@ function handleWorkerMessage(e) {
     }
 
     case "paged_shard_status": {
-      const { shardsTotal, shardsLoading, fastPath } = msg;
+      const { model, shardsTotal, shardsLoading, fastPath } = msg;
       const memMb = shardsLoading * 120;
       const pct = Math.min(100, (memMb / 300) * 100);
       const bar = document.getElementById("wf6-ram-bar");
@@ -1393,10 +1429,21 @@ function handleWorkerMessage(e) {
       const streamEl = document.getElementById("wf6-stream-text");
       if (wrap) { wrap.style.display = "block"; }
       if (streamEl) streamEl.textContent = "";
+      const modelTag = model ? `${model} · ` : "";
       if (meta) meta.textContent = fastPath
-        ? `(fast path · shard-0 only · ${shardsLoading}/${shardsTotal} shards)`
-        : `(full inference · ${shardsLoading}/${shardsTotal} shards)`;
-      log(`Paged inference: ${shardsLoading}/${shardsTotal} shards · ~${memMb} MB · ${fastPath ? "fast path" : "full"}`, "info");
+        ? `(${modelTag}fast path · shard-0 only · ${shardsLoading}/${shardsTotal} shards)`
+        : `(${modelTag}full inference · ${shardsLoading}/${shardsTotal} shards)`;
+      log(`Paged inference [${model ?? "?"}]: ${shardsLoading}/${shardsTotal} shards · ~${memMb} MB · ${fastPath ? "fast path" : "full"}`, "info");
+      break;
+    }
+
+    case "model_switched": {
+      log(`Model switched to ${msg.model} (wllama evicted; next run reloads)`, "info");
+      break;
+    }
+
+    case "model_switch_error": {
+      log(`Model switch failed: ${msg.message}`, "error");
       break;
     }
 
@@ -1412,6 +1459,22 @@ function handleWorkerMessage(e) {
 }
 
 // ── W4 textarea word counter ──────────────────────────────────────────────────
+// ── Wf6 model selector ────────────────────────────────────────────────────────
+const WF6_MODEL_META = {
+  "Q2_K":   "600 MB · ~180 MB RAM",
+  "Q3_K_S": "750 MB · ~260 MB RAM",
+};
+
+window.selectQuantModel = function(model) {
+  document.querySelectorAll(".wf6-quant-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.model === model);
+  });
+  const meta = document.getElementById("wf6-model-meta");
+  if (meta) meta.textContent = WF6_MODEL_META[model] ?? "";
+  worker.postMessage({ type: "set_model", model });
+  log(`BitNet model switched → ${model}`, "info");
+};
+
 window.onWf4Input = function(el) {
   const words = el.value.trim() === "" ? [] : el.value.trim().split(/\s+/);
   const count = words.length;
