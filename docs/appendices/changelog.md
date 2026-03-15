@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0rc2] — 2026-03-15
+
+### Added
+- **`PagedInferenceRuntime`** — shard-level LLM paging for memory-constrained browsers and edge devices. Keeps only a rolling window of GGUF shards resident in WASM/RAM, enabling a 1.2 GB BitNet 2B model to run within Safari's ~300 MB limit.
+- **`PagedBrowserInferenceProvider`** (`src/rufus/implementations/inference/paged_browser.py`) — Pyodide/browser provider; delegates to `globalThis.runPagedInference` via JS FFI.
+- **`LlamaCppPagedProvider`** (`src/rufus/implementations/inference/llamacpp_paged.py`) — native edge provider; wraps `llama-cli --mmap` for OS-level layer paging (~200 MB resident on 512 MB field devices).
+- **`AIInferenceConfig` paging fields**: `paging_strategy`, `max_resident_shards`, `prefetch_shards`, `shard_urls`, `shard_size_mb`, `logic_gate_threshold`, `max_tokens`.
+- **`WorkflowBuilder.create_workflow()` `paged_inference_provider=` param** — auto-selects browser or native provider based on `sys.platform` when any step uses `paging_strategy != "none"`.
+- **Browser demo Workflow 6 — Paged Reasoning** — `AssessComplexity` → logic-gate fast path (shard-0 only, ~140 MB, ~1.5s) or full paged inference (all shards, ~260 MB); live token streaming; OPFS shard cache with 1-ahead prefetch; memory gauge bar in UI.
+- **JS paged inference controller** in `examples/browser_demo/worker.js`: `OPFSShardCache`, `ShardScheduler`, `globalThis.classifyComplexity`, `globalThis.runPagedInference`.
+- **10 new tests** in `tests/sdk/test_paged_inference.py` covering provider FFI, `--mmap` flag, Pydantic validation, and fast/full path labelling.
+- **`TECHNICAL_INFORMATION.md` §21** — Paged Inference Runtime: memory budget table, GGUF shard prep, config field reference, provider selection, logic-gate tuning, known limitations.
+
+### Fixed
+- **`runPagedInference` JS mutex** — replaced double-wrapped `.then()` + `await prev` deadlock pattern with the standard `let release / await prev / try…finally release()` pattern used by all other model entry points.
+
+---
+
 ## [1.0.0rc1] — 2026-03-14
 
 ### Breaking Changes

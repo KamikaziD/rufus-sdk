@@ -548,7 +548,8 @@ class WorkflowBuilder:
                         priority: Optional[int] = None,
                         idempotency_key: Optional[str] = None,
                         metadata: Optional[Dict[str, Any]] = None,
-                        wasm_binary_resolver=None  # Optional WasmBinaryResolver; auto-creates ComponentStepRuntime for WASM steps
+                        wasm_binary_resolver=None,  # Optional WasmBinaryResolver; auto-creates ComponentStepRuntime for WASM steps
+                        paged_inference_provider=None  # Optional InferenceProvider for paged AI steps; auto-selected when None
                         ) -> 'Workflow': # Changed return type hint to string literal
 
         if any(p is None for p in [persistence_provider, execution_provider, workflow_builder,
@@ -586,6 +587,23 @@ class WorkflowBuilder:
             from rufus.implementations.execution.component_runtime import ComponentStepRuntime
             wasm_runtime = ComponentStepRuntime(wasm_binary_resolver)
 
+        # Auto-select paged inference provider when any step uses paging_strategy != "none".
+        # Prefers explicitly supplied provider; falls back to platform-appropriate default.
+        inference_provider = paged_inference_provider
+        if inference_provider is None:
+            needs_paging = any(
+                s.get("ai_config", {}).get("paging_strategy", "none") != "none"
+                for s in steps_config
+            )
+            if needs_paging:
+                import sys
+                if sys.platform == "wasm32" or "pyodide" in sys.modules:
+                    from rufus.implementations.inference.paged_browser import PagedBrowserInferenceProvider
+                    inference_provider = PagedBrowserInferenceProvider()
+                else:
+                    from rufus.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
+                    inference_provider = LlamaCppPagedProvider()
+
         return Workflow(
             workflow_type=workflow_type,
             workflow_version=workflow_version,
@@ -607,7 +625,8 @@ class WorkflowBuilder:
             expression_evaluator_cls=expression_evaluator_cls,
             template_engine_cls=template_engine_cls,
             workflow_observer=workflow_observer,
-            wasm_runtime=wasm_runtime
+            wasm_runtime=wasm_runtime,
+            inference_provider=inference_provider
         )
 
     def get_all_task_modules(self) -> List[str]:

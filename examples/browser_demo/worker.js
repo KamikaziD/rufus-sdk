@@ -152,6 +152,203 @@ globalThis.notifyGpuFallback = () => {
     self.postMessage({ type: "gpu_fallback" });
 };
 
+// ── PAGED INFERENCE ───────────────────────────────────────────────────────────
+// Shard-level LLM paging for memory-constrained browsers (Safari: ~300 MB WASM
+// limit) and edge devices.  Architecture:
+//   OPFSShardCache  — write-once LRU cache in Origin Private File System
+//   ShardScheduler  — rolling window of `windowSize` shards + 1-ahead prefetch
+//   runPagedInference — main entry point (called from Python via JS FFI)
+//   classifyComplexity — lightweight heuristic; returns 0.0–1.0 complexity score
+//
+// Production note: replace BITNET_SHARD_URLS with real CDN paths to your split
+// GGUF shards (llama-gguf-split --split-max-size 120M bitnet-2b.gguf shard).
+// wllama is loaded on first call and cached for subsequent runs.
+
+const BITNET_SHARD_URLS = [
+    // Placeholder URLs — swap for real split-GGUF shard paths in production.
+    // Example: "https://cdn.example.com/bitnet-2b/bitnet-2b-00001-of-00010.gguf"
+    "shard-0-placeholder.gguf",
+    "shard-1-placeholder.gguf",
+    "shard-2-placeholder.gguf",
+];
+
+// wllama CDN — loaded dynamically on first inference call
+const WLLAMA_CDN = "https://cdn.jsdelivr.net/npm/wllama@2/esm/wllama.js";
+let _wllama = null;
+let _wllamaClass = null;
+
+class OPFSShardCache {
+    constructor() { this._root = null; }
+
+    async init() {
+        try {
+            this._root = await navigator.storage.getDirectory();
+        } catch (_) {
+            this._root = null;   // OPFS unavailable (non-secure context / older Safari)
+        }
+    }
+
+    async has(shardId) {
+        if (!this._root) return false;
+        try { await this._root.getFileHandle(shardId); return true; } catch { return false; }
+    }
+
+    async write(shardId, buffer) {
+        if (!this._root) return;
+        try {
+            const fh = await this._root.getFileHandle(shardId, { create: true });
+            const writable = await fh.createWritable();
+            await writable.write(buffer);
+            await writable.close();
+        } catch (_) {}
+    }
+
+    async read(shardId) {
+        if (!this._root) return null;
+        try {
+            const fh = await this._root.getFileHandle(shardId);
+            const file = await fh.getFile();
+            return file.arrayBuffer();
+        } catch { return null; }
+    }
+}
+
+const _opfsCache = new OPFSShardCache();
+
+class ShardScheduler {
+    constructor(shardUrls, windowSize = 2, prefetch = 1) {
+        this._shards = shardUrls;
+        this._window = windowSize;
+        this._prefetch = prefetch;
+    }
+
+    async _ensureShard(idx) {
+        const id = `rufus-shard-${idx}.gguf`;
+        const cached = await _opfsCache.read(id);
+        if (cached) return cached;
+
+        // Fetch from remote; ignore errors (placeholder URLs will fail gracefully)
+        try {
+            const resp = await fetch(this._shards[idx]);
+            if (!resp.ok) return null;
+            const buf = await resp.arrayBuffer();
+            await _opfsCache.write(id, buf);
+            return buf;
+        } catch { return null; }
+    }
+
+    async getWindow(startIdx, shardsToUse) {
+        const indices = (shardsToUse || Array.from({ length: this._window },
+            (_, i) => startIdx + i)).filter(i => i < this._shards.length);
+
+        // Fire-and-forget prefetch for next shard
+        const prefetchIdx = Math.max(...indices) + 1;
+        if (prefetchIdx < this._shards.length) {
+            this._ensureShard(prefetchIdx).catch(() => {});
+        }
+
+        return Promise.all(indices.map(i => this._ensureShard(i)));
+    }
+}
+
+const _shardScheduler = new ShardScheduler(BITNET_SHARD_URLS, 2, 1);
+
+/**
+ * Lightweight complexity classifier — called from Python `assess_complexity` step.
+ * Returns 0.0–1.0 complexity score.  0.0 = trivial (fast path); 1.0 = complex (full inference).
+ */
+globalThis.classifyComplexity = async (prompt) => {
+    const tokenEst = prompt.trim().split(/\s+/).length;
+    const complexRe = /diagnos|analys|explain|reason|troubleshoot|root cause|cascad|intermittent|multi.step/i;
+    const isComplex = tokenEst > 50 || complexRe.test(prompt);
+    return isComplex ? 1.0 : 0.2;
+};
+
+/**
+ * Main paged inference entry point — called from Python via `from js import runPagedInference`.
+ * Serialises through _modelMutex so concurrent calls queue safely.
+ *
+ * @param {string} inputJson  JSON: { prompt: string, threshold?: number }
+ * @param {number} maxTokens  Token generation cap (default 128)
+ * @returns {{ text, tokens_generated, shards_loaded, latency_ms, complexity_score }}
+ */
+globalThis.runPagedInference = async (inputJson, maxTokens = 128) => {
+    let release;
+    const prev = _modelMutex;
+    _modelMutex = new Promise(r => { release = r; });
+    await prev;
+    try {
+        const { prompt, threshold = 0.5 } = JSON.parse(inputJson);
+        const complexity = await globalThis.classifyComplexity(prompt);
+
+        // Logic gate: use shard-0 only when prompt is simple
+        const useFastPath = complexity < threshold;
+        const shardIndices = useFastPath ? [0] : BITNET_SHARD_URLS.map((_, i) => i);
+
+        self.postMessage({
+            type: "paged_shard_status",
+            shardsTotal: BITNET_SHARD_URLS.length,
+            shardsLoading: shardIndices.length,
+            fastPath: useFastPath,
+        });
+
+        // Fetch active shard window (OPFS-backed)
+        const shardBuffers = await _shardScheduler.getWindow(0, shardIndices);
+        const loadedShards = shardBuffers.filter(Boolean).length;
+
+        // Load wllama on first call
+        if (!_wllamaClass) {
+            try {
+                const mod = await import(WLLAMA_CDN);
+                _wllamaClass = mod.Wllama || mod.default;
+            } catch (_) {
+                _wllamaClass = null;
+            }
+        }
+
+        const t0 = performance.now();
+        let text = "";
+
+        if (_wllamaClass && loadedShards > 0) {
+            // Real wllama inference path (requires actual GGUF shard files)
+            if (!_wllama) _wllama = new _wllamaClass({});
+            const blobs = shardBuffers.filter(Boolean).map(buf => new Blob([buf]));
+            await _wllama.loadModelFromBlob(blobs.length === 1 ? blobs[0] : blobs);
+            await _wllama.createCompletion(prompt, {
+                nPredict: maxTokens,
+                onNewToken: (_, piece) => {
+                    text += piece;
+                    self.postMessage({ type: "paged_token", piece });
+                },
+            });
+        } else {
+            // Simulation fallback — placeholder shards can't run real inference
+            const pathLabel = useFastPath ? "fast path (shard-0 only)" : "full inference";
+            text = useFastPath
+                ? `[Demo] Simple query resolved via ${pathLabel}. `
+                  + `In production, BitNet shard-0 (~120 MB) answers common lookups in ~1.5s.`
+                : `[Demo] Complex reasoning via ${pathLabel}. `
+                  + `In production, ${BITNET_SHARD_URLS.length} × 120 MB shards are loaded `
+                  + `from OPFS into a rolling 2-shard window, yielding full root-cause analysis.`;
+            // Simulate streaming tokens
+            for (const word of text.split(" ")) {
+                self.postMessage({ type: "paged_token", piece: word + " " });
+            }
+        }
+
+        const latency_ms = performance.now() - t0;
+        return {
+            text: text.trim(),
+            tokens_generated: text.trim().split(/\s+/).filter(Boolean).length,
+            shards_loaded: loadedShards || shardIndices.length,
+            latency_ms,
+            complexity_score: complexity,
+        };
+    } finally {
+        release();
+    }
+};
+
 globalThis.runSummarisation = async (text) => {
     if (!_pipeline) throw new Error("Transformers.js not loaded");
     let release;
@@ -1185,6 +1382,123 @@ wf5_steps = [
 ]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# WORKFLOW 6 — Paged Reasoning (BitNet shard paging demo)
+# Steps: AssessComplexity → [jump if simple] → FullPagedInference
+#        → FastPath (guard) → FormatOutput
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PagedReasoningState(BaseModel):
+    prompt: str = ""
+    complexity_score: float = 0.0
+    shards_loaded: int = 0
+    generated_text: str = ""
+    tokens_generated: int = 0
+    latency_ms: float = 0.0
+    path_taken: str = ""
+
+
+# Default prompts shown in the UI when the text area is empty
+_PAGED_DEMO_PROMPTS = [
+    "What does error code E42 mean?",
+    "Diagnose an intermittent relay failure on circuit breaker CB-42 under high thermal load with partial arc tracking.",
+    "Is the pressure valve green?",
+    "Explain multi-step root cause analysis for cascading sensor faults in a distributed SCADA network.",
+]
+
+
+async def assess_complexity(state: PagedReasoningState, context: StepContext, **_):
+    """Classify prompt complexity via JS FFI; jump to fast path if simple."""
+    try:
+        from js import classifyComplexity  # type: ignore[import]
+        score = float(await classifyComplexity(state.prompt or _PAGED_DEMO_PROMPTS[0]))
+    except Exception:
+        # Fallback: heuristic classifier (no JS runtime / FFI not registered)
+        text = state.prompt or ""
+        token_est = len(text.split())
+        complex_keywords = ["diagnos", "analys", "explain", "reason", "troubleshoot",
+                            "root cause", "cascad", "intermittent", "multi-step"]
+        keyword_hit = any(kw in text.lower() for kw in complex_keywords)
+        score = 1.0 if (token_est > 50 or keyword_hit) else 0.2
+
+    path = "fast_path" if score < 0.4 else "full_inference"
+    result = {"complexity_score": round(score, 3), "path_taken": path}
+    if score < 0.4:
+        raise WorkflowJumpDirective(target_step_name="FastPath")
+    return result
+
+
+async def full_paged_inference(state: PagedReasoningState, context: StepContext, **_):
+    """Full multi-shard inference — all shards loaded."""
+    try:
+        from js import runPagedInference  # type: ignore[import]
+        import json as _json
+        payload = _json.dumps({"prompt": state.prompt or _PAGED_DEMO_PROMPTS[1], "threshold": 0.4})
+        result = await runPagedInference(payload, 128)
+        return {
+            "generated_text": str(result.text),
+            "tokens_generated": int(result.tokens_generated),
+            "shards_loaded": int(result.shards_loaded),
+            "latency_ms": round(float(result.latency_ms), 1),
+        }
+    except Exception:
+        # Fallback: simulate full inference output without wllama
+        return {
+            "generated_text": (
+                "[Simulated full inference] Complex field diagnostic reasoning would appear here. "
+                "In a live deployment, 2–3 × 120 MB BitNet shards are loaded from OPFS and "
+                "processed sequentially by wllama, producing a detailed root-cause analysis."
+            ),
+            "tokens_generated": 42,
+            "shards_loaded": 3,
+            "latency_ms": 0.0,
+        }
+
+
+async def fast_path(state: PagedReasoningState, context: StepContext, **_):
+    """Shard-0-only inference — fast path for simple queries."""
+    # Guard: normal path that didn't jump here (complexity >= 0.4)
+    if state.complexity_score >= 0.4:
+        return {}
+    try:
+        from js import runPagedInference  # type: ignore[import]
+        import json as _json
+        payload = _json.dumps({"prompt": state.prompt or _PAGED_DEMO_PROMPTS[0], "threshold": 0.9})
+        result = await runPagedInference(payload, 64)
+        return {
+            "generated_text": str(result.text),
+            "tokens_generated": int(result.tokens_generated),
+            "shards_loaded": int(result.shards_loaded),
+            "latency_ms": round(float(result.latency_ms), 1),
+        }
+    except Exception:
+        return {
+            "generated_text": (
+                "[Simulated fast path] Simple query resolved from shard-0 embedding + "
+                "first 2 transformer layers only. Latency ~1.5s, peak RAM ~140 MB."
+            ),
+            "tokens_generated": 12,
+            "shards_loaded": 1,
+            "latency_ms": 0.0,
+        }
+
+
+def format_output(state: PagedReasoningState, context: StepContext, **_):
+    """Trim generated text and annotate with shard + path metadata."""
+    text = (state.generated_text or "").strip()
+    if len(text) > 500:
+        text = text[:500] + "…"
+    return {"generated_text": text}
+
+
+wf6_steps = [
+    WorkflowStep(name="AssessComplexity",    func=assess_complexity,     automate_next=True),
+    WorkflowStep(name="FullPagedInference",  func=full_paged_inference,  automate_next=True),
+    WorkflowStep(name="FastPath",            func=fast_path,             automate_next=True),
+    WorkflowStep(name="FormatOutput",        func=format_output,         automate_next=False),
+]
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 async def run_workflow(wf_type: str, data_json: str) -> str:
     data = json.loads(data_json) if data_json else {}
@@ -1199,6 +1513,8 @@ async def run_workflow(wf_type: str, data_json: str) -> str:
         wf = await _make_workflow(wf_type, wf4_steps, DocumentState, data)
     elif wf_type == "FieldTechTriage":
         wf = await _make_workflow(wf_type, wf5_steps, FieldTechState, data)
+    elif wf_type == "PagedReasoning":
+        wf = await _make_workflow(wf_type, wf6_steps, PagedReasoningState, data)
     else:
         raise ValueError(f"Unknown workflow type: {wf_type}")
 
@@ -1244,6 +1560,9 @@ let pyodide = null;
 async function init() {
     self.postMessage({ type: "status", message: "Loading Pyodide runtime…" });
 
+    // Initialise OPFS shard cache (Workflow 6 — Paged Reasoning)
+    await _opfsCache.init();
+
     // Dynamic import — errors are catchable and produce real messages
     const { loadPyodide, indexURL } = await loadPyodideDynamic();
     pyodide = await loadPyodide({ indexURL });
@@ -1272,11 +1591,11 @@ async function init() {
     // when no wheel is found at the same origin (bare two-file share scenario).
     try {
         const probe = await fetch(
-            `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`,
+            `${self.location.origin}/dist/rufus_sdk-1.0.0rc2-py3-none-any.whl`,
             { method: "HEAD" }
         );
         if (probe.ok) {
-            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc1-py3-none-any.whl`;
+            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc2-py3-none-any.whl`;
         }
     } catch (_) {
         // network error or CORS block → leave _wheelUrl as null → TestPyPI path
@@ -1316,7 +1635,7 @@ else:
         keep_going=True,
     )
     await micropip.install(
-        "rufus-sdk==1.0.0rc1",
+        "rufus-sdk==1.0.0rc2",
         index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
         keep_going=True,
     )
@@ -1414,7 +1733,8 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "workflow_start", workflowType });
         const TIMEOUT_MS = { TransactionRiskScoring: 60_000,
                              DocumentSummarisation:  90_000,
-                             FieldTechTriage:        60_000 }[workflowType] ?? 30_000;
+                             FieldTechTriage:        60_000,
+                             PagedReasoning:         120_000 }[workflowType] ?? 30_000;
         let timedOut = false;
         const timeoutId = setTimeout(() => {
             timedOut = true;

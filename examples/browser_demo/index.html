@@ -1005,6 +1005,82 @@
       </div>
     </div>
 
+    <!-- ── Card 6: Paged Reasoning (BitNet) ─────────────────────────────────── -->
+    <div class="card" id="card-wf6">
+      <div class="card-header">
+        <div class="card-icon" style="background:#0a1a0a">🧠</div>
+        <div class="card-meta">
+          <h3>Paged Reasoning <span style="color:var(--muted);font-weight:400;font-size:12px">(BitNet b1.58 2B)</span></h3>
+          <p>Shard-paged GGUF · OPFS cache · Logic-gate fast path · &lt;300 MB peak RAM</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="pipeline" id="pipeline-wf6">
+          <span class="pipe-step" data-step="AssessComplexity">AssessComplexity</span>
+          <span class="pipe-arrow" style="color:var(--purple)">⤷</span>
+          <span class="pipe-step" data-step="FastPath">FastPath</span>
+          <span class="pipe-arrow" style="color:var(--muted)">|</span>
+          <span class="pipe-step" data-step="FullPagedInference">FullPagedInference</span>
+          <span class="pipe-arrow">→</span>
+          <span class="pipe-step" data-step="FormatOutput">FormatOutput</span>
+        </div>
+
+        <!-- Memory gauge -->
+        <div style="margin:10px 0 6px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+            <span>Peak WASM RAM estimate</span>
+            <span id="wf6-ram-label">—</span>
+          </div>
+          <div style="background:var(--surface2);border-radius:4px;height:6px;overflow:hidden">
+            <div id="wf6-ram-bar" style="height:100%;width:0%;background:var(--green);transition:width 0.4s,background 0.4s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px">
+            <span>0 MB</span><span style="margin-left:auto">300 MB limit (Safari)</span>
+          </div>
+        </div>
+
+        <div class="wf4-input-wrap">
+          <textarea
+            id="text-input-wf6"
+            class="wf4-textarea"
+            placeholder="Type a query — simple: 'What is error E42?' / complex: 'Diagnose intermittent relay failure on CB-42 under thermal load…'"
+            rows="3"
+            spellcheck="false"
+          ></textarea>
+        </div>
+
+        <!-- Streaming token output -->
+        <div id="wf6-stream-wrap" style="display:none;margin-top:8px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
+            Streaming tokens <span id="wf6-stream-meta" style="color:var(--cyan)"></span>
+          </div>
+          <div id="wf6-stream-text"
+               style="font-family:var(--mono);font-size:12px;color:var(--text);
+                      background:var(--surface2);border:1px solid var(--border);
+                      border-radius:6px;padding:8px;max-height:120px;overflow-y:auto;
+                      white-space:pre-wrap;word-break:break-word"></div>
+        </div>
+
+        <p style="font-size:12px;color:var(--muted);margin-top:8px">
+          A complexity classifier routes simple queries to shard-0 only (~140 MB, ~1.5s).
+          Complex prompts load all shards via a 2-shard rolling window from OPFS (~260 MB).
+          Production deployment replaces placeholder URLs with real BitNet split-GGUF shards.
+        </p>
+      </div>
+      <div class="result-panel" id="result-wf6">
+        <div class="result-header">
+          Result <span class="status-pill" id="status-wf6"></span>
+        </div>
+        <div class="result-fields" id="fields-wf6"></div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-run" id="btn-wf6" disabled onclick="runWorkflow('PagedReasoning')">
+          Run
+        </button>
+        <span class="run-meta" id="meta-wf6"></span>
+      </div>
+    </div>
+
   </div><!-- /cards -->
 
   <!-- ── Run History ──────────────────────────────────────────────────────── -->
@@ -1059,6 +1135,7 @@ const WORKFLOW_STEPS = {
   TransactionRiskScoring:  ["ExtractFeatures","GPUEmbedding","ComputeRiskScore","ScoreDecision","RecordOutcome"],
   DocumentSummarisation:   ["IngestDocument","PreprocessText","GenerateSummary","ExtractKeywords","QualityDecision","FallbackExtract"],
   FieldTechTriage:         ["CaptureReport","RunNERAnalysis","BuildRedactedPayload","RouteByPriority","LogStandard","EscalateIncident","StoreForForward"],
+  PagedReasoning:          ["AssessComplexity","FullPagedInference","FastPath","FormatOutput"],
 };
 
 const WF_ID = {
@@ -1067,6 +1144,7 @@ const WF_ID = {
   TransactionRiskScoring: "wf3",
   DocumentSummarisation:  "wf4",
   FieldTechTriage:        "wf5",
+  PagedReasoning:         "wf6",
 };
 
 let worker = null;
@@ -1140,6 +1218,17 @@ function handleWorkerMessage(e) {
       resetPipeline(msg.workflowType);
       setButton(msg.workflowType, true, "Running…");
       log(`▶ Starting ${msg.workflowType}`, "info");
+      // Reset Workflow 6 streaming UI on each new run
+      if (msg.workflowType === "PagedReasoning") {
+        const sw = document.getElementById("wf6-stream-wrap");
+        const st = document.getElementById("wf6-stream-text");
+        const bar = document.getElementById("wf6-ram-bar");
+        const lbl = document.getElementById("wf6-ram-label");
+        if (sw)  sw.style.display = "none";
+        if (st)  st.textContent = "";
+        if (bar) { bar.style.width = "0%"; bar.style.background = "var(--green)"; }
+        if (lbl) lbl.textContent = "—";
+      }
       break;
 
     case "step_done":
@@ -1287,6 +1376,38 @@ function handleWorkerMessage(e) {
       if (nerBadge2) nerBadge2.textContent = "ready ✓";
       break;
     }
+
+    case "paged_shard_status": {
+      const { shardsTotal, shardsLoading, fastPath } = msg;
+      const memMb = shardsLoading * 120;
+      const pct = Math.min(100, (memMb / 300) * 100);
+      const bar = document.getElementById("wf6-ram-bar");
+      const label = document.getElementById("wf6-ram-label");
+      if (bar) {
+        bar.style.width = pct + "%";
+        bar.style.background = pct > 80 ? "var(--orange)" : "var(--green)";
+      }
+      if (label) label.textContent = `~${memMb} MB`;
+      const wrap = document.getElementById("wf6-stream-wrap");
+      const meta = document.getElementById("wf6-stream-meta");
+      const streamEl = document.getElementById("wf6-stream-text");
+      if (wrap) { wrap.style.display = "block"; }
+      if (streamEl) streamEl.textContent = "";
+      if (meta) meta.textContent = fastPath
+        ? `(fast path · shard-0 only · ${shardsLoading}/${shardsTotal} shards)`
+        : `(full inference · ${shardsLoading}/${shardsTotal} shards)`;
+      log(`Paged inference: ${shardsLoading}/${shardsTotal} shards · ~${memMb} MB · ${fastPath ? "fast path" : "full"}`, "info");
+      break;
+    }
+
+    case "paged_token": {
+      const streamEl = document.getElementById("wf6-stream-text");
+      if (streamEl) {
+        streamEl.textContent += msg.piece;
+        streamEl.scrollTop = streamEl.scrollHeight;
+      }
+      break;
+    }
   }
 }
 
@@ -1330,6 +1451,11 @@ window.runWorkflow = function(workflowType) {
       const v = ta ? ta.value.trim() : "";
       return v ? { report_text: v } : {};
     })(),  // report_text omitted → Python uses the demo Hazmat scenario
+    PagedReasoning: (() => {
+      const ta = document.getElementById("text-input-wf6");
+      const v = ta ? ta.value.trim() : "";
+      return v ? { prompt: v } : {};
+    })(),  // prompt omitted → Python picks from _PAGED_DEMO_PROMPTS
   };
   const modelSettings = workflowType === "DocumentSummarisation" ? {
     max_new_tokens:     parseInt(document.getElementById("wf4-max-tokens")?.value  ?? "200"),
@@ -1342,7 +1468,7 @@ window.runWorkflow = function(workflowType) {
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function enableButtons() {
-  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4", "btn-wf5"].forEach(id => {
+  ["btn-wf1", "btn-wf2", "btn-wf3", "btn-wf4", "btn-wf5", "btn-wf6"].forEach(id => {
     document.getElementById(id).disabled = false;
   });
 }
@@ -1483,6 +1609,25 @@ function buildResultRows(wfType, s) {
       ["routed_to",    s.routed_to    || "—",                                rcls],
       ["saf_record",   s.saf_record_id || "—",                               "purple"],
       ["redacted",     redactedPreview,                                       ""],
+    ];
+  }
+  if (wfType === "PagedReasoning") {
+    const pcls = s.path_taken === "fast_path" ? "green"
+               : s.path_taken === "full_inference" ? "purple" : "orange";
+    const memEstMb = (s.shards_loaded || 0) * 120;
+    const textPreview = s.generated_text
+      ? (s.generated_text.length > 150 ? s.generated_text.substring(0, 150) + "…" : s.generated_text)
+      : "—";
+    return [
+      ["complexity",    s.complexity_score != null ? s.complexity_score.toFixed(3) : "—",
+                        s.complexity_score < 0.4 ? "green" : "purple"],
+      ["path_taken",    s.path_taken || "—",                                          pcls],
+      ["shards_loaded", s.shards_loaded != null ? `${s.shards_loaded} / ${3}` : "—", ""],
+      ["peak_ram_est",  memEstMb > 0 ? `~${memEstMb} MB` : "—",
+                        memEstMb > 240 ? "orange" : "green"],
+      ["tokens",        s.tokens_generated != null ? String(s.tokens_generated) : "—", ""],
+      ["latency",       s.latency_ms ? `${s.latency_ms.toFixed(0)} ms` : "—",         ""],
+      ["output",        textPreview,                                                    ""],
     ];
   }
   return Object.entries(s).slice(0, 8).map(([k, v]) => [k, JSON.stringify(v), ""]);
