@@ -148,13 +148,13 @@ globalThis.runSummarisation = async (text) => {
         if (_summariserTask === "text-generation") {
             // Qwen2.5-Instruct: chat template — returns array of messages
             const messages = [
-                { role: "system", content: "You are a concise summarizer. Respond only with the summary." },
-                { role: "user",   content: `Summarize the following in 2-3 sentences:\n\n${text.substring(0, 1500)}` },
+                { role: "system", content: "You are a concise summarizer. Respond only with the summary. Do not copy sentences verbatim." },
+                { role: "user",   content: `Write a 2-3 sentence summary (under 60 words) that captures the key facts. Do not quote the source directly.\n\n${text.substring(0, 1500)}` },
             ];
             const result = await _summariser(messages, {
-                max_new_tokens:     100,
+                max_new_tokens:     200,
                 do_sample:          false,
-                repetition_penalty: 1.1,
+                repetition_penalty: 1.3,
             });
             const generated = result[0].generated_text;
             summary = Array.isArray(generated)
@@ -452,18 +452,20 @@ class IndexedDBPersistence(InMemoryPersistence):
     async def save_workflow(self, workflow_id: str, workflow_data):
         # Evict oldest entry when at capacity (insertion-order dict, Python 3.7+)
         MAX_MEM = 50
+        import time as _t
         if len(self._workflows) >= MAX_MEM:
             oldest_key = next(iter(self._workflows))
             del self._workflows[oldest_key]
-        await super().save_workflow(workflow_id, workflow_data)
+        # Ensure created_at is set before writing to in-memory dict AND IDB
+        enriched = {
+            **workflow_data,
+            "created_at": workflow_data.get("created_at") or
+                          _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
+        }
+        await super().save_workflow(workflow_id, enriched)
         try:
-            import time as _t
             from js import idbPutWorkflow
-            await idbPutWorkflow(json.dumps({
-                **workflow_data,
-                "created_at": workflow_data.get("created_at") or
-                              _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
-            }))
+            await idbPutWorkflow(json.dumps(enriched))
         except Exception:
             pass
 

@@ -264,6 +264,19 @@
   }
   .model-overlay.visible { display: flex; align-items: center; gap: 8px; }
 
+  /* ── W4 textarea input ────────────────────────────────────────────────── */
+  .wf4-input-wrap { margin-bottom: 10px; }
+  .wf4-textarea {
+    width: 100%; box-sizing: border-box;
+    background: var(--surface2); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; font-family: inherit;
+    resize: vertical; outline: none;
+  }
+  .wf4-textarea:focus { border-color: var(--accent); }
+  .wf4-wordcount { font-size: 11px; color: var(--muted); text-align: right; margin-top: 3px; }
+  .wf4-wordcount.over { color: var(--red); }
+
   /* ── Spinner ──────────────────────────────────────────────────────────── */
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner {
@@ -809,7 +822,7 @@
         <div class="card-icon" style="background:#0e1e2e">📄</div>
         <div class="card-meta">
           <h3>Document Summarisation</h3>
-          <p>STANDARD · T5-small text2text · DECISION quality gate · extractive fallback</p>
+          <p>Qwen2.5-0.5B-Instruct · DECISION quality gate · extractive fallback</p>
         </div>
       </div>
       <div class="card-body">
@@ -828,8 +841,20 @@
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--muted)">Model: Xenova/t5-small (~90 MB, q8)</span>
+          <span style="font-size:11px;color:var(--muted)" id="badge-summariser-label">Model: Qwen2.5-0.5B (~350 MB, q4)</span>
           <span class="badge" id="badge-summariser-card" style="font-size:10px">not loaded</span>
+        </div>
+
+        <div class="wf4-input-wrap">
+          <textarea
+            id="text-input-wf4"
+            class="wf4-textarea"
+            placeholder="Paste your own text here (up to 250 words) — or leave blank to use a random demo document…"
+            rows="4"
+            spellcheck="false"
+            oninput="onWf4Input(this)"
+          ></textarea>
+          <div class="wf4-wordcount"><span id="wf4-wordcount">0</span> / 250 words</div>
         </div>
 
         <div class="model-overlay" id="model-overlay-wf4">
@@ -838,9 +863,9 @@
         </div>
 
         <p style="font-size:12px;color:var(--muted)">
-          Abstractive summarisation using a quantised T5-small model. A DECISION step
-          validates compression ratio; if the LLM output is too short it jumps to an
-          extractive sentence fallback — a workflow-level quality gate.
+          Abstractive summarisation using Qwen2.5-0.5B-Instruct (q4). A DECISION step
+          validates compression ratio; if the output is too short it jumps to an extractive
+          sentence fallback — a workflow-level quality gate.
         </p>
       </div>
       <div class="result-panel" id="result-wf4">
@@ -1085,6 +1110,8 @@ function handleWorkerMessage(e) {
       document.getElementById("model-overlay-wf4").classList.add("visible");
       const sotEl = document.getElementById("summariser-overlay-text");
       if (sotEl) sotEl.textContent = "Downloading Qwen2.5-0.5B weights (~350 MB, q4) — cached after first run…";
+      const lblEl = document.getElementById("badge-summariser-label");
+      if (lblEl) lblEl.textContent = "Model: Qwen2.5-0.5B (~350 MB, q4)";
       document.getElementById("badge-summariser").style.display = "";
       log("Downloading onnx-community/Qwen2.5-0.5B-Instruct (~350 MB, first run only)…", "model");
       setBadge("badge-summariser", "wasm", "Qwen2.5: downloading…");
@@ -1102,6 +1129,8 @@ function handleWorkerMessage(e) {
     case "summariser_fallback": {
       const sotFb = document.getElementById("summariser-overlay-text");
       if (sotFb) sotFb.textContent = "Qwen2.5 unavailable — loading FLAN-T5-small fallback (~90 MB)…";
+      const lblFb = document.getElementById("badge-summariser-label");
+      if (lblFb) lblFb.textContent = "Model: FLAN-T5-small (~90 MB, q8)";
       log(`Qwen2.5 load failed (${msg.reason}) — falling back to FLAN-T5-small`, "warn");
       setBadge("badge-summariser", "wasm", "FLAN-T5: loading…");
       break;
@@ -1120,6 +1149,20 @@ function handleWorkerMessage(e) {
   }
 }
 
+// ── W4 textarea word counter ──────────────────────────────────────────────────
+window.onWf4Input = function(el) {
+  const words = el.value.trim() === "" ? [] : el.value.trim().split(/\s+/);
+  const count = words.length;
+  const countEl = document.getElementById("wf4-wordcount");
+  countEl.textContent = count;
+  countEl.parentElement.className = "wf4-wordcount" + (count > 250 ? " over" : "");
+  if (count > 250) {
+    el.value = words.slice(0, 250).join(" ");
+    countEl.textContent = 250;
+    countEl.parentElement.className = "wf4-wordcount";
+  }
+};
+
 // ── Workflow runner ───────────────────────────────────────────────────────────
 window.runWorkflow = function(workflowType) {
   if (!worker) return;
@@ -1136,7 +1179,11 @@ window.runWorkflow = function(workflowType) {
       merchant_category: ["retail", "crypto-exchange", "grocery", "streaming"][Math.floor(Math.random() * 4)],
       location: ["London", "New York", "Singapore", "unknown"][Math.floor(Math.random() * 4)],
     },
-    DocumentSummarisation: {},   // raw_text omitted → Python picks random _DEMO_TEXTS entry
+    DocumentSummarisation: (() => {
+      const ta = document.getElementById("text-input-wf4");
+      const v = ta ? ta.value.trim() : "";
+      return v ? { raw_text: v } : {};
+    })(),  // raw_text omitted → Python picks random _DEMO_TEXTS entry
   };
   worker.postMessage({ type: "run_workflow", workflowType, data: defaultData[workflowType] || {} });
 };
