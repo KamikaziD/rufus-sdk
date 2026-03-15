@@ -26,6 +26,7 @@ let _pipeline = null;   // set after dynamic import
 let _activeModel  = null;              // "extractor" | "summariser" | null
 let _modelMutex   = Promise.resolve(); // promise-chain mutex (no SharedArrayBuffer needed)
 let _workflowRunning = false;          // busy flag — prevents concurrent workflow runs
+let _currentModelSettings = {};       // model params forwarded from the main thread (W4)
 
 // ─── Preflight tracking ───────────────────────────────────────────────────────
 let _loadedPyodideUrl = null;
@@ -151,11 +152,14 @@ globalThis.runSummarisation = async (text) => {
                 { role: "system", content: "You are a concise summarizer. Respond only with the summary. Do not copy sentences verbatim." },
                 { role: "user",   content: `Write a 2-3 sentence summary (under 60 words) that captures the key facts. Do not quote the source directly.\n\n${text.substring(0, 1500)}` },
             ];
-            const result = await _summariser(messages, {
-                max_new_tokens:     200,
-                do_sample:          false,
-                repetition_penalty: 1.3,
-            });
+            const s = _currentModelSettings;
+            const genOpts = {
+                max_new_tokens:     s.max_new_tokens     ?? 200,
+                do_sample:          s.do_sample          ?? false,
+                repetition_penalty: s.repetition_penalty ?? 1.3,
+            };
+            if (genOpts.do_sample) genOpts.temperature = s.temperature ?? 0.7;
+            const result = await _summariser(messages, genOpts);
             const generated = result[0].generated_text;
             summary = Array.isArray(generated)
                 ? (generated.at(-1)?.content ?? "")
@@ -1219,9 +1223,10 @@ async function gatherPreflight() {
 
 // ─── Message dispatcher ───────────────────────────────────────────────────────
 self.onmessage = async (e) => {
-    const { type, workflowType, data } = e.data;
+    const { type, workflowType, data, modelSettings } = e.data;
 
     if (type === "run_workflow") {
+        if (modelSettings) _currentModelSettings = modelSettings;
         if (_workflowRunning) {
             self.postMessage({ type: "workflow_error", workflowType,
                                message: "A workflow is already running — please wait." });
