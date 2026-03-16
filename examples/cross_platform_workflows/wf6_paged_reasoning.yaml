@@ -1,0 +1,30 @@
+workflow_type: "PagedReasoning"
+workflow_version: "1.0.0rc3"
+description: "Paged LLM reasoning: complexity-gated fast path vs full inference (wllama/LlamaCpp/sim)"
+initial_state_model_path: "cross_platform_workflows.state_models.PagedReasoningState"
+automate_start: true
+
+steps:
+  - name: "AssessComplexity"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.assess_complexity"
+    description: "Score prompt complexity; jump to FastPath for simple queries"
+    automate_next: true
+
+  - name: "FullPagedInference"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.full_paged_inference"
+    description: "Full multi-shard LLM inference for complex queries"
+    automate_next: true
+
+  - name: "FastPath"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.fast_path"
+    description: "Single-shard fast inference (jump target) or no-op on full-inference path"
+    automate_next: true
+
+  - name: "FormatOutput"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.format_output"
+    description: "Trim and annotate generated text with path and shard metadata"
+    automate_next: false

@@ -7,7 +7,7 @@ export function LoginButton({ callbackUrl }: { callbackUrl: string }) {
     <button
       type="button"
       onClick={() => signIn("keycloak", { callbackUrl })}
-      className="w-full bg-primary text-primary-foreground rounded-lg py-3 font-medium hover:opacity-90 transition-opacity"
+      className="w-full bg-amber-500 hover:bg-amber-600 text-black font-mono text-sm rounded-none py-3 transition-colors"
     >
       Sign in with Keycloak
     </button>

@@ -1,0 +1,52 @@
+workflow_type: "PagedReasoningNative"
+workflow_version: "1.0.0rc3"
+description: "Paged reasoning with native LlamaCpp GGUF (edge: 1B, cloud: 3B) instead of wllama JS FFI"
+initial_state_model_path: "cross_platform_workflows.state_models.PagedReasoningState"
+automate_start: true
+
+# FullPagedInference and FastPath are replaced by AI_INFERENCE steps backed by
+# LlamaCppPagedProvider (src/rufus/implementations/inference/llamacpp_paged.py).
+#
+# Recommended models:
+#   Edge:  Llama-3.2-1B-Instruct.Q4_K_M.gguf  (~750 MB)
+#   Cloud: Llama-3.2-3B-Instruct.Q4_K_M.gguf  (~1.9 GB)
+#
+# Set LLM_MODEL_PATH env var to the local GGUF path before starting the container.
+# If the model file is absent the step is skipped and simulation text is used.
+
+steps:
+  - name: "AssessComplexity"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.assess_complexity"
+    description: "Score prompt complexity via heuristic; jump to FastPath for simple queries"
+    automate_next: true
+
+  - name: "FullPagedInference"
+    type: "AI_INFERENCE"
+    description: "Full multi-shard LLM inference for complex queries via LlamaCppPagedProvider"
+    ai_config:
+      model_path: "${LLM_MODEL_PATH:-/models/Llama-3.2-3B-Instruct.Q4_K_M.gguf}"
+      backend: "llamacpp_paged"
+      max_tokens: 256
+      paging_strategy: "rolling_window"
+      input_field: "prompt"
+      output_field: "generated_text"
+    automate_next: true
+
+  - name: "FastPath"
+    type: "AI_INFERENCE"
+    description: "Single-shard fast inference for simple queries (jump target from AssessComplexity)"
+    ai_config:
+      model_path: "${LLM_MODEL_PATH:-/models/Llama-3.2-1B-Instruct.Q4_K_M.gguf}"
+      backend: "llamacpp_paged"
+      max_tokens: 64
+      paging_strategy: "rolling_window"
+      input_field: "prompt"
+      output_field: "generated_text"
+    automate_next: true
+
+  - name: "FormatOutput"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.format_output"
+    description: "Trim and annotate generated text with path and shard metadata"
+    automate_next: false

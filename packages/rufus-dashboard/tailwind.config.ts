@@ -9,6 +9,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -41,9 +45,27 @@ const config: Config = {
         },
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "0px",
+        md: "0px",
+        sm: "0px",
+      },
+      animation: {
+        "pulse-amber": "pulse-amber 2s ease-in-out infinite",
+        "dash-march":  "dash-march .6s linear infinite",
+        "tick":        "tick 1s ease-in-out infinite alternate",
+      },
+      keyframes: {
+        "pulse-amber": {
+          "0%,100%": { boxShadow: "0 0 0 0 rgba(249,115,22,.4)" },
+          "50%":      { boxShadow: "0 0 0 6px rgba(249,115,22,0)" },
+        },
+        "dash-march": {
+          to: { strokeDashoffset: "-20" },
+        },
+        "tick": {
+          from: { opacity: "1" },
+          to:   { opacity: ".6" },
+        },
       },
     },
   },

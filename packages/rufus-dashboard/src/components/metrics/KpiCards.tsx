@@ -1,8 +1,5 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GitBranch, Cpu, CheckSquare, AlertCircle, Server } from "lucide-react";
-
 interface KpiData {
   activeWorkflows: number;
   onlineDevices: number;
@@ -19,35 +16,23 @@ interface KpiCardsProps {
 function KpiCard({
   title,
   value,
-  icon: Icon,
-  description,
+  accentColor,
   isLoading,
-  accent,
 }: {
   title: string;
   value: number;
-  icon: React.ComponentType<{ className?: string }>;
-  description: string;
+  accentColor: string;
   isLoading?: boolean;
-  accent?: string;
 }) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
-        <Icon className={`h-4 w-4 ${accent ?? "text-muted-foreground"}`} />
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="h-8 w-16 animate-pulse bg-muted rounded" />
-        ) : (
-          <div className="text-2xl font-bold">{value.toLocaleString()}</div>
-        )}
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
-      </CardContent>
-    </Card>
+    <div className={`bg-[#111113] border border-[#1E1E22] rounded-none p-4 border-l-2 ${accentColor}`}>
+      <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-2">{title}</div>
+      {isLoading ? (
+        <div className="h-8 w-12 animate-pulse bg-zinc-800 rounded-none" />
+      ) : (
+        <div className="font-mono text-3xl font-semibold text-[#E4E4E7]">{value.toLocaleString()}</div>
+      )}
+    </div>
   );
 }
 
@@ -57,42 +42,32 @@ export function KpiCards({ data, isLoading }: KpiCardsProps) {
       <KpiCard
         title="Active Workflows"
         value={data?.activeWorkflows ?? 0}
-        icon={GitBranch}
-        description="Currently running"
+        accentColor="border-l-amber-500"
         isLoading={isLoading}
-        accent="text-blue-500"
       />
       <KpiCard
         title="Online Devices"
         value={data?.onlineDevices ?? 0}
-        icon={Cpu}
-        description="Heartbeat within 2 min"
+        accentColor="border-l-emerald-500"
         isLoading={isLoading}
-        accent="text-green-500"
       />
       <KpiCard
         title="Pending Approvals"
         value={data?.pendingHitl ?? 0}
-        icon={CheckSquare}
-        description="Awaiting human input"
+        accentColor="border-l-yellow-500"
         isLoading={isLoading}
-        accent="text-yellow-500"
       />
       <KpiCard
         title="Failed (24h)"
         value={data?.failedToday ?? 0}
-        icon={AlertCircle}
-        description="Needs investigation"
+        accentColor="border-l-red-500"
         isLoading={isLoading}
-        accent="text-red-500"
       />
       <KpiCard
         title="Online Workers"
         value={data?.onlineWorkers ?? 0}
-        icon={Server}
-        description="Workers heartbeating"
+        accentColor="border-l-blue-500"
         isLoading={isLoading}
-        accent="text-violet-500"
       />
     </div>
   );

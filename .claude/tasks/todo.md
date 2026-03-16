@@ -1,44 +1,26 @@
-# Air-Gap Triage Demo — Operation Air-Gap
+# v1.0.0rc4 Release — SAF Payment Simulation + Bug Fixes
 
 ## Branch: feature/air-gap-triage-demo
 
-## Phase 1 — AI_INFERENCE dispatch in workflow.py
-- [x] Import AIInferenceWorkflowStep in workflow.py
-- [x] Add inference_provider optional param to Workflow.__init__
-- [x] Add AIInferenceWorkflowStep to is_sync_step exclusion list
-- [x] Add _execute_ai_inference_step() dispatch block
-- [ ] Write tests/sdk/test_ai_inference_step.py
+## Steps
 
-## Phase 2 — worker.js: NER model + JS globals
-- [x] Add _nerPipeline variable
-- [x] Extend _loadModel() with "ner" branch (unload + load)
-- [x] Add globalThis.runNERInference callback
-- [x] Add ner_model_loading / ner_model_ready postMessage types
-
-## Phase 3 — worker.js: Workflow 5 Python code
-- [x] FieldTechState Pydantic model
-- [x] SEVERITY_KEYWORDS + INCIDENT_KEYWORDS dicts
-- [x] Step functions: capture_report, run_ner_analysis, build_redacted_payload,
-      route_by_severity, log_standard_incident, escalate_incident, store_for_forward
-- [x] wf5_steps list
-- [x] run_workflow "FieldTechTriage" branch
-- [x] Timeout entry for FieldTechTriage
-
-## Phase 4 — index.html: Card 5 + plumbing
-- [x] Card 5 HTML (after card 4)
-- [x] WORKFLOW_STEPS dict: add FieldTechTriage
-- [x] WF_ID dict: add FieldTechTriage -> wf5
-- [x] enableButtons(): add btn-wf5
-- [x] runWorkflow() defaultData: add FieldTechTriage
-- [x] buildResultRows(): add FieldTechTriage case
-- [x] historyKeyResult(): add FieldTechTriage
-- [x] handleWorkerMessage(): ner_model_loading, ner_model_ready cases
-
-## Phase 5 — Tests & Commit
-- [ ] Run pytest to ensure no regressions
-- [ ] Commit and push
-
----
+- [x] Step 1 — Create Alembic migration `i4j5k6l7m8n9_add_workflow_id_to_saf_transactions.py`
+- [x] Step 2 — Commit #1: All session changes
+- [x] Step 3 — Version bump (17 locations: rc3 → rc4)
+- [x] Step 4 — Commit #2: Version bump (merged with session changes)
+- [x] Step 5 — Build and upload wheels (3 packages to TestPyPI) ✓
+- [x] Step 6 — Build and push Docker images (5 multi-arch images to ruhfuskdev/) ✓
+- [x] Step 7 — Update documentation (README + changelog)
+- [x] Step 8 — Commit #3: Docs + tag v1.0.0rc4
+- [x] Step 9 — Push branch + tag to remote ✓
+- [ ] Step 10 — Create PR (user provides fresh GH_TOKEN)
 
 ## Review
-(to be filled after completion)
+
+All done except PR creation. Two commits:
+- `1dff8cef` — feat: SAF payment + version bump (76 files)
+- `602c57dd` — docs: update for v1.0.0rc4
+
+**Note:** .env removed from git tracking; .env added to .gitignore (was causing push protection block due to GitHub PAT at line 111).
+
+PR URL to create: https://github.com/KamikaziD/rufus-sdk/pull/new/feature/air-gap-triage-demo

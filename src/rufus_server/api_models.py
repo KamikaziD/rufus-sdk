@@ -128,6 +128,12 @@ class EncryptedTransaction(BaseModel):
     encrypted_blob: str = Field(..., description="Base64-encoded encrypted data")
     encryption_key_id: str
     hmac: str = Field(..., description="HMAC for integrity verification")
+    # Plaintext metadata included alongside the encrypted blob
+    merchant_id: str = ""
+    amount_cents: int = 0
+    currency: str = "USD"
+    card_token: str = ""
+    card_last_four: str = ""
 
 
 class SyncRequest(BaseModel):

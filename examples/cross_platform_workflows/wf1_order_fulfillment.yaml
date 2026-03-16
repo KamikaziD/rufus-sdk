@@ -1,0 +1,48 @@
+workflow_type: "OrderFulfillment"
+workflow_version: "1.0.0rc3"
+description: "E-commerce order fulfillment with parallel warehouse checks and backorder handling"
+initial_state_model_path: "cross_platform_workflows.state_models.OrderState"
+automate_start: true
+
+steps:
+  - name: "ValidateOrder"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.validate_order"
+    description: "Validate order items and compute total"
+    automate_next: true
+
+  - name: "CheckInventory"
+    type: "PARALLEL"
+    description: "Check UK and EU warehouses simultaneously"
+    tasks:
+      - name: "check_uk"
+        function: "cross_platform_workflows.celery_steps.check_warehouse_uk"
+      - name: "check_eu"
+        function: "cross_platform_workflows.celery_steps.check_warehouse_eu"
+    merge_strategy: "SHALLOW"
+    merge_conflict_behavior: "PREFER_NEW"
+    automate_next: true
+
+  - name: "FulfillmentDecision"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.fulfillment_decision"
+    description: "Route to BackorderNotice if no stock available in either warehouse"
+    automate_next: true
+
+  - name: "ProcessPayment"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.process_payment"
+    description: "Charge payment and record reference"
+    automate_next: true
+
+  - name: "SendConfirmation"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.send_confirmation"
+    description: "Send order confirmation and mark SHIPPED"
+    automate_next: false
+
+  - name: "BackorderNotice"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.backorder_notice"
+    description: "Notify customer of backorder (jump target when out of stock)"
+    automate_next: false

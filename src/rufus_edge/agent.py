@@ -565,7 +565,7 @@ class RufusEdgeAgent:
 
     async def _send_heartbeat(self):
         """Send heartbeat with device metrics to cloud control plane."""
-        if not self.sync_manager or not self.sync_manager._http_client:
+        if not self.cloud_url:
             return
 
         pending_count = await self.sync_manager.get_pending_count() if self.sync_manager else 0
@@ -588,23 +588,20 @@ class RufusEdgeAgent:
         }
 
         try:
-            response = await self.sync_manager._http_client.post(
-                f"{self.cloud_url}/api/v1/devices/{self.device_id}/heartbeat",
-                json=payload,
-                timeout=10.0,
-            )
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.cloud_url}/api/v1/devices/{self.device_id}/heartbeat",
+                    json=payload,
+                    headers={"X-API-Key": self.api_key} if self.api_key else {},
+                )
             if response.status_code == 200:
                 self._heartbeat_consecutive_failures = 0
-                data = response.json()
-                # Process any pending commands from cloud
-                commands = data.get("commands", [])
-                for cmd in commands:
+                for cmd in response.json().get("commands", []):
                     await self._handle_cloud_command(cmd)
             else:
                 self._heartbeat_consecutive_failures += 1
-                self._log_heartbeat_failure(
-                    f"unexpected status {response.status_code}"
-                )
+                self._log_heartbeat_failure(f"unexpected status {response.status_code}")
         except Exception as e:
             self._heartbeat_consecutive_failures += 1
             self._log_heartbeat_failure(str(e))

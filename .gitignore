@@ -2,6 +2,10 @@
 # /sdk-plan.md
 # original_implementation_files/
 # project-plan-todo.md
+.env
+dist/
+**/dist/
+*.egg-info/
 .venv/
 __pycache__/
 *.pyc

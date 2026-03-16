@@ -12,6 +12,7 @@ import hashlib
 import hmac as hmac_lib
 import json
 import secrets
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import logging
@@ -396,13 +397,14 @@ class DeviceService:
                     result = await conn.fetchrow(
                         """
                         INSERT INTO saf_transactions (
-                            transaction_id, idempotency_key, device_id, merchant_id,
+                            id, transaction_id, idempotency_key, device_id, merchant_id,
                             amount_cents, currency, card_token, card_last_four,
-                            encrypted_payload, encryption_key_id, status, synced_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'synced', $11)
+                            encrypted_payload, encryption_key_id, workflow_id, status, synced_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced', $13)
                         ON CONFLICT (idempotency_key) DO NOTHING
                         RETURNING transaction_id
                         """,
+                        str(uuid.uuid4()),
                         txn["transaction_id"],
                         txn["idempotency_key"],
                         device_id,
@@ -413,6 +415,7 @@ class DeviceService:
                         txn.get("card_last_four", ""),
                         txn.get("encrypted_payload"),
                         txn.get("encryption_key_id"),
+                        txn.get("workflow_id"),
                         datetime.utcnow()
                     )
 
@@ -450,6 +453,38 @@ class DeviceService:
             "rejected": rejected,
             "server_sequence": device_sequence,
         }
+
+    async def list_saf_transactions(self, device_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """List synced SAF transactions for a device."""
+        async with self.persistence.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT transaction_id, merchant_id, amount_cents, currency,
+                          card_last_four, status, workflow_id, synced_at, created_at
+                   FROM saf_transactions WHERE device_id = $1
+                   ORDER BY synced_at DESC NULLS LAST LIMIT $2""",
+                device_id, limit,
+            )
+            result = []
+            for r in rows:
+                d = dict(r)
+                # Convert cents to float for display
+                d["amount"] = d["amount_cents"] / 100 if d.get("amount_cents") is not None else None
+                result.append(d)
+            return result
+
+    async def update_device(self, device_id: str, updates: dict) -> bool:
+        """Update allowed device fields."""
+        allowed = {"sdk_version", "firmware_version", "device_name", "location"}
+        fields = {k: v for k, v in updates.items() if k in allowed and v is not None}
+        if not fields:
+            return False
+        set_clause = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(fields))
+        async with self.persistence.pool.acquire() as conn:
+            result = await conn.execute(
+                f"UPDATE edge_devices SET {set_clause} WHERE device_id = $1",
+                device_id, *fields.values(),
+            )
+        return result != "UPDATE 0"
 
     async def _get_transaction_by_idempotency(
         self,

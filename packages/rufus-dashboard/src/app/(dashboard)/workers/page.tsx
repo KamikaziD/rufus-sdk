@@ -7,11 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { listWorkers, type WorkerSummary } from "@/lib/api";
 import { hasPermission } from "@/lib/roles";
 import { WorkerCommandModal } from "@/components/workers/WorkerCommandModal";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/utils";
-import { Server, RefreshCw, Wifi, WifiOff, ChevronRight, Radio } from "lucide-react";
+import { Server, RefreshCw, Radio, ChevronRight } from "lucide-react";
 
 const STATUS_OPTIONS = ["all", "online", "offline"] as const;
 
@@ -25,15 +22,12 @@ function useRoles() {
   return (session?.user as unknown as { roles?: string[] })?.roles ?? [];
 }
 
-function WorkerStatusBadge({ status }: { status: string }) {
+function WorkerStatusDot({ status }: { status: string }) {
   const online = status === "online";
   return (
-    <Badge variant={online ? "success" : "secondary"} className="gap-1">
-      {online
-        ? <Wifi className="h-3 w-3" />
-        : <WifiOff className="h-3 w-3" />}
-      {status}
-    </Badge>
+    <span className={`font-mono text-xs ${online ? "text-emerald-400" : "text-zinc-600"}`}>
+      {online ? "●" : "○"} {status.toUpperCase()}
+    </span>
   );
 }
 
@@ -46,14 +40,12 @@ export default function WorkersPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
-  // Single-worker command modal state
   const [cmdModal, setCmdModal] = useState<{
     open: boolean;
     workerId: string;
     hostname: string;
   }>({ open: false, workerId: "", hostname: "" });
 
-  // Broadcast modal state
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
@@ -73,151 +65,151 @@ export default function WorkersPage() {
   const pageCount = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Worker Fleet</h1>
-          <p className="text-muted-foreground">{total} worker{total !== 1 ? "s" : ""} registered</p>
+          <h1 className="font-mono text-sm font-semibold text-[#E4E4E7] tracking-wider uppercase">WORKER FLEET</h1>
+          <p className="font-mono text-[10px] text-zinc-600 mt-0.5">
+            {total} worker{total !== 1 ? "s" : ""} registered
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-1.5 font-mono text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 px-2 py-1 rounded-none transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
           {canManage && (
-            <Button size="sm" onClick={() => setBroadcastOpen(true)}>
-              <Radio className="h-3.5 w-3.5" />
-              Broadcast
-            </Button>
+            <button
+              onClick={() => setBroadcastOpen(true)}
+              className="inline-flex items-center gap-1.5 font-mono text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 px-2 py-1 rounded-none transition-colors"
+            >
+              <Radio className="h-3 w-3" /> Broadcast
+            </button>
           )}
         </div>
       </div>
 
-      {/* Status filter */}
-      <div className="flex gap-2">
+      {/* Filter chips */}
+      <div className="flex gap-1.5">
         {STATUS_OPTIONS.map((s) => (
           <button
             key={s}
             onClick={() => { setStatusFilter(s); setPage(1); }}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+            className={`font-mono text-[10px] border px-2 py-1 rounded-none transition-colors ${
               statusFilter === s
-                ? "bg-primary text-primary-foreground border-primary"
-                : "border-border text-muted-foreground hover:border-foreground"
+                ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
+                : "border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500"
             }`}
           >
-            {s.charAt(0).toUpperCase() + s.slice(1)}
+            {s.toUpperCase()}
           </button>
         ))}
       </div>
 
       {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-12 animate-pulse bg-muted rounded" />
-              ))}
-            </div>
-          ) : workers.length === 0 ? (
-            <div className="py-16 text-center text-muted-foreground">
-              <Server className="h-10 w-10 mx-auto mb-3 opacity-30" />
-              <p>No workers found</p>
-              {statusFilter !== "all" && (
-                <p className="text-xs mt-1">Try clearing the status filter</p>
-              )}
-            </div>
-          ) : (
-            <table className="w-full text-sm">
+      <div className="bg-[#111113] border border-[#1E1E22] rounded-none">
+        {isLoading ? (
+          <div className="p-6 space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-10 animate-pulse bg-zinc-800/50 rounded-none" />
+            ))}
+          </div>
+        ) : workers.length === 0 ? (
+          <div className="py-16 text-center">
+            <Server className="h-8 w-8 mx-auto mb-3 text-zinc-700" />
+            <p className="font-mono text-xs text-zinc-600">NO WORKERS FOUND</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
               <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th className="text-left px-4 py-3 font-medium">Worker ID</th>
-                  <th className="text-left px-4 py-3 font-medium">Hostname</th>
-                  <th className="text-left px-4 py-3 font-medium">Region / Zone</th>
-                  <th className="text-left px-4 py-3 font-medium">Status</th>
-                  <th className="text-left px-4 py-3 font-medium">SDK</th>
-                  <th className="text-left px-4 py-3 font-medium">Pending</th>
-                  <th className="text-left px-4 py-3 font-medium">Last Heartbeat</th>
-                  <th className="text-right px-4 py-3 font-medium">Actions</th>
+                <tr className="bg-[#0D0D0F] border-b border-[#1E1E22]">
+                  {["WORKER ID", "HOSTNAME", "REGION / ZONE", "STATUS", "SDK", "PENDING", "LAST HEARTBEAT", ""].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {workers.map((w) => (
-                  <tr key={w.worker_id} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs truncate max-w-[160px]" title={w.worker_id}>
-                      {w.worker_id.length > 20 ? w.worker_id.slice(0, 20) + "…" : w.worker_id}
+                  <tr key={w.worker_id} className="border-b border-[#1E1E22] hover:bg-[#1A1A1E] transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-400 truncate max-w-[140px]" title={w.worker_id}>
+                      {w.worker_id.length > 18 ? w.worker_id.slice(0, 18) + "…" : w.worker_id}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs">{w.hostname}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-300">{w.hostname}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500">
                       {w.region}
-                      {w.zone && <span className="ml-1 text-muted-foreground/60">/ {w.zone}</span>}
+                      {w.zone && <span className="text-zinc-600"> / {w.zone}</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <WorkerStatusBadge status={w.status} />
+                      <WorkerStatusDot status={w.status} />
                     </td>
-                    <td className="px-4 py-3 text-xs font-mono">
-                      {w.sdk_version ?? <span className="text-muted-foreground">—</span>}
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500">
+                      {w.sdk_version ?? <span className="text-zinc-700">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-xs tabular-nums">
-                      {w.pending_command_count > 0
-                        ? <Badge variant="outline" className="text-xs">{w.pending_command_count}</Badge>
-                        : <span className="text-muted-foreground">0</span>}
+                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                      {w.pending_command_count > 0 ? (
+                        <span className="font-mono text-[10px] border border-amber-500/40 text-amber-400 px-1.5 py-0.5">
+                          {w.pending_command_count}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-700">0</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500 tabular-nums">
                       {w.last_heartbeat ? formatRelativeTime(w.last_heartbeat) : "—"}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         {canManage && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
+                          <button
                             onClick={() => setCmdModal({ open: true, workerId: w.worker_id, hostname: w.hostname })}
+                            className="font-mono text-[10px] border border-zinc-700 text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 px-2 py-0.5 rounded-none transition-colors"
                           >
-                            Send Cmd
-                          </Button>
+                            CMD
+                          </button>
                         )}
-                        <Button size="sm" variant="ghost" className="h-7 px-2" asChild>
-                          <Link href={`/workers/${encodeURIComponent(w.worker_id)}`}>
-                            <ChevronRight className="h-4 w-4" />
-                          </Link>
-                        </Button>
+                        <Link
+                          href={`/workers/${encodeURIComponent(w.worker_id)}`}
+                          className="font-mono text-[10px] border border-zinc-700 text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 px-2 py-0.5 rounded-none transition-colors"
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Link>
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
 
       {/* Pagination */}
       {pageCount > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
+        <div className="flex items-center justify-center gap-2">
+          <button
             disabled={page === 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="font-mono text-xs border border-zinc-700 text-zinc-500 hover:text-zinc-200 px-3 py-1 rounded-none disabled:opacity-40 transition-colors"
           >
             ← Prev
-          </Button>
-          <span>Page {page} of {pageCount}</span>
-          <Button
-            variant="outline"
-            size="sm"
+          </button>
+          <span className="font-mono text-xs text-zinc-600">Page {page} of {pageCount}</span>
+          <button
             disabled={page >= pageCount}
             onClick={() => setPage((p) => p + 1)}
+            className="font-mono text-xs border border-zinc-700 text-zinc-500 hover:text-zinc-200 px-3 py-1 rounded-none disabled:opacity-40 transition-colors"
           >
             Next →
-          </Button>
+          </button>
         </div>
       )}
 
-      {/* Single-worker command modal */}
       <WorkerCommandModal
         open={cmdModal.open}
         onClose={() => setCmdModal((m) => ({ ...m, open: false }))}
@@ -225,8 +217,6 @@ export default function WorkersPage() {
         workerId={cmdModal.workerId}
         workerHostname={cmdModal.hostname}
       />
-
-      {/* Broadcast modal */}
       <WorkerCommandModal
         open={broadcastOpen}
         onClose={() => setBroadcastOpen(false)}

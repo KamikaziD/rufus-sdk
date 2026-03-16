@@ -30,7 +30,7 @@ export function KpiCardsServer() {
       };
     },
     enabled: !!token,
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
   });
 
   return <KpiCards data={data} isLoading={isLoading} />;

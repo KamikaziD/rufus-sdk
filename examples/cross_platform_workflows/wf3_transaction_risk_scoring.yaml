@@ -1,0 +1,36 @@
+workflow_type: "TransactionRiskScoring"
+workflow_version: "1.0.0rc3"
+description: "Transaction risk scoring with WebGPU embedding (browser) or CPU fallback (cloud/edge)"
+initial_state_model_path: "cross_platform_workflows.state_models.TransactionState"
+automate_start: true
+
+steps:
+  - name: "ExtractFeatures"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.extract_features"
+    description: "Build feature text string from transaction fields"
+    automate_next: true
+
+  - name: "GPUEmbedding"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.gpu_embedding"
+    description: "Embed feature text (WebGPU on browser, deterministic hash on cloud/edge)"
+    automate_next: true
+
+  - name: "ComputeRiskScore"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.compute_risk_score"
+    description: "Compute cosine similarity against risk pattern embeddings"
+    automate_next: true
+
+  - name: "ScoreDecision"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.score_decision"
+    description: "Jump to RecordOutcome (DECLINED) for high-risk transactions"
+    automate_next: true
+
+  - name: "RecordOutcome"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.record_outcome"
+    description: "Record DECLINED outcome (jump target) or no-op if already decided"
+    automate_next: false

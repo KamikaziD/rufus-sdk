@@ -1,0 +1,42 @@
+workflow_type: "DocumentSummarisation"
+workflow_version: "1.0.0rc3"
+description: "Document summarisation pipeline with LLM (browser) or extractive (cloud/edge) fallback"
+initial_state_model_path: "cross_platform_workflows.state_models.DocumentState"
+automate_start: true
+
+steps:
+  - name: "IngestDocument"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.ingest_document"
+    description: "Load document text and classify doc type"
+    automate_next: true
+
+  - name: "PreprocessText"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.preprocess_text"
+    description: "Normalise whitespace and count sentences"
+    automate_next: true
+
+  - name: "GenerateSummary"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.generate_summary"
+    description: "Abstractive LLM summary (browser) or extractive sentence fallback (cloud/edge)"
+    automate_next: true
+
+  - name: "ExtractKeywords"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.extract_keywords"
+    description: "Extract top 8 keywords from summary + source text"
+    automate_next: true
+
+  - name: "QualityDecision"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.quality_decision"
+    description: "Jump to FallbackExtract if summary fails quality gates"
+    automate_next: true
+
+  - name: "FallbackExtract"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.fallback_extract"
+    description: "Extractive 3-sentence summary (jump target) or no-op if quality is GOOD"
+    automate_next: false

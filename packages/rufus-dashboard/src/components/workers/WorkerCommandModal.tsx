@@ -144,7 +144,7 @@ function CommandDataFields({
                   className={INPUT_CLS}
                   value={(commandData.version as string) ?? ""}
                   onChange={(e) => set("version", e.target.value)}
-                  placeholder="0.7.3"
+                  placeholder="1.0.0rc3"
                 />
               </FieldWrap>
               <FieldWrap label="Index URL (optional)">

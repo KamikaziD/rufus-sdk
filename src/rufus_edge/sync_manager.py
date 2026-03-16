@@ -91,17 +91,46 @@ class SyncManager:
         Returns:
             The transaction ID
         """
-        # Store in local database
-        await self.persistence.create_task_record(
-            execution_id=transaction.workflow_id or transaction.transaction_id,
-            step_name="SAF_Sync",
-            step_index=0,
-            task_data={
-                "transaction": transaction.model_dump(mode="json"),
-                "queued_at": datetime.utcnow().isoformat(),
-            },
-            idempotency_key=transaction.idempotency_key,
+        now_iso = datetime.utcnow().isoformat()
+        row_id = str(uuid.uuid4())
+        encrypted = (
+            transaction.encrypted_payload.hex()
+            if transaction.encrypted_payload
+            else ""
         )
+        amount_cents = int(transaction.amount * 100) if transaction.amount else 0
+        metadata = json.dumps({"merchant_id": transaction.merchant_id or ""})
+        try:
+            await self.persistence.conn.execute(
+                """
+                INSERT INTO saf_pending_transactions
+                    (id, transaction_id, idempotency_key, workflow_id,
+                     amount_cents, currency, card_token, card_last_four,
+                     encrypted_payload, encryption_key_id,
+                     status, created_at, queued_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_sync', ?, ?, ?)
+                ON CONFLICT(idempotency_key) DO NOTHING
+                """,
+                (
+                    row_id,
+                    transaction.transaction_id,
+                    transaction.idempotency_key,
+                    transaction.workflow_id,
+                    amount_cents,
+                    transaction.currency or "USD",
+                    transaction.card_token or "",
+                    transaction.card_last_four or "",
+                    encrypted,
+                    transaction.encryption_key_id or "default",
+                    now_iso,
+                    now_iso,
+                    metadata,
+                ),
+            )
+            await self.persistence.conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to queue transaction {transaction.transaction_id}: {e}")
+            raise
 
         logger.info(f"Queued transaction {transaction.transaction_id} for sync")
         return transaction.transaction_id
@@ -110,10 +139,7 @@ class SyncManager:
         """Get count of transactions pending sync."""
         try:
             async with self.persistence.conn.execute(
-                """
-                SELECT COUNT(*) FROM tasks
-                WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
-                """
+                "SELECT COUNT(*) FROM saf_pending_transactions WHERE status = 'pending_sync'"
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else 0
@@ -346,29 +372,54 @@ class SyncManager:
             await self._release_sync_lock()
 
     async def _get_pending_transactions(self) -> List[SAFTransaction]:
-        """Get all transactions pending sync from the local task queue."""
+        """Get all transactions pending sync from saf_pending_transactions."""
         try:
             async with self.persistence.conn.execute(
                 """
-                SELECT task_id, task_data FROM tasks
-                WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
+                SELECT id, transaction_id, idempotency_key, workflow_id,
+                       amount_cents, currency, card_token, card_last_four,
+                       encrypted_payload, encryption_key_id, metadata
+                FROM saf_pending_transactions
+                WHERE status = 'pending_sync'
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
-                (self.batch_size * 10,)  # Fetch up to 10 batches
+                (self.batch_size * 10,),
             ) as cursor:
                 rows = await cursor.fetchall()
 
             transactions = []
             for row in rows:
-                task_data = self.persistence._deserialize_json(row[1])
-                if task_data and "transaction" in task_data:
-                    txn_dict = task_data["transaction"]
-                    txn_dict["_task_id"] = row[0]  # Track task ID for marking synced
-                    try:
-                        transactions.append(SAFTransaction(**txn_dict))
-                    except Exception as e:
-                        logger.warning(f"Skipping malformed SAF transaction: {e}")
+                (row_id, txn_id, idem_key, workflow_id,
+                 amount_cents, currency, card_token, card_last_four,
+                 enc_payload_hex, enc_key_id, metadata_json) = row
+                try:
+                    from decimal import Decimal
+                    encrypted = bytes.fromhex(enc_payload_hex) if enc_payload_hex else b""
+                    amount = Decimal(amount_cents) / 100 if amount_cents else Decimal("0")
+                    meta = {}
+                    if metadata_json:
+                        try:
+                            meta = json.loads(metadata_json)
+                        except Exception:
+                            pass
+                    txn = SAFTransaction(
+                        transaction_id=txn_id,
+                        idempotency_key=idem_key,
+                        device_id=self.device_id,
+                        workflow_id=workflow_id,
+                        amount=amount,
+                        currency=currency or "USD",
+                        card_token=card_token or "",
+                        card_last_four=card_last_four or "",
+                        encrypted_payload=encrypted,
+                        encryption_key_id=enc_key_id or "default",
+                        merchant_id=meta.get("merchant_id", ""),
+                    )
+                    txn._saf_row_id = row_id
+                    transactions.append(txn)
+                except Exception as e:
+                    logger.warning(f"Skipping malformed SAF row {row_id}: {e}")
 
             return transactions
 
@@ -418,6 +469,13 @@ class SyncManager:
                 "transaction_id": t.transaction_id,
                 "encrypted_blob": t.encrypted_payload.hex() if t.encrypted_payload else "",
                 "encryption_key_id": t.encryption_key_id or "default",
+                # Plaintext metadata — needed by server to populate saf_transactions columns
+                "merchant_id": t.merchant_id or "",
+                "amount_cents": int(t.amount * 100) if t.amount else 0,
+                "currency": t.currency or "USD",
+                "card_token": t.card_token or "",
+                "card_last_four": t.card_last_four or "",
+                "workflow_id": t.workflow_id or "",
             }
 
             # Calculate HMAC over transaction data
@@ -502,63 +560,43 @@ class SyncManager:
         return result
 
     async def mark_synced(self, transaction_ids: List[str]):
-        """Mark transactions as synced in local database."""
+        """Mark transactions as synced in saf_pending_transactions."""
+        synced_at = datetime.utcnow().isoformat()
         for tid in transaction_ids:
             try:
-                # Find the task record by matching the transaction_id in task_data
-                async with self.persistence.conn.execute(
+                await self.persistence.conn.execute(
                     """
-                    SELECT task_id, task_data FROM tasks
-                    WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
-                    """
-                ) as cursor:
-                    rows = await cursor.fetchall()
-
-                for row in rows:
-                    task_data = self.persistence._deserialize_json(row[1])
-                    if (task_data
-                            and "transaction" in task_data
-                            and task_data["transaction"].get("transaction_id") == tid):
-                        await self.persistence.update_task_status(
-                            task_id=row[0],
-                            status="COMPLETED",
-                            result={"synced": True, "synced_at": datetime.utcnow().isoformat()}
-                        )
-                        logger.debug(f"Marked transaction {tid} as synced")
-                        break
+                    UPDATE saf_pending_transactions
+                    SET status = 'synced', synced_at = ?
+                    WHERE transaction_id = ? AND status = 'pending_sync'
+                    """,
+                    (synced_at, tid),
+                )
+                await self.persistence.conn.commit()
+                logger.debug(f"Marked transaction {tid} as synced")
             except Exception as e:
                 logger.error(f"Failed to mark transaction {tid} as synced: {e}")
 
     async def mark_rejected(self, transaction_ids: List[str]):
         """
-        Mark server-rejected transactions as FAILED in local database.
+        Mark server-rejected transactions as failed in saf_pending_transactions.
 
         This ends the infinite retry cycle: a transaction that the cloud explicitly
-        rejects (4xx response) moves from PENDING → FAILED instead of being
+        rejects (4xx response) moves from pending_sync → failed instead of being
         re-queued on every sync cycle.
         """
         for tid in transaction_ids:
             try:
-                async with self.persistence.conn.execute(
+                await self.persistence.conn.execute(
                     """
-                    SELECT task_id, task_data FROM tasks
-                    WHERE step_name = 'SAF_Sync' AND status = 'PENDING'
-                    """
-                ) as cursor:
-                    rows = await cursor.fetchall()
-
-                for row in rows:
-                    task_data = self.persistence._deserialize_json(row[1])
-                    if (task_data
-                            and "transaction" in task_data
-                            and task_data["transaction"].get("transaction_id") == tid):
-                        await self.persistence.update_task_status(
-                            task_id=row[0],
-                            status="FAILED",
-                            error_message="Rejected by cloud control plane",
-                        )
-                        logger.warning(f"Marked transaction {tid} as FAILED (cloud-rejected)")
-                        break
+                    UPDATE saf_pending_transactions
+                    SET status = 'failed', last_sync_error = 'Rejected by cloud control plane'
+                    WHERE transaction_id = ? AND status = 'pending_sync'
+                    """,
+                    (tid,),
+                )
+                await self.persistence.conn.commit()
+                logger.warning(f"Marked transaction {tid} as failed (cloud-rejected)")
             except Exception as e:
                 logger.error(f"Failed to mark transaction {tid} as rejected: {e}")
 
