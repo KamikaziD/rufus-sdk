@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0rc4] — 2026-03-16
+
+### Added
+- **SAF payment simulation** — `PaymentSimulation` workflow with concurrent payment + telemetry loops in `edge_device_sim.py`; new `payment_sim_steps.py` module with full payment cycle step functions.
+- **`GET /api/v1/metrics/throughput`** — new endpoint returning hourly completed/failed workflow counts; used by the dashboard overview chart.
+- **`POST /api/v1/workflows/{id}/cancel`** — cancel workflow endpoint wired to dashboard.
+- **`PATCH /api/v1/devices/{id}`** — partial device record update endpoint.
+- **`GET /api/v1/devices/{id}/saf`** — list SAF transactions for a specific device.
+- **Dashboard SAF tab improvements** — amount displayed as formatted USD, merchant name column, clickable workflow link navigates to `/workflows/{uuid}`.
+- **`workflow_id` linkage** — SAF transactions now carry the source workflow execution ID; Alembic migration `i4j5k6l7m8n9` adds `workflow_id TEXT` column to `saf_transactions`.
+
+### Fixed
+- **`SyncManager` table migration** — migrated from `tasks` table to `saf_pending_transactions`; SAF transactions no longer cascade-deleted when the source workflow is purged.
+- **`saf_transactions` server INSERT** — added `id` UUID generation (no server default) and `workflow_id` field.
+- **`list_saf_transactions` cents→float** — amount stored in cents converted to float on read.
+- **Dashboard `WorkflowChartServer`** — uses `getMetricsThroughput()` instead of `listWorkflows` for accurate hourly breakdown.
+- **`EncryptedTransaction` metadata fields** — added `merchant_name`, `amount_cents`, `currency`, `card_last4`, `transaction_ref` plaintext fields to sync payload.
+- **Alembic merge heads** (`g2h3i4j5k6l7`) and **patch metrics/rate_limit** (`h3i4j5k6l7m8`) migrations applied.
+
+### New Components
+- `packages/rufus-dashboard/src/components/workflows/ConsoleDetailPanel.tsx`
+- `packages/rufus-dashboard/src/components/workflows/WorkflowHeader.tsx`
+- `examples/cross_platform_workflows/` — 6 cross-platform workflow examples (OrderFulfillment, IoTSensorPipeline, TransactionRiskScoring, DocumentSummarisation, FieldTechTriage, PagedReasoning) running unchanged on Browser/Cloud/Edge.
+
+---
+
+## [1.0.0rc3] — 2026-03-16
+
+### Added
+- **Cross-platform workflow examples** (`examples/cross_platform_workflows/`) — 6 workflows in a standalone package; same YAML + step functions run on Browser (Pyodide), Cloud (Celery), and Edge (SQLite) without modification.
+- **Real GGUF models in browser demo** — Q2_K and Q3_K_S model selector; `MODEL_CONFIGS` map replaces single shard URL array.
+
+### Fixed
+- **Dashboard version placeholders** — updated stale `0.7.9` strings in devices page, WorkerCommandModal, admin page.
+
+---
+
 ## [1.0.0rc2] — 2026-03-15
 
 ### Added (post-tag fixes — same version)
