@@ -1,0 +1,48 @@
+workflow_type: "FieldTechTriage"
+workflow_version: "1.0.0rc3"
+description: "Air-gapped field tech triage: on-device NER strips PII before SAF record is created"
+initial_state_model_path: "cross_platform_workflows.state_models.FieldTechState"
+automate_start: true
+
+steps:
+  - name: "CaptureReport"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.capture_report"
+    description: "Accept free-text incident report from field technician"
+    automate_next: true
+
+  - name: "RunNERAnalysis"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.run_ner_analysis"
+    description: "Extract PII entities via NER model (browser) or regex fallback (cloud/edge)"
+    automate_next: true
+
+  - name: "BuildRedactedPayload"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.build_redacted_payload"
+    description: "Replace PII entities with [REDACTED]; classify severity and incident type"
+    automate_next: true
+
+  - name: "RouteByPriority"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.route_by_priority"
+    description: "Jump to EscalateIncident for CRITICAL severity"
+    automate_next: true
+
+  - name: "LogStandard"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.log_standard_incident"
+    description: "Create SAF record for standard (non-critical) incidents"
+    automate_next: true
+
+  - name: "EscalateIncident"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.escalate_incident"
+    description: "Create ESC- SAF record (jump target) or no-op if already logged as standard"
+    automate_next: true
+
+  - name: "StoreForForward"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.store_for_forward"
+    description: "Confirm SAF record is queued for sync when connectivity returns"
+    automate_next: false

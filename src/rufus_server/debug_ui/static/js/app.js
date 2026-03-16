@@ -722,8 +722,9 @@ async function fetchDebugWorkflows() {
             const err = await response.json();
             throw new Error(err.detail || 'Failed to fetch workflows');
         }
-        const workflows = await response.json();
-        
+        const data = await response.json();
+        const workflows = Array.isArray(data) ? data : (data.workflows || []);
+
         if (workflows.length === 0) {
             container.innerHTML = '<p>No active or recent workflows found.</p>';
             return;

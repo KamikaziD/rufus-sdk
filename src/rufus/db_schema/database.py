@@ -831,6 +831,7 @@ saf_transactions = Table(
     Column('encrypted_payload', Text),
     Column('encryption_key_id', String(100)),
     Column('status', String(50), server_default='pending'),
+    Column('workflow_id', String(100), nullable=True),
     Column('synced_at', DateTime),
     Column('processed_at', DateTime),
     Column('settlement_batch_id', String(100)),

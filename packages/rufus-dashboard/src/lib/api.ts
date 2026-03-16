@@ -96,6 +96,8 @@ export async function getWorkflow(token: string, id: string): Promise<WorkflowSt
       details:   { old: e.old_status, new: e.new_status, ...((e.details as Record<string, unknown>) ?? {}) },
     })) as WorkflowStatusResponse["audit_log"],
     workflow_type: raw.workflow_type as string | undefined,
+    started_at: (raw.created_at ?? raw.started_at ?? null) as string | null,
+    completed_at: (raw.completed_at ?? null) as string | null,
   };
 }
 
@@ -423,6 +425,19 @@ export function getMetrics(token: string): Promise<Record<string, unknown>> {
   return apiFetch("/api/v1/metrics/summary", token);
 }
 
+export interface ThroughputBucket {
+  hour: string;       // ISO datetime, truncated to hour
+  completed: number;
+  failed: number;
+}
+
+export function getMetricsThroughput(
+  token: string,
+  hours = 12
+): Promise<ThroughputBucket[]> {
+  return apiFetch(`/api/v1/metrics/throughput?hours=${hours}`, token);
+}
+
 export function getSystemHealth(token: string): Promise<{ workers: WorkerSummary[] }> {
   return listWorkers(token);
 }
@@ -622,7 +637,11 @@ export function registerDevice(
 export interface SafTransaction {
   transaction_id: string;
   amount: number | null;
+  amount_cents: number | null;
   currency: string | null;
+  merchant_id: string | null;
+  card_last_four: string | null;
+  workflow_id: string | null;
   status: string;
   created_at: string;
   synced_at: string | null;

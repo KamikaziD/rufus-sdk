@@ -1,0 +1,45 @@
+# Cross-Platform Workflow Registry
+# Runs identically on Browser (Pyodide), Cloud (Celery), and Edge (SQLite).
+# JS FFI steps (AI inference) degrade automatically to Python fallbacks on cloud/edge.
+
+workflows:
+  - type: "OrderFulfillment"
+    description: "E-commerce order fulfillment with parallel warehouse checks"
+    config_file: "wf1_order_fulfillment.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.OrderState"
+
+  - type: "IoTSensorPipeline"
+    description: "IoT sensor pipeline with anomaly detection and health routing"
+    config_file: "wf2_iot_sensor_pipeline.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.SensorState"
+
+  - type: "TransactionRiskScoring"
+    description: "Transaction risk scoring with GPU embedding / CPU fallback"
+    config_file: "wf3_transaction_risk_scoring.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.TransactionState"
+
+  - type: "DocumentSummarisation"
+    description: "Document summarisation with LLM / extractive fallback"
+    config_file: "wf4_document_summarisation.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.DocumentState"
+
+  - type: "FieldTechTriage"
+    description: "Air-gapped field tech triage with on-device NER PII redaction"
+    config_file: "wf5_field_tech_triage.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.FieldTechState"
+
+  - type: "PagedReasoning"
+    description: "Paged LLM reasoning with complexity-gated fast/full inference paths"
+    config_file: "wf6_paged_reasoning.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.PagedReasoningState"
+
+  # ── Native AI_INFERENCE variants (edge/cloud — larger models, no JS FFI) ──
+  - type: "FieldTechTriageNative"
+    description: "Field tech triage with native ONNX NER (bert-large-NER, ~420 MB)"
+    config_file: "wf5_field_triage_native.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.FieldTechState"
+
+  - type: "PagedReasoningNative"
+    description: "Paged reasoning with native LlamaCpp GGUF (1B edge / 3B cloud)"
+    config_file: "wf6_paged_reasoning_native.yaml"
+    initial_state_model_path: "cross_platform_workflows.state_models.PagedReasoningState"

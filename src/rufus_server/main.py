@@ -791,6 +791,48 @@ async def get_workflow_executions(
     return {"total": total, "workflows": page_items}
 
 
+@app.get("/api/v1/metrics/throughput", tags=["Monitoring"])
+async def get_metrics_throughput(
+    hours: int = 12,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Return per-hour workflow throughput buckets for the last `hours` hours.
+
+    Response: list of { hour: ISO string, completed: int, failed: int }
+    Sorted oldest → newest, suitable for a time-series chart.
+    """
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        raise HTTPException(status_code=501, detail="Metrics require PostgreSQL backend")
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    date_trunc('hour', created_at) AS hour,
+                    COUNT(*) FILTER (WHERE status = 'COMPLETED')                AS completed,
+                    COUNT(*) FILTER (WHERE status LIKE 'FAILED%%')              AS failed
+                FROM workflow_executions
+                WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+                GROUP BY hour
+                ORDER BY hour ASC
+            """, hours)
+        return [
+            {
+                "hour": row["hour"].isoformat(),
+                "completed": row["completed"],
+                "failed": row["failed"],
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch throughput: {str(e)}")
+
+
 @app.get("/api/v1/metrics/summary", tags=["Monitoring"])
 async def get_metrics_summary(hours: int = 24):
     """Get aggregated metrics across workflows (PostgreSQL backend required)."""
@@ -997,6 +1039,45 @@ async def retry_workflow(
     resume_from_async_task.delay({}, str(workflow_uuid), current_step_index)
 
     return {"status": "retry_initiated", "workflow_id": workflow_id}
+
+
+@app.post("/api/v1/workflow/{workflow_id}/cancel", tags=["Workflows"])
+async def cancel_workflow(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Cancel an active or paused workflow."""
+    if workflow_engine is None:
+        raise HTTPException(status_code=503, detail="Workflow Engine not initialized.")
+
+    try:
+        workflow_uuid = UUID(workflow_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow ID format")
+
+    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    if not workflow_dict:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    terminal = {'COMPLETED', 'FAILED', 'CANCELLED', 'FAILED_ROLLED_BACK'}
+    if workflow_dict['status'] in terminal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Workflow already in terminal state: {workflow_dict['status']}"
+        )
+
+    old_status = workflow_dict['status']
+    workflow_dict['status'] = 'CANCELLED'
+    await workflow_engine.persistence.save_workflow(str(workflow_uuid), workflow_dict)
+
+    from rufus.events import event_publisher
+    await event_publisher._publish(
+        'workflow:persistence',
+        'workflow.status_changed',
+        {"workflow_id": str(workflow_uuid), "old_status": old_status, "new_status": "CANCELLED"}
+    )
+
+    return {"status": "cancelled", "workflow_id": workflow_id}
 
 
 @app.post("/api/v1/workflow/{workflow_id}/rewind", tags=["Workflows"])
@@ -1497,6 +1578,31 @@ async def get_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    # Apply same heartbeat-based offline detection as list_devices
+    from datetime import datetime, timedelta, timezone
+    offline_threshold = timedelta(seconds=120)
+    now = datetime.now(timezone.utc)
+    if isinstance(device, dict):
+        last_heartbeat = device.get('last_heartbeat_at')
+        if last_heartbeat:
+            if not hasattr(last_heartbeat, 'tzinfo') or last_heartbeat.tzinfo is None:
+                last_heartbeat = last_heartbeat.replace(tzinfo=timezone.utc)
+            if (now - last_heartbeat) > offline_threshold:
+                device['status'] = 'offline'
+        elif device.get('status') == 'online':
+            device['status'] = 'offline'
+
+    # Extract pending_saf_count from heartbeat metrics stored in metadata
+    if isinstance(device, dict):
+        import json as _json
+        meta = device.get("metadata") or "{}"
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except Exception:
+                meta = {}
+        device["pending_saf_count"] = meta.get("pending_sync_count", 0)
+
     return device
 
 
@@ -1521,6 +1627,29 @@ async def delete_device(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deletion failed: {e}")
+
+
+@app.patch("/api/v1/devices/{device_id}", tags=["Devices"])
+async def patch_device(
+    device_id: str,
+    updates: dict,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Update allowed device fields (sdk_version, firmware_version, device_name, location).
+    Accepts either dashboard JWT or device X-API-Key header."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    # Allow device auth via API key
+    if not user and x_api_key:
+        if not await device_service.authenticate_device(device_id, x_api_key):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    elif not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    ok = await device_service.update_device(device_id, updates)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Device not found or no valid fields to update")
+    return {"updated": True}
 
 
 @app.get("/api/v1/devices/{device_id}/config", tags=["Devices"])
@@ -1635,6 +1764,11 @@ async def sync_device_transactions(
             "encrypted_blob": t.encrypted_blob,  # Needed for HMAC verification
             "encryption_key_id": t.encryption_key_id,
             "hmac": t.hmac,  # HMAC signature from device
+            "merchant_id": t.merchant_id,
+            "amount_cents": t.amount_cents,
+            "currency": t.currency,
+            "card_token": t.card_token,
+            "card_last_four": t.card_last_four,
         }
         for t in request_data.transactions
     ]
@@ -1655,6 +1789,24 @@ async def sync_device_transactions(
         server_sequence=result.get("server_sequence", 0),
         next_sync_delay=30,
     )
+
+
+@app.get("/api/v1/devices/{device_id}/saf", tags=["Devices"])
+async def list_device_saf(
+    device_id: str,
+    limit: int = 50,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """List SAF transactions synced from a device."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    transactions = await device_service.list_saf_transactions(device_id, limit=limit)
+    import json as _json
+    for txn in transactions:
+        for key in ("synced_at", "created_at"):
+            if txn.get(key) and hasattr(txn[key], "isoformat"):
+                txn[key] = txn[key].isoformat()
+    return {"transactions": transactions}
 
 
 @app.post("/api/v1/devices/{device_id}/rotate-key", tags=["Devices"])

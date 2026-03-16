@@ -52,6 +52,8 @@ export interface WorkflowStatusResponse {
   workflow_type?: string;
   parent_execution_id?: string;
   blocked_on_child_id?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 export interface StepConfig {

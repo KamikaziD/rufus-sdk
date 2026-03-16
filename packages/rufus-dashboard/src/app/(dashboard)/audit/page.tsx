@@ -5,10 +5,22 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { queryAuditLogs, exportAuditLogs } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { FileText, RefreshCw, Download } from "lucide-react";
+
+const EVENT_CLS: Record<string, string> = {
+  COMPLETED: "border-emerald-500/40 text-emerald-400",
+  FAILED:    "border-red-500/40 text-red-400",
+  STARTED:   "border-blue-500/40 text-blue-400",
+  STEP:      "border-zinc-600 text-zinc-500",
+};
+
+function eventCls(eventType: string) {
+  const upper = eventType?.toUpperCase() ?? "";
+  if (upper.includes("COMPLETE")) return EVENT_CLS.COMPLETED;
+  if (upper.includes("FAIL"))     return EVENT_CLS.FAILED;
+  if (upper.includes("START"))    return EVENT_CLS.STARTED;
+  return EVENT_CLS.STEP;
+}
 
 export default function AuditPage() {
   const { data: session } = useSession();
@@ -21,13 +33,9 @@ export default function AuditPage() {
   async function handleExport() {
     if (!token) return;
     setIsExporting(true);
-    try {
-      await exportAuditLogs(token, exportFormat);
-    } catch (e) {
-      console.error("Export failed", e);
-    } finally {
-      setIsExporting(false);
-    }
+    try { await exportAuditLogs(token, exportFormat); }
+    catch (e) { console.error("Export failed", e); }
+    finally { setIsExporting(false); }
   }
 
   const { data, isLoading, refetch } = useQuery({
@@ -41,87 +49,100 @@ export default function AuditPage() {
   const pageCount = Math.ceil(total / 50);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Audit Log</h1>
-          <p className="text-muted-foreground">{total} entries total</p>
+          <h1 className="font-mono text-sm font-semibold text-[#E4E4E7] tracking-wider uppercase">AUDIT LOG</h1>
+          <p className="font-mono text-[10px] text-zinc-600 mt-0.5">{total} entries total</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-1.5 font-mono text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 px-2 py-1 rounded-none transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
           <select
             value={exportFormat}
             onChange={(e) => setExportFormat(e.target.value as "json" | "csv")}
-            className="text-xs border rounded px-2 py-1 bg-background"
+            className="font-mono text-xs border border-zinc-700 bg-[#0A0A0B] text-zinc-400 px-2 py-1 rounded-none"
           >
             <option value="json">JSON</option>
             <option value="csv">CSV</option>
           </select>
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
-            <Download className="h-3.5 w-3.5" />
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            className="inline-flex items-center gap-1.5 font-mono text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 px-2 py-1 rounded-none disabled:opacity-40 transition-colors"
+          >
+            <Download className="h-3 w-3" />
             {isExporting ? "Exporting…" : "Export"}
-          </Button>
+          </button>
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="h-8 animate-pulse bg-muted rounded" />
-              ))}
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
-              No audit entries
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Timestamp</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Event</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Entity</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((entry) => (
-                    <tr key={entry.log_id} className="border-b hover:bg-muted/30">
-                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                        {formatDateTime(entry.timestamp)}
-                      </td>
-                      <td className="px-4 py-2">
-                        <Badge variant="outline">{entry.event_type}</Badge>
-                      </td>
-                      <td className="px-4 py-2 text-muted-foreground">
-                        {entry.entity_type}/{entry.entity_id}
-                      </td>
-                      <td className="px-4 py-2">{entry.actor}</td>
-                    </tr>
+      <div className="bg-[#111113] border border-[#1E1E22] rounded-none">
+        {isLoading ? (
+          <div className="p-6 space-y-2">
+            {[...Array(8)].map((_, i) => <div key={i} className="h-8 animate-pulse bg-zinc-800/50 rounded-none" />)}
+          </div>
+        ) : logs.length === 0 ? (
+          <div className="py-12 text-center">
+            <FileText className="h-8 w-8 mx-auto mb-3 text-zinc-700" />
+            <p className="font-mono text-xs text-zinc-600">NO AUDIT ENTRIES</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-[#0D0D0F] border-b border-[#1E1E22]">
+                  {["TIMESTAMP", "EVENT", "ENTITY", "ACTOR"].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
+                      {h}
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((entry) => (
+                  <tr key={entry.log_id} className="border-b border-[#1E1E22] hover:bg-[#1A1A1E] transition-colors">
+                    <td className="px-4 py-2 font-mono text-[11px] text-zinc-600 tabular-nums whitespace-nowrap">
+                      {formatDateTime(entry.timestamp)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`font-mono text-[10px] border px-1.5 py-0.5 rounded-none ${eventCls(entry.event_type)}`}>
+                        {entry.event_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-zinc-500">
+                      {entry.entity_type}/{entry.entity_id}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-zinc-400">{entry.actor}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {pageCount > 1 && (
         <div className="flex items-center justify-center gap-2">
-          <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-            Previous
-          </Button>
-          <span className="text-sm text-muted-foreground">{page} / {pageCount}</span>
-          <Button variant="outline" size="sm" disabled={page === pageCount} onClick={() => setPage(p => p + 1)}>
-            Next
-          </Button>
+          <button
+            disabled={page === 1}
+            onClick={() => setPage((p) => p - 1)}
+            className="font-mono text-xs border border-zinc-700 text-zinc-500 hover:text-zinc-200 px-3 py-1 rounded-none disabled:opacity-40 transition-colors"
+          >
+            ← Prev
+          </button>
+          <span className="font-mono text-xs text-zinc-600">{page} / {pageCount}</span>
+          <button
+            disabled={page === pageCount}
+            onClick={() => setPage((p) => p + 1)}
+            className="font-mono text-xs border border-zinc-700 text-zinc-500 hover:text-zinc-200 px-3 py-1 rounded-none disabled:opacity-40 transition-colors"
+          >
+            Next →
+          </button>
         </div>
       )}
     </div>

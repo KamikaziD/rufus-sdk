@@ -4,7 +4,8 @@ edge_device_sim.py — Rufus edge device emulator for docker-compose testing.
 1. Registers the device with the cloud control plane.
 2. Starts RufusEdgeAgent (heartbeat + config polling).
 3. Runs a continuous EdgeTelemetry workflow loop (TELEMETRY_INTERVAL seconds).
-4. Gracefully shuts down on SIGTERM / SIGINT.
+4. Runs a concurrent PaymentSimulation workflow loop (PAYMENT_INTERVAL seconds).
+5. Gracefully shuts down on SIGTERM / SIGINT.
 
 Environment variables:
     CLOUD_URL             Cloud control plane URL (default: http://rufus-server:8000)
@@ -14,6 +15,7 @@ Environment variables:
     DB_PATH               SQLite database path (default: /tmp/edge_sim.db)
     RUFUS_REGISTRATION_KEY  Key required for /api/v1/devices/register (default: test-registration-key)
     TELEMETRY_INTERVAL    Seconds between telemetry cycles (default: 30)
+    PAYMENT_INTERVAL      Seconds between payment simulation cycles (default: 20)
     EDGE_WORKFLOW_SYNC    Push completed workflows to cloud + purge SQLite (default: true)
 """
 
@@ -21,8 +23,14 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 
 import httpx
+
+# Resolve step modules from the same directory as this script
+sys.path.insert(0, os.path.dirname(__file__))
+
+import payment_sim_steps  # noqa: E402  (after sys.path patch)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +44,7 @@ DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
 ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
 REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
 TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
+PAYMENT_INTERVAL = int(os.getenv("PAYMENT_INTERVAL", "20"))
 EDGE_WORKFLOW_SYNC = os.getenv("EDGE_WORKFLOW_SYNC", "true").lower() == "true"
 
 # Persist API key alongside the SQLite DB so it survives container restarts
@@ -82,6 +91,52 @@ steps:
 """
 
 
+PAYMENT_SIM_YAML = """
+workflow_type: "PaymentSimulation"
+workflow_version: "1.0.0"
+description: "Simulated card payment — online approval or offline SAF"
+initial_state_model_path: "payment_sim_steps.PaymentSimState"
+
+steps:
+  - name: "Generate_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.generate_payment"
+    description: "Generate random card payment data"
+    automate_next: true
+
+  - name: "Check_Connectivity"
+    type: "STANDARD"
+    function: "payment_sim_steps.check_connectivity"
+    description: "Simulate connectivity check — 70% online, 30% offline"
+
+  - name: "Authorize_Online"
+    type: "STANDARD"
+    function: "payment_sim_steps.authorize_online"
+    description: "Simulate gateway approval (online path)"
+
+  - name: "Check_Floor_Limit"
+    type: "STANDARD"
+    function: "payment_sim_steps.check_floor_limit"
+    description: "Route by floor limit (offline path)"
+
+  - name: "Approve_Offline"
+    type: "STANDARD"
+    function: "payment_sim_steps.approve_offline"
+    description: "Approve offline and queue into SAF"
+
+  - name: "Decline_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.decline_payment"
+    description: "Decline — exceeds offline floor limit"
+    automate_next: true
+
+  - name: "Complete_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.complete_payment"
+    description: "Log final outcome"
+"""
+
+
 async def register_device() -> str:
     """
     Register the device with the cloud control plane.
@@ -109,7 +164,7 @@ async def register_device() -> str:
                 "device_name": f"Sim Device {DEVICE_ID}",
                 "merchant_id": "test-merchant-001",
                 "firmware_version": "1.0.0",
-                "sdk_version": "0.7.7",
+                "sdk_version": "1.0.0rc4",
                 "capabilities": ["workflow_execution", "update_workflow"],
             },
             headers={"X-Registration-Key": REGISTRATION_KEY},
@@ -224,6 +279,45 @@ async def telemetry_loop(agent):
             pass
 
 
+async def _register_payment_workflow(agent):
+    """Inject PaymentSimulation YAML into the WorkflowBuilder via the config cache."""
+    ok = await agent.config_manager.handle_update_workflow_command(
+        {
+            "workflow_type": "PaymentSimulation",
+            "yaml_content": PAYMENT_SIM_YAML.strip(),
+            "version": "1.0.0",
+        },
+        workflow_builder=agent.workflow_builder,
+    )
+    logger.info(
+        f"PaymentSimulation workflow registered (cached in edge_workflow_cache): {ok}"
+    )
+
+
+async def payment_loop(agent):
+    """Continuously run PaymentSimulation workflow, pausing PAYMENT_INTERVAL between cycles."""
+    cycle = 0
+    logger.info(
+        f"Payment loop started (interval={PAYMENT_INTERVAL}s). "
+        "Generating randomised card payments — 70% online / 30% offline SAF."
+    )
+    while not _shutdown_event.is_set():
+        cycle += 1
+        logger.info(f"─── Payment cycle {cycle} ───")
+        await _run_workflow_direct(agent, "PaymentSimulation", {
+            "device_id": DEVICE_ID,
+            "cloud_url": CLOUD_URL,
+            "db_path": DB_PATH,
+            "cycle": cycle,
+        })
+        try:
+            await asyncio.wait_for(
+                _shutdown_event.wait(), timeout=float(PAYMENT_INTERVAL)
+            )
+        except asyncio.TimeoutError:
+            pass
+
+
 async def main():
     # Wait for server to be reachable
     for attempt in range(20):
@@ -241,6 +335,18 @@ async def main():
         raise SystemExit(1)
 
     api_key = await register_device()
+
+    # Always PATCH sdk_version on startup so restarts refresh the DB value
+    if api_key:
+        try:
+            async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=10) as client:
+                await client.patch(
+                    f"/api/v1/devices/{DEVICE_ID}",
+                    json={"sdk_version": "1.0.0rc4"},
+                    headers={"X-API-Key": api_key},
+                )
+        except Exception as e:
+            logger.warning(f"Could not PATCH sdk_version: {e}")
 
     from rufus_edge import RufusEdgeAgent
 
@@ -264,8 +370,15 @@ async def main():
 
     await _register_telemetry_workflow(agent)
 
+    # Wire sync_manager reference for payment SAF queuing, then register + run
+    payment_sim_steps._sync_manager = agent.sync_manager
+    await _register_payment_workflow(agent)
+
     try:
-        await telemetry_loop(agent)
+        await asyncio.gather(
+            telemetry_loop(agent),
+            payment_loop(agent),
+        )
     finally:
         await agent.stop()
         logger.info("Edge sim stopped cleanly.")

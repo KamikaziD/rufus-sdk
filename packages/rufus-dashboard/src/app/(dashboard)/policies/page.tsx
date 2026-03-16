@@ -4,9 +4,6 @@ import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listPolicies, createPolicy, updatePolicyStatus } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -16,27 +13,23 @@ import {
 } from "@/components/ui/dialog";
 import { Shield, RefreshCw, Plus } from "lucide-react";
 
-const STATUS_VARIANT: Record<string, "success" | "secondary" | "outline"> = {
-  ACTIVE:   "success",
-  PAUSED:   "secondary",
-  ARCHIVED: "outline",
-  DRAFT:    "outline",
+const STATUS_CLS: Record<string, string> = {
+  ACTIVE:   "border-emerald-500/40 text-emerald-400 bg-emerald-500/10",
+  PAUSED:   "border-yellow-500/40 text-yellow-400 bg-yellow-500/10",
+  ARCHIVED: "border-zinc-600 text-zinc-500 bg-zinc-800/50",
+  DRAFT:    "border-zinc-600 text-zinc-500 bg-zinc-800/50",
 };
 
-// Status transitions available per current status
 const NEXT_ACTIONS: Record<string, Array<{ label: string; value: "active" | "paused" | "archived" }>> = {
-  DRAFT:    [{ label: "Activate", value: "active" }],
-  ACTIVE:   [{ label: "Pause", value: "paused" }, { label: "Archive", value: "archived" }],
-  PAUSED:   [{ label: "Activate", value: "active" }, { label: "Archive", value: "archived" }],
+  DRAFT:    [{ label: "ACTIVATE", value: "active" }],
+  ACTIVE:   [{ label: "PAUSE", value: "paused" }, { label: "ARCHIVE", value: "archived" }],
+  PAUSED:   [{ label: "ACTIVATE", value: "active" }, { label: "ARCHIVE", value: "archived" }],
   ARCHIVED: [],
 };
 
-const EMPTY_FORM = {
-  policy_name: "",
-  description: "",
-  condition: "default",
-  artifact: "",
-};
+const EMPTY_FORM = { policy_name: "", description: "", condition: "default", artifact: "" };
+
+const INPUT_CLS = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
 
 export default function PoliciesPage() {
   const { data: session } = useSession();
@@ -75,133 +68,121 @@ export default function PoliciesPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Policies</h1>
-          <p className="text-muted-foreground">{policies.length} policies configured</p>
+          <h1 className="font-mono text-sm font-semibold text-[#E4E4E7] tracking-wider uppercase">POLICIES</h1>
+          <p className="font-mono text-[10px] text-zinc-600 mt-0.5">{policies.length} configured</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
-          <Button size="sm" onClick={() => setIsCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5" />
-            Create Policy
-          </Button>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-1.5 font-mono text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 px-2 py-1 rounded-none transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="inline-flex items-center gap-1.5 font-mono text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 px-2 py-1 rounded-none transition-colors"
+          >
+            <Plus className="h-3 w-3" /> Create Policy
+          </button>
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(4)].map((_, i) => <div key={i} className="h-12 animate-pulse bg-muted rounded" />)}
-            </div>
-          ) : policies.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
-              <Shield className="h-8 w-8 mx-auto mb-3 opacity-30" />
-              No policies configured
-            </div>
-          ) : (
-            <div className="divide-y">
-              {policies.map((policy) => {
-                const statusKey = policy.status?.toUpperCase() ?? "DRAFT";
-                const actions = NEXT_ACTIONS[statusKey] ?? [];
-                return (
-                  <div key={policy.policy_id} className="flex items-center justify-between px-4 py-3">
-                    <div>
-                      <p className="font-medium">{policy.name}</p>
-                      <p className="text-xs text-muted-foreground">{policy.description}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={STATUS_VARIANT[statusKey] ?? "outline"}>{statusKey}</Badge>
-                      {actions.map((action) => (
-                        <Button
-                          key={action.value}
-                          variant="outline"
-                          size="sm"
-                          disabled={statusMutation.isPending}
-                          onClick={() => statusMutation.mutate({ id: policy.policy_id, status: action.value })}
-                        >
-                          {action.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="bg-[#111113] border border-[#1E1E22] rounded-none">
+        {isLoading ? (
+          <div className="p-6 space-y-3">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-10 animate-pulse bg-zinc-800/50 rounded-none" />)}
+          </div>
+        ) : policies.length === 0 ? (
+          <div className="py-12 text-center">
+            <Shield className="h-8 w-8 mx-auto mb-3 text-zinc-700" />
+            <p className="font-mono text-xs text-zinc-600">NO POLICIES CONFIGURED</p>
+          </div>
+        ) : (
+          policies.map((policy) => {
+            const statusKey = policy.status?.toUpperCase() ?? "DRAFT";
+            const actions = NEXT_ACTIONS[statusKey] ?? [];
+            return (
+              <div key={policy.policy_id} className="flex items-center justify-between px-4 py-3 border-b border-[#1E1E22] last:border-0 hover:bg-[#1A1A1E] transition-colors">
+                <div>
+                  <p className="font-mono text-sm text-[#E4E4E7]">{policy.name}</p>
+                  <p className="font-mono text-[11px] text-zinc-600 mt-0.5">{policy.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`font-mono text-[10px] border px-1.5 py-0.5 rounded-none ${STATUS_CLS[statusKey] ?? "border-zinc-600 text-zinc-500"}`}>
+                    {statusKey}
+                  </span>
+                  {actions.map((action) => (
+                    <button
+                      key={action.value}
+                      disabled={statusMutation.isPending}
+                      onClick={() => statusMutation.mutate({ id: policy.policy_id, status: action.value })}
+                      className="font-mono text-[10px] border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 px-2 py-0.5 rounded-none disabled:opacity-40 transition-colors"
+                    >
+                      [{action.label}]
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
 
       {/* Create Policy Modal */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent>
+        <DialogContent className="bg-[#111113] border border-[#1E1E22] rounded-none">
           <DialogHeader>
-            <DialogTitle>Create Policy</DialogTitle>
+            <DialogTitle className="font-mono text-sm text-[#E4E4E7] uppercase tracking-wider">Create Policy</DialogTitle>
           </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Policy Name *</label>
-              <input
-                className="mt-1 w-full border rounded px-3 py-2 text-sm bg-background"
-                placeholder="e.g. fraud-rules-v2"
-                value={form.policy_name}
-                onChange={(e) => setForm((f) => ({ ...f, policy_name: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Description</label>
-              <input
-                className="mt-1 w-full border rounded px-3 py-2 text-sm bg-background"
-                placeholder="Optional description"
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Rule Condition *</label>
-              <input
-                className="mt-1 w-full border rounded px-3 py-2 text-sm bg-background font-mono"
-                placeholder='e.g. hardware == "NVIDIA" or "default"'
-                value={form.condition}
-                onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Artifact *</label>
-              <input
-                className="mt-1 w-full border rounded px-3 py-2 text-sm bg-background"
-                placeholder="e.g. model_v2.pex"
-                value={form.artifact}
-                onChange={(e) => setForm((f) => ({ ...f, artifact: e.target.value }))}
-              />
-            </div>
+          <div className="space-y-3">
+            <FieldWrap label="Policy Name *">
+              <input className={INPUT_CLS} placeholder="fraud-rules-v2"
+                value={form.policy_name} onChange={(e) => setForm((f) => ({ ...f, policy_name: e.target.value }))} />
+            </FieldWrap>
+            <FieldWrap label="Description">
+              <input className={INPUT_CLS} placeholder="Optional description"
+                value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+            </FieldWrap>
+            <FieldWrap label="Rule Condition *">
+              <input className={INPUT_CLS} placeholder='hardware == "NVIDIA" or "default"'
+                value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))} />
+            </FieldWrap>
+            <FieldWrap label="Artifact *">
+              <input className={INPUT_CLS} placeholder="model_v2.pex"
+                value={form.artifact} onChange={(e) => setForm((f) => ({ ...f, artifact: e.target.value }))} />
+            </FieldWrap>
           </div>
-
           {createMutation.isError && (
-            <p className="text-sm text-destructive mt-2">
+            <div className="border-l-4 border-red-500 bg-red-500/5 font-mono text-xs text-red-400 px-3 py-2 mt-2">
               {(createMutation.error as Error)?.message ?? "Failed to create policy"}
-            </p>
+            </div>
           )}
-
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
+            <button onClick={() => setIsCreateOpen(false)} className="font-mono text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-200 px-4 py-2 rounded-none">
               Cancel
-            </Button>
-            <Button
+            </button>
+            <button
               onClick={() => createMutation.mutate()}
               disabled={!form.policy_name || !form.artifact || createMutation.isPending}
+              className="font-mono text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 px-4 py-2 rounded-none disabled:opacity-40"
             >
-              {createMutation.isPending ? "Creating…" : "Create"}
-            </Button>
+              {createMutation.isPending ? "CREATING…" : "CREATE"}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function FieldWrap({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">{label}</label>
+      {children}
     </div>
   );
 }

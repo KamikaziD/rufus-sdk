@@ -1,0 +1,42 @@
+workflow_type: "IoTSensorPipeline"
+workflow_version: "1.0.0rc3"
+description: "IoT sensor data processing with anomaly detection and health routing"
+initial_state_model_path: "cross_platform_workflows.state_models.SensorState"
+automate_start: true
+
+steps:
+  - name: "InitPipeline"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.init_pipeline"
+    description: "Initialise pipeline with device ID and thresholds"
+    automate_next: true
+
+  - name: "CollectSensorData"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.collect_sensor_data"
+    description: "Collect 10 synthetic sensor readings with injected anomalies"
+    automate_next: true
+
+  - name: "ProcessReadings"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.process_readings"
+    description: "Filter and classify readings against thresholds"
+    automate_next: true
+
+  - name: "ComputeStatistics"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.compute_statistics"
+    description: "Compute mean, stddev, and anomaly rate"
+    automate_next: true
+
+  - name: "HealthDecision"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.health_decision"
+    description: "Jump to SendAlert if anomaly rate or stddev exceeds critical thresholds"
+    automate_next: true
+
+  - name: "SendAlert"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.send_alert"
+    description: "Emit CRITICAL alert (jump target) or no-op if health is acceptable"
+    automate_next: false

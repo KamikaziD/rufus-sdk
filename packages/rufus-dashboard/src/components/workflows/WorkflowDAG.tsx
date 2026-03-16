@@ -31,6 +31,7 @@ interface WorkflowDAGProps {
   editable?: boolean;
   onSaveYaml?: (yaml: string) => void;
   yamlContent?: string;
+  bgColor?: string;
 }
 
 // ── Colours ──────────────────────────────────────────────────────────────────
@@ -405,6 +406,7 @@ export function WorkflowDAG({
   editable = false,
   onSaveYaml,
   yamlContent,
+  bgColor = "#1E1E22",
 }: WorkflowDAGProps) {
   const [selectedDecision, setSelectedDecision] = useState<{
     name: string;
@@ -461,7 +463,7 @@ export function WorkflowDAG({
   }
 
   return (
-    <div className="relative border rounded-lg overflow-hidden bg-muted/10" style={{ height: 380 }}>
+    <div className="relative border border-[#1E1E22] rounded-none overflow-hidden bg-[#111113]" style={{ height: "100%", minHeight: 380 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -477,7 +479,7 @@ export function WorkflowDAG({
         elementsSelectable={editable}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#94a3b8" gap={20} size={1} />
+        <Background color={bgColor} gap={20} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
 

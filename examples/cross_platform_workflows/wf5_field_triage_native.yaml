@@ -1,0 +1,58 @@
+workflow_type: "FieldTechTriageNative"
+workflow_version: "1.0.0rc3"
+description: "Field tech triage with native ONNX NER (edge/cloud) instead of JS FFI bert-base-NER"
+initial_state_model_path: "cross_platform_workflows.state_models.FieldTechState"
+automate_start: true
+
+# RunNERAnalysis is replaced by an AI_INFERENCE step backed by dslim/bert-large-NER ONNX.
+# All other steps are identical to wf5_field_tech_triage.yaml.
+# If NER_MODEL_PATH is unset or the file is absent, the workflow engine falls back to
+# the regex-based PII detection in the standard wf5 step function.
+
+steps:
+  - name: "CaptureReport"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.capture_report"
+    description: "Accept free-text incident report from field technician"
+    automate_next: true
+
+  - name: "RunNERAnalysis"
+    type: "AI_INFERENCE"
+    description: "Named-entity recognition via bert-large-NER ONNX (~420 MB); extracts PER/MISC for PII redaction"
+    ai_config:
+      model_path: "${NER_MODEL_PATH:-/models/bert-large-NER.onnx}"
+      backend: "onnx"
+      task: "token-classification"
+      input_field: "raw_input"
+      output_field: "pii_entities"
+    automate_next: true
+
+  - name: "BuildRedactedPayload"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.build_redacted_payload"
+    description: "Replace PII entities with [REDACTED]; classify severity and incident type"
+    automate_next: true
+
+  - name: "RouteByPriority"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.route_by_priority"
+    description: "Jump to EscalateIncident for CRITICAL severity"
+    automate_next: true
+
+  - name: "LogStandard"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.log_standard_incident"
+    description: "Create SAF record for standard (non-critical) incidents"
+    automate_next: true
+
+  - name: "EscalateIncident"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.escalate_incident"
+    description: "Create ESC- SAF record (jump target) or no-op if already logged as standard"
+    automate_next: true
+
+  - name: "StoreForForward"
+    type: "STANDARD"
+    function: "cross_platform_workflows.steps.store_for_forward"
+    description: "Confirm SAF record is queued for sync when connectivity returns"
+    automate_next: false
