@@ -230,6 +230,12 @@ userinfo: {
 **Correction:** Cast to string: `str(wf.get("current_step", 0))` before passing to asyncpg
 **Verification:** `POST /sync/workflows` returns 200; edge logs show `[WorkflowSync] Synced N workflows`
 
+## Pattern: .env Must Never Be Committed — Add to .gitignore Before Staging
+**Context:** Staging `.env` as part of a bulk `git add .env` in the release commit
+**Anti-Pattern:** `git add .env` alongside source files — the file is tracked, modified to include a real GitHub PAT, and GitHub push protection blocks the push with `GH013: Repository rule violations found`
+**Correction:** (1) Add `.env` to `.gitignore` before ever staging it. (2) Run `git rm --cached .env` to stop tracking it. (3) If already committed: soft-reset the commit, unstage .env, re-commit without it. Do NOT use `--no-verify` to bypass push protection.
+**Verification:** `git status` shows `.env` as untracked (??); `git push` succeeds without GH013 error
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
