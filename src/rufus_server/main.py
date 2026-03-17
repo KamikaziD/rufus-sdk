@@ -1769,6 +1769,7 @@ async def sync_device_transactions(
             "currency": t.currency,
             "card_token": t.card_token,
             "card_last_four": t.card_last_four,
+            "workflow_id": t.workflow_id or None,
         }
         for t in request_data.transactions
     ]

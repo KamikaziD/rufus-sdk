@@ -5,8 +5,9 @@ Signature: async def func(state, context, **kw) -> dict
 Bound to the workflow YAML via dotted path: payment_sim_steps.<function_name>
 
 Simulates card payments on an edge device:
-  - 70 % online  → gateway approval
-  - 30 % offline → floor-limit check → SAF queue or decline
+  - Probes control plane /health — online if reachable, offline if not
+  - Online  → gateway approval
+  - Offline → floor-limit check → SAF queue or decline
 
 State-mutation note: steps that both need to update state AND jump use direct
 mutation (state.field = value) before raising WorkflowJumpDirective.  The jump
@@ -54,7 +55,7 @@ class PaymentSimState(BaseModel):
 
     # Connectivity / routing
     is_online: bool = True
-    floor_limit: float = 25.0
+    floor_limit: float = 1000.0
 
     # Outcome
     status: str = "PENDING"          # APPROVED_ONLINE / APPROVED_OFFLINE / DECLINED
@@ -100,8 +101,16 @@ async def generate_payment(state, context, **kw) -> dict:
 
 
 async def check_connectivity(state, context, **kw) -> dict:
-    """Step 2: 70 % online, 30 % offline — jump to the appropriate path."""
-    is_online = random.random() < 0.70
+    """Step 2: Probe the control plane — go offline if unreachable."""
+    import httpx
+    is_online = False
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{state.cloud_url}/health")
+            is_online = resp.status_code == 200
+    except Exception:
+        is_online = False
+
     state.is_online = is_online  # mutate so state is persisted with jump
     logger.info(
         f"[Payment cycle {state.cycle}] Connectivity → {'ONLINE' if is_online else 'OFFLINE'}"

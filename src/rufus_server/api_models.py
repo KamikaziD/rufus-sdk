@@ -134,6 +134,7 @@ class EncryptedTransaction(BaseModel):
     currency: str = "USD"
     card_token: str = ""
     card_last_four: str = ""
+    workflow_id: str = ""
 
 
 class SyncRequest(BaseModel):
