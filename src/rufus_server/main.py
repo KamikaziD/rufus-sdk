@@ -485,6 +485,14 @@ async def start_workflow(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create workflow: {e}")
 
+    # Auto-advance through STANDARD/automate_next steps until WAITING_HUMAN or terminal.
+    # Mirrors the PolicyRollout/ConfigRollout pattern — HUMAN_IN_LOOP pauses naturally.
+    if new_workflow.status == "ACTIVE":
+        try:
+            await new_workflow.next_step(user_input={})
+        except Exception as e:
+            logger.warning(f"start_workflow auto-advance failed for {new_workflow.id}: {e}")
+
     return WorkflowStartResponse(
         workflow_id=new_workflow.id,
         current_step_name=new_workflow.current_step_name,
@@ -745,7 +753,8 @@ async def get_workflow_executions(
     exclude_status: Optional[str] = None,
     since: Optional[str] = None,
     limit: int = 50,
-    offset: int = 0
+    offset: int = 0,
+    include_state: bool = False,
 ):
     """List workflow executions.
 
@@ -763,6 +772,8 @@ async def get_workflow_executions(
     if status:
         filters['status'] = status
 
+    if include_state:
+        filters['include_state'] = True
     workflow_list = await workflow_engine.persistence.list_workflows(**filters)
 
     # Apply exclude_status filter if provided
@@ -1186,6 +1197,17 @@ async def resume_workflow(
         workflow.status = "FAILED"
         await workflow_engine.persistence.save_workflow(workflow_id, workflow.to_dict())
         raise HTTPException(status_code=500, detail=f"Unexpected error executing step: {e}")
+
+    # Auto-advance through any remaining STANDARD/automate_next steps until the
+    # workflow pauses again (WAITING_HUMAN) or reaches a terminal state.
+    _advance_attempts = 0
+    while workflow.status == "ACTIVE" and _advance_attempts < 20:
+        _advance_attempts += 1
+        try:
+            result_dict, next_step_name = await workflow.next_step(user_input={})
+        except Exception as e:
+            logger.warning(f"resume_workflow auto-advance failed for {workflow_id} (attempt {_advance_attempts}): {e}")
+            break
 
     # Publish event
     from rufus.events import event_publisher

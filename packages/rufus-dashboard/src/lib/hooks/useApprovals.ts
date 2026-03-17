@@ -10,7 +10,7 @@ export function useApprovals() {
 
   return useQuery({
     queryKey: ["approvals"],
-    queryFn: () => api.listWorkflows(token!, { status: "WAITING_HUMAN", limit: 100 }),
+    queryFn: () => api.listWorkflows(token!, { status: "WAITING_HUMAN", limit: 100, include_state: true }),
     enabled: !!token,
     refetchInterval: 10_000,
   });

@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 
 _velocity_tracker: dict = defaultdict(list)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pending fraud review decisions  (alert_id → {decision, reviewer_notes})
+# Written by edge_device_sim._handle_resume_fraud_review() via cloud command.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_pending_fraud_decisions: dict = {}
+
 
 def _get_velocity(card_token: str, window_sec: int) -> int:
     """Return the number of transactions for *card_token* within *window_sec*.
@@ -125,6 +132,13 @@ class TransactionMonitoringState(BaseModel):
     action: str = "ALLOW"
     alert_id: str = ""
     monitoring_notes: list = []
+
+    # HITL bubble-up (cloud_url required for review to reach control plane)
+    cloud_url: str = ""
+    review_timeout_sec: int = 90
+    review_decision: str = ""
+    review_notes: str = ""
+    review_source: str = ""   # "cloud_hitl" | "ondevice_hitl" | "offline_fallback"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -468,6 +482,95 @@ async def monitoring_verdict(state, context, **kw) -> dict:
 # Step 8: Flag_Transaction (STANDARD, last step)
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _bubble_up_for_review(state, alert_id: str, notes: list) -> dict:
+    """
+    POST to the cloud control plane to start a FraudCaseReview workflow, then
+    poll _pending_fraud_decisions for the analyst's decision (written back via
+    a 'resume_fraud_review' device command).
+
+    Always returns a dict — never raises.  This is critical because
+    _run_monitoring_inline()'s loop only exits on COMPLETED/FAILED and the
+    launch_monitoring wrapper catches Exception.
+    """
+    import asyncio
+    import httpx
+
+    payload = {
+        "workflow_type": "FraudCaseReview",
+        "initial_data": {
+            "device_id": state.device_id,
+            "device_type": state.device_type,
+            "transaction_id": state.transaction_id,
+            "alert_id": alert_id,
+            "amount": state.amount,
+            "rules_fired": state.rules_fired,
+            "typologies_triggered": state.typologies_triggered,
+            "ml_risk_score": state.ml_risk_score,
+            "cloud_url": state.cloud_url,
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{state.cloud_url}/api/v1/workflow/start", json=payload
+            )
+        case_wf_id = resp.json().get("workflow_id", "?")
+        logger.info(
+            "[Monitoring] HITL case started: workflow_id=%s alert=%s",
+            case_wf_id, alert_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Monitoring] Could not reach cloud for HITL (%s) — offline fallback", exc
+        )
+        return {
+            "alert_id": alert_id,
+            "monitoring_notes": notes + [f"HITL unreachable: {exc}"],
+            "review_decision": "APPROVED_LOCAL",
+            "review_source": "offline_fallback",
+            "action": "ALLOW",
+        }
+
+    # Poll for decision (asyncio.sleep — non-blocking)
+    poll_sec = 3
+    elapsed = 0
+    timeout = getattr(state, "review_timeout_sec", 90)
+    while elapsed < timeout:
+        decision_data = _pending_fraud_decisions.pop(alert_id, None)
+        if decision_data:
+            decision = decision_data.get("decision", "APPROVE")
+            action = "ALLOW" if decision == "APPROVE" else "BLOCK"
+            logger.info(
+                "[Monitoring] Cloud HITL decision: alert=%s decision=%s",
+                alert_id, decision,
+            )
+            return {
+                "alert_id": alert_id,
+                "monitoring_notes": notes + [f"Cloud HITL: {decision}"],
+                "review_decision": decision,
+                "review_notes": decision_data.get("reviewer_notes", ""),
+                "review_source": "cloud_hitl",
+                "action": action,
+            }
+        await asyncio.sleep(poll_sec)
+        elapsed += poll_sec
+
+    # Timeout — on-device manager authorisation simulation
+    logger.warning(
+        "[Monitoring] Review timeout (%ds) — on-device manager authorisation", timeout
+    )
+    await asyncio.sleep(1.5)
+    manager_code = f"MGR-{uuid.uuid4().hex[:6].upper()}"
+    return {
+        "alert_id": alert_id,
+        "monitoring_notes": notes + [f"TIMEOUT: manager_code={manager_code}"],
+        "review_decision": "APPROVED_LOCAL",
+        "review_notes": f"Manager override: {manager_code}",
+        "review_source": "ondevice_hitl",
+        "action": "ALLOW",
+    }
+
+
 async def flag_transaction(state, context, **kw) -> dict:
     """Create an alert record for HIGH/CRITICAL; log PASS for LOW/MEDIUM."""
     alert_id = ""
@@ -487,6 +590,9 @@ async def flag_transaction(state, context, **kw) -> dict:
             state.device_id, state.action,
             state.rules_fired, state.typologies_triggered,
         )
+        if state.action == "REVIEW" and state.cloud_url:
+            result = await _bubble_up_for_review(state, alert_id, notes)
+            return result
     else:
         notes.append(
             f"PASS: {state.risk_level} risk — "

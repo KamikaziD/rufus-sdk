@@ -464,6 +464,23 @@ async def main():
     payment_sim_steps._sync_manager = agent.sync_manager
     payment_sim_steps._agent = agent          # for launch_monitoring inline sub-workflow
 
+    # Register HITL fraud review command handler
+    async def _handle_resume_fraud_review(cmd_data: dict) -> None:
+        alert_id = cmd_data.get("alert_id", "")
+        if not alert_id:
+            logger.warning("resume_fraud_review missing alert_id")
+            return
+        txn_monitoring_steps._pending_fraud_decisions[alert_id] = {
+            "decision": cmd_data.get("decision", "APPROVE"),
+            "reviewer_notes": cmd_data.get("reviewer_notes", ""),
+        }
+        logger.info(
+            "resume_fraud_review: alert=%s decision=%s",
+            alert_id, cmd_data.get("decision"),
+        )
+
+    agent.register_command_handler("resume_fraud_review", _handle_resume_fraud_review)
+
     # Register embedded workflow definitions
     await _register_payment_workflow(agent)
     await _register_monitoring_workflow(agent)

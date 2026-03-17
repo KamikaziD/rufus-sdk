@@ -258,6 +258,7 @@ async def _run_monitoring_inline(agent, payment_state) -> dict:
             "merchant_id": payment_state.merchant_id,
             "card_token": payment_state.card_token,
             "payment_status": payment_state.status,
+            "cloud_url": payment_state.cloud_url,
         },
         owner_id=payment_state.device_id,
     )

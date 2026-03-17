@@ -246,6 +246,8 @@ class WasmRuntime:
     @staticmethod
     def _execute_wasi(binary: bytes, stdin_bytes: bytes, entrypoint: str) -> bytes:
         """Synchronous WASI execution — called in a thread pool executor."""
+        import os
+        import tempfile
         from wasmtime import Engine, Linker, Module, Store, WasiConfig
 
         engine = Engine()
@@ -253,29 +255,50 @@ class WasmRuntime:
         linker = Linker(engine)
         linker.define_wasi()
 
-        wasi_config = WasiConfig()
-        wasi_config.stdin_bytes(stdin_bytes)
+        # Write stdin to a temp file (wasmtime v25+ dropped stdin_bytes())
+        stdin_fd, stdin_path = tempfile.mkstemp(suffix=".wasm_stdin")
+        stdout_fd, stdout_path = tempfile.mkstemp(suffix=".wasm_stdout")
+        try:
+            os.write(stdin_fd, stdin_bytes)
+            os.close(stdin_fd)
+            stdin_fd = -1
+            os.close(stdout_fd)
+            stdout_fd = -1
 
-        # Capture stdout via an in-memory pipe
-        stdout_buf = io.BytesIO()
-        wasi_config.stdout_file(stdout_buf)
+            wasi_config = WasiConfig()
+            wasi_config.stdin_file = stdin_path
+            wasi_config.stdout_file = stdout_path
 
-        store = Store(engine)
-        store.set_wasi(wasi_config)
+            store = Store(engine)
+            store.set_wasi(wasi_config)
 
-        instance = linker.instantiate(store, module)
-        exports = instance.exports(store)
+            instance = linker.instantiate(store, module)
+            exports = instance.exports(store)
 
-        if entrypoint not in exports:
-            raise RuntimeError(
-                f"WASM module does not export function '{entrypoint}'. "
-                f"Available exports: {list(exports)}"
-            )
+            if entrypoint not in exports:
+                raise RuntimeError(
+                    f"WASM module does not export function '{entrypoint}'. "
+                    f"Available exports: {list(exports)}"
+                )
 
-        fn = exports[entrypoint]
-        fn(store)
+            fn = exports[entrypoint]
+            fn(store)
 
-        return stdout_buf.getvalue()
+            with open(stdout_path, "rb") as f:
+                return f.read()
+        finally:
+            if stdin_fd >= 0:
+                os.close(stdin_fd)
+            if stdout_fd >= 0:
+                os.close(stdout_fd)
+            try:
+                os.unlink(stdin_path)
+            except OSError:
+                pass
+            try:
+                os.unlink(stdout_path)
+            except OSError:
+                pass
 
     def _handle_error(self, wasm_config, exc: Exception) -> Dict[str, Any]:
         """Apply fallback_on_error policy."""

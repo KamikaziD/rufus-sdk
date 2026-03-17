@@ -56,6 +56,7 @@ class CommandType(str, Enum):
     SECURITY_LOCKDOWN = "security_lockdown"
     DISABLE_TRANSACTIONS = "disable_transactions"
     ENABLE_TRANSACTIONS = "enable_transactions"
+    RESUME_FRAUD_REVIEW = "resume_fraud_review"
 
 
 # Command routing configuration
@@ -96,6 +97,7 @@ COMMAND_ROUTING: Dict[CommandType, CommandPriority] = {
     CommandType.SECURITY_LOCKDOWN: CommandPriority.CRITICAL,
     CommandType.DISABLE_TRANSACTIONS: CommandPriority.CRITICAL,
     CommandType.ENABLE_TRANSACTIONS: CommandPriority.CRITICAL,
+    CommandType.RESUME_FRAUD_REVIEW: CommandPriority.CRITICAL,
 }
 
 

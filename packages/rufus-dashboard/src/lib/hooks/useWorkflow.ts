@@ -67,6 +67,7 @@ export function useResumeWorkflow() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["workflow", id] });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
 }

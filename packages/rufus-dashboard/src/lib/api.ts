@@ -49,7 +49,7 @@ async function apiFetch<T>(
 
 export async function listWorkflows(
   token: string,
-  params: { status?: string; type?: string; limit?: number; page?: number; since?: string } = {}
+  params: { status?: string; type?: string; limit?: number; page?: number; since?: string; include_state?: boolean } = {}
 ): Promise<WorkflowListResponse> {
   const q = new URLSearchParams();
   if (params.status) q.set("status", params.status);
@@ -58,6 +58,7 @@ export async function listWorkflows(
   // Server uses `offset`, not `page`
   if (params.page)   q.set("offset", String(((params.page ?? 1) - 1) * (params.limit ?? 50)));
   if (params.since)  q.set("since", params.since);
+  if (params.include_state) q.set("include_state", "true");
   // Server returns { total, workflows } envelope
   const raw = await apiFetch<{ total: number; workflows: Record<string, unknown>[] }>(
     `/api/v1/workflows/executions?${q}`,

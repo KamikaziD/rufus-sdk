@@ -113,6 +113,8 @@ class RufusEdgeAgent:
         self._background_tasks: list[asyncio.Task] = []
         # Heartbeat failure counting (4.3)
         self._heartbeat_consecutive_failures: int = 0
+        # Custom command handlers registered by application code
+        self._custom_command_handlers: dict = {}
 
     async def start(self):
         """Start the edge agent."""
@@ -629,6 +631,14 @@ class RufusEdgeAgent:
                 f"({n} consecutive heartbeat failures). Last error: {reason}"
             )
 
+    def register_command_handler(self, command_type: str, handler) -> None:
+        """Register an async handler for a cloud command type.
+
+        handler: async def handler(cmd_data: dict) -> None
+        """
+        self._custom_command_handlers[command_type] = handler
+        logger.info(f"Registered custom command handler for: {command_type}")
+
     async def _handle_cloud_command(self, command: Dict[str, Any]):
         """Handle a command received from cloud via heartbeat response."""
         cmd_type = command.get("command_type", "")
@@ -660,5 +670,10 @@ class RufusEdgeAgent:
                 await self.config_manager.handle_sync_wasm_command(cmd_data)
             else:
                 logger.warning("sync_wasm command received but config_manager is not set")
+        elif cmd_type in self._custom_command_handlers:
+            try:
+                await self._custom_command_handlers[cmd_type](cmd_data)
+            except Exception as exc:
+                logger.error(f"Custom handler for {cmd_type} raised: {exc}")
         else:
             logger.warning(f"Unknown cloud command: {cmd_type}")
