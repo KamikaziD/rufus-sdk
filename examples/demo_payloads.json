@@ -192,5 +192,120 @@
       }
     }
 
+    ,
+
+    {
+      "workflow_type": "LoanApplication",
+      "description": "Full lending pipeline — parallel credit+fraud checks, KYC sub-workflow, dynamic underwriting branch, optional HITL",
+      "version": "1.1",
+      "tested": "2026-03-17 — all 4 paths confirmed COMPLETED on Cloud (Celery/PostgreSQL)",
+      "execution_trace": [
+        "Initialize_Application (STANDARD)",
+        "Run_Concurrent_Checks (PARALLEL → Credit_Check + Fraud_Detection on Celery, ~5s)",
+        "Evaluate_Pre_Approval → WorkflowJumpDirective to Generate_Final_Decision (fast/reject) OR continues to KYC",
+        "Run_KYC_Workflow → StartSubWorkflowDirective → child KYC workflow (PENDING_SUB_WORKFLOW)",
+        "Route_Underwriting → sets underwriting_type: simple | full",
+        "Inject_Underwriting_Branch → dynamic step injection based on underwriting_type",
+        "  [full path] Run_Full_Underwriting (ASYNC Celery, ~8s) → Request_Human_Review → WAITING_HUMAN",
+        "  [simple path] Simplified_Underwriting (ASYNC Celery, ~3s) → auto-completes",
+        "Generate_Final_Decision → final_loan_status: APPROVED | REJECTED"
+      ],
+      "decision_logic": {
+        "credit_score": "780 if age >= 25, else 620",
+        "fraud_status": "HIGH_RISK if country == 'South Africa', else CLEAN",
+        "fast_track": "credit > 700 AND fraud CLEAN → jump to Generate_Final_Decision (APPROVED)",
+        "auto_reject": "credit < 600 OR fraud HIGH_RISK → jump to Generate_Final_Decision (REJECTED)",
+        "detailed_review": "credit 600–700 AND fraud CLEAN → KYC + underwriting",
+        "underwriting_branch": "amount < 20000 → simple (no HITL); amount >= 20000 → full (WAITING_HUMAN)"
+      },
+      "scenarios": {
+        "1_fast_track_approved": {
+          "_note": "Age >= 25 + clean country → credit 780 + fraud CLEAN → WorkflowJumpDirective skips KYC and underwriting → APPROVED in ~5s. Proves PARALLEL step and jump directive.",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "APPROVED",
+          "_expected_pre_approval_status": "FAST_TRACK_APPROVED",
+          "requested_amount": 25000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-01",
+            "name": "Alice Martin",
+            "email": "alice.martin@example.com",
+            "country": "United Kingdom",
+            "age": 35,
+            "id_document_url": "https://docs.example.com/id/alice-passport.pdf"
+          }
+        },
+        "2_auto_rejected_fraud": {
+          "_note": "Country = South Africa → fraud score 0.9 HIGH_RISK → WorkflowJumpDirective to Generate_Final_Decision → REJECTED in ~5s. No KYC or underwriting runs.",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "REJECTED",
+          "_expected_pre_approval_status": "REJECTED_AUTOMATIC",
+          "requested_amount": 8000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-02",
+            "name": "Thabo Nkosi",
+            "email": "thabo.nkosi@example.com",
+            "country": "South Africa",
+            "age": 42,
+            "id_document_url": "https://docs.example.com/id/thabo-id.pdf"
+          }
+        },
+        "3_full_underwriting_hitl": {
+          "_note": "Age < 25 + amount >= 20000 → credit 620 (PENDING) → KYC sub-workflow → full underwriting (Celery, ~8s) → WAITING_HUMAN at Request_Human_Review. Resume from the Approvals tab with the hitl_resume payload below. Proves: sub-workflow, dynamic injection, ASYNC Celery task, WAITING_HUMAN, human decision.",
+          "_expected_status": "WAITING_HUMAN (after ~15s)",
+          "_expected_step": "Request_Human_Review",
+          "_expected_underwriting_type": "full",
+          "_hitl_resume_payload": {
+            "_note": "Paste this into the Approvals panel notes field — OR use the curl command. Matches ProcessHumanDecisionInput schema.",
+            "decision": "APPROVED",
+            "reviewer_id": "underwriter-01",
+            "comments": "Income verified, employment confirmed, acceptable debt-to-income ratio."
+          },
+          "_hitl_resume_curl": "curl -X POST http://localhost:8000/api/v1/workflow/{workflow_id}/resume -H 'Content-Type: application/json' -H 'X-API-Key: dev-api-key' -d '{\"user_input\": {\"decision\": \"APPROVED\", \"reviewer_id\": \"underwriter-01\", \"comments\": \"Income verified.\"}}'",
+          "requested_amount": 45000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-03",
+            "name": "Jamie Chen",
+            "email": "jamie.chen@example.com",
+            "country": "United Kingdom",
+            "age": 22,
+            "id_document_url": "https://docs.example.com/id/jamie-passport.pdf"
+          }
+        },
+        "3b_full_underwriting_hitl_rejected": {
+          "_note": "Same as 3 but rejected by the underwriter. Resume with decision: REJECTED to see compensation path.",
+          "_expected_status": "WAITING_HUMAN (after ~15s)",
+          "_hitl_resume_payload": {
+            "decision": "REJECTED",
+            "reviewer_id": "underwriter-02",
+            "comments": "Insufficient income evidence for loan amount requested."
+          },
+          "requested_amount": 50000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-04",
+            "name": "Priya Sharma",
+            "email": "priya.sharma@example.com",
+            "country": "United Kingdom",
+            "age": 24,
+            "id_document_url": "https://docs.example.com/id/priya-passport.pdf"
+          }
+        },
+        "4_simplified_underwriting_no_hitl": {
+          "_note": "Age < 25 + amount < 20000 → credit 620 (PENDING) → KYC sub-workflow → simplified underwriting (Celery, ~3s) → auto-completes. No human review step. Proves: KYC sub-workflow lifecycle (PENDING_SUB_WORKFLOW → ACTIVE) and simplified async branch. final_loan_status: REJECTED (simplified path has no human approval gate — expected behaviour per workflow v1.1 design).",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "REJECTED",
+          "_expected_underwriting_type": "simple",
+          "requested_amount": 7500.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-05",
+            "name": "Sam Okafor",
+            "email": "sam.okafor@example.com",
+            "country": "Nigeria",
+            "age": 23,
+            "id_document_url": "https://docs.example.com/id/sam-id.pdf"
+          }
+        }
+      }
+    }
+
   ]
 }
