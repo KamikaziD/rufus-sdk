@@ -6,13 +6,51 @@ import { useResumeWorkflow } from "@/lib/hooks/useWorkflow";
 import { WorkflowStatusBadge } from "@/components/shared/StatusBadge";
 import { HitlForm } from "@/components/workflows/HitlForm";
 import { FraudReviewPanel } from "@/components/approvals/FraudReviewPanel";
+import { LoanReviewPanel } from "@/components/approvals/LoanReviewPanel";
 import { formatRelativeTime, truncateId } from "@/lib/utils";
-import { CheckSquare, RefreshCw, X, ShieldAlert } from "lucide-react";
+import { CheckSquare, RefreshCw, X, ShieldAlert, Banknote } from "lucide-react";
 import type { WorkflowExecution } from "@/types";
 
 const SEARCH_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
 
-// ─── Toast ───────────────────────────────────────────────────────────────────
+// ─── Panel registry — add new workflow types here ─────────────────────────────
+// Maps workflow_type → { accentColor, badge label, card icon, expand panel }
+
+type PanelVariant = "fraud" | "loan" | "default";
+
+function getPanelVariant(workflowType: string): PanelVariant {
+  if (workflowType === "FraudCaseReview") return "fraud";
+  if (workflowType === "LoanApplication")  return "loan";
+  return "default";
+}
+
+const VARIANT_STYLES: Record<PanelVariant, {
+  border: string;
+  activeBorder: string;
+  expandBg: string;
+  expandBorder: string;
+}> = {
+  fraud: {
+    border:       "border-[#1E1E22]",
+    activeBorder: "border-red-500/40",
+    expandBg:     "bg-red-500/5",
+    expandBorder: "border-red-500/20",
+  },
+  loan: {
+    border:       "border-[#1E1E22]",
+    activeBorder: "border-emerald-500/40",
+    expandBg:     "bg-emerald-500/5",
+    expandBorder: "border-emerald-500/20",
+  },
+  default: {
+    border:       "border-[#1E1E22]",
+    activeBorder: "border-amber-500/40",
+    expandBg:     "bg-amber-500/5",
+    expandBorder: "border-amber-500/20",
+  },
+};
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
 
 interface ToastData {
   workflowId: string;
@@ -41,7 +79,7 @@ function FraudToast({ toast, onDismiss }: { toast: ToastData; onDismiss: () => v
   );
 }
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ApprovalsPage() {
   const { data, isLoading, refetch } = useApprovals();
@@ -62,11 +100,8 @@ export default function ApprovalsPage() {
   // Detect new FraudCaseReview arrivals and show toast
   useEffect(() => {
     if (!data) return;
-    const fraudCases = data.workflows.filter(
-      (wf) => wf.workflow_type === "FraudCaseReview"
-    );
+    const fraudCases = data.workflows.filter((wf) => wf.workflow_type === "FraudCaseReview");
     if (!initializedRef.current) {
-      // Seed known IDs on first load — no toasts for pre-existing cases
       fraudCases.forEach((wf) => knownFraudIds.current.add(wf.workflow_id));
       initializedRef.current = true;
       return;
@@ -87,7 +122,6 @@ export default function ApprovalsPage() {
     }
   }, [data]);
 
-  // Cleanup timer on unmount
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const allApprovals = data?.workflows ?? [];
@@ -139,7 +173,9 @@ export default function ApprovalsPage() {
 
         {isLoading ? (
           <div className="space-y-3">
-            {[...Array(3)].map((_, i) => <div key={i} className="h-20 animate-pulse bg-[#111113] border border-[#1E1E22] rounded-none" />)}
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-20 animate-pulse bg-[#111113] border border-[#1E1E22] rounded-none" />
+            ))}
           </div>
         ) : approvals.length === 0 ? (
           <div className="bg-[#111113] border border-[#1E1E22] rounded-none py-12 text-center">
@@ -166,13 +202,83 @@ export default function ApprovalsPage() {
       </div>
 
       {toast && (
-        <FraudToast toast={toast} onDismiss={() => { setToast(null); if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }} />
+        <FraudToast
+          toast={toast}
+          onDismiss={() => {
+            setToast(null);
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          }}
+        />
       )}
     </>
   );
 }
 
 // ─── Approval Card ────────────────────────────────────────────────────────────
+
+function CardHeader({ workflow, variant }: { workflow: WorkflowExecution; variant: PanelVariant }) {
+  const s = workflow.state as Record<string, unknown>;
+
+  if (variant === "fraud") {
+    return (
+      <div className="flex items-center gap-2">
+        <ShieldAlert className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
+        <span className="font-mono text-sm text-[#E4E4E7]">{workflow.workflow_type}</span>
+        <span className="font-mono text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 uppercase tracking-wider">
+          Fraud Review
+        </span>
+      </div>
+    );
+  }
+
+  if (variant === "loan") {
+    const profile = s.applicant_profile as Record<string, unknown> | undefined;
+    return (
+      <div className="flex items-center gap-2">
+        <Banknote className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+        <span className="font-mono text-sm text-[#E4E4E7]">{workflow.workflow_type}</span>
+        <span className="font-mono text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider">
+          Underwriter Review
+        </span>
+        {profile?.name && (
+          <span className="font-mono text-[10px] text-zinc-500 truncate max-w-[120px]">
+            {String(profile.name)}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="inline-block w-2 h-2 bg-yellow-400 rounded-full animate-pulse flex-shrink-0" />
+      <span className="font-mono text-sm text-[#E4E4E7]">{workflow.workflow_type}</span>
+    </div>
+  );
+}
+
+function CardSubline({ workflow, variant }: { workflow: WorkflowExecution; variant: PanelVariant }) {
+  const s = workflow.state as Record<string, unknown>;
+
+  return (
+    <div className="flex items-center gap-3 mt-1">
+      <span className="font-mono text-[10px] text-zinc-600">#{truncateId(workflow.workflow_id, 8)}</span>
+      {workflow.current_step && (
+        <span className="font-mono text-[10px] text-zinc-600">→ {workflow.current_step}</span>
+      )}
+      {variant === "fraud" && s.amount ? (
+        <span className="font-mono text-[10px] text-zinc-500">
+          {String(s.currency ?? "USD")} {Number(s.amount).toFixed(2)}
+        </span>
+      ) : null}
+      {variant === "loan" && s.requested_amount ? (
+        <span className="font-mono text-[10px] text-zinc-500">
+          {Number(s.requested_amount).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 function ApprovalCard({
   workflow,
@@ -187,41 +293,18 @@ function ApprovalCard({
   onSubmit: (data: Record<string, unknown>) => void;
   isSubmitting: boolean;
 }) {
-  const isFraudCase = workflow.workflow_type === "FraudCaseReview";
+  const variant = getPanelVariant(workflow.workflow_type);
+  const styles  = VARIANT_STYLES[variant];
 
   return (
-    <div className={`bg-[#111113] border rounded-none ${isSelected ? (isFraudCase ? "border-red-500/40" : "border-amber-500/40") : "border-[#1E1E22]"}`}>
+    <div className={`bg-[#111113] border rounded-none ${isSelected ? styles.activeBorder : styles.border}`}>
       <button
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#1A1A1E] transition-colors"
         onClick={onSelect}
       >
         <div className="text-left">
-          <div className="flex items-center gap-2">
-            {isFraudCase
-              ? <ShieldAlert className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
-              : <span className="inline-block w-2 h-2 bg-yellow-400 rounded-full animate-pulse flex-shrink-0" />
-            }
-            <span className="font-mono text-sm text-[#E4E4E7]">{workflow.workflow_type}</span>
-            {isFraudCase && (
-              <span className="font-mono text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 uppercase tracking-wider">
-                Fraud Review
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3 mt-1">
-            <span className="font-mono text-[10px] text-zinc-600">#{truncateId(workflow.workflow_id, 8)}</span>
-            {workflow.current_step && (
-              <span className="font-mono text-[10px] text-zinc-600">→ {workflow.current_step}</span>
-            )}
-            {isFraudCase && (() => {
-              const s = workflow.state as Record<string, unknown>;
-              return s.amount ? (
-                <span className="font-mono text-[10px] text-zinc-500">
-                  {String(s.currency ?? "USD")} {Number(s.amount).toFixed(2)}
-                </span>
-              ) : null;
-            })()}
-          </div>
+          <CardHeader workflow={workflow} variant={variant} />
+          <CardSubline workflow={workflow} variant={variant} />
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           <span className="font-mono text-[10px] text-zinc-600">{formatRelativeTime(workflow.started_at)}</span>
@@ -230,9 +313,16 @@ function ApprovalCard({
       </button>
 
       {isSelected && (
-        <div className={`border-t px-4 py-4 ${isFraudCase ? "border-red-500/20 bg-red-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
-          {isFraudCase ? (
+        <div className={`border-t px-4 py-4 ${styles.expandBorder} ${styles.expandBg}`}>
+          {variant === "fraud" ? (
             <FraudReviewPanel
+              workflowId={workflow.workflow_id}
+              state={workflow.state as Record<string, unknown>}
+              onSubmit={onSubmit}
+              isSubmitting={isSubmitting}
+            />
+          ) : variant === "loan" ? (
+            <LoanReviewPanel
               workflowId={workflow.workflow_id}
               state={workflow.state as Record<string, unknown>}
               onSubmit={onSubmit}
