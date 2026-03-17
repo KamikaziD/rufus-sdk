@@ -473,6 +473,16 @@ class RufusEdgeAgent:
             self.workflow_builder.workflow_registry = config.workflows
             logger.info(f"Updated workflow registry with {len(config.workflows)} workflows")
 
+        # Update runtime intervals from config (takes effect on next loop iteration)
+        new_sync = config.sync_interval_seconds
+        new_heartbeat = config.heartbeat_interval_seconds
+        if new_sync != self.sync_interval:
+            logger.info(f"Sync interval updated: {self.sync_interval}s → {new_sync}s")
+            self.sync_interval = new_sync
+        if new_heartbeat != self.heartbeat_interval:
+            logger.info(f"Heartbeat interval updated: {self.heartbeat_interval}s → {new_heartbeat}s")
+            self.heartbeat_interval = new_heartbeat
+
     async def _sync_loop(self):
         """Background sync loop."""
         while True:

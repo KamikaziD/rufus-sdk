@@ -5,11 +5,14 @@ edge_device_sim.py — Rufus edge device emulator for docker-compose testing.
 2. Starts RufusEdgeAgent (heartbeat + config polling).
 3. Runs a continuous EdgeTelemetry workflow loop (TELEMETRY_INTERVAL seconds).
 4. Runs a concurrent PaymentSimulation workflow loop (PAYMENT_INTERVAL seconds).
+   Each payment triggers an inline TransactionMonitoring sub-workflow (fraud screening).
 5. Gracefully shuts down on SIGTERM / SIGINT.
 
 Environment variables:
     CLOUD_URL             Cloud control plane URL (default: http://rufus-server:8000)
     DEVICE_ID             Unique device identifier (default: sim-device-001)
+    DEVICE_TYPE           "pos" or "atm" — controls payment amounts and fraud rules (default: pos)
+    FLOOR_LIMIT           Offline approval floor limit in USD (default: 1000.0 for POS, 500 for ATM)
     RUFUS_API_KEY         API key returned after registration (leave blank; set after register)
     RUFUS_ENCRYPTION_KEY  Encryption key for workflow state (optional)
     DB_PATH               SQLite database path (default: /tmp/edge_sim.db)
@@ -30,7 +33,8 @@ import httpx
 # Resolve step modules from the same directory as this script
 sys.path.insert(0, os.path.dirname(__file__))
 
-import payment_sim_steps  # noqa: E402  (after sys.path patch)
+import payment_sim_steps      # noqa: E402  (after sys.path patch)
+import txn_monitoring_steps  # noqa: E402  (registers velocity tracker, etc.)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,6 +44,10 @@ logger = logging.getLogger("edge-sim")
 
 CLOUD_URL = os.getenv("CLOUD_URL", "http://rufus-server:8000")
 DEVICE_ID = os.getenv("DEVICE_ID", "sim-device-001")
+DEVICE_TYPE = os.getenv("DEVICE_TYPE", "pos")   # "pos" or "atm"
+# Default floor limit: $1000 for POS, $500 for ATM
+_default_floor = "500.0" if DEVICE_TYPE == "atm" else "1000.0"
+FLOOR_LIMIT = float(os.getenv("FLOOR_LIMIT", _default_floor))
 DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
 ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
 REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
@@ -93,8 +101,8 @@ steps:
 
 PAYMENT_SIM_YAML = """
 workflow_type: "PaymentSimulation"
-workflow_version: "1.0.0"
-description: "Simulated card payment — online approval or offline SAF"
+workflow_version: "1.1.0"
+description: "Simulated card payment — online approval or offline SAF + fraud screening"
 initial_state_model_path: "payment_sim_steps.PaymentSimState"
 
 steps:
@@ -130,10 +138,70 @@ steps:
     description: "Decline — exceeds offline floor limit"
     automate_next: true
 
+  - name: "Launch_Monitoring"
+    type: "STANDARD"
+    function: "payment_sim_steps.launch_monitoring"
+    description: "Run TransactionMonitoring fraud screening sub-workflow"
+    automate_next: true
+
   - name: "Complete_Payment"
     type: "STANDARD"
     function: "payment_sim_steps.complete_payment"
     description: "Log final outcome"
+"""
+
+
+TRANSACTION_MONITORING_YAML = """
+workflow_type: "TransactionMonitoring"
+workflow_version: "1.0.0"
+description: "Tazama-inspired rule + typology + WASM ML fraud screening — POS and ATM"
+initial_state_model_path: "txn_monitoring_steps.TransactionMonitoringState"
+
+steps:
+  - name: "Extract_Features"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.extract_features"
+    description: "Build normalised feature vector for ML scoring"
+    automate_next: true
+
+  - name: "Route_By_Type"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.route_by_type"
+    description: "Route to POS or ATM rule evaluation"
+
+  - name: "POS_Rules"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.evaluate_pos_rules"
+    description: "POS fraud rules: velocity, micro-structuring, card-testing (5 rules)"
+
+  - name: "ATM_Rules"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.evaluate_atm_rules"
+    description: "ATM fraud rules: large-cash, after-hours, structuring (5 rules)"
+    automate_next: true
+
+  - name: "Score_With_Wasm"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.score_with_wasm"
+    description: "Rust logistic regression via Wasmtime WASI (Python fallback)"
+    automate_next: true
+
+  - name: "Apply_Typologies"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.apply_typologies"
+    description: "Map rule combinations to named fraud typologies"
+    automate_next: true
+
+  - name: "Monitoring_Verdict"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.monitoring_verdict"
+    description: "Classify risk tier; jump to Flag_Transaction for HIGH/CRITICAL"
+    automate_next: true
+
+  - name: "Flag_Transaction"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.flag_transaction"
+    description: "Create alert record for HIGH/CRITICAL; log PASS otherwise"
 """
 
 
@@ -156,12 +224,16 @@ async def register_device() -> str:
         pass
 
     async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=15) as client:
+        device_name = (
+            f"ATM Device {DEVICE_ID}" if DEVICE_TYPE == "atm"
+            else f"POS Device {DEVICE_ID}"
+        )
         resp = await client.post(
             "/api/v1/devices/register",
             json={
                 "device_id": DEVICE_ID,
-                "device_type": "sim",
-                "device_name": f"Sim Device {DEVICE_ID}",
+                "device_type": DEVICE_TYPE,
+                "device_name": device_name,
                 "merchant_id": "test-merchant-001",
                 "firmware_version": "1.0.0",
                 "sdk_version": "1.0.0rc4",
@@ -285,7 +357,7 @@ async def _register_payment_workflow(agent):
         {
             "workflow_type": "PaymentSimulation",
             "yaml_content": PAYMENT_SIM_YAML.strip(),
-            "version": "1.0.0",
+            "version": "1.1.0",
         },
         workflow_builder=agent.workflow_builder,
     )
@@ -294,18 +366,36 @@ async def _register_payment_workflow(agent):
     )
 
 
+async def _register_monitoring_workflow(agent):
+    """Inject TransactionMonitoring YAML into the WorkflowBuilder via the config cache."""
+    ok = await agent.config_manager.handle_update_workflow_command(
+        {
+            "workflow_type": "TransactionMonitoring",
+            "yaml_content": TRANSACTION_MONITORING_YAML.strip(),
+            "version": "1.0.0",
+        },
+        workflow_builder=agent.workflow_builder,
+    )
+    logger.info(
+        f"TransactionMonitoring workflow registered (cached in edge_workflow_cache): {ok}"
+    )
+
+
 async def payment_loop(agent):
     """Continuously run PaymentSimulation workflow, pausing PAYMENT_INTERVAL between cycles."""
     cycle = 0
     logger.info(
-        f"Payment loop started (interval={PAYMENT_INTERVAL}s). "
-        "Generating randomised card payments — 70% online / 30% offline SAF."
+        f"Payment loop started (interval={PAYMENT_INTERVAL}s, device_type={DEVICE_TYPE}, "
+        f"floor_limit=${FLOOR_LIMIT:.0f}). "
+        "Generating randomised card payments — 70% online / 30% offline SAF + fraud screening."
     )
     while not _shutdown_event.is_set():
         cycle += 1
         logger.info(f"─── Payment cycle {cycle} ───")
         await _run_workflow_direct(agent, "PaymentSimulation", {
             "device_id": DEVICE_ID,
+            "device_type": DEVICE_TYPE,
+            "floor_limit": FLOOR_LIMIT,
             "cloud_url": CLOUD_URL,
             "db_path": DB_PATH,
             "cycle": cycle,
@@ -370,9 +460,13 @@ async def main():
 
     await _register_telemetry_workflow(agent)
 
-    # Wire sync_manager reference for payment SAF queuing, then register + run
+    # Wire module-level references for payment step functions
     payment_sim_steps._sync_manager = agent.sync_manager
+    payment_sim_steps._agent = agent          # for launch_monitoring inline sub-workflow
+
+    # Register embedded workflow definitions
     await _register_payment_workflow(agent)
+    await _register_monitoring_workflow(agent)
 
     try:
         await asyncio.gather(

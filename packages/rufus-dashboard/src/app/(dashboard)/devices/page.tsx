@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { formatRelativeTime } from "@/lib/utils";
-import { Cpu, RefreshCw, Plus, Wifi, WifiOff } from "lucide-react";
+import { Cpu, RefreshCw, Plus, Wifi, WifiOff, X } from "lucide-react";
 import type { Device, DeviceStatus } from "@/types";
 
 const INPUT_CLS = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
@@ -44,9 +44,18 @@ const EMPTY_REG: RegForm = {
   location: "",
 };
 
+const SEARCH_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
+
 export default function DevicesPage() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | DeviceStatus>("ALL");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const { data, isLoading, refetch } = useDeviceList();
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<RegForm>(EMPTY_REG);
   const [regResult, setRegResult] = useState<{ api_key: string } | null>(null);
@@ -65,9 +74,20 @@ export default function DevicesPage() {
     onError: (e) => setRegError(e instanceof Error ? e.message : "Registration failed."),
   });
 
-  const devices = (data?.devices ?? []).filter(
-    (d) => statusFilter === "ALL" || d.status === statusFilter
-  );
+  const devices = useMemo(() => {
+    let rows = data?.devices ?? [];
+    if (statusFilter !== "ALL") rows = rows.filter((d) => d.status === statusFilter);
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      rows = rows.filter(
+        (d) =>
+          d.device_id.toLowerCase().includes(q) ||
+          (d.metadata?.device_name as string ?? "").toLowerCase().includes(q) ||
+          d.merchant_id.toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [data?.devices, statusFilter, debouncedSearch]);
 
   function setField<K extends keyof RegForm>(k: K, v: RegForm[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -127,6 +147,25 @@ export default function DevicesPage() {
             </button>
           </RoleGate>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative inline-block">
+        <input
+          type="text"
+          placeholder="Search by ID, name, merchant…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={SEARCH_INPUT}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {/* Filter chips */}

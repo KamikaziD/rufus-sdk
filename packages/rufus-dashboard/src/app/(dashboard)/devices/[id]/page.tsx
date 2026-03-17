@@ -2,13 +2,20 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDevice } from "@/lib/hooks/useDevice";
-import { getDeviceSafTransactions } from "@/lib/api";
+import {
+  getDeviceSafTransactions,
+  getAdminDeviceConfig,
+  saveAdminDeviceConfig,
+  saveDeviceConfig,
+  broadcastDeviceCommand,
+  type DeviceConfigData,
+} from "@/lib/api";
 import { DeviceStatusBadge } from "@/components/shared/StatusBadge";
 import { CommandSender } from "@/components/devices/CommandSender";
 import { formatRelativeTime } from "@/lib/utils";
-import { ChevronLeft, RefreshCw, DatabaseZap } from "lucide-react";
+import { ChevronLeft, RefreshCw, DatabaseZap, AlertCircle, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 
 type Tab = "overview" | "commands" | "config" | "saf";
@@ -87,17 +94,313 @@ export default function DeviceDetailPage({ params }: { params: { id: string } })
 
       {activeTab === "commands" && <CommandSender deviceId={id} />}
 
-      {activeTab === "config" && (
-        <div className="bg-[#111113] border border-[#1E1E22] rounded-none p-4">
-          <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">DEVICE CONFIG</div>
-          <pre className="font-mono text-xs text-zinc-400 bg-[#0A0A0B] border border-[#1E1E22] p-4 overflow-auto max-h-80 leading-5">
-            {JSON.stringify(device.metadata ?? {}, null, 2)}
-          </pre>
-        </div>
-      )}
+      {activeTab === "config" && <ConfigTab deviceId={id} />}
 
       {activeTab === "saf" && <SafTab deviceId={id} pendingCount={device.pending_saf_count} />}
     </div>
+  );
+}
+
+function bumpPatchVersion(v: string): string {
+  const parts = v.split(".");
+  if (parts.length < 3) return v;
+  const patch = parseInt(parts[2] ?? "0", 10);
+  return `${parts[0]}.${parts[1]}.${isNaN(patch) ? 0 : patch + 1}`;
+}
+
+const CFG_INPUT = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
+
+function ConfigTab({ deviceId }: { deviceId: string }) {
+  const { data: session } = useSession();
+  const token = (session as unknown as { accessToken?: string })?.accessToken;
+  const queryClient = useQueryClient();
+
+  const { data: configData, isLoading } = useQuery({
+    queryKey: ["device-config", deviceId],
+    queryFn: () => getAdminDeviceConfig(token!, deviceId),
+    enabled: !!token,
+  });
+
+  const [local, setLocal] = useState<DeviceConfigData | null>(null);
+  const [description, setDescription] = useState("");
+  const [fraudJson, setFraudJson] = useState<string | null>(null);
+  const [fraudErr, setFraudErr] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [broadcastStatus, setBroadcastStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // Use local edits if set, else fall back to fetched data
+  const cfg: DeviceConfigData = local ?? configData?.config_data ?? {};
+  const currentVersion = configData?.config_version ?? "1.0.0";
+  const nextVersion = bumpPatchVersion(currentVersion);
+
+  function setField<K extends keyof DeviceConfigData>(key: K, val: DeviceConfigData[K]) {
+    setLocal((prev) => ({ ...(prev ?? cfg), [key]: val }));
+  }
+  function setFeature(name: string, enabled: boolean) {
+    setLocal((prev) => ({
+      ...(prev ?? cfg),
+      features: { ...(cfg.features ?? {}), [name]: enabled },
+    }));
+  }
+
+  const saveMut = useMutation({
+    mutationFn: () => {
+      let fraud_rules = cfg.fraud_rules ?? [];
+      if (fraudJson !== null) {
+        fraud_rules = JSON.parse(fraudJson);
+      }
+      return saveDeviceConfig(token!, deviceId, {
+        config_version: nextVersion,
+        config_data: { ...cfg, fraud_rules },
+        description: description || undefined,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["device-config", deviceId] });
+      setLocal(null);
+      setFraudJson(null);
+      setSaveStatus({ ok: true, msg: `Saved as v${nextVersion}` });
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+    onError: (e: Error) => setSaveStatus({ ok: false, msg: e.message }),
+  });
+
+  const broadcastMut = useMutation({
+    mutationFn: async () => {
+      let fraud_rules = cfg.fraud_rules ?? [];
+      if (fraudJson !== null) {
+        fraud_rules = JSON.parse(fraudJson);
+      }
+      await saveDeviceConfig(token!, deviceId, {
+        config_version: nextVersion,
+        config_data: { ...cfg, fraud_rules },
+        description: description || undefined,
+      });
+      return broadcastDeviceCommand(token!, {
+        command_type: "reload_config",
+        target_filter: { device_id: deviceId },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["device-config", deviceId] });
+      setLocal(null);
+      setFraudJson(null);
+      setBroadcastStatus({ ok: true, msg: `Saved v${nextVersion} & broadcast reload_config` });
+      setTimeout(() => setBroadcastStatus(null), 5000);
+    },
+    onError: (e: Error) => setBroadcastStatus({ ok: false, msg: e.message }),
+  });
+
+  function handleSave(e: React.FormEvent, withBroadcast: boolean) {
+    e.preventDefault();
+    setFraudErr(null);
+    setSaveStatus(null);
+    setBroadcastStatus(null);
+    if (fraudJson !== null) {
+      try { JSON.parse(fraudJson); } catch {
+        setFraudErr("Invalid JSON in fraud rules");
+        return;
+      }
+    }
+    if (withBroadcast) broadcastMut.mutate();
+    else saveMut.mutate();
+  }
+
+  const features = cfg.features ?? {};
+  const FEATURE_KEYS: { key: string; label: string }[] = [
+    { key: "offline_mode",  label: "Offline mode" },
+    { key: "contactless",   label: "Contactless" },
+    { key: "chip_fallback", label: "Chip fallback" },
+    { key: "manual_entry",  label: "Manual entry" },
+  ];
+
+  const inFlight = saveMut.isPending || broadcastMut.isPending;
+
+  if (isLoading) return <div className="h-48 animate-pulse bg-[#111113] border border-[#1E1E22]" />;
+
+  return (
+    <form onSubmit={(e) => handleSave(e, false)} className="space-y-4">
+      {/* Header */}
+      <div className="bg-[#111113] border border-[#1E1E22] px-4 py-3 flex items-center justify-between">
+        <div>
+          <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">DEVICE CONFIG</span>
+          <span className="font-mono text-[10px] text-zinc-700 ml-3">v{currentVersion}</span>
+        </div>
+        {configData?.created_at && (
+          <span className="font-mono text-[10px] text-zinc-700">updated {formatRelativeTime(configData.created_at)}</span>
+        )}
+      </div>
+
+      {/* Row 1: Transaction limits + Payment thresholds */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-[#111113] border border-[#1E1E22] p-4 space-y-3">
+          <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-1">TRANSACTION LIMITS</div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Floor Limit (USD)</label>
+            <input
+              type="number" step="0.01" min="0"
+              className={CFG_INPUT}
+              value={cfg.floor_limit ?? ""}
+              onChange={(e) => setField("floor_limit", parseFloat(e.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Max Offline Transactions</label>
+            <input
+              type="number" min="0"
+              className={CFG_INPUT}
+              value={cfg.max_offline_transactions ?? ""}
+              onChange={(e) => setField("max_offline_transactions", parseInt(e.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Offline Timeout (hours)</label>
+            <input
+              type="number" min="0"
+              className={CFG_INPUT}
+              value={cfg.offline_timeout_hours ?? ""}
+              onChange={(e) => setField("offline_timeout_hours", parseInt(e.target.value))}
+            />
+          </div>
+        </div>
+
+        <div className="bg-[#111113] border border-[#1E1E22] p-4 space-y-3">
+          <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-1">PAYMENT THRESHOLDS</div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">PIN Required Above (USD)</label>
+            <input
+              type="number" step="0.01" min="0"
+              className={CFG_INPUT}
+              value={cfg.require_pin_above ?? ""}
+              onChange={(e) => setField("require_pin_above", parseFloat(e.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Signature Required Above (USD)</label>
+            <input
+              type="number" step="0.01" min="0"
+              className={CFG_INPUT}
+              value={cfg.require_signature_above ?? ""}
+              onChange={(e) => setField("require_signature_above", parseFloat(e.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Card Types (comma-separated)</label>
+            <input
+              type="text"
+              className={CFG_INPUT}
+              value={(cfg.supported_card_types ?? []).join(", ")}
+              onChange={(e) => setField("supported_card_types", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: Feature flags + Sync settings */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-[#111113] border border-[#1E1E22] p-4">
+          <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">FEATURE FLAGS</div>
+          <div className="space-y-2">
+            {FEATURE_KEYS.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-amber-500"
+                  checked={features[key] ?? false}
+                  onChange={(e) => setFeature(key, e.target.checked)}
+                />
+                <span className="font-mono text-xs text-zinc-400">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-[#111113] border border-[#1E1E22] p-4 space-y-3">
+          <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-1">SYNC SETTINGS</div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Sync Interval (seconds)</label>
+            <input
+              type="number" min="10"
+              className={CFG_INPUT}
+              value={cfg.sync_interval_seconds ?? ""}
+              onChange={(e) => setField("sync_interval_seconds", parseInt(e.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Heartbeat Interval (seconds)</label>
+            <input
+              type="number" min="5"
+              className={CFG_INPUT}
+              value={cfg.heartbeat_interval_seconds ?? ""}
+              onChange={(e) => setField("heartbeat_interval_seconds", parseInt(e.target.value))}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Fraud rules */}
+      <div className="bg-[#111113] border border-[#1E1E22] p-4">
+        <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-2">FRAUD RULES (JSON)</div>
+        <textarea
+          rows={4}
+          className="font-mono text-xs bg-[#0A0A0B] border border-[#1E1E22] p-3 w-full text-zinc-300 rounded-none focus:outline-none focus:border-amber-500/50 transition-colors"
+          value={fraudJson ?? JSON.stringify(cfg.fraud_rules ?? [], null, 2)}
+          onChange={(e) => {
+            setFraudJson(e.target.value);
+            setFraudErr(null);
+          }}
+        />
+        {fraudErr && (
+          <p className="font-mono text-xs text-red-400 mt-1 flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" />{fraudErr}
+          </p>
+        )}
+      </div>
+
+      {/* Description */}
+      <div className="bg-[#111113] border border-[#1E1E22] p-4">
+        <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-2">DESCRIPTION (optional)</div>
+        <input
+          type="text"
+          className={CFG_INPUT}
+          placeholder="What changed in this version?"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={inFlight}
+          className="border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-mono text-xs px-4 py-1.5 rounded-none disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {saveMut.isPending ? "Saving…" : "Save Config"}
+        </button>
+        <button
+          type="button"
+          disabled={inFlight}
+          onClick={(e) => handleSave(e as unknown as React.FormEvent, true)}
+          className="border border-zinc-600 text-zinc-400 hover:bg-zinc-700/20 font-mono text-xs px-4 py-1.5 rounded-none disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+        >
+          {broadcastMut.isPending ? "Saving…" : "Save & Broadcast Reload ▶"}
+        </button>
+      </div>
+
+      {saveStatus && (
+        <p className={`font-mono text-xs flex items-center gap-1 ${saveStatus.ok ? "text-emerald-400" : "text-red-400"}`}>
+          {saveStatus.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+          {saveStatus.msg}
+        </p>
+      )}
+      {broadcastStatus && (
+        <p className={`font-mono text-xs flex items-center gap-1 ${broadcastStatus.ok ? "text-emerald-400" : "text-red-400"}`}>
+          {broadcastStatus.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+          {broadcastStatus.msg}
+        </p>
+      )}
+    </form>
   );
 }
 

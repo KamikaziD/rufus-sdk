@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSchedules, useCreateSchedule, usePauseSchedule, useResumeSchedule, useCancelSchedule } from "@/lib/hooks/useSchedules";
 import { RoleGate } from "@/components/shared/RoleGate";
 import { formatRelativeTime } from "@/lib/utils";
-import { Clock, Plus, RefreshCw, Pause, Play, X } from "lucide-react";
+import { Clock, Plus, RefreshCw, Pause, Play, X, ArrowUpDown } from "lucide-react";
 import type { Schedule } from "@/lib/api";
 
 type ScheduleStatus = Schedule["status"];
@@ -39,6 +39,10 @@ const EMPTY_FORM: CreateFormState = {
 };
 
 const INPUT_CLS = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
+const SEARCH_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
+
+type SortCol = "name" | "status" | "next_run" | "created";
+type SortDir = "asc" | "desc";
 
 function isImminent(ts: string | undefined | null): boolean {
   if (!ts) return false;
@@ -55,8 +59,58 @@ export default function SchedulesPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<CreateFormState>(EMPTY_FORM);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortCol, setSortCol] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const schedules = data?.schedules ?? [];
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const allSchedules = data?.schedules ?? [];
+
+  const schedules = useMemo(() => {
+    let rows = allSchedules;
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      rows = rows.filter(
+        (s) =>
+          s.schedule_name.toLowerCase().includes(q) ||
+          (s.device_id ?? "").toLowerCase().includes(q) ||
+          s.command_type.toLowerCase().includes(q)
+      );
+    }
+    if (!sortCol) return rows;
+    return [...rows].sort((a, b) => {
+      let cmp = 0;
+      if (sortCol === "name")     cmp = a.schedule_name.localeCompare(b.schedule_name);
+      else if (sortCol === "status")   cmp = a.status.localeCompare(b.status);
+      else if (sortCol === "next_run") cmp = (a.next_execution_at ?? "").localeCompare(b.next_execution_at ?? "");
+      else if (sortCol === "created")  cmp = a.created_at.localeCompare(b.created_at);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [allSchedules, debouncedSearch, sortCol, sortDir]);
+
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  function ColHeader({ col, label }: { col: SortCol; label: string }) {
+    const active = sortCol === col;
+    return (
+      <button
+        onClick={() => toggleSort(col)}
+        className={`flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest hover:text-zinc-300 transition-colors ${active ? "text-amber-400" : "text-zinc-600"}`}
+      >
+        {label}
+        <ArrowUpDown className="h-2.5 w-2.5 opacity-50" />
+        {active && <span className="text-[9px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
+      </button>
+    );
+  }
 
   function setField<K extends keyof CreateFormState>(key: K, value: CreateFormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -121,6 +175,25 @@ export default function SchedulesPage() {
             </button>
           </RoleGate>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative inline-block">
+        <input
+          type="text"
+          placeholder="Search by name, device, command…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={SEARCH_INPUT}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {feedback && (
@@ -210,11 +283,16 @@ export default function SchedulesPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-[#0D0D0F] border-b border-[#1E1E22]">
-                  {["NAME", "COMMAND", "DEVICE", "CRON", "STATUS", "NEXT RUN", "CREATED", ""].map((h) => (
+                  <th className="text-left px-4 py-2.5"><ColHeader col="name" label="NAME" /></th>
+                  {["COMMAND", "DEVICE", "CRON"].map((h) => (
                     <th key={h} className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest whitespace-nowrap">
                       {h}
                     </th>
                   ))}
+                  <th className="text-left px-4 py-2.5"><ColHeader col="status" label="STATUS" /></th>
+                  <th className="text-left px-4 py-2.5"><ColHeader col="next_run" label="NEXT RUN" /></th>
+                  <th className="text-left px-4 py-2.5"><ColHeader col="created" label="CREATED" /></th>
+                  <th className="text-left px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody>

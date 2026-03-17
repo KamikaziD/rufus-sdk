@@ -1652,6 +1652,62 @@ async def patch_device(
     return {"updated": True}
 
 
+@app.get("/api/v1/admin/device-config", tags=["Configuration"])
+async def get_admin_device_config(device_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Get the active device config (admin, Bearer token).
+
+    If device_id query param is provided, returns per-device config (falls back to fleet global).
+    Otherwise returns the fleet-wide global config.
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    config = await device_service.get_active_config(device_id)
+    if not config:
+        return {
+            "config_version": "1.0.0",
+            "etag": None,
+            "created_at": None,
+            "config_data": {
+                "floor_limit": 25.00,
+                "max_offline_transactions": 100,
+                "offline_timeout_hours": 24,
+                "supported_card_types": ["visa", "mastercard", "amex"],
+                "require_pin_above": 50.00,
+                "require_signature_above": 100.00,
+                "fraud_rules": [],
+                "features": {"offline_mode": True, "contactless": True, "chip_fallback": True, "manual_entry": False},
+                "sync_interval_seconds": 300,
+                "heartbeat_interval_seconds": 60,
+            },
+        }
+    config_data = config.get("config_data", "{}")
+    if isinstance(config_data, str):
+        config_data = json.loads(config_data)
+    created_at = config.get("created_at")
+    if created_at and hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "config_version": config.get("config_version"),
+        "etag": config.get("etag"),
+        "created_at": created_at,
+        "config_data": config_data,
+    }
+
+
+@app.put("/api/v1/admin/device-config", tags=["Configuration"])
+async def put_admin_device_config(body: dict, user=Depends(get_current_user)):
+    """Create a new active fleet device config (admin, Bearer token)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    result = await device_service.create_config(
+        config_version=body.get("config_version", "1.0.0"),
+        config_data=body.get("config_data", {}),
+        created_by=user.get("user_id") if user else "admin",
+        description=body.get("description"),
+    )
+    return result
+
+
 @app.get("/api/v1/devices/{device_id}/config", tags=["Devices"])
 async def get_device_config(
     device_id: str,
@@ -1666,8 +1722,14 @@ async def get_device_config(
     if not await device_service.authenticate_device(device_id, x_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Get active config
-    config = await device_service.get_active_config()
+    # Get active config (device-specific first, falls back to fleet global)
+    config = await device_service.get_active_config(device_id)
+    if not config:
+        # Auto-seed per-device config for existing devices that pre-date this feature
+        device = await device_service.get_device(device_id)
+        if device:
+            await device_service._create_device_config(device_id, device.get("device_type", "pos"))
+            config = await device_service.get_active_config(device_id)
     if not config:
         # Return default config if none exists
         config = {
@@ -1701,11 +1763,31 @@ async def get_device_config(
     return JSONResponse(
         content={
             "version": config.get("config_version"),
-            "updated_at": created_at,
+            "updated_at": created_at or datetime.utcnow().isoformat(),
             **config_data,
         },
         headers={"ETag": current_etag}
     )
+
+
+@app.post("/api/v1/devices/{device_id}/config", tags=["Devices"])
+async def save_device_config(
+    device_id: str,
+    body: dict,
+    user=Depends(get_current_user)
+):
+    """Save per-device configuration (requires admin Bearer token)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+
+    result = await device_service.save_device_config(
+        device_id=device_id,
+        config_data=body.get("config_data", {}),
+        config_version=body.get("config_version"),
+        description=body.get("description"),
+        created_by=user.get("user_id") if user else "admin",
+    )
+    return result
 
 
 @app.post("/api/v1/devices/{device_id}/heartbeat", response_model=DeviceHeartbeatResponse, tags=["Devices"])

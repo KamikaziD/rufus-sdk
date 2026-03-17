@@ -297,6 +297,24 @@ class ConfigManager:
             return self._current_config.features.get(feature, False)
         return False
 
+    def get_offline_mode(self) -> bool:
+        """Check if offline mode is enabled (default: True)."""
+        if self._current_config:
+            return self._current_config.features.get("offline_mode", True)
+        return True
+
+    def get_sync_interval(self) -> int:
+        """Get sync interval in seconds from config."""
+        if self._current_config:
+            return self._current_config.sync_interval_seconds
+        return 30
+
+    def get_heartbeat_interval(self) -> int:
+        """Get heartbeat interval in seconds from config."""
+        if self._current_config:
+            return self._current_config.heartbeat_interval_seconds
+        return 60
+
     def get_workflow_config(self, workflow_type: str) -> Optional[Dict[str, Any]]:
         """Get workflow configuration by type."""
         if self._current_config:

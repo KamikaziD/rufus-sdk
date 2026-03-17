@@ -1,20 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useApprovals } from "@/lib/hooks/useApprovals";
 import { useResumeWorkflow } from "@/lib/hooks/useWorkflow";
 import { WorkflowStatusBadge } from "@/components/shared/StatusBadge";
 import { HitlForm } from "@/components/workflows/HitlForm";
 import { formatRelativeTime, truncateId } from "@/lib/utils";
-import { CheckSquare, RefreshCw } from "lucide-react";
+import { CheckSquare, RefreshCw, X } from "lucide-react";
 import type { WorkflowExecution } from "@/types";
+
+const SEARCH_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
 
 export default function ApprovalsPage() {
   const { data, isLoading, refetch } = useApprovals();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const resumeWorkflow = useResumeWorkflow();
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const approvals = data?.workflows ?? [];
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const allApprovals = data?.workflows ?? [];
+
+  const approvals = useMemo(() => {
+    if (!debouncedSearch) return allApprovals;
+    const q = debouncedSearch.toLowerCase();
+    return allApprovals.filter(
+      (wf) =>
+        wf.workflow_type.toLowerCase().includes(q) ||
+        wf.workflow_id.toLowerCase().includes(q)
+    );
+  }, [allApprovals, debouncedSearch]);
 
   return (
     <div className="space-y-5">
@@ -29,6 +48,25 @@ export default function ApprovalsPage() {
         >
           <RefreshCw className="h-3 w-3" /> Refresh
         </button>
+      </div>
+
+      {/* Search */}
+      <div className="relative inline-block">
+        <input
+          type="text"
+          placeholder="Search by type or ID…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={SEARCH_INPUT}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {isLoading ? (
