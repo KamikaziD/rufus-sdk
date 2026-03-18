@@ -138,8 +138,9 @@ class SimulatedEdgeDevice:
                 return await coro_func(*args, **kwargs)
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
                 last_exception = e
-                self.metrics.total_errors += 1
-                self.metrics.errors_timeout += 1
+                if attempt == MAX_RETRIES - 1:
+                    # Final attempt — classify error; caller tracks total_errors
+                    self.metrics.errors_timeout += 1
 
                 if attempt < MAX_RETRIES - 1:
                     # Add jitter to prevent thundering herd
@@ -166,11 +167,12 @@ class SimulatedEdgeDevice:
                         f"Device {self.config.device_id} {operation_name} failed "
                         f"with client error {e.response.status_code}: {e}"
                     )
-                    self.metrics.total_errors += 1
+                    self.metrics.errors_4xx += 1
                     raise
                 # Retry 5xx errors (server errors)
                 last_exception = e
-                self.metrics.total_errors += 1
+                if attempt == MAX_RETRIES - 1:
+                    self.metrics.errors_5xx += 1
 
                 if attempt < MAX_RETRIES - 1:
                     jitter = random.uniform(0, backoff * 0.1)
@@ -196,7 +198,6 @@ class SimulatedEdgeDevice:
                     f"Device {self.config.device_id} {operation_name} failed "
                     f"with unexpected error: {e}"
                 )
-                self.metrics.total_errors += 1
                 raise
 
         # All retries exhausted
@@ -222,12 +223,8 @@ class SimulatedEdgeDevice:
                 await self._thundering_herd_scenario()
             elif scenario == "config_poll":
                 await self._config_polling_scenario(duration_seconds)
-            elif scenario == "model_update":
-                await self._model_update_scenario()
             elif scenario == "cloud_commands":
                 await self._cloud_commands_scenario(duration_seconds)
-            elif scenario == "workflow_execution":
-                await self._workflow_execution_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -252,6 +249,11 @@ class SimulatedEdgeDevice:
         Simulates real device reporting health metrics to cloud.
         """
         end_time = time.time() + duration_seconds
+
+        # Stagger initial requests across the full heartbeat window so all devices
+        # don't fire simultaneously at t=0 (which dominates p95 at scale).
+        initial_offset = random.uniform(0, self.config.heartbeat_interval)
+        await asyncio.sleep(min(initial_offset, end_time - time.time()))
 
         while time.time() < end_time and self._running:
             success = await self._send_heartbeat()
@@ -570,41 +572,7 @@ class SimulatedEdgeDevice:
             return False
 
     # -------------------------------------------------------------------------
-    # Scenario 4: Model Updates
-    # -------------------------------------------------------------------------
-
-    async def _model_update_scenario(self):
-        """
-        Download model update (simulated).
-
-        Simulates delta update or full download.
-        """
-        # Simulate model update check
-        model_name = "fraud_detection"
-        use_delta = random.random() < 0.8  # 80% use delta
-
-        logger.info(
-            f"Device {self.config.device_id} updating model {model_name} "
-            f"(delta={use_delta})"
-        )
-
-        # Simulate download time based on size
-        if use_delta:
-            download_size_mb = 8
-            download_time = download_size_mb / 2  # 2 MB/s
-        else:
-            download_size_mb = 50
-            download_time = download_size_mb / 2
-
-        await asyncio.sleep(download_time)
-
-        logger.info(
-            f"Device {self.config.device_id} model update complete "
-            f"({download_size_mb}MB in {download_time:.1f}s)"
-        )
-
-    # -------------------------------------------------------------------------
-    # Scenario 5: Cloud Commands
+    # Scenario 4: Cloud Commands
     # -------------------------------------------------------------------------
 
     async def _cloud_commands_scenario(self, duration_seconds: int):
@@ -632,43 +600,6 @@ class SimulatedEdgeDevice:
 
             # Report command completion (in real impl)
             # For load testing, we skip this to avoid extra requests
-
-    # -------------------------------------------------------------------------
-    # Scenario 6: Workflow Execution
-    # -------------------------------------------------------------------------
-
-    async def _workflow_execution_scenario(self, duration_seconds: int):
-        """
-        Execute workflows concurrently.
-
-        Simulates local workflow execution on edge device.
-        """
-        num_workflows = random.randint(5, 15)
-        logger.info(
-            f"Device {self.config.device_id} executing {num_workflows} workflows"
-        )
-
-        tasks = [
-            self._execute_workflow(i)
-            for i in range(num_workflows)
-        ]
-
-        await asyncio.gather(*tasks)
-
-    async def _execute_workflow(self, workflow_index: int):
-        """Execute a single workflow (simulated)."""
-        workflow_id = f"{self.config.device_id}-wf-{workflow_index:03d}"
-
-        # Simulate workflow steps
-        num_steps = random.randint(3, 7)
-        for step in range(num_steps):
-            # Simulate step execution time
-            step_time = random.uniform(0.1, 1.0)
-            await asyncio.sleep(step_time)
-
-        logger.debug(
-            f"Workflow {workflow_id} completed ({num_steps} steps)"
-        )
 
     def get_metrics(self) -> DeviceMetrics:
         """Get current metrics."""

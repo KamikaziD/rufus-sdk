@@ -151,7 +151,14 @@ def _print_section(sec: Section):
         parts = []
         for k, v in rest.items():
             if isinstance(v, float):
-                parts.append(f"{k}={v:,.2f}")
+                # Use enough decimal places to show sub-millisecond p95 values
+                if (k.endswith("_ms") or k == "ms") and v < 0.01:
+                    fmt = f"{v:.4f}"
+                elif (k.endswith("_ms") or k == "ms") and v < 0.1:
+                    fmt = f"{v:.3f}"
+                else:
+                    fmt = f"{v:,.2f}"
+                parts.append(f"{k}={fmt}")
             else:
                 parts.append(f"{k}={v}")
         print(f"  {label:<35} {', '.join(parts)}")
@@ -435,8 +442,13 @@ async def bench_e2e_workflow(n: int) -> Section:
 async def bench_event_loop(n: int) -> Section:
     sec = Section("5. Async Event Loop")
 
-    loop_type = type(asyncio.get_running_loop()).__name__
-    sec.note(f"event loop: {loop_type}")
+    loop = asyncio.get_running_loop()
+    if _UVLOOP_AVAILABLE:
+        import uvloop as _uv
+        loop_label = "uvloop.Loop" if isinstance(loop, _uv.Loop) else type(loop).__name__
+    else:
+        loop_label = type(loop).__name__
+    sec.note(f"event loop: {loop_label}")
 
     # warmup
     for _ in range(200):
@@ -451,7 +463,7 @@ async def bench_event_loop(n: int) -> Section:
     p50 = statistics.median(times) * 1_000_000
     p95 = _pct(times, 0.95) * 1_000_000
     p99 = _pct(times, 0.99) * 1_000_000
-    sec.add(f"asyncio.sleep(0) [{loop_type}]",
+    sec.add(f"asyncio.sleep(0) [{loop_label}]",
             p50_us=p50, p95_us=p95, p99_us=p99)
 
     return sec
@@ -507,6 +519,12 @@ def bench_fernet(n: int) -> Section:
     f = Fernet(key)
 
     sizes = [("100B", 100), ("1KB", 1024), ("10KB", 10 * 1024), ("100KB", 100 * 1024)]
+
+    # Warmup: prime the cryptography library (OpenSSL, JIT, etc.) before the
+    # first timed measurement so 100B isn't penalised for cold-library overhead.
+    _warmup = secrets.token_bytes(100)
+    for _ in range(50):
+        f.decrypt(f.encrypt(_warmup))
 
     for label, size in sizes:
         plaintext = secrets.token_bytes(size)

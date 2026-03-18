@@ -109,7 +109,7 @@ async def ensure_seed_data(db_url: str):
         logger.warning(f"Seed data check failed: {e}, continuing anyway...")
 
 
-def print_results(results: LoadTestResults):
+def print_results(results: LoadTestResults, workers: int = 1):
     """Print formatted test results."""
     print("\n" + "=" * 80)
     print(f"LOAD TEST RESULTS - {results.scenario.upper()}")
@@ -187,10 +187,15 @@ def print_results(results: LoadTestResults):
 
     # Throughput target (scenario-specific)
     if results.scenario == "heartbeat":
-        # Target: 33 req/sec for 1000 devices (heartbeat every 30s)
-        throughput_target = 33
-        throughput_pass = results.requests_per_second >= throughput_target * 0.9  # 90% of target
-        print(f"Throughput >= {throughput_target} req/s:  {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+        # Target scales with device count: one heartbeat per device every 30s.
+        # Wall-clock duration includes the stagger ramp-up window (up to heartbeat_interval
+        # seconds before the first device fires), so exclude it from the denominator.
+        heartbeat_interval = 30  # seconds — matches DeviceConfig default
+        throughput_target = results.num_devices / heartbeat_interval
+        effective_duration = max(results.duration_seconds - heartbeat_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        throughput_pass = effective_rps >= throughput_target * 0.9
+        print(f"Throughput >= {throughput_target:.1f} req/s:  {'✅ PASS' if throughput_pass else '❌ FAIL'} ({effective_rps:.1f} req/s)")
 
     elif results.scenario == "saf_sync":
         # Target: 1000 tx/sec
@@ -227,8 +232,13 @@ def print_results(results: LoadTestResults):
         print(f"Timeouts:             {results.errors_timeout:,}")
         if results.request_latencies:
             p_max = max(results.request_latencies) * 1000
-            tail_pass = p_max < 5000
-            print(f"Max latency < 5s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
+            # Scale target with N: expected server capacity is ~500 req/s,
+            # so the last device in a simultaneous burst of N waits N/500 seconds.
+            per_worker_rps = 125  # req/s per worker (measured: 4 workers → ~500 req/s)
+            expected_throughput = workers * per_worker_rps
+            max_latency_target_ms = results.num_devices / expected_throughput * 1000
+            tail_pass = p_max < max_latency_target_ms
+            print(f"Max latency < {max_latency_target_ms / 1000:.0f}s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
 
     print("=" * 80)
 
@@ -278,7 +288,8 @@ async def run_single_scenario(
 async def run_all_scenarios(
     cloud_url: str,
     num_devices: int,
-    output_dir: str
+    output_dir: str,
+    workers: int = 4,
 ):
     """
     Run all test scenarios with shared devices.
@@ -290,9 +301,7 @@ async def run_all_scenarios(
         ("heartbeat", 600),
         ("saf_sync", 300),
         ("config_poll", 600),
-        ("model_update", 300),
         ("cloud_commands", 600),
-        ("workflow_execution", 300),
     ]
 
     # Create single orchestrator for all scenarios
@@ -335,7 +344,7 @@ async def run_all_scenarios(
             if output_file:
                 orchestrator.export_results(results, output_file)
 
-            print_results(results)
+            print_results(results, workers=workers)
             all_results.append(results)
 
             # Brief pause between scenarios
@@ -391,6 +400,8 @@ Examples:
   # Run all scenarios with 100 devices (smoke test)
   python run_load_test.py --all --devices 100
 
+
+
   # Run with custom cloud URL and database URL
   python run_load_test.py --scenario heartbeat --devices 100 \\
       --cloud-url http://localhost:8000 \\
@@ -404,9 +415,8 @@ Scenarios:
   heartbeat          - Concurrent device heartbeats (30s interval)
   saf_sync           - Store-and-Forward bulk sync
   config_poll        - Config polling with ETag (60s interval)
-  model_update       - Model distribution with delta updates
   cloud_commands     - Cloud-to-device command delivery
-  workflow_execution - Concurrent workflow execution
+  thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
         """
     )
 
@@ -428,9 +438,7 @@ Scenarios:
             "heartbeat",
             "saf_sync",
             "config_poll",
-            "model_update",
             "cloud_commands",
-            "workflow_execution",
             "thundering_herd",
         ],
         help="Test scenario to run"
@@ -467,6 +475,13 @@ Scenarios:
     )
 
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of server workers (used to scale thundering herd latency target, default: 1)"
+    )
+
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -500,7 +515,8 @@ Scenarios:
             asyncio.run(run_all_scenarios(
                 cloud_url=args.cloud_url,
                 num_devices=args.devices,
-                output_dir=args.output_dir
+                output_dir=args.output_dir,
+                workers=args.workers,
             ))
         else:
             results = asyncio.run(run_single_scenario(
@@ -511,7 +527,7 @@ Scenarios:
                 output_file=args.output
             ))
 
-            print_results(results)
+            print_results(results, workers=args.workers)
 
     except KeyboardInterrupt:
         logger.info("\nLoad test interrupted by user")

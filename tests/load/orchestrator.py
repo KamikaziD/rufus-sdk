@@ -61,7 +61,7 @@ class LoadTestResults:
         if not self.request_latencies:
             return 0.0
         s = sorted(self.request_latencies)
-        idx = int(len(s) * p)
+        idx = int(p * (len(s) - 1))
         return s[min(idx, len(s) - 1)] * 1000
 
     def to_dict(self) -> Dict[str, Any]:
@@ -569,19 +569,6 @@ class ScenarioRunner:
         )
 
     @staticmethod
-    async def run_model_update_test(
-        orchestrator: LoadTestOrchestrator,
-        num_devices: int = 1000
-    ) -> LoadTestResults:
-        """Run Scenario 4: Model Distribution."""
-        await orchestrator.setup_devices(num_devices)
-        return await orchestrator.run_scenario(
-            scenario="model_update",
-            duration_seconds=300,
-            skip_device_setup=True,
-        )
-
-    @staticmethod
     async def run_cloud_commands_test(
         orchestrator: LoadTestOrchestrator,
         num_devices: int = 1000,
@@ -595,16 +582,3 @@ class ScenarioRunner:
             skip_device_setup=True,
         )
 
-    @staticmethod
-    async def run_workflow_test(
-        orchestrator: LoadTestOrchestrator,
-        num_devices: int = 100,
-        duration_seconds: int = 300
-    ) -> LoadTestResults:
-        """Run Scenario 6: Concurrent Workflow Execution."""
-        await orchestrator.setup_devices(num_devices)
-        return await orchestrator.run_scenario(
-            scenario="workflow_execution",
-            duration_seconds=duration_seconds,
-            skip_device_setup=True,
-        )

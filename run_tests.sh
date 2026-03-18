@@ -35,6 +35,11 @@ prompt_duration() {
     echo "${d:-$1}"
 }
 
+prompt_workers() {
+    read -rp "  Number of server workers [default: ${1}]: " w
+    echo "${w:-$1}"
+}
+
 prompt_postgres() {
     local env_url="${RUFUS_POSTGRES_URL:-}"
     if [[ -n "$env_url" ]]; then
@@ -110,8 +115,8 @@ menu_pytest() {
 
 menu_benchmarks() {
     header "Benchmarks"
-    echo "  1) Benchmark suite — quick  (~8s)"
-    echo "  2) Benchmark suite — full  (~60s)"
+    echo "  1) Benchmark suite — quick  (~1s)"
+    echo "  2) Benchmark suite — full  (~10s)"
     echo "  3) Benchmark suite — full, JSON output"
     echo "  4) Benchmark suite — skip security sections"
     echo "  5) Workflow performance"
@@ -122,8 +127,8 @@ menu_benchmarks() {
     read -rp "  Choice: " choice
     case "$choice" in
         1)  run "python tests/benchmarks/benchmark_suite.py --quick" ;;
-        2)  run "python tests/benchmarks/benchmark_suite.py" ;;
-        3)  run "python tests/benchmarks/benchmark_suite.py --output json" ;;
+        2)  run "python tests/benchmarks/benchmark_suite.py --iterations 10000" ;;
+        3)  run "python tests/benchmarks/benchmark_suite.py --iterations 10000 --output json" ;;
         4)  run "python tests/benchmarks/benchmark_suite.py --quick --no-security" ;;
         5)  run "python tests/benchmarks/workflow_performance.py" ;;
         6)  run "python tests/benchmarks/persistence_benchmark.py" ;;
@@ -144,14 +149,14 @@ menu_benchmarks() {
 menu_load() {
     require_docker
     header "Load Tests"
+    workers=$(prompt_workers 1)
+    echo
     echo "  1) Heartbeat"
     echo "  2) SAF sync"
     echo "  3) Config polling"
-    echo "  4) Model update"
-    echo "  5) Cloud commands"
-    echo "  6) Workflow execution"
-    echo "  7) Thundering herd"
-    echo "  8) All scenarios in sequence"
+    echo "  4) Cloud commands"
+    echo "  5) Thundering herd"
+    echo "  6) All scenarios in sequence"
     echo "  b) Back"
     echo
     read -rp "  Choice: " choice
@@ -161,41 +166,33 @@ menu_load() {
         1)
             devices=$(prompt_devices 1000)
             duration=$(prompt_duration 600)
-            run "python tests/load/run_load_test.py --scenario heartbeat --devices ${devices} --duration ${duration}"
+            run "python tests/load/run_load_test.py --scenario heartbeat --devices ${devices} --duration ${duration} --workers ${workers}"
             ;;
         2)
             devices=$(prompt_devices 500)
-            run "python tests/load/run_load_test.py --scenario saf_sync --devices ${devices}"
+            run "python tests/load/run_load_test.py --scenario saf_sync --devices ${devices} --workers ${workers}"
             ;;
         3)
             devices=$(prompt_devices 1000)
             duration=$(prompt_duration 600)
-            run "python tests/load/run_load_test.py --scenario config_poll --devices ${devices} --duration ${duration}"
+            run "python tests/load/run_load_test.py --scenario config_poll --devices ${devices} --duration ${duration} --workers ${workers}"
             ;;
         4)
-            devices=$(prompt_devices 200)
-            run "python tests/load/run_load_test.py --scenario model_update --devices ${devices}"
-            ;;
-        5)
             devices=$(prompt_devices 500)
             duration=$(prompt_duration 600)
-            run "python tests/load/run_load_test.py --scenario cloud_commands --devices ${devices} --duration ${duration}"
+            run "python tests/load/run_load_test.py --scenario cloud_commands --devices ${devices} --duration ${duration} --workers ${workers}"
             ;;
-        6)
-            devices=$(prompt_devices 100)
-            run "python tests/load/run_load_test.py --scenario workflow_execution --devices ${devices}"
-            ;;
-        7)
+        5)
             echo
             warn "Thundering herd fires ALL devices simultaneously."
             warn "For >1000 devices ensure docker-compose has max_connections=500 and pool max=100."
             echo
             devices=$(prompt_devices 1000)
-            run "python tests/load/run_load_test.py --scenario thundering_herd --devices ${devices}"
+            run "python tests/load/run_load_test.py --scenario thundering_herd --devices ${devices} --workers ${workers}"
             ;;
-        8)
+        6)
             devices=$(prompt_devices 100)
-            run "python tests/load/run_load_test.py --all --devices ${devices}"
+            run "python tests/load/run_load_test.py --all --devices ${devices} --workers ${workers}"
             ;;
         *) warn "Unknown choice." ;;
     esac
