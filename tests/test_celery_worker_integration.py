@@ -2,9 +2,16 @@
 """
 Integration test for Celery worker improvements.
 Tests automatic task discovery and beat schedule population.
+
+Note: This is a standalone runner script, not a pytest test suite.
+Run directly: python tests/test_celery_worker_integration.py
 """
 import os
 import sys
+import pytest
+
+# Standalone script — skip when collected by pytest
+pytestmark = pytest.mark.skip(reason="standalone runner script; run directly with python")
 
 # Set up environment
 os.environ['WORKFLOW_CONFIG_DIR'] = 'config'

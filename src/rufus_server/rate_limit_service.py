@@ -141,6 +141,9 @@ class RateLimitService:
             resource_pattern: Resource pattern
             scope: 'user' or 'ip'
         """
+        # Ensure rules are loaded before looking up
+        await self._ensure_rules_loaded()
+
         # Find matching rule
         rule = self._find_matching_rule(resource_pattern, scope)
         if not rule:

@@ -281,16 +281,21 @@ class TestRunCommand:
         mock_workflow.id = "test-workflow-id"
         mock_workflow.status = "COMPLETED"
         mock_workflow.state = mock_state
+        mock_workflow.workflow_type = "SimpleTest"
+        mock_workflow.automate_start = False
+        mock_workflow.next_step = AsyncMock(return_value=(None, None))
 
-        # Mock engine — use spec=[] on observer/executor so hasattr("close") is False
+        # Mock providers returned by _create_providers_for_run
         mock_persistence = AsyncMock()
-        mock_engine = MagicMock()
-        mock_engine.persistence = mock_persistence
-        mock_engine.observer = MagicMock(spec=[])
-        mock_engine.executor = MagicMock(spec=[])
-        mock_engine.start_workflow = AsyncMock(return_value=mock_workflow)
+        mock_execution = AsyncMock()
+        mock_observer = AsyncMock()
+        mock_builder = AsyncMock()
+        mock_builder.create_workflow = AsyncMock(return_value=mock_workflow)
 
-        with patch("rufus_cli.main.get_configured_engine", new=AsyncMock(return_value=mock_engine)):
+        with patch(
+            "rufus_cli.main._create_providers_for_run",
+            new=AsyncMock(return_value=(mock_persistence, mock_execution, mock_observer, mock_builder))
+        ):
             result = cli_runner.invoke(app, ["run", str(yaml_file), "--data", "{}"])
 
         assert result.exit_code == 0
