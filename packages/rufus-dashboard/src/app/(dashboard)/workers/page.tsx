@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
@@ -8,9 +8,14 @@ import { listWorkers, type WorkerSummary } from "@/lib/api";
 import { hasPermission } from "@/lib/roles";
 import { WorkerCommandModal } from "@/components/workers/WorkerCommandModal";
 import { formatRelativeTime } from "@/lib/utils";
-import { Server, RefreshCw, Radio, ChevronRight } from "lucide-react";
+import { Server, RefreshCw, Radio, ChevronRight, X, ArrowUpDown } from "lucide-react";
 
 const STATUS_OPTIONS = ["all", "online", "offline"] as const;
+
+type SortCol = "status" | "heartbeat" | "pending";
+type SortDir = "asc" | "desc";
+
+const FILTER_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
 
 function useToken() {
   const { data: session } = useSession();
@@ -40,6 +45,11 @@ export default function WorkersPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortCol, setSortCol] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
   const [cmdModal, setCmdModal] = useState<{
     open: boolean;
     workerId: string;
@@ -47,6 +57,11 @@ export default function WorkersPage() {
   }>({ open: false, workerId: "", hostname: "" });
 
   const [broadcastOpen, setBroadcastOpen] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["workers", statusFilter, page],
@@ -60,9 +75,49 @@ export default function WorkersPage() {
     refetchInterval: 30_000,
   });
 
-  const workers: WorkerSummary[] = data?.workers ?? [];
+  const allWorkers: WorkerSummary[] = data?.workers ?? [];
   const total = data?.total ?? 0;
   const pageCount = Math.ceil(total / PAGE_SIZE);
+
+  const workers = useMemo(() => {
+    let rows = allWorkers;
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      rows = rows.filter(
+        (w) =>
+          w.worker_id.toLowerCase().includes(q) ||
+          w.hostname.toLowerCase().includes(q) ||
+          (w.region ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (!sortCol) return rows;
+    return [...rows].sort((a, b) => {
+      let cmp = 0;
+      if (sortCol === "status")     cmp = (a.status ?? "").localeCompare(b.status ?? "");
+      else if (sortCol === "heartbeat") cmp = (a.last_heartbeat ?? "").localeCompare(b.last_heartbeat ?? "");
+      else if (sortCol === "pending")   cmp = a.pending_command_count - b.pending_command_count;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [allWorkers, debouncedSearch, sortCol, sortDir]);
+
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  function ColHeader({ col, label }: { col: SortCol; label: string }) {
+    const active = sortCol === col;
+    return (
+      <button
+        onClick={() => toggleSort(col)}
+        className={`flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest hover:text-zinc-300 transition-colors ${active ? "text-amber-400" : "text-zinc-600"}`}
+      >
+        {label}
+        <ArrowUpDown className="h-2.5 w-2.5 opacity-50" />
+        {active && <span className="text-[9px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
+      </button>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -90,6 +145,25 @@ export default function WorkersPage() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative inline-block">
+        <input
+          type="text"
+          placeholder="Search by ID, hostname, region…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={FILTER_INPUT}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {/* Filter chips */}
@@ -127,11 +201,16 @@ export default function WorkersPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-[#0D0D0F] border-b border-[#1E1E22]">
-                  {["WORKER ID", "HOSTNAME", "REGION / ZONE", "STATUS", "SDK", "PENDING", "LAST HEARTBEAT", ""].map((h) => (
+                  {["WORKER ID", "HOSTNAME", "REGION / ZONE"].map((h) => (
                     <th key={h} className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest whitespace-nowrap">
                       {h}
                     </th>
                   ))}
+                  <th className="text-left px-4 py-2.5"><ColHeader col="status" label="STATUS" /></th>
+                  <th className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest whitespace-nowrap">SDK</th>
+                  <th className="text-left px-4 py-2.5"><ColHeader col="pending" label="PENDING" /></th>
+                  <th className="text-left px-4 py-2.5"><ColHeader col="heartbeat" label="LAST HEARTBEAT" /></th>
+                  <th className="text-left px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody>

@@ -114,6 +114,7 @@ export default function WorkflowDetailPage({
             isFailed={isFailed}
             isWaitingHuman={isWaitingHuman}
             workflowId={id}
+            workflowType={workflow.workflow_type ?? ""}
             state={workflow.state ?? {}}
             auditLog={auditLog}
             inputSchema={workflow.current_step_info?.input_schema}

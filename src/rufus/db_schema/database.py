@@ -801,6 +801,7 @@ device_configs = Table(
     'device_configs',
     metadata,
     Column('id', String(36), primary_key=True),
+    Column('device_id', String(200), nullable=True),  # NULL = global fleet config; set = per-device
     Column('config_id', String(36)),
     Column('config_version', String(50), nullable=False),
     Column('config_data', Text, nullable=False, server_default='{}'),
@@ -812,6 +813,7 @@ device_configs = Table(
 
     Index('ix_config_active', 'is_active'),
     Index('ix_config_version', 'config_version'),
+    Index('ix_config_device_id', 'device_id'),
 )
 
 # Cloud-side SAF transaction records (synced from edge devices)

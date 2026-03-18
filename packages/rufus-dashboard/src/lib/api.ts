@@ -49,7 +49,7 @@ async function apiFetch<T>(
 
 export async function listWorkflows(
   token: string,
-  params: { status?: string; type?: string; limit?: number; page?: number; since?: string } = {}
+  params: { status?: string; type?: string; limit?: number; page?: number; since?: string; include_state?: boolean } = {}
 ): Promise<WorkflowListResponse> {
   const q = new URLSearchParams();
   if (params.status) q.set("status", params.status);
@@ -58,6 +58,7 @@ export async function listWorkflows(
   // Server uses `offset`, not `page`
   if (params.page)   q.set("offset", String(((params.page ?? 1) - 1) * (params.limit ?? 50)));
   if (params.since)  q.set("since", params.since);
+  if (params.include_state) q.set("include_state", "true");
   // Server returns { total, workflows } envelope
   const raw = await apiFetch<{ total: number; workflows: Record<string, unknown>[] }>(
     `/api/v1/workflows/executions?${q}`,
@@ -250,15 +251,21 @@ export async function queryAuditLogs(
 export async function exportAuditLogs(
   token: string,
   format: "json" | "csv",
-  params: Record<string, string> = {}
+  filters?: { entity_id?: string; event_type?: string; from?: string; to?: string }
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
+  const body: Record<string, unknown> = { format };
+  if (filters?.entity_id)  body.entity_id  = filters.entity_id;
+  if (filters?.event_type) body.event_type = filters.event_type;
+  if (filters?.from)       body.start_time = filters.from;
+  if (filters?.to)         body.end_time   = filters.to;
+
   const res = await fetch(`${API_BASE}/api/v1/audit/export`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ format, ...params }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -662,6 +669,65 @@ export async function getDeviceSafTransactions(
     // Endpoint may not exist in all deployments — return empty list
     return { transactions: [] };
   }
+}
+
+// ── Admin Device Config ───────────────────────────────────────────────────────
+
+export interface DeviceConfigData {
+  version?: string;
+  floor_limit?: number;
+  max_offline_transactions?: number;
+  offline_timeout_hours?: number;
+  require_pin_above?: number;
+  require_signature_above?: number;
+  supported_card_types?: string[];
+  fraud_rules?: unknown[];
+  features?: Record<string, boolean>;
+  sync_interval_seconds?: number;
+  heartbeat_interval_seconds?: number;
+}
+
+export interface ActiveDeviceConfig {
+  config_version: string;
+  config_data: DeviceConfigData;
+  etag?: string | null;
+  created_at?: string | null;
+}
+
+export function getAdminDeviceConfig(token: string, deviceId?: string): Promise<ActiveDeviceConfig> {
+  const qs = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch(`/api/v1/admin/device-config${qs}`, token);
+}
+
+export function saveAdminDeviceConfig(
+  token: string,
+  body: { config_version: string; config_data: DeviceConfigData; description?: string }
+): Promise<{ config_version: string; etag: string; is_active: boolean }> {
+  return apiFetch("/api/v1/admin/device-config", token, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function saveDeviceConfig(
+  token: string,
+  deviceId: string,
+  body: { config_version?: string; config_data: DeviceConfigData; description?: string }
+): Promise<{ config_version: string; etag: string; is_active: boolean; device_id: string }> {
+  return apiFetch(`/api/v1/devices/${encodeURIComponent(deviceId)}/config`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function broadcastDeviceCommand(
+  token: string,
+  body: { command_type: string; target_filter?: Record<string, unknown>; command_data?: Record<string, unknown> }
+): Promise<{ command_id: string; status: string; broadcast: boolean }> {
+  return apiFetch("/api/v1/devices/commands/broadcast", token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 // ── Config Rollout ────────────────────────────────────────────────────────────

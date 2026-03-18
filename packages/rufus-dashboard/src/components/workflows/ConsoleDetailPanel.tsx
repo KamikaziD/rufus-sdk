@@ -3,6 +3,8 @@
 import { WorkflowDAG, type StepConfig } from "@/components/workflows/WorkflowDAG";
 import { StatePanel } from "@/components/workflows/StatePanel";
 import { HitlForm } from "@/components/workflows/HitlForm";
+import { FraudReviewPanel } from "@/components/approvals/FraudReviewPanel";
+import { LoanReviewPanel } from "@/components/approvals/LoanReviewPanel";
 import type { WorkflowStatus } from "@/types";
 
 interface AuditEntry {
@@ -22,6 +24,7 @@ interface ConsoleDetailPanelProps {
   isFailed: boolean;
   isWaitingHuman: boolean;
   workflowId: string;
+  workflowType?: string;
   state: Record<string, unknown>;
   auditLog: AuditEntry[];
   inputSchema?: Record<string, unknown>;
@@ -86,6 +89,7 @@ export function ConsoleDetailPanel({
   isFailed,
   isWaitingHuman,
   workflowId,
+  workflowType,
   state,
   auditLog,
   inputSchema,
@@ -137,20 +141,44 @@ export function ConsoleDetailPanel({
 
   // 3. HITL waiting
   if (isWaitingHuman) {
+    const isFraud = workflowType === "FraudCaseReview";
+    const isLoan  = workflowType === "LoanApplication";
+    const accentBorder = isFraud ? "border-red-500/40"     : isLoan ? "border-emerald-500/40"  : "border-amber-500/40";
+    const accentBg     = isFraud ? "bg-red-500/5"          : isLoan ? "bg-emerald-500/5"        : "bg-amber-500/5";
+    const dotColor     = isFraud ? "bg-red-400"            : isLoan ? "bg-emerald-400"           : "bg-amber-400";
+    const labelColor   = isFraud ? "text-red-400"          : isLoan ? "text-emerald-400"         : "text-amber-400";
+    const label        = isFraud ? "FRAUD REVIEW REQUIRED" : isLoan ? "AWAITING UNDERWRITER"     : "AWAITING HUMAN INPUT";
+
     return (
       <div className="flex flex-col h-full overflow-auto">
-        <div className="border border-amber-500/40 bg-amber-500/5 m-4 p-4">
-          <div className="font-mono text-xs text-amber-400 font-semibold mb-3 flex items-center gap-2">
-            <span className="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
-            AWAITING HUMAN INPUT
+        <div className={`border ${accentBorder} ${accentBg} m-4 p-4`}>
+          <div className={`font-mono text-xs ${labelColor} font-semibold mb-3 flex items-center gap-2`}>
+            <span className={`inline-block w-2 h-2 ${dotColor} rounded-full animate-pulse`} />
+            {label}
           </div>
-          <HitlForm
-            workflowId={workflowId}
-            inputSchema={inputSchema}
-            stepName={stepName ?? ""}
-            onSubmit={onHitlSubmit}
-            isSubmitting={isSubmitting}
-          />
+          {isFraud ? (
+            <FraudReviewPanel
+              workflowId={workflowId}
+              state={state}
+              onSubmit={onHitlSubmit}
+              isSubmitting={isSubmitting}
+            />
+          ) : isLoan ? (
+            <LoanReviewPanel
+              workflowId={workflowId}
+              state={state}
+              onSubmit={onHitlSubmit}
+              isSubmitting={isSubmitting}
+            />
+          ) : (
+            <HitlForm
+              workflowId={workflowId}
+              inputSchema={inputSchema}
+              stepName={stepName ?? ""}
+              onSubmit={onHitlSubmit}
+              isSubmitting={isSubmitting}
+            />
+          )}
         </div>
         <ConsoleAuditTail entries={auditLog} />
       </div>

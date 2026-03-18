@@ -98,6 +98,9 @@ class DeviceService:
 
         logger.info(f"Registered device {device_id} for merchant {merchant_id}")
 
+        # Auto-create per-device config seeded by device_type
+        await self._create_device_config(device_id, device_type)
+
         # Dispatch webhook event
         if self.webhook_service:
             try:
@@ -201,14 +204,34 @@ class DeviceService:
     # Config Management
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def get_active_config(self) -> Optional[Dict[str, Any]]:
-        """Get the current active configuration."""
+    async def get_active_config(self, device_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get the current active configuration.
+
+        If device_id is provided, returns per-device config first, then falls back to
+        the global fleet config (where device_id IS NULL).
+        """
         async with self.persistence.pool.acquire() as conn:
+            # Try device-specific config first
+            if device_id:
+                row = await conn.fetchrow(
+                    """
+                    SELECT config_id, config_version, config_data, etag, created_at
+                    FROM device_configs
+                    WHERE is_active = true AND device_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    device_id
+                )
+                if row:
+                    return dict(row)
+
+            # Fall back to global fleet config
             row = await conn.fetchrow(
                 """
                 SELECT config_id, config_version, config_data, etag, created_at
                 FROM device_configs
-                WHERE is_active = true
+                WHERE is_active = true AND device_id IS NULL
                 ORDER BY created_at DESC
                 LIMIT 1
                 """
@@ -216,6 +239,113 @@ class DeviceService:
             if row:
                 return dict(row)
             return None
+
+    async def save_device_config(
+        self,
+        device_id: str,
+        config_data: Dict[str, Any],
+        config_version: Optional[str] = None,
+        description: Optional[str] = None,
+        created_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Save per-device configuration (creates or replaces the active device config)."""
+        import json
+
+        config_json = json.dumps(config_data, sort_keys=True)
+        etag = hashlib.sha256(config_json.encode()).hexdigest()
+
+        if not config_version:
+            config_version = f"device-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+        import uuid as _uuid
+        row_id = str(_uuid.uuid4())
+        async with self.persistence.pool.acquire() as conn:
+            # Deactivate previous per-device configs for this device only
+            await conn.execute(
+                "UPDATE device_configs SET is_active = false WHERE is_active = true AND device_id = $1",
+                device_id
+            )
+            # Insert new per-device config
+            await conn.execute(
+                """
+                INSERT INTO device_configs (
+                    id, device_id, config_version, config_data, etag, is_active, created_by, description
+                ) VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+                """,
+                row_id, device_id, config_version, config_json, etag, created_by or "admin", description
+            )
+
+        logger.info(f"Saved per-device config {config_version} for device {device_id}")
+        return {
+            "config_version": config_version,
+            "etag": etag,
+            "is_active": True,
+            "device_id": device_id,
+        }
+
+    async def _create_device_config(self, device_id: str, device_type: str) -> None:
+        """Auto-create a default config for a newly registered device (seeded by device_type)."""
+        import json
+
+        if device_type == "atm":
+            config_data = {
+                "floor_limit": 500.0,
+                "max_offline_transactions": 50,
+                "offline_timeout_hours": 12,
+                "supported_card_types": ["visa", "mastercard"],
+                "require_pin_above": 0.0,
+                "require_signature_above": 0.0,
+                "fraud_rules": [],
+                "features": {
+                    "offline_mode": True,
+                    "contactless": False,
+                    "chip_fallback": True,
+                    "manual_entry": False,
+                },
+                "workflows": {},
+                "sync_interval_seconds": 30,
+                "heartbeat_interval_seconds": 45,
+            }
+        else:  # pos and everything else
+            config_data = {
+                "floor_limit": 1000.0,
+                "max_offline_transactions": 100,
+                "offline_timeout_hours": 24,
+                "supported_card_types": ["visa", "mastercard", "amex", "discover"],
+                "require_pin_above": 50.0,
+                "require_signature_above": 25.0,
+                "fraud_rules": [],
+                "features": {
+                    "offline_mode": True,
+                    "contactless": True,
+                    "chip_fallback": True,
+                    "manual_entry": False,
+                },
+                "workflows": {},
+                "sync_interval_seconds": 30,
+                "heartbeat_interval_seconds": 60,
+            }
+
+        config_json = json.dumps(config_data, sort_keys=True)
+        etag = hashlib.sha256(config_json.encode()).hexdigest()
+        config_version = f"device-default-{device_type}"
+
+        try:
+            import uuid as _uuid
+            row_id = str(_uuid.uuid4())
+            async with self.persistence.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO device_configs (
+                        id, device_id, config_version, config_data, etag, is_active, created_by, description
+                    ) VALUES ($1, $2, $3, $4, $5, true, 'system', $6)
+                    """,
+                    row_id, device_id, config_version, config_json, etag,
+                    f"Auto-created default {device_type} config on registration"
+                )
+            logger.info(f"Created default {device_type} config for device {device_id}")
+        except Exception as e:
+            logger.warning(f"Failed to create default config for device {device_id}: {e}")
 
     async def create_config(
         self,

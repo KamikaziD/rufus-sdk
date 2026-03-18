@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0rc5] — 2026-03-18
+
+### Added
+- **Fraud HITL round-trip** — Edge device escalates HIGH-risk transactions to cloud
+  `FraudCaseReview` workflow; analyst reviews via dashboard Approvals page; decision
+  delivered back to device as CRITICAL-priority `resume_fraud_review` command (WebSocket
+  instant / heartbeat fallback). 90s timeout falls back to on-device manager PIN.
+- **`register_command_handler()` API** — `RufusEdgeAgent` now supports registering async
+  handlers for custom cloud command types: `agent.register_command_handler(type, fn)`.
+- **LoanReviewPanel** — Specialised HITL approval panel for `LoanApplication` workflows;
+  shows credit score bar, fraud check badge, applicant profile, underwriting recommendation,
+  KYC status dots; Approve Loan / Reject Loan buttons.
+- **FraudReviewPanel + LoanReviewPanel in workflow detail** — Both panels now render inline
+  in `ConsoleDetailPanel` (Workflows console) for `WAITING_HUMAN` state, replacing the
+  generic JSON textarea. Panel selection driven by `workflow_type`.
+- **Tazama on-device fraud pipeline** — ATM emulator running Tazama-compatible WASM fraud
+  scorer with per-transaction rule evaluation and typology triggers.
+- **Per-device configuration** — `device_configs` table now has `device_id` column for
+  device-specific overrides of fleet-wide config (Alembic migration `j5k6l7m8n9o0`).
+- **Demo payloads** — `examples/demo_payloads.json` with copy-paste `initial_data` for all
+  6 cross-platform workflows + FraudCaseReview (3 scenarios) + LoanApplication (5 scenarios).
+
+### Fixed
+- **WASM runtime wasmtime v42 compatibility** — Rewrote `_execute_wasi()` to use
+  `tempfile.mkstemp()` for stdin/stdout; wasmtime v42 removed `stdin_bytes()` /
+  `stdout_file(BytesIO)`.
+- **Sync conflict resolution tests** — Fixture updated from deprecated `tasks` table to
+  `saf_pending_transactions`; status assertion corrected `'FAILED'` → `'failed'`.
+- **SAF workflow_id linkage** — SAF transactions now carry `workflow_id` from source
+  workflow execution. Floor limit raised to $1,000.
+
+---
+
 ## [1.0.0rc4] — 2026-03-16
 
 ### Added

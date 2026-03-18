@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listPolicies, createPolicy, updatePolicyStatus } from "@/lib/api";
@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Shield, RefreshCw, Plus } from "lucide-react";
+import { Shield, RefreshCw, Plus, X } from "lucide-react";
 
 const STATUS_CLS: Record<string, string> = {
   ACTIVE:   "border-emerald-500/40 text-emerald-400 bg-emerald-500/10",
@@ -30,6 +30,7 @@ const NEXT_ACTIONS: Record<string, Array<{ label: string; value: "active" | "pau
 const EMPTY_FORM = { policy_name: "", description: "", condition: "default", artifact: "" };
 
 const INPUT_CLS = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
+const SEARCH_INPUT = "bg-[#0A0A0B] border border-[#1E1E22] font-mono text-xs text-zinc-300 placeholder-zinc-600 px-3 py-1.5 w-64 focus:outline-none focus:border-zinc-500 transition-colors rounded-none";
 
 export default function PoliciesPage() {
   const { data: session } = useSession();
@@ -38,6 +39,13 @@ export default function PoliciesPage() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["policies"],
@@ -45,7 +53,17 @@ export default function PoliciesPage() {
     enabled: !!token,
   });
 
-  const policies = data?.policies ?? [];
+  const allPolicies = data?.policies ?? [];
+
+  const policies = useMemo(() => {
+    if (!debouncedSearch) return allPolicies;
+    const q = debouncedSearch.toLowerCase();
+    return allPolicies.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q)
+    );
+  }, [allPolicies, debouncedSearch]);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -88,6 +106,25 @@ export default function PoliciesPage() {
             <Plus className="h-3 w-3" /> Create Policy
           </button>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative inline-block">
+        <input
+          type="text"
+          placeholder="Search policies…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={SEARCH_INPUT}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       <div className="bg-[#111113] border border-[#1E1E22] rounded-none">

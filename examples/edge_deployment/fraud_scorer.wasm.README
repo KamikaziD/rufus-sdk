@@ -1,0 +1,1 @@
+fraud_scorer.wasm placeholder — build with: cd examples/edge_deployment/fraud_scorer && rustup target add wasm32-wasip1 && cargo build --target wasm32-wasip1 --release && cp target/wasm32-wasip1/release/fraud-scorer.wasm ../

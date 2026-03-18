@@ -96,12 +96,14 @@ class DeviceRegistrationResponse(BaseModel):
 class DeviceConfigResponse(BaseModel):
     """Device configuration response."""
     version: str
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
     floor_limit: float = Field(default=25.00)
     max_offline_transactions: int = Field(default=100)
     fraud_rules: List[Dict[str, Any]] = Field(default_factory=list)
     workflows: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     features: Dict[str, bool] = Field(default_factory=dict)
+    sync_interval_seconds: int = Field(default=30)
+    heartbeat_interval_seconds: int = Field(default=60)
 
 
 class DeviceHeartbeatRequest(BaseModel):
@@ -134,6 +136,7 @@ class EncryptedTransaction(BaseModel):
     currency: str = "USD"
     card_token: str = ""
     card_last_four: str = ""
+    workflow_id: str = ""
 
 
 class SyncRequest(BaseModel):

@@ -2710,3 +2710,111 @@ Tune the threshold based on your query distribution. The built-in heuristic clas
 - **CORS required for shard fetches:** Shards must be served with `Access-Control-Allow-Origin: *`. Plain `python -m http.server` does not set this header; use a CORS-enabled server (see GGUF Shard Preparation above).
 - **Model selector (Q2_K / Q3_K_S):** Browser demo Card 6 includes a pill selector for quantisation level. `Q2_K` (~180 MB peak, faster) and `Q3_K_S` (~260 MB peak, higher quality). Both use placeholder URLs by default; update `MODEL_CONFIGS` in `worker.js` with your real CDN paths. Switching models evicts the wllama instance; OPFS-cached shards are preserved.
 - **LlamaCppPagedProvider:** Requires `llama-cli` binary on PATH. Windows mmap support is limited; recommend Linux/macOS for native edge deployment.
+
+---
+
+## §22 — Edge Device Cloud HITL Round-Trips (v1.0.0rc5)
+
+### Overview
+
+An edge device can escalate a HITL decision to the cloud, receive an analyst decision, and resume execution — even after briefly going offline. The pattern uses:
+
+1. **SAF queue** to deliver the escalation event to the cloud
+2. **Cloud HITL workflow** (e.g. `FraudCaseReview`) that pauses for analyst review
+3. **`resume_fraud_review` command** (CRITICAL priority) delivered back to the device via WebSocket or heartbeat poll
+4. **`register_command_handler()`** on the edge agent to receive the command and resume the local workflow
+
+### `register_command_handler()` API
+
+```python
+def register_command_handler(self, command_type: str, handler: Callable[[dict], Awaitable[None]]) -> None:
+    """Register an async handler for a cloud command type.
+
+    Args:
+        command_type: The command type string (matches device_commands.command_type in DB).
+        handler: Async callable receiving command_data dict.
+    """
+```
+
+**Usage:**
+
+```python
+agent = RufusEdgeAgent(
+    device_id="atm-001",
+    cloud_url="https://control.example.com",
+    db_path="/var/lib/rufus/edge.db",
+    encryption_key=os.getenv("RUFUS_ENCRYPTION_KEY"),
+)
+
+async def handle_fraud_review_decision(command_data: dict):
+    workflow_id = command_data["workflow_id"]
+    decision = command_data["decision"]          # "approved" | "rejected"
+    notes = command_data.get("notes", "")
+
+    workflow = await agent.workflow_builder.load_workflow(workflow_id)
+    await workflow.next_step(user_input={
+        "decision": decision,
+        "notes": notes,
+        "source": "cloud_analyst",
+    })
+
+agent.register_command_handler("resume_fraud_review", handle_fraud_review_decision)
+await agent.start()
+```
+
+### Full Round-Trip Sequence
+
+```
+Edge ATM (offline-capable)                 Cloud Control Plane
+─────────────────────────────              ──────────────────────────────
+1. Execute FraudDetection workflow
+2. WASM scorer returns HIGH risk
+3. Escalate:
+   - SAF-queue EncryptedTransaction ──►    4. SAF sync received
+   - SAF metadata: risk_score, typologies  5. FraudCaseReview workflow created
+                                           6. Dashboard Approvals panel shows case
+                                           7. Analyst reviews FraudReviewPanel
+                                           8. Analyst clicks Approve / Reject
+                                           9. POST /devices/{id}/commands
+                                              {type: "resume_fraud_review",
+                                               priority: "CRITICAL",
+                                               data: {workflow_id, decision, notes}}
+10. Agent polls heartbeat / WS        ◄─── command in response
+11. register_command_handler fires
+12. Local workflow resumed
+13. Continue: dispense / retain card
+```
+
+### Timeout Fallback
+
+If the cloud decision does not arrive within a configured timeout (e.g. 90 seconds), fall back to on-device handling:
+
+```python
+async def await_cloud_decision(state: FraudState, context: StepContext, **user_input) -> dict:
+    # On first entry: set deadline in state and pause
+    if not state.cloud_escalation_deadline:
+        import time
+        state.cloud_escalation_deadline = time.time() + 90
+        raise WorkflowPauseDirective()
+
+    # On resume (command received): process decision
+    if user_input.get("source") == "cloud_analyst":
+        return {"decision": user_input["decision"], "decided_by": "analyst"}
+
+    # Deadline exceeded: fall back to manager PIN path
+    import time
+    if time.time() > state.cloud_escalation_deadline:
+        raise WorkflowJumpDirective("Manager_PIN_Override")
+
+    raise WorkflowPauseDirective()  # still waiting
+```
+
+### Priority Levels
+
+Cloud commands support a `priority` field consumed by the edge agent's command queue:
+
+| Priority | Delivery | Use case |
+|----------|----------|----------|
+| `CRITICAL` | Next heartbeat / immediate WS push | Fraud HITL decision, emergency stop |
+| `HIGH` | Within 2 heartbeat cycles | Config update, workflow deploy |
+| `NORMAL` | Best-effort | Telemetry requests, log flush |

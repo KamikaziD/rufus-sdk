@@ -162,7 +162,7 @@ class DeviceConfig(BaseModel):
     """
     # Version tracking
     version: str = Field(..., description="Config version for ETag")
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[str] = Field(default=None, description="ISO timestamp of last update")
 
     # Transaction limits
     floor_limit: Decimal = Field(

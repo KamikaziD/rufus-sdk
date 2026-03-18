@@ -5,21 +5,18 @@ import { useSendCommand } from "@/lib/hooks/useDevice";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { listDeviceCommands } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Send, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Send, AlertCircle, CheckCircle2 } from "lucide-react";
 import { formatRelativeTime } from "@/lib/utils";
 
 interface CommandSenderProps {
   deviceId: string;
 }
 
-const STATUS_VARIANT: Record<string, "success" | "destructive" | "secondary" | "info"> = {
-  pending:      "secondary",
-  sent:         "info",
-  acknowledged: "success",
-  failed:       "destructive",
+const STATUS_CLS: Record<string, string> = {
+  pending:      "border-zinc-600 text-zinc-500",
+  sent:         "border-blue-500/40 text-blue-400",
+  acknowledged: "border-emerald-500/40 text-emerald-400",
+  failed:       "border-red-500/40 text-red-400",
 };
 
 const COMMAND_TYPES = ["force_sync", "reload_config", "update_workflow", "update_model"] as const;
@@ -27,13 +24,13 @@ type CommandType = typeof COMMAND_TYPES[number];
 
 const PRIORITIES = ["low", "normal", "high", "critical"] as const;
 
-const INPUT_CLS = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+const INPUT_CLS = "flex h-9 w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-1 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors";
 const SELECT_CLS = INPUT_CLS;
 
 function FieldWrap({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium">{label}</label>
+      <label className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">{label}</label>
       {children}
     </div>
   );
@@ -71,7 +68,7 @@ function CommandDataFields({
           <textarea
             required
             rows={6}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+            className="flex w-full border border-[#1E1E22] bg-[#0A0A0B] px-3 py-2 font-mono text-sm text-[#E4E4E7] rounded-none focus:outline-none focus:border-amber-500/50 transition-colors"
             placeholder="Paste workflow YAML here..."
             value={(commandData.yaml_content as string) ?? ""}
             onChange={(e) =>
@@ -157,104 +154,106 @@ export function CommandSender({ deviceId }: CommandSenderProps) {
   return (
     <div className="space-y-4">
       {/* Send command form */}
-      <Card>
-        <CardHeader><CardTitle className="text-sm">Send Command</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={handleSend} className="space-y-4">
-            <FieldWrap label="Command type">
+      <div className="bg-[#111113] border border-[#1E1E22] p-4">
+        <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">SEND COMMAND</div>
+        <form onSubmit={handleSend} className="space-y-4">
+          <FieldWrap label="Command type">
+            <select
+              className={SELECT_CLS}
+              value={commandType}
+              onChange={(e) => {
+                setCommandType(e.target.value as CommandType);
+                setCommandData({});
+                setSuccess(null);
+              }}
+            >
+              {COMMAND_TYPES.map((t) => (
+                <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+              ))}
+            </select>
+          </FieldWrap>
+
+          <CommandDataFields
+            commandType={commandType}
+            commandData={commandData}
+            setCommandData={setCommandData}
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <FieldWrap label="Priority">
               <select
                 className={SELECT_CLS}
-                value={commandType}
-                onChange={(e) => {
-                  setCommandType(e.target.value as CommandType);
-                  setCommandData({});
-                  setSuccess(null);
-                }}
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
               >
-                {COMMAND_TYPES.map((t) => (
-                  <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+                {PRIORITIES.map((p) => (
+                  <option key={p} value={p}>{p}</option>
                 ))}
               </select>
             </FieldWrap>
+            <FieldWrap label="Expires in (seconds, optional)">
+              <input
+                type="number"
+                className={INPUT_CLS}
+                placeholder="e.g. 300"
+                value={expiresIn}
+                onChange={(e) => setExpiresIn(e.target.value)}
+                min={1}
+              />
+            </FieldWrap>
+          </div>
 
-            <CommandDataFields
-              commandType={commandType}
-              commandData={commandData}
-              setCommandData={setCommandData}
-            />
+          {sendCommand.error && (
+            <p className="font-mono text-xs text-red-400 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />
+              {(sendCommand.error as Error).message}
+            </p>
+          )}
+          {success && (
+            <p className="font-mono text-xs text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              {success}
+            </p>
+          )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <FieldWrap label="Priority">
-                <select
-                  className={SELECT_CLS}
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value)}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </FieldWrap>
-              <FieldWrap label="Expires in (seconds, optional)">
-                <input
-                  type="number"
-                  className={INPUT_CLS}
-                  placeholder="e.g. 300"
-                  value={expiresIn}
-                  onChange={(e) => setExpiresIn(e.target.value)}
-                  min={1}
-                />
-              </FieldWrap>
-            </div>
-
-            {sendCommand.error && (
-              <p className="text-xs text-destructive flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" />
-                {(sendCommand.error as Error).message}
-              </p>
-            )}
-            {success && (
-              <p className="text-xs text-green-600 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                {success}
-              </p>
-            )}
-
-            <Button type="submit" size="sm" disabled={sendCommand.isPending}>
-              {sendCommand.isPending
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <Send className="h-3.5 w-3.5" />}
-              Send Command
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+          <button
+            type="submit"
+            disabled={sendCommand.isPending}
+            className="border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-mono text-xs px-3 py-1.5 rounded-none flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Send className="h-3.5 w-3.5" />
+            {sendCommand.isPending ? "Sending…" : "Send Command"}
+          </button>
+        </form>
+      </div>
 
       {/* Command history */}
-      <Card>
-        <CardHeader><CardTitle className="text-sm">Command History</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4 space-y-2">
-              {[...Array(3)].map((_, i) => <div key={i} className="h-8 animate-pulse bg-muted rounded" />)}
-            </div>
-          ) : commands.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-muted-foreground text-center">No commands sent yet</p>
-          ) : (
-            <div className="divide-y">
-              {commands.map((cmd) => (
-                <div key={cmd.command_id} className="flex items-center justify-between px-4 py-2 text-sm">
-                  <div>
-                    <span className="font-medium">{cmd.command_type}</span>
-                    <span className="text-xs text-muted-foreground ml-2">{formatRelativeTime(cmd.created_at)}</span>
-                  </div>
-                  <Badge variant={STATUS_VARIANT[cmd.status] ?? "secondary"}>{cmd.status}</Badge>
+      <div className="bg-[#111113] border border-[#1E1E22]">
+        <div className="px-4 py-3 border-b border-[#1E1E22]">
+          <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">COMMAND HISTORY</span>
+        </div>
+        {isLoading ? (
+          <div className="p-4 space-y-2">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-8 animate-pulse bg-[#1E1E22]" />)}
+          </div>
+        ) : commands.length === 0 ? (
+          <p className="px-4 py-6 font-mono text-xs text-zinc-600 text-center">No commands sent yet</p>
+        ) : (
+          <div className="divide-y divide-[#1E1E22]">
+            {commands.map((cmd) => (
+              <div key={cmd.command_id} className="flex items-center justify-between px-4 py-2.5">
+                <div>
+                  <span className="font-mono text-xs text-zinc-300">{cmd.command_type}</span>
+                  <span className="font-mono text-[10px] text-zinc-600 ml-2">{formatRelativeTime(cmd.created_at)}</span>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <span className={`font-mono text-[10px] border px-1.5 py-0.5 rounded-none ${STATUS_CLS[cmd.status] ?? "border-zinc-600 text-zinc-500"}`}>
+                  {cmd.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

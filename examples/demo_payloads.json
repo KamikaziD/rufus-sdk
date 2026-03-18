@@ -1,0 +1,311 @@
+{
+  "_readme": "Rufus cross-platform demo payloads — paste any initial_data block into the dashboard Start Workflow dialog. All workflows run unchanged on Cloud (Celery/PostgreSQL), Edge (SQLite/WASM), and Browser (Pyodide). AI steps (GPU embedding, NER, LLM) fall back gracefully on cloud/edge.",
+  "_usage": "Dashboard → Workflows → Start → select workflow_type → paste initial_data → Submit",
+
+  "workflows": [
+
+    {
+      "workflow_type": "OrderFulfillment",
+      "description": "E-commerce order — parallel UK + EU warehouse checks, payment, fulfilment routing",
+      "what_to_watch": "CheckInventory runs as two parallel tasks. FulfillmentDecision routes to BackorderNotice if both warehouses are out of stock.",
+      "scenarios": {
+        "standard_order": {
+          "_note": "Both warehouses have stock → SHIPPED",
+          "order_id": "ORD-2026-0317-001",
+          "items": [
+            {"sku": "RUFUS-SDK-TSHIRT-M", "qty": 2, "price": 29.99},
+            {"sku": "RUFUS-EDGE-HOODIE-L", "qty": 1, "price": 59.99}
+          ],
+          "total": 0.0
+        },
+        "backorder": {
+          "_note": "Force backorder path — set both stock flags to false via step logic; total > 500 triggers backorder branch in fulfillment_decision",
+          "order_id": "ORD-2026-0317-002",
+          "items": [
+            {"sku": "ENTERPRISE-LICENSE-ANNUAL", "qty": 10, "price": 999.00}
+          ],
+          "total": 0.0
+        }
+      }
+    },
+
+    {
+      "workflow_type": "IoTSensorPipeline",
+      "description": "IoT temperature sensor batch — anomaly detection, health routing, optional alert",
+      "what_to_watch": "Readings outside 0–50 °C are flagged as anomalies. anomaly_rate > 20 % sets health_status=DEGRADED and fires an alert.",
+      "scenarios": {
+        "healthy_readings": {
+          "_note": "All readings in range → health_status: HEALTHY, no alert",
+          "device_id": "temp-sensor-floor-3",
+          "readings": [21.4, 22.1, 21.8, 23.0, 22.7, 21.9, 22.5, 23.1, 22.3, 21.6],
+          "max_threshold": 50.0,
+          "min_threshold": 0.0
+        },
+        "degraded_with_anomalies": {
+          "_note": "3 / 10 readings out of range → anomaly_rate: 30 %, health_status: DEGRADED, alert_sent: true",
+          "device_id": "temp-sensor-atm-lobby",
+          "readings": [22.0, 23.5, 68.4, 21.0, -4.2, 22.8, 23.1, 55.9, 21.7, 22.4],
+          "max_threshold": 50.0,
+          "min_threshold": 0.0
+        },
+        "all_anomalies": {
+          "_note": "Simulates a broken sensor — all readings out of range → CRITICAL",
+          "device_id": "temp-sensor-atm-vault",
+          "readings": [99.9, 100.1, 98.7, -10.0, 102.3, 95.5, -8.2, 101.0, 97.8, 103.4],
+          "max_threshold": 50.0,
+          "min_threshold": 0.0
+        }
+      }
+    },
+
+    {
+      "workflow_type": "TransactionRiskScoring",
+      "description": "Card transaction risk — semantic embedding (WebGPU in browser, CPU on cloud/edge), rule-based decision",
+      "what_to_watch": "risk_score and decision fields. Browser uses WebGPU MiniLM embeddings; cloud/edge use rule-based cosine sim fallback. Same decision logic runs on all platforms.",
+      "scenarios": {
+        "low_risk_retail": {
+          "_note": "Typical high-street purchase → decision: APPROVE",
+          "txn_id": "TXN-2026-LO-001",
+          "amount": 42.50,
+          "merchant_category": "retail",
+          "location": "London"
+        },
+        "high_risk_crypto": {
+          "_note": "Crypto exchange, large amount → decision: REVIEW or BLOCK",
+          "txn_id": "TXN-2026-HI-002",
+          "amount": 4750.00,
+          "merchant_category": "cryptocurrency_exchange",
+          "location": "Unknown"
+        },
+        "medium_risk_travel": {
+          "_note": "Foreign travel spend, moderate amount → decision: APPROVE with note",
+          "txn_id": "TXN-2026-MD-003",
+          "amount": 389.00,
+          "merchant_category": "international_airline",
+          "location": "Lagos"
+        }
+      }
+    },
+
+    {
+      "workflow_type": "DocumentSummarisation",
+      "description": "Document summarisation — LLM in browser (wllama), extractive summariser on cloud/edge",
+      "what_to_watch": "summary, keywords, compression_ratio, method. method field shows which path ran: 'llm' (browser) vs 'extractive' (cloud/edge).",
+      "scenarios": {
+        "fintech_press_release": {
+          "_note": "Short press release — fast path on all platforms",
+          "raw_text": "Rufus Edge today announced the general availability of its v1.0 workflow engine for fintech edge devices. The platform enables banks and payment processors to deploy fraud detection, KYC, and transaction monitoring workflows directly onto POS terminals, ATMs, and mobile readers — running identically on-device and in the cloud. The air-gap triage demo shows a full HITL fraud review round-trip: an on-device WASM scorer flags a suspicious transaction, the cloud analyst approves or blocks via the dashboard, and the decision reaches the device within 30 seconds over WebSocket. Rufus Edge is available on PyPI as rufus-sdk, rufus-sdk-edge, and rufus-sdk-server.",
+          "doc_type": "press_release"
+        },
+        "compliance_report": {
+          "_note": "Longer regulatory text — tests compression on cloud/edge extractive path",
+          "raw_text": "Pursuant to the requirements of the Payment Card Industry Data Security Standard (PCI-DSS) version 4.0 and the European Banking Authority guidelines on outsourcing arrangements, this report documents the controls implemented by the issuing institution with respect to edge-device transaction processing. Section 3.1 addresses encryption-at-rest for cardholder data stored in the device SQLite database. Section 3.2 covers the Store-and-Forward (SAF) queue management including floor-limit enforcement, offline approval thresholds, and cryptographic message authentication codes applied to each queued transaction payload. Section 3.3 describes the automated fraud rule deployment pipeline, including ETag-based config push, WASM binary integrity verification via SHA-256, and rollback procedures in the event of a failed rule deployment. Appendix A provides a full mapping of PCI-DSS requirements to implemented controls. Appendix B lists outstanding remediation items with target resolution dates.",
+          "doc_type": "compliance_report"
+        }
+      }
+    },
+
+    {
+      "workflow_type": "FieldTechTriage",
+      "description": "Air-gapped field technician incident report — NER PII redaction, severity routing, SAF record creation",
+      "what_to_watch": "redacted_text shows PII replaced with [REDACTED]. CRITICAL severity jumps to EscalateIncident step. saf_record_id confirms Store-and-Forward queuing.",
+      "scenarios": {
+        "standard_atm_fault": {
+          "_note": "Non-critical hardware fault — routes through LogStandard",
+          "raw_input": "ATM unit at Canary Wharf branch reported card reader failure at 14:32. Technician John Smith (badge J-4421) attended site. Fault isolated to the EMV chip reader module. Replaced module from stock. Unit back in service by 15:10. Customer Sarah Johnson had card retained during fault — card returned after fix."
+        },
+        "critical_security_incident": {
+          "_note": "Security incident → CRITICAL severity → EscalateIncident path, ESC- SAF record",
+          "raw_input": "URGENT: Suspicious device found attached to card slot of ATM at Manchester Piccadilly (unit ATM-MC-047). Discovered by technician Mike Davies (badge M-7891) during routine inspection at 09:15. Device appears to be a skimmer. Police contacted — reference number GMP-2026-0317-4421. Unit taken offline immediately. All transactions since 2026-03-16 18:00 may be compromised. Affected customers to be notified per breach protocol."
+        },
+        "network_outage": {
+          "_note": "Infrastructure fault — standard severity, tests SAF queue during offline operation",
+          "raw_input": "POS terminal cluster at Birmingham New Street retail unit offline since 08:00. Network engineer Alice Thompson (ID: NET-3312) confirmed fibre cut at exchange level. Estimated restoration 4 hours. 14 terminals affected. Store manager David Lee authorised offline floor-limit mode per policy OP-7.4.2. All transactions under £50 being approved locally with SAF queue active."
+        }
+      }
+    },
+
+    {
+      "workflow_type": "PagedReasoning",
+      "description": "LLM reasoning with complexity gate — simple prompts take fast path (template), complex prompts load inference shards",
+      "what_to_watch": "path_taken field: 'fast_path' (below complexity threshold) vs 'full_inference' (shards loaded). complexity_score drives the decision. shards_loaded shows paging activity.",
+      "scenarios": {
+        "simple_query_fast_path": {
+          "_note": "Low complexity → path_taken: fast_path, 0 shards loaded",
+          "prompt": "What is the current status of my order?"
+        },
+        "complex_reasoning_full_inference": {
+          "_note": "High complexity → path_taken: full_inference, shards loaded",
+          "prompt": "Analyse the risk profile of a POS terminal that has processed 47 transactions in the last hour, with 3 flagged for velocity abuse, 1 for micro-structuring, and 2 declined at the issuer. The terminal is located in a high-footfall retail zone and has been online for 6 hours since last config sync. Should the device be placed in heightened monitoring mode, and what compensating controls should be applied while awaiting cloud analyst review?"
+        },
+        "fraud_pattern_analysis": {
+          "_note": "Moderate complexity — tests boundary of fast/full path",
+          "prompt": "Explain the difference between card testing fraud and micro-structuring, and describe how a real-time velocity rule can detect both patterns within a 60-minute sliding window on an edge device operating in offline mode."
+        }
+      }
+    },
+
+    {
+      "workflow_type": "FraudCaseReview",
+      "description": "Manual HITL fraud case — paste into Start Workflow to create a review card in the Approvals tab without waiting for the edge sim to trigger one",
+      "what_to_watch": "Workflow starts at WAITING_HUMAN (Prepare_Case auto-runs). Go to Approvals tab — card shows risk score, device, transaction, rules, typologies. Approve or Block to dispatch decision back to device.",
+      "scenarios": {
+        "high_risk_unknown_merchant": {
+          "_note": "HIGH risk, unknown merchant + velocity — typical auto-escalation from edge sim",
+          "device_id": "sim-device-001",
+          "device_type": "pos",
+          "transaction_id": "demo-txn-001",
+          "alert_id": "demo-alert-001",
+          "amount": 278.68,
+          "currency": "USD",
+          "rules_fired": ["pos_r004_unknown_merchant", "pos_r005_amount_spike"],
+          "typologies_triggered": ["unknown_merchant", "unknown_merchant_large_txn"],
+          "ml_risk_score": 0.74,
+          "cloud_url": "http://rufus-server:8000"
+        },
+        "critical_risk_structuring": {
+          "_note": "CRITICAL risk, micro-structuring + card testing combo",
+          "device_id": "sim-device-001",
+          "device_type": "pos",
+          "transaction_id": "demo-txn-002",
+          "alert_id": "demo-alert-002",
+          "amount": 4.99,
+          "currency": "USD",
+          "rules_fired": ["pos_r003_card_testing", "pos_r002_micro_struct", "pos_r001_velocity"],
+          "typologies_triggered": ["card_testing", "micro_structuring_pos", "velocity_fraud"],
+          "ml_risk_score": 0.93,
+          "cloud_url": "http://rufus-server:8000"
+        },
+        "atm_after_hours_structuring": {
+          "_note": "ATM nighttime structuring — tests ATM rule labels in UI",
+          "device_id": "atm-device-001",
+          "device_type": "atm",
+          "transaction_id": "demo-txn-003",
+          "alert_id": "demo-alert-003",
+          "amount": 480.00,
+          "currency": "USD",
+          "rules_fired": ["atm_r002_after_hours", "atm_r003_structuring", "atm_r004_velocity"],
+          "typologies_triggered": ["cash_structuring_atm", "nighttime_structuring", "atm_velocity_fraud"],
+          "ml_risk_score": 0.87,
+          "cloud_url": "http://rufus-server:8000"
+        }
+      }
+    }
+
+    ,
+
+    {
+      "workflow_type": "LoanApplication",
+      "description": "Full lending pipeline — parallel credit+fraud checks, KYC sub-workflow, dynamic underwriting branch, optional HITL",
+      "version": "1.1",
+      "tested": "2026-03-17 — all 4 paths confirmed COMPLETED on Cloud (Celery/PostgreSQL)",
+      "execution_trace": [
+        "Initialize_Application (STANDARD)",
+        "Run_Concurrent_Checks (PARALLEL → Credit_Check + Fraud_Detection on Celery, ~5s)",
+        "Evaluate_Pre_Approval → WorkflowJumpDirective to Generate_Final_Decision (fast/reject) OR continues to KYC",
+        "Run_KYC_Workflow → StartSubWorkflowDirective → child KYC workflow (PENDING_SUB_WORKFLOW)",
+        "Route_Underwriting → sets underwriting_type: simple | full",
+        "Inject_Underwriting_Branch → dynamic step injection based on underwriting_type",
+        "  [full path] Run_Full_Underwriting (ASYNC Celery, ~8s) → Request_Human_Review → WAITING_HUMAN",
+        "  [simple path] Simplified_Underwriting (ASYNC Celery, ~3s) → auto-completes",
+        "Generate_Final_Decision → final_loan_status: APPROVED | REJECTED"
+      ],
+      "decision_logic": {
+        "credit_score": "780 if age >= 25, else 620",
+        "fraud_status": "HIGH_RISK if country == 'South Africa', else CLEAN",
+        "fast_track": "credit > 700 AND fraud CLEAN → jump to Generate_Final_Decision (APPROVED)",
+        "auto_reject": "credit < 600 OR fraud HIGH_RISK → jump to Generate_Final_Decision (REJECTED)",
+        "detailed_review": "credit 600–700 AND fraud CLEAN → KYC + underwriting",
+        "underwriting_branch": "amount < 20000 → simple (no HITL); amount >= 20000 → full (WAITING_HUMAN)"
+      },
+      "scenarios": {
+        "1_fast_track_approved": {
+          "_note": "Age >= 25 + clean country → credit 780 + fraud CLEAN → WorkflowJumpDirective skips KYC and underwriting → APPROVED in ~5s. Proves PARALLEL step and jump directive.",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "APPROVED",
+          "_expected_pre_approval_status": "FAST_TRACK_APPROVED",
+          "requested_amount": 25000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-01",
+            "name": "Alice Martin",
+            "email": "alice.martin@example.com",
+            "country": "United Kingdom",
+            "age": 35,
+            "id_document_url": "https://docs.example.com/id/alice-passport.pdf"
+          }
+        },
+        "2_auto_rejected_fraud": {
+          "_note": "Country = South Africa → fraud score 0.9 HIGH_RISK → WorkflowJumpDirective to Generate_Final_Decision → REJECTED in ~5s. No KYC or underwriting runs.",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "REJECTED",
+          "_expected_pre_approval_status": "REJECTED_AUTOMATIC",
+          "requested_amount": 8000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-02",
+            "name": "Thabo Nkosi",
+            "email": "thabo.nkosi@example.com",
+            "country": "South Africa",
+            "age": 42,
+            "id_document_url": "https://docs.example.com/id/thabo-id.pdf"
+          }
+        },
+        "3_full_underwriting_hitl": {
+          "_note": "Age < 25 + amount >= 20000 → credit 620 (PENDING) → KYC sub-workflow → full underwriting (Celery, ~8s) → WAITING_HUMAN at Request_Human_Review. Resume from the Approvals tab with the hitl_resume payload below. Proves: sub-workflow, dynamic injection, ASYNC Celery task, WAITING_HUMAN, human decision.",
+          "_expected_status": "WAITING_HUMAN (after ~15s)",
+          "_expected_step": "Request_Human_Review",
+          "_expected_underwriting_type": "full",
+          "_hitl_resume_payload": {
+            "_note": "Paste this into the Approvals panel notes field — OR use the curl command. Matches ProcessHumanDecisionInput schema.",
+            "decision": "APPROVED",
+            "reviewer_id": "underwriter-01",
+            "comments": "Income verified, employment confirmed, acceptable debt-to-income ratio."
+          },
+          "_hitl_resume_curl": "curl -X POST http://localhost:8000/api/v1/workflow/{workflow_id}/resume -H 'Content-Type: application/json' -H 'X-API-Key: dev-api-key' -d '{\"user_input\": {\"decision\": \"APPROVED\", \"reviewer_id\": \"underwriter-01\", \"comments\": \"Income verified.\"}}'",
+          "requested_amount": 45000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-03",
+            "name": "Jamie Chen",
+            "email": "jamie.chen@example.com",
+            "country": "United Kingdom",
+            "age": 22,
+            "id_document_url": "https://docs.example.com/id/jamie-passport.pdf"
+          }
+        },
+        "3b_full_underwriting_hitl_rejected": {
+          "_note": "Same as 3 but rejected by the underwriter. Resume with decision: REJECTED to see compensation path.",
+          "_expected_status": "WAITING_HUMAN (after ~15s)",
+          "_hitl_resume_payload": {
+            "decision": "REJECTED",
+            "reviewer_id": "underwriter-02",
+            "comments": "Insufficient income evidence for loan amount requested."
+          },
+          "requested_amount": 50000.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-04",
+            "name": "Priya Sharma",
+            "email": "priya.sharma@example.com",
+            "country": "United Kingdom",
+            "age": 24,
+            "id_document_url": "https://docs.example.com/id/priya-passport.pdf"
+          }
+        },
+        "4_simplified_underwriting_no_hitl": {
+          "_note": "Age < 25 + amount < 20000 → credit 620 (PENDING) → KYC sub-workflow → simplified underwriting (Celery, ~3s) → auto-completes. No human review step. Proves: KYC sub-workflow lifecycle (PENDING_SUB_WORKFLOW → ACTIVE) and simplified async branch. final_loan_status: REJECTED (simplified path has no human approval gate — expected behaviour per workflow v1.1 design).",
+          "_expected_status": "COMPLETED",
+          "_expected_final_loan_status": "REJECTED",
+          "_expected_underwriting_type": "simple",
+          "requested_amount": 7500.00,
+          "applicant_profile": {
+            "user_id": "usr-demo-05",
+            "name": "Sam Okafor",
+            "email": "sam.okafor@example.com",
+            "country": "Nigeria",
+            "age": 23,
+            "id_document_url": "https://docs.example.com/id/sam-id.pdf"
+          }
+        }
+      }
+    }
+
+  ]
+}

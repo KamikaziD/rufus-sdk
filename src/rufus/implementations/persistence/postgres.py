@@ -244,8 +244,12 @@ class PostgresPersistenceProvider(PersistenceProvider):
         if not self._initialized:
             await self.initialize()
 
+        include_state = filters.pop('include_state', False)
         async with self.pool.acquire() as conn:
-            query = "SELECT id, workflow_type, current_step, status, created_at, updated_at, completed_at FROM workflow_executions"
+            select_cols = "id, workflow_type, current_step, status, created_at, updated_at, completed_at"
+            if include_state:
+                select_cols += ", state"
+            query = f"SELECT {select_cols} FROM workflow_executions"
             params = []
             conditions = []
 
@@ -259,11 +263,22 @@ class PostgresPersistenceProvider(PersistenceProvider):
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-            
+
             query += " ORDER BY updated_at DESC" # Default sorting
 
             rows = await conn.fetch(query, *params)
-            return [dict(row) for row in rows]
+            result = []
+            for row in rows:
+                d = dict(row)
+                if include_state and 'state' in d:
+                    import json as _json
+                    raw = d.pop('state')
+                    try:
+                        d['state'] = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    except Exception:
+                        d['state'] = {}
+                result.append(d)
+            return result
 
 
     async def claim_pending_task(self, worker_id: str) -> Optional[Dict[str, Any]]:
