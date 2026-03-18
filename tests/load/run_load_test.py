@@ -175,8 +175,8 @@ def print_results(results: LoadTestResults):
     error_pass = results.error_rate < 1.0
     print(f"Error Rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
 
-    # Latency target: p95 < 500ms
-    if results.request_latencies:
+    # Latency target: p95 < 500ms / p99 < 1000ms (not applicable to thundering_herd)
+    if results.request_latencies and results.scenario != "thundering_herd":
         p95 = results.latency_percentile(0.95)
         latency_pass = p95 < 500.0
         print(f"Latency p95 < 500ms:  {'✅ PASS' if latency_pass else '❌ FAIL'} ({p95:.1f}ms)")
@@ -212,12 +212,17 @@ def print_results(results: LoadTestResults):
         print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
 
     elif results.scenario == "thundering_herd":
-        # All devices fired simultaneously — target: ≥ 99% success
-        success_count = results.transactions_synced
+        # Count devices that succeeded (sync_failures == 0 AND synced at least 1 tx)
+        devices_succeeded = sum(
+            1 for m in results.device_metrics.values()
+            if m.sync_failures == 0 and m.transactions_synced > 0
+        )
         total_devices = results.num_devices
-        success_rate = success_count / total_devices * 100 if total_devices else 0
+        success_rate = devices_succeeded / total_devices * 100 if total_devices else 0
         herd_pass = success_rate >= 99.0
-        print(f"Success Rate >= 99%:  {'✅ PASS' if herd_pass else '❌ FAIL'} ({success_rate:.1f}%  {success_count}/{total_devices} devices)")
+        print(f"Devices succeeded:    {devices_succeeded:,} / {total_devices:,}")
+        print(f"Txns synced:          {results.transactions_synced:,}  ({results.transactions_synced // total_devices if total_devices else 0} avg/device)")
+        print(f"Device success >= 99%:{'✅ PASS' if herd_pass else '❌ FAIL'} ({success_rate:.1f}%)")
         print(f"5xx errors:           {results.errors_5xx:,}  (pool/server limit)")
         print(f"Timeouts:             {results.errors_timeout:,}")
         if results.request_latencies:
