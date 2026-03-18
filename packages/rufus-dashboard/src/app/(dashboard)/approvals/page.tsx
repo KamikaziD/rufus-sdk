@@ -240,9 +240,9 @@ function CardHeader({ workflow, variant }: { workflow: WorkflowExecution; varian
         <span className="font-mono text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 uppercase tracking-wider">
           Underwriter Review
         </span>
-        {profile?.name && (
+        {typeof profile?.name === "string" && (
           <span className="font-mono text-[10px] text-zinc-500 truncate max-w-[120px]">
-            {String(profile.name)}
+            {profile.name}
           </span>
         )}
       </div>
