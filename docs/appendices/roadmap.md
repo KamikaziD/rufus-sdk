@@ -2,8 +2,8 @@
 
 Rufus SDK development roadmap with planned features, priorities, and timelines.
 
-**Last Updated:** 2026-02-27
-**Current Version:** 0.6.0
+**Last Updated:** 2026-03-18
+**Current Version:** 1.0.0rc5
 **Next Major Release:** 1.0.0
 
 ---
@@ -34,13 +34,23 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
    │
 2026-02 ━━ v0.5.0 (33-table schema consolidation)
    │
-2026-02 ━━ v0.6.0 (Current ⭐ — package split: rufus-sdk-edge + rufus-sdk-server)
+2026-02 ━━ v0.6.0 (package split: rufus-sdk-edge + rufus-sdk-server)
    │
-        ━━ v0.7.0 (OpenTelemetry, Prometheus metrics)
+2026-03 ━━ v0.7.x (Edge E2E, device fleet, workflow sync, SAF)
    │
-        ━━ v0.8.0 (GPU inference step type, mTLS, HSM integration)
+2026-03 ━━ v0.8.0 (WASM Component Model, Browser/WASI targets)
    │
-        ━━ v1.0.0 (Stable API guarantee)
+2026-03 ━━ v1.0.0rc1 (Paged inference, browser demo)
+   │
+2026-03 ━━ v1.0.0rc2 (PagedInferenceRuntime, LlamaCpp paged provider)
+   │
+2026-03 ━━ v1.0.0rc3 (Cross-platform workflows, 6 demo workflows)
+   │
+2026-03 ━━ v1.0.0rc4 (SAF payment pipeline, FraudCaseReview, dashboard)
+   │
+2026-03 ━━ v1.0.0rc5 (Current ⭐ — Fraud HITL round-trip, WASM scorer, LoanReviewPanel, per-device config)
+   │
+        ━━ v1.0.0 (Stable API guarantee, production PyPI)
 ```
 
 ---

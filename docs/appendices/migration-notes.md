@@ -19,6 +19,34 @@ Version-to-version migration guides for upgrading Rufus SDK.
 
 ---
 
+## Upgrading to 1.0.0rc4 / rc5
+
+**From:** 1.0.0rc3 or earlier
+**Date:** 2026-03-16 (rc4) · 2026-03-18 (rc5)
+
+### New Alembic Migrations
+
+Two new migrations are included. Run `alembic upgrade head` after deploying:
+
+| Migration | Description |
+|-----------|-------------|
+| `i4j5k6l7m8n9` | Adds `workflow_id TEXT` column to `saf_transactions` table — links SAF records to source workflow execution |
+| `j5k6l7m8n9o0` | Adds `device_id TEXT` column to `device_configs` table — enables per-device configuration overrides |
+
+```bash
+alembic upgrade head
+```
+
+### No Breaking Changes
+
+Both migrations are additive (new nullable columns). Existing data is unaffected. No Python import changes required.
+
+### SAF Table Change (rc4)
+
+The `SyncManager` now uses `saf_pending_transactions` instead of the `tasks` table. This ensures SAF records survive workflow purge (the `tasks` table has `ON DELETE CASCADE` on the `workflow_executions` FK). If you have custom code querying `tasks` for pending SAF transactions, migrate to `saf_pending_transactions`.
+
+---
+
 ## Upgrading to 0.6.0
 
 **From:** 0.5.x

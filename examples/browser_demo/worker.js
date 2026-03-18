@@ -803,7 +803,7 @@ async def _make_workflow(wf_type, steps, state_class, initial_data=None):
     }
     return Workflow(
         workflow_type=wf_type,
-        workflow_version="1.0.0rc4",
+        workflow_version="1.0.0rc5",
         definition_snapshot=synth_snapshot,
         workflow_steps=steps,
         steps_config=synth_steps_config,
@@ -1639,11 +1639,11 @@ async function init() {
     // when no wheel is found at the same origin (bare two-file share scenario).
     try {
         const probe = await fetch(
-            `${self.location.origin}/dist/rufus_sdk-1.0.0rc4-py3-none-any.whl`,
+            `${self.location.origin}/dist/rufus_sdk-1.0.0rc5-py3-none-any.whl`,
             { method: "HEAD" }
         );
         if (probe.ok) {
-            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc4-py3-none-any.whl`;
+            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc5-py3-none-any.whl`;
         }
     } catch (_) {
         // network error or CORS block → leave _wheelUrl as null → TestPyPI path
@@ -1683,7 +1683,7 @@ else:
         keep_going=True,
     )
     await micropip.install(
-        "rufus-sdk==1.0.0rc4",
+        "rufus-sdk==1.0.0rc5",
         index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
         keep_going=True,
     )

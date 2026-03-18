@@ -415,6 +415,62 @@ Old pattern (still supported):
 - [Implement saga mode](saga-mode.md)
 - [Deploy to production](deployment.md)
 
+## Edge Device HITL Round-Trip (v1.0.0rc5)
+
+For air-gapped or offline-capable edge devices, Rufus supports a full cloud HITL round-trip: the device escalates a decision to the cloud, an analyst reviews it in the dashboard, and the decision is delivered back to the device as a command.
+
+### Pattern Overview
+
+```
+Edge Device                         Cloud Control Plane
+   │                                        │
+   ├─ executes FraudCaseReview workflow      │
+   ├─ hits HUMAN_IN_LOOP step               │
+   ├─ SAF-queues escalation event ──────►   │
+   │                                        ├─ creates FraudCaseReview cloud workflow
+   │                                        ├─ analyst reviews in Approvals dashboard
+   │                                        ├─ analyst approves / rejects
+   │    ◄──── CRITICAL priority command ────┤
+   ├─ register_command_handler fires        │
+   ├─ resumes local workflow with decision  │
+   └─ continues execution                  │
+```
+
+### `register_command_handler()` API
+
+`RufusEdgeAgent` supports registering async handlers for custom cloud command types:
+
+```python
+agent = RufusEdgeAgent(
+    device_id="atm-001",
+    cloud_url="https://control.example.com",
+    db_path="/var/lib/rufus/edge.db",
+)
+
+async def handle_fraud_review_decision(command_data: dict):
+    workflow_id = command_data["workflow_id"]
+    decision = command_data["decision"]          # "approved" | "rejected"
+    analyst_notes = command_data.get("notes", "")
+
+    # Resume the locally-paused FraudCaseReview workflow
+    workflow = await agent.workflow_builder.load_workflow(workflow_id)
+    await workflow.next_step(user_input={
+        "decision": decision,
+        "notes": analyst_notes,
+        "source": "cloud_analyst",
+    })
+
+agent.register_command_handler("resume_fraud_review", handle_fraud_review_decision)
+
+await agent.start()
+```
+
+### Timeout Fallback
+
+If the cloud decision does not arrive within the configured timeout (default 90 seconds), the device falls back to on-device handling (e.g. manager PIN, conservative floor-limit decision). Implement this in a `CRON_SCHEDULE` or `LOOP` step that polls for the command and raises `WorkflowJumpDirective` to the fallback path when the timeout expires.
+
+---
+
 ## See also
 
 - [Create workflow guide](create-workflow.md)

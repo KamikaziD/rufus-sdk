@@ -8,7 +8,7 @@ This guide covers deploying the Rufus Dashboard, logging in, assigning roles, an
 
 - Docker Compose with the Rufus stack running (`rufus-server`, `rufus-worker`, `postgres`, `redis`)
 - A Keycloak instance **or** any OIDC-compatible identity provider
-- The `rufus-dashboard` Docker image (`ruhfuskdev/rufus-dashboard:0.7.4`)
+- The `rufus-dashboard` Docker image (`ruhfuskdev/rufus-dashboard:1.0.0rc5`)
 
 ---
 
@@ -18,7 +18,7 @@ Add the `rufus-dashboard` service to your compose file:
 
 ```yaml
 rufus-dashboard:
-  image: ruhfuskdev/rufus-dashboard:0.7.4
+  image: ruhfuskdev/rufus-dashboard:1.0.0rc5
   ports: ["3000:3000"]
   environment:
     NEXT_PUBLIC_RUFUS_API_URL: http://localhost:8000   # baked at build time
@@ -114,6 +114,19 @@ For each pending approval:
 3. Click **Approve** or **Reject**.
 
 Approved workflows resume immediately; rejected workflows transition to `FAILED`.
+
+#### Domain-Specific Review Panels (v1.0.0rc5)
+
+The Approvals page renders specialised panels based on `workflow_type`, replacing the generic JSON textarea for known workflow types:
+
+| Workflow Type | Panel | What it Shows |
+|---------------|-------|---------------|
+| `FraudCaseReview` | **FraudReviewPanel** | Transaction details, risk score, flagged typologies, merchant, Approve / Reject with notes |
+| `LoanApplication` | **LoanReviewPanel** | Credit score bar, fraud check badge, applicant profile, underwriting recommendation, KYC status dots; Approve Loan / Reject Loan buttons |
+
+Both panels also render inline in the **Workflows** console (`ConsoleDetailPanel`) when a workflow is in `WAITING_HUMAN` state — analysts can approve directly from the workflow detail view without navigating to the Approvals page.
+
+Panel selection is driven by `workflow_type` in the workflow execution record.
 
 ---
 
