@@ -13,7 +13,7 @@ import random
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import httpx
 import psutil
 
@@ -53,6 +53,7 @@ class DeviceMetrics:
     command_failures: int = 0
     total_requests: int = 0
     total_errors: int = 0
+    latencies: List[float] = field(default_factory=list)  # per-request latency in seconds
 
 
 class SimulatedEdgeDevice:
@@ -287,7 +288,9 @@ class SimulatedEdgeDevice:
                 response.raise_for_status()
                 return response
 
+            t0 = time.perf_counter()
             response = await self._retry_with_backoff("heartbeat", send_heartbeat)
+            self.metrics.latencies.append(time.perf_counter() - t0)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:
@@ -406,7 +409,9 @@ class SimulatedEdgeDevice:
                 response.raise_for_status()
                 return response
 
+            t0 = time.perf_counter()
             response = await self._retry_with_backoff("SAF sync", send_sync)
+            self.metrics.latencies.append(time.perf_counter() - t0)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:
@@ -475,7 +480,9 @@ class SimulatedEdgeDevice:
                     response.raise_for_status()
                 return response
 
+            t0 = time.perf_counter()
             response = await self._retry_with_backoff("config poll", poll_config)
+            self.metrics.latencies.append(time.perf_counter() - t0)
             self.metrics.total_requests += 1
 
             if response.status_code == 200:

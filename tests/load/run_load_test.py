@@ -138,6 +138,17 @@ def print_results(results: LoadTestResults):
     if results.commands_received > 0:
         print(f"Commands Received:    {results.commands_received:,}")
 
+    # Latency percentiles
+    if results.request_latencies:
+        p50 = results.latency_percentile(0.50)
+        p95 = results.latency_percentile(0.95)
+        p99 = results.latency_percentile(0.99)
+        print()
+        print(f"Latency p50:          {p50:.1f}ms")
+        print(f"Latency p95:          {p95:.1f}ms")
+        print(f"Latency p99:          {p99:.1f}ms")
+        print(f"Latency samples:      {len(results.request_latencies):,}")
+
     print("=" * 80)
 
     # Check against targets
@@ -147,6 +158,16 @@ def print_results(results: LoadTestResults):
     # Error rate target: < 1%
     error_pass = results.error_rate < 1.0
     print(f"Error Rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+
+    # Latency target: p95 < 500ms
+    if results.request_latencies:
+        p95 = results.latency_percentile(0.95)
+        latency_pass = p95 < 500.0
+        print(f"Latency p95 < 500ms:  {'✅ PASS' if latency_pass else '❌ FAIL'} ({p95:.1f}ms)")
+
+        p99 = results.latency_percentile(0.99)
+        p99_pass = p99 < 1000.0
+        print(f"Latency p99 < 1000ms: {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.1f}ms)")
 
     # Throughput target (scenario-specific)
     if results.scenario == "heartbeat":
@@ -161,6 +182,18 @@ def print_results(results: LoadTestResults):
         throughput_target = 1000
         throughput_pass = tx_per_sec >= throughput_target * 0.9
         print(f"Transaction Rate >= {throughput_target} tx/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({tx_per_sec:.1f} tx/s)")
+
+    elif results.scenario == "config_poll":
+        # Target: config polling should sustain reasonable rate
+        throughput_target = results.num_devices / 60  # ~1 poll per device per minute
+        throughput_pass = results.requests_per_second >= throughput_target * 0.9
+        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+
+    elif results.scenario == "cloud_commands":
+        # Target: command delivery within heartbeat cycle
+        throughput_target = results.num_devices / 30  # heartbeat every 30s
+        throughput_pass = results.requests_per_second >= throughput_target * 0.9
+        print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
 
     print("=" * 80)
 
@@ -278,15 +311,23 @@ async def run_all_scenarios(
         print("\n" + "=" * 80)
         print("ALL SCENARIOS SUMMARY")
         print("=" * 80)
+        print(f"{'Scenario':<22} {'Devices':>7} {'Requests':>9} {'Err%':>6} {'req/s':>7} {'p50ms':>7} {'p95ms':>7} {'p99ms':>7}  Status")
+        print("-" * 80)
 
         for results in all_results:
-            pass_fail = "✅ PASS" if results.error_rate < 1.0 else "❌ FAIL"
+            pass_fail = "✅" if results.error_rate < 1.0 else "❌"
+            p50 = f"{results.latency_percentile(0.50):.0f}" if results.request_latencies else "  —"
+            p95 = f"{results.latency_percentile(0.95):.0f}" if results.request_latencies else "  —"
+            p99 = f"{results.latency_percentile(0.99):.0f}" if results.request_latencies else "  —"
             print(
-                f"{results.scenario:20s} | "
-                f"{results.num_devices:4d} devices | "
-                f"{results.total_requests:7,} req | "
-                f"{results.error_rate:5.2f}% err | "
-                f"{pass_fail}"
+                f"{results.scenario:<22} "
+                f"{results.num_devices:>7} "
+                f"{results.total_requests:>9,} "
+                f"{results.error_rate:>6.2f} "
+                f"{results.requests_per_second:>7.1f} "
+                f"{p50:>7} "
+                f"{p95:>7} "
+                f"{p99:>7}  {pass_fail}"
             )
 
         print("=" * 80)

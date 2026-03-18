@@ -51,9 +51,17 @@ class LoadTestResults:
         if self.total_requests > 0:
             self.error_rate = (self.total_errors / self.total_requests) * 100
 
+    def latency_percentile(self, p: float) -> float:
+        """Return the p-th percentile latency in milliseconds (0–1 scale)."""
+        if not self.request_latencies:
+            return 0.0
+        s = sorted(self.request_latencies)
+        idx = int(len(s) * p)
+        return s[min(idx, len(s) - 1)] * 1000
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        d = {
             "scenario": self.scenario,
             "num_devices": self.num_devices,
             "duration_seconds": self.duration_seconds,
@@ -70,6 +78,12 @@ class LoadTestResults:
             "commands_received": self.commands_received,
             "success_rate": f"{100 - self.error_rate:.2f}%",
         }
+        if self.request_latencies:
+            d["latency_p50_ms"] = f"{self.latency_percentile(0.50):.1f}"
+            d["latency_p95_ms"] = f"{self.latency_percentile(0.95):.1f}"
+            d["latency_p99_ms"] = f"{self.latency_percentile(0.99):.1f}"
+            d["latency_samples"] = len(self.request_latencies)
+        return d
 
 
 class LoadTestOrchestrator:
@@ -276,6 +290,7 @@ class LoadTestOrchestrator:
                 results.commands_received += metrics.commands_received
                 results.total_requests += metrics.total_requests
                 results.total_errors += metrics.total_errors
+                results.request_latencies.extend(metrics.latencies)
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -492,10 +507,11 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 1: Concurrent Device Heartbeats."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="heartbeat",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -504,10 +520,11 @@ class ScenarioRunner:
         num_devices: int = 500
     ) -> LoadTestResults:
         """Run Scenario 2: Store-and-Forward Bulk Sync."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="saf_sync",
-            num_devices=num_devices,
-            duration_seconds=300  # Sync is one-time, not continuous
+            duration_seconds=300,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -517,10 +534,11 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 3: Config Rollout."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="config_poll",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -529,10 +547,11 @@ class ScenarioRunner:
         num_devices: int = 1000
     ) -> LoadTestResults:
         """Run Scenario 4: Model Distribution."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="model_update",
-            num_devices=num_devices,
-            duration_seconds=300  # Model update is one-time
+            duration_seconds=300,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -542,10 +561,11 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 5: Cloud Command Distribution."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="cloud_commands",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -555,8 +575,9 @@ class ScenarioRunner:
         duration_seconds: int = 300
     ) -> LoadTestResults:
         """Run Scenario 6: Concurrent Workflow Execution."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="workflow_execution",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
