@@ -37,6 +37,11 @@ class LoadTestResults:
     config_failures: int = 0
     commands_received: int = 0
 
+    # Error breakdown (thundering herd / capacity analysis)
+    errors_5xx: int = 0      # Server errors — pool exhaustion, crashes
+    errors_4xx: int = 0      # Client errors — auth, bad request
+    errors_timeout: int = 0  # Network timeouts
+
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
 
@@ -82,7 +87,11 @@ class LoadTestResults:
             d["latency_p50_ms"] = f"{self.latency_percentile(0.50):.1f}"
             d["latency_p95_ms"] = f"{self.latency_percentile(0.95):.1f}"
             d["latency_p99_ms"] = f"{self.latency_percentile(0.99):.1f}"
+            d["latency_max_ms"] = f"{max(self.request_latencies) * 1000:.1f}"
             d["latency_samples"] = len(self.request_latencies)
+        d["errors_5xx"] = self.errors_5xx
+        d["errors_4xx"] = self.errors_4xx
+        d["errors_timeout"] = self.errors_timeout
         return d
 
 
@@ -227,23 +236,44 @@ class LoadTestOrchestrator:
         # Start timer
         start_time = time.time()
 
-        # Run scenario on all devices concurrently
-        logger.info(f"Running scenario {scenario} on {num_devices} devices...")
+        # For thundering herd: attach a shared asyncio.Event to every device.
+        # Devices prepare their payload then block on the event; the orchestrator
+        # releases all of them at once after a short prep window.
+        go_event = None
+        if scenario == "thundering_herd":
+            go_event = asyncio.Event()
+            for device in self._devices:
+                device._go_event = go_event
 
-        tasks = [
-            device.run_scenario(scenario, duration_seconds)
+        # Run scenario on all devices concurrently (as tasks so the event loop
+        # can interleave them before the go_event fires)
+        logger.info(f"Running scenario {scenario} on {num_devices} devices...")
+        device_tasks = [
+            asyncio.create_task(device.run_scenario(scenario, duration_seconds))
             for device in self._devices
         ]
 
-        # Progress reporting task
+        all_tasks = list(device_tasks)
         if progress_callback:
-            progress_task = asyncio.create_task(
+            all_tasks.append(asyncio.create_task(
                 self._report_progress(progress_callback, duration_seconds)
+            ))
+
+        if go_event is not None:
+            # Give all devices time to reach their wait point (prep phase)
+            prep_seconds = min(5, max(2, num_devices // 200))
+            logger.info(
+                f"Thundering herd prep window: {prep_seconds}s "
+                f"(devices generating transactions...)"
             )
-            tasks.append(progress_task)
+            await asyncio.sleep(prep_seconds)
+            logger.info(
+                f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
+            )
+            go_event.set()
 
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*all_tasks)
         except Exception as e:
             logger.error(f"Error during load test: {e}")
 
@@ -290,6 +320,9 @@ class LoadTestOrchestrator:
                 results.commands_received += metrics.commands_received
                 results.total_requests += metrics.total_requests
                 results.total_errors += metrics.total_errors
+                results.errors_5xx += metrics.errors_5xx
+                results.errors_4xx += metrics.errors_4xx
+                results.errors_timeout += metrics.errors_timeout
                 results.request_latencies.extend(metrics.latencies)
 
     async def _register_devices(self, idempotent: bool = True):

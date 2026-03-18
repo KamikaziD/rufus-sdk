@@ -53,6 +53,9 @@ class DeviceMetrics:
     command_failures: int = 0
     total_requests: int = 0
     total_errors: int = 0
+    errors_5xx: int = 0      # Server errors (pool exhausted, crash, etc.)
+    errors_4xx: int = 0      # Client errors (auth, bad request)
+    errors_timeout: int = 0  # Network timeouts
     latencies: List[float] = field(default_factory=list)  # per-request latency in seconds
 
 
@@ -136,6 +139,7 @@ class SimulatedEdgeDevice:
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
                 last_exception = e
                 self.metrics.total_errors += 1
+                self.metrics.errors_timeout += 1
 
                 if attempt < MAX_RETRIES - 1:
                     # Add jitter to prevent thundering herd
@@ -214,6 +218,8 @@ class SimulatedEdgeDevice:
                 await self._heartbeat_scenario(duration_seconds)
             elif scenario == "saf_sync":
                 await self._saf_sync_scenario()
+            elif scenario == "thundering_herd":
+                await self._thundering_herd_scenario()
             elif scenario == "config_poll":
                 await self._config_polling_scenario(duration_seconds)
             elif scenario == "model_update":
@@ -307,6 +313,10 @@ class SimulatedEdgeDevice:
                     f"HTTP {response.status_code}"
                 )
                 self.metrics.total_errors += 1
+                if 500 <= response.status_code < 600:
+                    self.metrics.errors_5xx += 1
+                elif 400 <= response.status_code < 500:
+                    self.metrics.errors_4xx += 1
                 return False
 
         except Exception as e:
@@ -428,12 +438,56 @@ class SimulatedEdgeDevice:
                     f"HTTP {response.status_code}"
                 )
                 self.metrics.total_errors += 1
+                if 500 <= response.status_code < 600:
+                    self.metrics.errors_5xx += 1
+                elif 400 <= response.status_code < 500:
+                    self.metrics.errors_4xx += 1
                 return False
 
         except Exception as e:
             logger.error(f"Sync error for {self.config.device_id}: {e}", exc_info=True)
             self.metrics.total_errors += 1
             return False
+
+    # -------------------------------------------------------------------------
+    # Thundering Herd: synchronized SAF sync burst
+    # -------------------------------------------------------------------------
+
+    async def _thundering_herd_scenario(self):
+        """
+        Synchronized SAF sync burst — all devices fire at exactly the same moment.
+
+        Phase 1 (prep): generate transactions locally (no network).
+        Phase 2 (wait): block on the orchestrator's go_event barrier.
+        Phase 3 (fire): send the sync request immediately when released.
+
+        The orchestrator sets _go_event after all devices have reached phase 2,
+        ensuring a true simultaneous burst rather than a gradual ramp.
+        """
+        # Phase 1: prepare transactions — pure CPU, no network
+        num_transactions = random.randint(10, self.config.saf_batch_size)
+        transactions = [self._generate_transaction(i) for i in range(num_transactions)]
+        logger.debug(
+            f"Device {self.config.device_id} prepared {num_transactions} transactions, waiting for go signal"
+        )
+
+        # Phase 2: wait for coordinated release from orchestrator
+        go_event: Optional[asyncio.Event] = getattr(self, "_go_event", None)
+        if go_event is not None:
+            await go_event.wait()
+
+        # Phase 3: fire immediately — this is the thundering herd moment
+        logger.debug(f"Device {self.config.device_id} FIRING thundering herd sync")
+        success = await self._sync_batch(transactions)
+
+        if success:
+            self.metrics.transactions_synced += len(transactions)
+        else:
+            self.metrics.sync_failures += 1
+
+        # Report metrics
+        if self.metrics_callback:
+            await self.metrics_callback(self.config.device_id, self.metrics)
 
     # -------------------------------------------------------------------------
     # Scenario 3: Config Polling
@@ -504,6 +558,10 @@ class SimulatedEdgeDevice:
                     f"HTTP {response.status_code}"
                 )
                 self.metrics.total_errors += 1
+                if 500 <= response.status_code < 600:
+                    self.metrics.errors_5xx += 1
+                elif 400 <= response.status_code < 500:
+                    self.metrics.errors_4xx += 1
                 return False
 
         except Exception as e:

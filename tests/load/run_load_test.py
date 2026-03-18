@@ -138,15 +138,31 @@ def print_results(results: LoadTestResults):
     if results.commands_received > 0:
         print(f"Commands Received:    {results.commands_received:,}")
 
+    # Error breakdown
+    if results.total_errors > 0:
+        print()
+        print(f"Error Breakdown:")
+        if results.errors_5xx > 0:
+            pct = results.errors_5xx / results.total_requests * 100 if results.total_requests else 0
+            print(f"  5xx (server):       {results.errors_5xx:,}  ({pct:.1f}%)  ← pool exhaustion / crash")
+        if results.errors_4xx > 0:
+            pct = results.errors_4xx / results.total_requests * 100 if results.total_requests else 0
+            print(f"  4xx (client):       {results.errors_4xx:,}  ({pct:.1f}%)")
+        if results.errors_timeout > 0:
+            pct = results.errors_timeout / results.total_requests * 100 if results.total_requests else 0
+            print(f"  Timeout:            {results.errors_timeout:,}  ({pct:.1f}%)")
+
     # Latency percentiles
     if results.request_latencies:
         p50 = results.latency_percentile(0.50)
         p95 = results.latency_percentile(0.95)
         p99 = results.latency_percentile(0.99)
+        p_max = max(results.request_latencies) * 1000
         print()
         print(f"Latency p50:          {p50:.1f}ms")
         print(f"Latency p95:          {p95:.1f}ms")
         print(f"Latency p99:          {p99:.1f}ms")
+        print(f"Latency max:          {p_max:.1f}ms")
         print(f"Latency samples:      {len(results.request_latencies):,}")
 
     print("=" * 80)
@@ -194,6 +210,20 @@ def print_results(results: LoadTestResults):
         throughput_target = results.num_devices / 30  # heartbeat every 30s
         throughput_pass = results.requests_per_second >= throughput_target * 0.9
         print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+
+    elif results.scenario == "thundering_herd":
+        # All devices fired simultaneously — target: ≥ 99% success
+        success_count = results.transactions_synced
+        total_devices = results.num_devices
+        success_rate = success_count / total_devices * 100 if total_devices else 0
+        herd_pass = success_rate >= 99.0
+        print(f"Success Rate >= 99%:  {'✅ PASS' if herd_pass else '❌ FAIL'} ({success_rate:.1f}%  {success_count}/{total_devices} devices)")
+        print(f"5xx errors:           {results.errors_5xx:,}  (pool/server limit)")
+        print(f"Timeouts:             {results.errors_timeout:,}")
+        if results.request_latencies:
+            p_max = max(results.request_latencies) * 1000
+            tail_pass = p_max < 5000
+            print(f"Max latency < 5s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
 
     print("=" * 80)
 
@@ -395,7 +425,8 @@ Scenarios:
             "config_poll",
             "model_update",
             "cloud_commands",
-            "workflow_execution"
+            "workflow_execution",
+            "thundering_herd",
         ],
         help="Test scenario to run"
     )
