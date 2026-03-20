@@ -155,8 +155,10 @@ menu_load() {
     echo "  2) SAF sync"
     echo "  3) Config polling"
     echo "  4) Cloud commands"
-    echo "  5) Thundering herd"
-    echo "  6) All scenarios in sequence"
+    echo "  5) Thundering herd  (SAF burst — all devices simultaneous)"
+    echo "  6) WASM steps       (sustained throughput, real bridge dispatch)"
+    echo "  7) WASM thundering herd  (local burst — target p99 < 50ms)"
+    echo "  8) All scenarios in sequence"
     echo "  b) Back"
     echo
     read -rp "  Choice: " choice
@@ -191,6 +193,19 @@ menu_load() {
             run "python tests/load/run_load_test.py --scenario thundering_herd --devices ${devices} --workers ${workers}"
             ;;
         6)
+            devices=$(prompt_devices 100)
+            duration=$(prompt_duration 300)
+            run "python tests/load/run_load_test.py --scenario wasm_steps --devices ${devices} --duration ${duration} --workers ${workers}"
+            ;;
+        7)
+            echo
+            info "WASM dispatch is local — no HTTP, no DB. Expected p99 < 50ms."
+            info "Contrast: SAF thundering herd p50 is typically ~6,000ms."
+            echo
+            devices=$(prompt_devices 1000)
+            run "python tests/load/run_load_test.py --scenario wasm_thundering_herd --devices ${devices} --workers ${workers}"
+            ;;
+        8)
             devices=$(prompt_devices 100)
             run "python tests/load/run_load_test.py --all --devices ${devices} --workers ${workers}"
             ;;
