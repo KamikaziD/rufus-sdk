@@ -97,16 +97,26 @@ class SimulatedEdgeDevice:
         self._current_config_etag: Optional[str] = None
         self._pending_transactions: List[Dict[str, Any]] = []
 
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Lazily create the HTTP client on first use.
+
+        Defers allocation until a scenario actually makes an HTTP call.
+        Pure-local scenarios (wasm_thundering_herd) never call this, so
+        no client objects are created — critical for 100k-device runs.
+        """
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=60.0,
+                headers={
+                    "X-API-Key": self.config.api_key,
+                    "X-Device-ID": self.config.device_id,
+                    "Content-Type": "application/json",
+                }
+            )
+        return self._http_client
+
     async def initialize(self):
-        """Initialize HTTP client."""
-        self._http_client = httpx.AsyncClient(
-            timeout=60.0,  # Increased for load testing
-            headers={
-                "X-API-Key": self.config.api_key,
-                "X-Device-ID": self.config.device_id,
-                "Content-Type": "application/json",
-            }
-        )
+        """Record device as ready. HTTP client is created lazily on first use."""
         logger.info(f"Device {self.config.device_id} initialized")
 
     async def close(self):
@@ -289,7 +299,7 @@ class SimulatedEdgeDevice:
 
             # Retry heartbeat with exponential backoff
             async def send_heartbeat():
-                response = await self._http_client.post(
+                response = await self._get_http_client().post(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/heartbeat",
                     json={
                         "device_status": "online",
@@ -419,7 +429,7 @@ class SimulatedEdgeDevice:
         try:
             # Retry sync with exponential backoff
             async def send_sync():
-                response = await self._http_client.post(
+                response = await self._get_http_client().post(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/sync",
                     json={
                         "transactions": transactions,
@@ -536,7 +546,7 @@ class SimulatedEdgeDevice:
 
             # Retry config poll with exponential backoff
             async def poll_config():
-                response = await self._http_client.get(
+                response = await self._get_http_client().get(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/config",
                     headers=headers
                 )
