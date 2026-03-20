@@ -448,15 +448,9 @@ class LoadTestOrchestrator:
                                 existing_api_key = data.get("api_key")
                                 if existing_api_key:
                                     device.config.api_key = existing_api_key
-                                    await device._http_client.aclose()
-                                    device._http_client = httpx.AsyncClient(
-                                        timeout=60.0,
-                                        headers={
-                                            "X-API-Key": device.config.api_key,
-                                            "X-Device-ID": device.config.device_id,
-                                            "Content-Type": "application/json",
-                                        }
-                                    )
+                                    if device._http_client:
+                                        await device._http_client.aclose()
+                                    device._http_client = None  # Recreate lazily with new api_key
                                     logger.debug(
                                         f"Device {device.config.device_id} already registered (using existing)")
                                     return True
@@ -483,15 +477,9 @@ class LoadTestOrchestrator:
                         if response.status_code == 200:
                             data = response.json()
                             device.config.api_key = data.get("api_key", device.config.api_key)
-                            await device._http_client.aclose()
-                            device._http_client = httpx.AsyncClient(
-                                timeout=60.0,
-                                headers={
-                                    "X-API-Key": device.config.api_key,
-                                    "X-Device-ID": device.config.device_id,
-                                    "Content-Type": "application/json",
-                                }
-                            )
+                            if device._http_client:
+                                await device._http_client.aclose()
+                            device._http_client = None  # Recreate lazily with new api_key
                             logger.debug(f"Registered device {device.config.device_id}")
                             return True
                         elif response.status_code == 400 and "already registered" in response.text:
