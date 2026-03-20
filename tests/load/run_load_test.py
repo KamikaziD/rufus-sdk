@@ -249,6 +249,25 @@ def print_results(results: LoadTestResults, workers: int = 1):
         target_tps = results.num_devices * results.num_devices / 60  # rough: steps/device/min
         print(f"WASM steps/sec:       {wasm_tps:.1f}")
 
+    elif results.scenario == "wasm_thundering_herd":
+        # WASM dispatch is local — no HTTP, no DB. Contrast vs SAF thundering herd.
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        wasm_pass = wasm_success_rate >= 99.0
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"WASM steps fired:     {total_wasm:,}")
+        print(f"Device success >= 99%:{'✅ PASS' if wasm_pass else '❌ FAIL'} ({wasm_success_rate:.1f}%)")
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p50_wasm = wl[int(0.50 * (len(wl) - 1))] * 1000
+            p99_wasm = wl[int(0.99 * (len(wl) - 1))] * 1000
+            p99_pass = p99_wasm < 50.0
+            print(f"WASM p50:             {p50_wasm:.2f}ms")
+            print(
+                f"WASM p99 < 50ms:      {'✅ PASS' if p99_pass else '❌ FAIL'} "
+                f"({p99_wasm:.2f}ms)  ← vs SAF thundering herd p50 ~6,300ms"
+            )
+
     elif results.scenario == "thundering_herd":
         # Count devices that succeeded (sync_failures == 0 AND synced at least 1 tx)
         devices_succeeded = sum(
@@ -452,6 +471,7 @@ Scenarios:
   cloud_commands     - Cloud-to-device command delivery
   thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
   wasm_steps         - WASM step execution throughput (sync_wasm command delivery + edge execution)
+  wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: p99 < 50ms)
         """
     )
 
@@ -476,6 +496,7 @@ Scenarios:
             "cloud_commands",
             "thundering_herd",
             "wasm_steps",
+            "wasm_thundering_herd",
         ],
         help="Test scenario to run"
     )

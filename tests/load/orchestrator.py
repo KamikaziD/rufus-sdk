@@ -261,7 +261,7 @@ class LoadTestOrchestrator:
         # Devices prepare their payload then block on the event; the orchestrator
         # releases all of them at once after a short prep window.
         go_event = None
-        if scenario == "thundering_herd":
+        if scenario in ("thundering_herd", "wasm_thundering_herd"):
             go_event = asyncio.Event()
             for device in self._devices:
                 device._go_event = go_event
@@ -283,14 +283,26 @@ class LoadTestOrchestrator:
         if go_event is not None:
             # Give all devices time to reach their wait point (prep phase)
             prep_seconds = min(5, max(2, num_devices // 200))
-            logger.info(
-                f"Thundering herd prep window: {prep_seconds}s "
-                f"(devices generating transactions...)"
-            )
+            if scenario == "wasm_thundering_herd":
+                logger.info(
+                    f"WASM thundering herd prep window: {prep_seconds}s "
+                    f"(devices warming WASM resolver...)"
+                )
+            else:
+                logger.info(
+                    f"Thundering herd prep window: {prep_seconds}s "
+                    f"(devices generating transactions...)"
+                )
             await asyncio.sleep(prep_seconds)
-            logger.info(
-                f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
-            )
+            if scenario == "wasm_thundering_herd":
+                logger.info(
+                    f"WASM THUNDERING HERD: Releasing {num_devices} simultaneous "
+                    f"local WASM dispatches NOW (target: p99 < 50ms)"
+                )
+            else:
+                logger.info(
+                    f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
+                )
             go_event.set()
 
         try:
@@ -622,6 +634,24 @@ class ScenarioRunner:
         return await orchestrator.run_scenario(
             scenario="wasm_steps",
             duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_wasm_thundering_herd_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 1000,
+    ) -> LoadTestResults:
+        """Run WASM Thundering Herd: coordinated burst of local WASM dispatches.
+
+        All devices fire simultaneously (go_event barrier) — no HTTP, no DB write.
+        Expected: p99 < 50ms  vs  SAF thundering herd p50 ~6s.
+        This is the headline proof that feat/wasi-bridge delivers on its promise.
+        """
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="wasm_thundering_herd",
+            duration_seconds=60,  # Single burst — duration is just the timeout guard
             skip_device_setup=True,
         )
 
