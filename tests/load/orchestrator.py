@@ -152,14 +152,23 @@ class LoadTestOrchestrator:
         self._devices: List[SimulatedEdgeDevice] = []
         self._metrics_lock = asyncio.Lock()
         self._aggregated_metrics: Dict[str, DeviceMetrics] = {}
+        self._devices_registered: bool = False  # True only after _register_devices()
 
-    async def setup_devices(self, num_devices: int, cleanup_first: bool = True):
+    async def setup_devices(
+        self,
+        num_devices: int,
+        cleanup_first: bool = True,
+        register_with_server: bool = True,
+    ):
         """
         Setup devices for load testing (shared across scenarios).
 
         Args:
             num_devices: Number of devices to create
             cleanup_first: Whether to cleanup existing devices before setup
+            register_with_server: Whether to register devices with the control plane.
+                Set False for local-only scenarios (wasm_thundering_herd) to skip
+                the N registration + N cleanup HTTP round-trips entirely.
         """
         logger.info(f"Setting up {num_devices} devices for load testing...")
 
@@ -188,14 +197,22 @@ class LoadTestOrchestrator:
         logger.info(f"Initializing {num_devices} HTTP clients...")
         await asyncio.gather(*[device.initialize() for device in self._devices])
 
-        # Clean up any existing load test devices (if requested)
-        if cleanup_first:
-            logger.info(f"Cleaning up existing load test devices...")
-            await self._cleanup_devices()
+        if register_with_server:
+            # Clean up any existing load test devices (if requested)
+            if cleanup_first:
+                logger.info(f"Cleaning up existing load test devices...")
+                await self._cleanup_devices()
 
-        # Register devices with control plane (idempotent)
-        logger.info(f"Registering {num_devices} devices with control plane...")
-        await self._register_devices(idempotent=True)
+            # Register devices with control plane (idempotent)
+            logger.info(f"Registering {num_devices} devices with control plane...")
+            await self._register_devices(idempotent=True)
+            self._devices_registered = True
+        else:
+            logger.info(
+                f"Skipping server registration for {num_devices} devices "
+                f"(local-only scenario — no HTTP calls will be made)."
+            )
+            self._devices_registered = False
 
         logger.info(f"Device setup complete: {num_devices} devices ready")
 
@@ -203,13 +220,16 @@ class LoadTestOrchestrator:
         """Teardown devices after all scenarios complete."""
         logger.info("Tearing down devices...")
 
-        # Close HTTP clients
+        # Close HTTP clients (only those that were lazily created)
         if self._devices:
             await asyncio.gather(*[device.close() for device in self._devices])
 
-        # Cleanup from server
-        logger.info("Cleaning up devices from server...")
-        await self._cleanup_devices()
+        # Only hit the server if we actually registered devices there
+        if self._devices_registered:
+            logger.info("Cleaning up devices from server...")
+            await self._cleanup_devices()
+        else:
+            logger.info("Skipping server cleanup — devices were never registered.")
 
         logger.info("Device teardown complete")
 
@@ -251,8 +271,13 @@ class LoadTestOrchestrator:
             raise ValueError(
                 "No devices available. Call setup_devices() first or set skip_device_setup=False")
         elif not skip_device_setup:
-            # Single scenario mode - setup and cleanup
-            await self.setup_devices(num_devices, cleanup_first=True)
+            # Single scenario mode — skip server registration for local-only scenarios
+            _local_only = scenario in ("wasm_thundering_herd",)
+            await self.setup_devices(
+                num_devices,
+                cleanup_first=not _local_only,
+                register_with_server=not _local_only,
+            )
 
         # Start timer
         start_time = time.time()
