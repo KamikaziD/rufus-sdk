@@ -335,8 +335,13 @@ async def run_single_scenario(
     )
 
     try:
-        # Setup devices for this scenario
-        await orchestrator.setup_devices(num_devices, cleanup_first=True)
+        # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
+        _local_only = scenario in ("wasm_thundering_herd",)
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=not _local_only,
+            register_with_server=not _local_only,
+        )
 
         # Run scenario with existing devices
         results = await orchestrator.run_scenario(
