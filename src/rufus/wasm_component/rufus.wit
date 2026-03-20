@@ -58,6 +58,22 @@ interface vault {
 }
 
 // ---------------------------------------------------------------------------
+// Brain Pool — batch execution for the Sovereign Dispatcher
+// ---------------------------------------------------------------------------
+
+/// Batch execution interface used by the Rust SovereignDispatcher.
+///
+/// Allows a pool of pre-warmed WASM instances to process a burst of sagas
+/// in parallel, returning results in input order.
+interface brain-pool {
+    /// Process a list of saga payloads in parallel across the instance pool.
+    ///
+    /// sagas: JSON-encoded step payloads to execute concurrently.
+    /// Returns: ok(list of JSON result strings) or err(human-readable error).
+    execute-batch: func(sagas: list<string>) -> result<list<string>, string>;
+}
+
+// ---------------------------------------------------------------------------
 // World — the Brain component's full import/export surface
 // ---------------------------------------------------------------------------
 
@@ -79,4 +95,7 @@ world rufus-node {
     ///
     /// Returns: ok(JSON result string) or err(human-readable error message).
     export execute-saga: func(saga-id: string, payload: string) -> result<string, string>;
+
+    /// Batch execution for the Sovereign Dispatcher (parallel instance pool).
+    export brain-pool;
 }

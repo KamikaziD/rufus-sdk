@@ -12,6 +12,8 @@ without any code changes in the workflow engine itself.
 
 from __future__ import annotations
 
+import concurrent.futures
+import os
 import sys
 from typing import Protocol, runtime_checkable
 
@@ -41,6 +43,22 @@ class WasmBridgeProtocol(Protocol):
         """
         ...
 
+    def execute_batch(
+        self,
+        binary: bytes,
+        states_json: list,
+        step_name: str,
+    ) -> list:
+        """Execute N states through the component. Default: sequential loop.
+
+        Override in platform bridges that support parallel execution
+        (e.g. NativeWasmBridge with a dedicated ThreadPoolExecutor).
+
+        Returns:
+            List of JSON result strings, one per input state, in order.
+        """
+        return [self.execute_component(binary, s, step_name) for s in states_json]
+
 
 # ---------------------------------------------------------------------------
 # Native CPython implementation (wasmtime via ComponentStepRuntime)
@@ -63,6 +81,108 @@ class NativeWasmBridge:
             ComponentStepRuntime,
         )
         return ComponentStepRuntime._call_component(binary, state_json, step_name)
+
+    def execute_batch(
+        self,
+        binary: bytes,
+        states_json: list,
+        step_name: str,
+    ) -> list:
+        """Parallel batch execution via a sized ThreadPoolExecutor.
+
+        Each state is dispatched to a separate thread so N concurrent
+        wasmtime calls run simultaneously instead of sequentially.
+        Falls back to the sovereign-dispatcher Rust binary when available.
+        """
+        from rufus.implementations.execution.component_runtime import (
+            ComponentStepRuntime,
+        )
+        _sovereign = _find_sovereign_dispatcher()
+        if _sovereign is not None:
+            return _run_sovereign_dispatcher(_sovereign, binary, states_json, step_name)
+        max_workers = os.cpu_count() or 4
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            return list(pool.map(
+                lambda s: ComponentStepRuntime._call_component(binary, s, step_name),
+                states_json,
+            ))
+
+
+# ---------------------------------------------------------------------------
+# Sovereign Dispatcher helpers (Rust subprocess fallback)
+# ---------------------------------------------------------------------------
+
+def _find_sovereign_dispatcher():
+    """Return path to sovereign-dispatcher binary, or None if unavailable."""
+    import pathlib
+    import shutil
+
+    env_path = os.environ.get("SOVEREIGN_DISPATCHER_PATH")
+    if env_path:
+        p = pathlib.Path(env_path)
+        if p.is_file():
+            return p
+
+    # Relative path from this file: ../../../../src/rufus/wasm_component/sovereign_dispatcher/target/release/sovereign-dispatcher
+    candidate = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "rufus"
+        / "wasm_component"
+        / "sovereign_dispatcher"
+        / "target"
+        / "release"
+        / "sovereign-dispatcher"
+    )
+    if candidate.is_file():
+        return candidate
+
+    found = shutil.which("sovereign-dispatcher")
+    if found:
+        return pathlib.Path(found)
+
+    return None
+
+
+def _get_or_write_wasm_cache(wasm_hash: str, binary: bytes):
+    """Write WASM binary to /tmp/rufus_wasm_cache/<hash>.wasm and return path."""
+    import pathlib
+    cache_dir = pathlib.Path("/tmp/rufus_wasm_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    wasm_path = cache_dir / f"{wasm_hash}.wasm"
+    if not wasm_path.exists():
+        wasm_path.write_bytes(binary)
+    return wasm_path
+
+
+def _run_sovereign_dispatcher(dispatcher_path, binary: bytes, states_json: list, step_name: str) -> list:
+    """Invoke the Rust sovereign-dispatcher subprocess for batch WASM execution."""
+    import hashlib
+    import json
+    import subprocess
+
+    wasm_hash = hashlib.sha256(binary).hexdigest()
+    wasm_path = _get_or_write_wasm_cache(wasm_hash, binary)
+
+    payload = json.dumps({
+        "wasm_path": str(wasm_path),
+        "step_name": step_name,
+        "sagas": [{"id": str(i), "payload": s} for i, s in enumerate(states_json)],
+    })
+
+    proc = subprocess.run(
+        [str(dispatcher_path)],
+        input=payload.encode(),
+        capture_output=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"sovereign-dispatcher exited {proc.returncode}: {proc.stderr[:200]!r}"
+        )
+    result = json.loads(proc.stdout)
+    if result.get("error"):
+        raise RuntimeError(f"sovereign-dispatcher error: {result['error']}")
+    return result["results"]
 
 
 # ---------------------------------------------------------------------------

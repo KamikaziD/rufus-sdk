@@ -266,6 +266,33 @@ class LoadTestOrchestrator:
             for device in self._devices:
                 device._go_event = go_event
 
+        # For wasm_thundering_herd: build ONE shared runtime, warm it up once,
+        # then inject it into every device so they skip per-device _setup_wasm_runtime()
+        # and the N redundant warmup resolve calls.
+        # At 100k devices this avoids creating 100k identical resolver/bridge/runtime
+        # objects and eliminates 100k sequential SQLite-style resolve coroutines.
+        if scenario == "wasm_thundering_herd" and self._devices:
+            probe = self._devices[0]
+            probe._setup_wasm_runtime()
+            if probe._wasm_runtime is not None:
+                # Warm the shared resolver once
+                try:
+                    await probe._wasm_runtime._resolver.resolve(probe._wasm_hash)
+                except Exception:
+                    pass
+                shared_runtime = probe._wasm_runtime
+                shared_config = probe._wasm_config
+                shared_hash = probe._wasm_hash
+                logger.info(
+                    f"Shared WASM runtime ready (hash={shared_hash[:16]}…). "
+                    f"Injecting into {len(self._devices):,} devices — "
+                    f"skipping {len(self._devices):,} per-device warmup resolves."
+                )
+                for device in self._devices[1:]:
+                    device._wasm_runtime = shared_runtime
+                    device._wasm_config = shared_config
+                    device._wasm_hash = shared_hash
+
         # Run scenario on all devices concurrently (as tasks so the event loop
         # can interleave them before the go_event fires)
         logger.info(f"Running scenario {scenario} on {num_devices} devices...")

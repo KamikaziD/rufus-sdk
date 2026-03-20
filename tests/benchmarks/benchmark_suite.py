@@ -1021,6 +1021,89 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
     except ImportError:
         sec.note("aiosqlite not installed — skipping full chain benchmark")
 
+    # ------------------------------------------------------------------
+    # 12f: execute_batch vs 5× execute — event-loop round-trip savings
+    #      Measures the overhead reduction from collapsing N sequential
+    #      run_in_executor calls into a single batch dispatch.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite as _aiosqlite2
+        import hashlib as _hashlib2
+
+        batch_n = 5  # steps per batch (fixed; matches wasm_steps_per_sync default)
+        _fake_binary = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 1024
+        _fake_hash = _hashlib2.sha256(_fake_binary).hexdigest()
+
+        async with _aiosqlite2.connect(":memory:") as conn2:
+            await conn2.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn2.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (_fake_hash, _fake_binary),
+            )
+            await conn2.commit()
+
+            from unittest.mock import MagicMock
+
+            wasm_config2 = MagicMock()
+            wasm_config2.wasm_hash = _fake_hash
+            wasm_config2.entrypoint = "execute"
+            wasm_config2.state_mapping = None
+            wasm_config2.timeout_ms = 5000
+            wasm_config2.fallback_on_error = "fail"
+
+            resolver3 = SqliteWasmBinaryResolver(conn2)
+            runtime2 = ComponentStepRuntime(resolver3, bridge=None)
+
+            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            try:
+                batch_iterations = max(5, n // 20)
+
+                # (a) Sequential baseline: batch_n independent execute() calls
+                times_seq = []
+                for _ in range(batch_iterations):
+                    t = time.perf_counter()
+                    for _ in range(batch_n):
+                        await runtime2._dispatch(wasm_config2, state_payload)
+                    times_seq.append(time.perf_counter() - t)
+
+                # (b) Batch: single execute_batch() call for batch_n states
+                times_batch = []
+                for _ in range(batch_iterations):
+                    t = time.perf_counter()
+                    await runtime2.execute_batch(wasm_config2, [state_payload] * batch_n)
+                    times_batch.append(time.perf_counter() - t)
+            finally:
+                ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+        st_seq = _stats(times_seq)
+        st_bat = _stats(times_batch)
+
+        speedup = st_seq["p50_ms"] / st_bat["p50_ms"] if st_bat["p50_ms"] > 0 else float("inf")
+        round_trip_savings = batch_n - 1  # one call instead of batch_n
+
+        sec.add(
+            f"sequential {batch_n}× execute (baseline)",
+            ops_per_sec=st_seq["ops_per_sec"],
+            p95_ms=st_seq["p95_ms"],
+        )
+        sec.add(
+            f"execute_batch ({batch_n} states, 1 round-trip)",
+            ops_per_sec=st_bat["ops_per_sec"],
+            p95_ms=st_bat["p95_ms"],
+        )
+        sec.note(
+            f"Section 12f  execute_batch vs {batch_n}x execute\n"
+            f"  sequential {batch_n}-step:  p50={st_seq['p50_ms']:.3f}ms  p95={st_seq['p95_ms']:.3f}ms\n"
+            f"  batch {batch_n}-step:        p50={st_bat['p50_ms']:.3f}ms  p95={st_bat['p95_ms']:.3f}ms\n"
+            f"  Speedup:            {speedup:.1f}x  (saves {round_trip_savings} event-loop round-trips per device)"
+        )
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping 12f batch overhead benchmark")
+
     return sec
 
 

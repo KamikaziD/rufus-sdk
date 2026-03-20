@@ -201,6 +201,8 @@ menu_load() {
             echo
             info "WASM dispatch is local — no HTTP, no DB. Expected p99 < 50ms."
             info "Contrast: SAF thundering herd p50 is typically ~6,000ms."
+            info "Baseline (pre-Sovereign Dispatcher): p99 = 5,055ms at 50,000 devices."
+            info "Target (post-Sovereign Dispatcher):  p99 < 50ms."
             echo
             devices=$(prompt_devices 1000)
             run "python tests/load/run_load_test.py --scenario wasm_thundering_herd --devices ${devices} --workers ${workers}"

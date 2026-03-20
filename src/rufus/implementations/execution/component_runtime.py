@@ -24,12 +24,33 @@ Native execution uses ``wasmtime.component`` (``pip install wasmtime``).
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
-from typing import Any, Dict, Optional
+import os
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Shared thread-pool executor for batch WASM dispatch.
+#
+# A singleton is intentional: 50,000 devices each with a private
+# ThreadPoolExecutor(max_workers=14) would create 700,000 threads.
+# The singleton keeps the total thread count at cpu_count.
+# ---------------------------------------------------------------------------
+_BATCH_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
+
+
+def _get_batch_executor() -> concurrent.futures.ThreadPoolExecutor:
+    global _BATCH_EXECUTOR
+    if _BATCH_EXECUTOR is None:
+        _BATCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            max_workers=os.cpu_count() or 4,
+            thread_name_prefix="rufus-wasm-batch",
+        )
+    return _BATCH_EXECUTOR
 
 # Component Model magic: first 8 bytes of a .wasm Component
 # Core module:  \x00asm\x01\x00\x00\x00
@@ -83,6 +104,89 @@ class ComponentStepRuntime:
                 f"(hash={wasm_config.wasm_hash})"
             )
             return self._handle_error(wasm_config, RuntimeError(msg))
+
+    async def execute_batch(
+        self,
+        wasm_config,
+        states: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Execute N states through the same WASM component in one event-loop round-trip.
+
+        Resolves and hash-verifies the binary once, then dispatches all states
+        to the batch executor (one run_in_executor call instead of N).
+
+        Returns a list of result dicts in the same order as *states*.
+        Falls back to legacy path for core-module (non-Component) binaries.
+        """
+        if not states:
+            return []
+
+        binary = await self._resolver.resolve(wasm_config.wasm_hash)
+        actual_hash = hashlib.sha256(binary).hexdigest()
+        if actual_hash != wasm_config.wasm_hash:
+            raise RuntimeError(
+                f"WASM binary hash mismatch: expected {wasm_config.wasm_hash}, "
+                f"got {actual_hash}"
+            )
+
+        if not is_component(binary):
+            # Legacy path: run sequentially (core modules have stdin/stdout overhead anyway)
+            return [await self._run_legacy(binary, wasm_config, s) for s in states]
+
+        # Apply state_mapping once per call (same mapping for all states)
+        if wasm_config.state_mapping:
+            mapped_states = [
+                {
+                    wasm_key: s.get(state_key)
+                    for state_key, wasm_key in wasm_config.state_mapping.items()
+                }
+                for s in states
+            ]
+        else:
+            mapped_states = states
+
+        step_name = getattr(wasm_config, "entrypoint", "execute")
+        states_json = [json.dumps(s) for s in mapped_states]
+
+        loop = asyncio.get_event_loop()
+        _bridge = self._bridge
+
+        try:
+            if _bridge is not None:
+                results_json = await loop.run_in_executor(
+                    _get_batch_executor(),
+                    lambda: (
+                        _bridge.execute_batch(binary, states_json, step_name)
+                        if hasattr(_bridge, "execute_batch")
+                        else [_bridge.execute_component(binary, s, step_name) for s in states_json]
+                    ),
+                )
+            else:
+                # Cloud path — wasmtime direct, parallelised in the batch executor
+                results_json = await loop.run_in_executor(
+                    _get_batch_executor(),
+                    lambda: [self._call_component(binary, s, step_name) for s in states_json],
+                )
+        except Exception as exc:
+            return [self._handle_error(wasm_config, exc)] * len(states)
+
+        output: List[Dict[str, Any]] = []
+        for rj in results_json:
+            try:
+                r = json.loads(rj)
+                if isinstance(r, dict):
+                    output.append(r)
+                else:
+                    output.append(self._handle_error(
+                        wasm_config,
+                        RuntimeError(f"Non-dict result: {type(r).__name__}"),
+                    ))
+            except json.JSONDecodeError:
+                output.append(self._handle_error(
+                    wasm_config,
+                    RuntimeError(f"Non-JSON: {rj[:200]!r}"),
+                ))
+        return output
 
     async def _dispatch(self, wasm_config, state_data: Dict[str, Any]) -> Dict[str, Any]:
         binary = await self._resolver.resolve(wasm_config.wasm_hash)

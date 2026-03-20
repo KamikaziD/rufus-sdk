@@ -653,8 +653,13 @@ class SimulatedEdgeDevice:
             This isolates the bridge dispatch overhead from wasmtime itself,
             matching the benchmark sub-section 12c/12e.
             """
+            _RESULT = '{"wasm_ok": true, "risk_score": 42}'
+
             def execute_component(self, binary: bytes, state_json: str, step_name: str) -> str:
-                return '{"wasm_ok": true, "risk_score": 42}'
+                return self._RESULT
+
+            def execute_batch(self, binary: bytes, states_json: list, step_name: str) -> list:
+                return [self._RESULT] * len(states_json)
 
         resolver = _MemoryResolver(self._wasm_binary, self._wasm_hash)
         bridge = _MockWasmBridge()
@@ -734,17 +739,25 @@ class SimulatedEdgeDevice:
             "currency": "USD",
         }
 
-        loop = asyncio.get_event_loop()
-        for _ in range(num_steps):
-            t0 = time.perf_counter()
-            try:
-                await self._wasm_runtime.execute(self._wasm_config, state_data)
+        t0 = time.perf_counter()
+        try:
+            if hasattr(self._wasm_runtime, 'execute_batch'):
+                results = await self._wasm_runtime.execute_batch(
+                    self._wasm_config, [state_data] * num_steps
+                )
                 elapsed = time.perf_counter() - t0
-                self.metrics.wasm_steps_executed += 1
-                self.metrics.wasm_execution_latencies.append(elapsed)
-            except Exception as exc:
-                self.metrics.wasm_step_failures += 1
-                logger.debug(f"Device {self.config.device_id} WASM dispatch error: {exc}")
+                self.metrics.wasm_steps_executed += len(results)
+                per_step = elapsed / num_steps
+                self.metrics.wasm_execution_latencies.extend([per_step] * num_steps)
+            else:
+                for _ in range(num_steps):
+                    st = time.perf_counter()
+                    await self._wasm_runtime.execute(self._wasm_config, state_data)
+                    self.metrics.wasm_steps_executed += 1
+                    self.metrics.wasm_execution_latencies.append(time.perf_counter() - st)
+        except Exception as exc:
+            self.metrics.wasm_step_failures += num_steps
+            logger.debug(f"Device {self.config.device_id} WASM batch error: {exc}")
 
     # -------------------------------------------------------------------------
     # Scenario 6: WASM Thundering Herd
@@ -765,15 +778,23 @@ class SimulatedEdgeDevice:
         Phase 1 (prep): build state payload and warm the resolver (no network).
         Phase 2 (wait): block on orchestrator's go_event barrier.
         Phase 3 (fire): dispatch wasm_steps_per_sync steps back-to-back.
-        """
-        self._setup_wasm_runtime()
 
-        # Phase 1: warmup the resolver cache (one dry-run resolve)
-        if self._wasm_runtime is not None and self._wasm_config is not None:
-            try:
-                await self._wasm_runtime._resolver.resolve(self._wasm_hash)
-            except Exception:
-                pass
+        When the orchestrator pre-injects a shared runtime (via _wasm_runtime /
+        _wasm_config attributes) the per-device setup and warmup resolve are
+        skipped — the orchestrator already warmed the shared resolver once.
+        """
+        # Allow orchestrator to inject a shared runtime to avoid N redundant
+        # object allocations and N warmup resolver calls at large device counts.
+        if self._wasm_runtime is None:
+            self._setup_wasm_runtime()
+
+            # Phase 1: warmup the resolver cache (one dry-run resolve).
+            # Skipped when the orchestrator provides a pre-warmed shared runtime.
+            if self._wasm_runtime is not None and self._wasm_config is not None:
+                try:
+                    await self._wasm_runtime._resolver.resolve(self._wasm_hash)
+                except Exception:
+                    pass
 
         state_data = {
             "amount_cents": random.randint(100, 50000),
@@ -798,16 +819,27 @@ class SimulatedEdgeDevice:
             self.metrics.wasm_step_failures += self.config.wasm_steps_per_sync
             return
 
-        for _ in range(self.config.wasm_steps_per_sync):
-            t0 = time.perf_counter()
-            try:
-                await self._wasm_runtime.execute(self._wasm_config, state_data)
+        num_steps = self.config.wasm_steps_per_sync
+        t0 = time.perf_counter()
+        try:
+            if hasattr(self._wasm_runtime, 'execute_batch'):
+                results = await self._wasm_runtime.execute_batch(
+                    self._wasm_config, [state_data] * num_steps
+                )
                 elapsed = time.perf_counter() - t0
-                self.metrics.wasm_steps_executed += 1
-                self.metrics.wasm_execution_latencies.append(elapsed)
-            except Exception as exc:
-                self.metrics.wasm_step_failures += 1
-                logger.debug(f"WASM herd dispatch error: {exc}")
+                self.metrics.wasm_steps_executed += len(results)
+                per_step = elapsed / num_steps
+                self.metrics.wasm_execution_latencies.extend([per_step] * num_steps)
+            else:
+                for _ in range(num_steps):
+                    st = time.perf_counter()
+                    await self._wasm_runtime.execute(self._wasm_config, state_data)
+                    elapsed = time.perf_counter() - st
+                    self.metrics.wasm_steps_executed += 1
+                    self.metrics.wasm_execution_latencies.append(elapsed)
+        except Exception as exc:
+            self.metrics.wasm_step_failures += num_steps
+            logger.debug(f"WASM herd dispatch error: {exc}")
 
         if self.metrics_callback:
             await self.metrics_callback(self.config.device_id, self.metrics)

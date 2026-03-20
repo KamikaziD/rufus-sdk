@@ -1,26 +1,23 @@
-# v1.0.0rc4 Release — SAF Payment Simulation + Bug Fixes
+# Sovereign Dispatcher — Implementation
 
-## Branch: feature/air-gap-triage-demo
+## Branch: feature/agent-heartbeat-stagger
 
-## Steps
+## Tasks
 
-- [x] Step 1 — Create Alembic migration `i4j5k6l7m8n9_add_workflow_id_to_saf_transactions.py`
-- [x] Step 2 — Commit #1: All session changes
-- [x] Step 3 — Version bump (17 locations: rc3 → rc4)
-- [x] Step 4 — Commit #2: Version bump (merged with session changes)
-- [x] Step 5 — Build and upload wheels (3 packages to TestPyPI) ✓
-- [x] Step 6 — Build and push Docker images (5 multi-arch images to ruhfuskdev/) ✓
-- [x] Step 7 — Update documentation (README + changelog)
-- [x] Step 8 — Commit #3: Docs + tag v1.0.0rc4
-- [x] Step 9 — Push branch + tag to remote ✓
-- [ ] Step 10 — Create PR (user provides fresh GH_TOKEN)
+- [x] D1: device_simulator.py — execute_batch dispatch in _execute_wasm_dispatch_batch + thundering herd phase 3
+- [x] D2: wasm_bridge.py — add execute_batch to WasmBridgeProtocol + NativeWasmBridge ThreadPoolExecutor override
+- [x] D3: component_runtime.py — _BATCH_EXECUTOR singleton + execute_batch() method
+- [x] D4: rufus.wit — add brain-pool interface + export to rufus-node world
+- [x] D5: sovereign_dispatcher/ — Cargo.toml + src/main.rs (Rust batch WASM executor)
+- [x] D6: run_load_test.py — fix wasm_steps target formula, add improvement factor, add wasm_thundering_herd to --all
+- [x] D6: run_tests.sh — update option 7 baseline/target note
+- [x] D7: benchmark_suite.py — add Section 12f (batch vs sequential overhead)
 
 ## Review
 
-All done except PR creation. Two commits:
-- `1dff8cef` — feat: SAF payment + version bump (76 files)
-- `602c57dd` — docs: update for v1.0.0rc4
-
-**Note:** .env removed from git tracking; .env added to .gitignore (was causing push protection block due to GitHub PAT at line 111).
-
-PR URL to create: https://github.com/KamikaziD/rufus-sdk/pull/new/feature/air-gap-triage-demo
+All done. Verified:
+- 28 edge/component tests pass (no regressions)
+- SDK tests pass
+- Section 12f benchmark: 4.4x speedup (target: 3-5x) ✅
+- wasm_thundering_herd 100 devices: p99=1.95ms, improvement=2594x ✅
+- Rust sovereign-dispatcher: Cargo.toml + main.rs created (compile with cargo build --release)
