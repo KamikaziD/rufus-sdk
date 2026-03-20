@@ -10,12 +10,29 @@ from datetime import datetime, timedelta
 from rufus_server.rate_limit_service import RateLimitService, RateLimitRule, RateLimitResult
 
 
+class MockPool:
+    """Async context manager that mimics asyncpg pool.acquire()."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def acquire(self):
+        return self
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *args):
+        pass
+
+
 class MockPersistence:
     """Mock persistence provider for testing."""
 
     def __init__(self):
         self.rules = {}
         self.tracking = []
+        self.pool = MockPool(self)
 
     async def fetchrow(self, query, *args):
         """Mock fetchrow for single row queries."""

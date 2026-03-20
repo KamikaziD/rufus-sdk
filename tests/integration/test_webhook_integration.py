@@ -112,6 +112,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 class TestWebhookIntegration:
     """Integration tests for webhook notifications."""
 

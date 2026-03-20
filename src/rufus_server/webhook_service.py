@@ -465,8 +465,10 @@ class WebhookService:
             "User-Agent": "Rufus-Edge-Webhook/1.0"
         }
 
-        # Add custom headers
+        # Add custom headers (SQLite returns JSON columns as strings)
         if custom_headers:
+            if isinstance(custom_headers, str):
+                custom_headers = json.loads(custom_headers)
             headers.update(custom_headers)
 
         # Add HMAC signature

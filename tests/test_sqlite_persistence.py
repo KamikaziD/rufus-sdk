@@ -250,6 +250,13 @@ class TestSQLitePersistence:
         execution_id = "exec_123"
         task_data = {'input': 'test_data'}
 
+        # Insert parent workflow_execution to satisfy FK constraint
+        await sqlite_provider.save_workflow(execution_id, {
+            'id': execution_id, 'workflow_type': 'Test', 'current_step': 0,
+            'status': 'ACTIVE', 'state': {}, 'steps_config': [],
+            'state_model_path': 'test.State',
+        })
+
         # Create task
         task_record = await sqlite_provider.create_task_record(
             execution_id=execution_id,
@@ -282,6 +289,12 @@ class TestSQLitePersistence:
     @pytest.mark.asyncio
     async def test_update_task_status(self, sqlite_provider):
         """Test updating task status"""
+        # Insert parent workflow_execution to satisfy FK constraint
+        await sqlite_provider.save_workflow("exec_123", {
+            'id': 'exec_123', 'workflow_type': 'Test', 'current_step': 0,
+            'status': 'ACTIVE', 'state': {}, 'steps_config': [],
+            'state_model_path': 'test.State',
+        })
         # Create task
         task_record = await sqlite_provider.create_task_record(
             execution_id="exec_123",
@@ -366,6 +379,13 @@ class TestSQLitePersistence:
         action_result = {'refunded': True, 'amount': 100}
         state_before = {'balance': 1000}
         state_after = {'balance': 1100}
+
+        # Insert parent workflow_execution to satisfy FK constraint
+        await sqlite_provider.save_workflow(execution_id, {
+            'id': execution_id, 'workflow_type': 'Test', 'current_step': 0,
+            'status': 'ACTIVE', 'state': {}, 'steps_config': [],
+            'state_model_path': 'test.State',
+        })
 
         await sqlite_provider.log_compensation(
             execution_id=execution_id,

@@ -37,6 +37,11 @@ class LoadTestResults:
     config_failures: int = 0
     commands_received: int = 0
 
+    # Error breakdown (thundering herd / capacity analysis)
+    errors_5xx: int = 0      # Server errors — pool exhaustion, crashes
+    errors_4xx: int = 0      # Client errors — auth, bad request
+    errors_timeout: int = 0  # Network timeouts
+
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
 
@@ -51,9 +56,17 @@ class LoadTestResults:
         if self.total_requests > 0:
             self.error_rate = (self.total_errors / self.total_requests) * 100
 
+    def latency_percentile(self, p: float) -> float:
+        """Return the p-th percentile latency in milliseconds (0–1 scale)."""
+        if not self.request_latencies:
+            return 0.0
+        s = sorted(self.request_latencies)
+        idx = int(p * (len(s) - 1))
+        return s[min(idx, len(s) - 1)] * 1000
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        d = {
             "scenario": self.scenario,
             "num_devices": self.num_devices,
             "duration_seconds": self.duration_seconds,
@@ -70,6 +83,16 @@ class LoadTestResults:
             "commands_received": self.commands_received,
             "success_rate": f"{100 - self.error_rate:.2f}%",
         }
+        if self.request_latencies:
+            d["latency_p50_ms"] = f"{self.latency_percentile(0.50):.1f}"
+            d["latency_p95_ms"] = f"{self.latency_percentile(0.95):.1f}"
+            d["latency_p99_ms"] = f"{self.latency_percentile(0.99):.1f}"
+            d["latency_max_ms"] = f"{max(self.request_latencies) * 1000:.1f}"
+            d["latency_samples"] = len(self.request_latencies)
+        d["errors_5xx"] = self.errors_5xx
+        d["errors_4xx"] = self.errors_4xx
+        d["errors_timeout"] = self.errors_timeout
+        return d
 
 
 class LoadTestOrchestrator:
@@ -213,23 +236,44 @@ class LoadTestOrchestrator:
         # Start timer
         start_time = time.time()
 
-        # Run scenario on all devices concurrently
-        logger.info(f"Running scenario {scenario} on {num_devices} devices...")
+        # For thundering herd: attach a shared asyncio.Event to every device.
+        # Devices prepare their payload then block on the event; the orchestrator
+        # releases all of them at once after a short prep window.
+        go_event = None
+        if scenario == "thundering_herd":
+            go_event = asyncio.Event()
+            for device in self._devices:
+                device._go_event = go_event
 
-        tasks = [
-            device.run_scenario(scenario, duration_seconds)
+        # Run scenario on all devices concurrently (as tasks so the event loop
+        # can interleave them before the go_event fires)
+        logger.info(f"Running scenario {scenario} on {num_devices} devices...")
+        device_tasks = [
+            asyncio.create_task(device.run_scenario(scenario, duration_seconds))
             for device in self._devices
         ]
 
-        # Progress reporting task
+        all_tasks = list(device_tasks)
         if progress_callback:
-            progress_task = asyncio.create_task(
+            all_tasks.append(asyncio.create_task(
                 self._report_progress(progress_callback, duration_seconds)
+            ))
+
+        if go_event is not None:
+            # Give all devices time to reach their wait point (prep phase)
+            prep_seconds = min(5, max(2, num_devices // 200))
+            logger.info(
+                f"Thundering herd prep window: {prep_seconds}s "
+                f"(devices generating transactions...)"
             )
-            tasks.append(progress_task)
+            await asyncio.sleep(prep_seconds)
+            logger.info(
+                f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
+            )
+            go_event.set()
 
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*all_tasks)
         except Exception as e:
             logger.error(f"Error during load test: {e}")
 
@@ -276,6 +320,10 @@ class LoadTestOrchestrator:
                 results.commands_received += metrics.commands_received
                 results.total_requests += metrics.total_requests
                 results.total_errors += metrics.total_errors
+                results.errors_5xx += metrics.errors_5xx
+                results.errors_4xx += metrics.errors_4xx
+                results.errors_timeout += metrics.errors_timeout
+                results.request_latencies.extend(metrics.latencies)
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -290,94 +338,89 @@ class LoadTestOrchestrator:
         registration_key = os.getenv(
             "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
+        # Limit concurrent registrations to avoid exhausting the server's DB pool.
+        # Default: 50 concurrent (matches server pool max_size default).
+        concurrency = int(os.getenv("LOAD_TEST_SETUP_CONCURRENCY", "50"))
+        semaphore = asyncio.Semaphore(concurrency)
+
         async def register_single_device(device):
             """Register a single device (idempotent)."""
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Check if device already exists (idempotent mode)
-                    if idempotent:
-                        check_response = await client.get(
-                            f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+            async with semaphore:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        # Check if device already exists (idempotent mode)
+                        if idempotent:
+                            check_response = await client.get(
+                                f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                                headers={"X-Registration-Key": registration_key}
+                            )
+
+                            if check_response.status_code == 200:
+                                data = check_response.json()
+                                existing_api_key = data.get("api_key")
+                                if existing_api_key:
+                                    device.config.api_key = existing_api_key
+                                    await device._http_client.aclose()
+                                    device._http_client = httpx.AsyncClient(
+                                        timeout=60.0,
+                                        headers={
+                                            "X-API-Key": device.config.api_key,
+                                            "X-Device-ID": device.config.device_id,
+                                            "Content-Type": "application/json",
+                                        }
+                                    )
+                                    logger.debug(
+                                        f"Device {device.config.device_id} already registered (using existing)")
+                                    return True
+
+                        # Register new device
+                        response = await client.post(
+                            f"{self.cloud_url}/api/v1/devices/register",
                             headers={
-                                "X-Registration-Key": registration_key
+                                "X-Registration-Key": registration_key,
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "device_id": device.config.device_id,
+                                "device_type": device.config.device_type,
+                                "device_name": f"Load Test Device {device.config.device_id}",
+                                "merchant_id": device.config.merchant_id,
+                                "location": "load-test-environment",
+                                "capabilities": ["payment_processing", "offline_mode"],
+                                "firmware_version": "1.0.0-loadtest",
+                                "sdk_version": "1.0.0"
                             }
                         )
 
-                        if check_response.status_code == 200:
-                            # Device already exists - get API key from response
-                            data = check_response.json()
-                            existing_api_key = data.get("api_key")
+                        if response.status_code == 200:
+                            data = response.json()
+                            device.config.api_key = data.get("api_key", device.config.api_key)
+                            await device._http_client.aclose()
+                            device._http_client = httpx.AsyncClient(
+                                timeout=60.0,
+                                headers={
+                                    "X-API-Key": device.config.api_key,
+                                    "X-Device-ID": device.config.device_id,
+                                    "Content-Type": "application/json",
+                                }
+                            )
+                            logger.debug(f"Registered device {device.config.device_id}")
+                            return True
+                        elif response.status_code == 400 and "already registered" in response.text:
+                            logger.debug(
+                                f"Device {device.config.device_id} already registered (via 400)")
+                            return True
+                        else:
+                            logger.error(
+                                f"Failed to register device {device.config.device_id}: "
+                                f"HTTP {response.status_code} - {response.text}"
+                            )
+                            return False
 
-                            if existing_api_key:
-                                # Update device API key
-                                device.config.api_key = existing_api_key
-                                # Recreate HTTP client with existing API key
-                                await device._http_client.aclose()
-                                device._http_client = httpx.AsyncClient(
-                                    timeout=60.0,
-                                    headers={
-                                        "X-API-Key": device.config.api_key,
-                                        "X-Device-ID": device.config.device_id,
-                                        "Content-Type": "application/json",
-                                    }
-                                )
-                                logger.debug(
-                                    f"Device {device.config.device_id} already registered (using existing)")
-                                return True
-
-                    # Register new device
-                    response = await client.post(
-                        f"{self.cloud_url}/api/v1/devices/register",
-                        headers={
-                            "X-Registration-Key": registration_key,
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "device_id": device.config.device_id,
-                            "device_type": device.config.device_type,
-                            "device_name": f"Load Test Device {device.config.device_id}",
-                            "merchant_id": device.config.merchant_id,
-                            "location": "load-test-environment",
-                            "capabilities": ["payment_processing", "offline_mode"],
-                            "firmware_version": "1.0.0-loadtest",
-                            "sdk_version": "1.0.0"
-                        }
-                    )
-
-                    if response.status_code == 200:
-                        data = response.json()
-                        # Update device API key to match what was returned
-                        device.config.api_key = data.get(
-                            "api_key", device.config.api_key)
-                        # Recreate HTTP client with new API key (httpx headers are immutable)
-                        await device._http_client.aclose()
-                        device._http_client = httpx.AsyncClient(
-                            timeout=60.0,  # Increased for load testing
-                            headers={
-                                "X-API-Key": device.config.api_key,
-                                "X-Device-ID": device.config.device_id,
-                                "Content-Type": "application/json",
-                            }
-                        )
-                        logger.debug(
-                            f"Registered device {device.config.device_id}")
-                        return True
-                    elif response.status_code == 400 and "already registered" in response.text:
-                        # Device already registered (backup check)
-                        logger.debug(
-                            f"Device {device.config.device_id} already registered (via 400)")
-                        return True
-                    else:
-                        logger.error(
-                            f"Failed to register device {device.config.device_id}: "
-                            f"HTTP {response.status_code} - {response.text}"
-                        )
-                        return False
-
-            except Exception as e:
-                logger.error(
-                    f"Error registering device {device.config.device_id}: {e}", exc_info=True)
-                return False
+                except Exception as e:
+                    logger.error(
+                        f"Error registering device {device.config.device_id}: {e}", exc_info=True)
+                    return False
 
         # Register all devices in parallel
         results = await asyncio.gather(*[
@@ -400,37 +443,36 @@ class LoadTestOrchestrator:
         registration_key = os.getenv(
             "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
 
+        concurrency = int(os.getenv("LOAD_TEST_SETUP_CONCURRENCY", "50"))
+        semaphore = asyncio.Semaphore(concurrency)
+
         async def delete_single_device(device):
             """Delete a single device if it exists."""
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.delete(
-                        f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
-                        headers={
-                            "X-Registration-Key": registration_key
-                        }
-                    )
-
-                    if response.status_code == 200:
-                        logger.debug(
-                            f"Deleted existing device {device.config.device_id}")
-                        return True
-                    elif response.status_code == 404:
-                        # Device doesn't exist - that's fine
-                        logger.debug(
-                            f"Device {device.config.device_id} not found (already clean)")
-                        return True
-                    else:
-                        logger.warning(
-                            f"Failed to delete device {device.config.device_id}: "
-                            f"HTTP {response.status_code}"
+            async with semaphore:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.delete(
+                            f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                            headers={"X-Registration-Key": registration_key}
                         )
-                        return False
 
-            except Exception as e:
-                logger.debug(
-                    f"Error deleting device {device.config.device_id}: {e}", exc_info=True)
-                return False
+                        if response.status_code == 200:
+                            logger.debug(f"Deleted existing device {device.config.device_id}")
+                            return True
+                        elif response.status_code == 404:
+                            logger.debug(f"Device {device.config.device_id} not found (already clean)")
+                            return True
+                        else:
+                            logger.warning(
+                                f"Failed to delete device {device.config.device_id}: "
+                                f"HTTP {response.status_code}"
+                            )
+                            return False
+
+                except Exception as e:
+                    logger.debug(
+                        f"Error deleting device {device.config.device_id}: {e}", exc_info=True)
+                    return False
 
         # Delete all devices in parallel
         results = await asyncio.gather(*[
@@ -492,10 +534,11 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 1: Concurrent Device Heartbeats."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="heartbeat",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -504,10 +547,11 @@ class ScenarioRunner:
         num_devices: int = 500
     ) -> LoadTestResults:
         """Run Scenario 2: Store-and-Forward Bulk Sync."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="saf_sync",
-            num_devices=num_devices,
-            duration_seconds=300  # Sync is one-time, not continuous
+            duration_seconds=300,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -517,22 +561,11 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 3: Config Rollout."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="config_poll",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
-        )
-
-    @staticmethod
-    async def run_model_update_test(
-        orchestrator: LoadTestOrchestrator,
-        num_devices: int = 1000
-    ) -> LoadTestResults:
-        """Run Scenario 4: Model Distribution."""
-        return await orchestrator.run_scenario(
-            scenario="model_update",
-            num_devices=num_devices,
-            duration_seconds=300  # Model update is one-time
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
     @staticmethod
@@ -542,21 +575,10 @@ class ScenarioRunner:
         duration_seconds: int = 600
     ) -> LoadTestResults:
         """Run Scenario 5: Cloud Command Distribution."""
+        await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="cloud_commands",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
         )
 
-    @staticmethod
-    async def run_workflow_test(
-        orchestrator: LoadTestOrchestrator,
-        num_devices: int = 100,
-        duration_seconds: int = 300
-    ) -> LoadTestResults:
-        """Run Scenario 6: Concurrent Workflow Execution."""
-        return await orchestrator.run_scenario(
-            scenario="workflow_execution",
-            num_devices=num_devices,
-            duration_seconds=duration_seconds
-        )

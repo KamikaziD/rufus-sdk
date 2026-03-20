@@ -135,6 +135,56 @@ class SyncManager:
         logger.info(f"Queued transaction {transaction.transaction_id} for sync")
         return transaction.transaction_id
 
+    async def queue_batch_for_sync(self, transactions: List[SAFTransaction]):
+        """
+        Queue multiple transactions for sync in a single INSERT + commit.
+
+        More efficient than calling queue_for_sync() in a loop when the caller
+        has a batch of transactions ready at once (e.g. payment simulation).
+        """
+        if not transactions:
+            return
+        now_iso = datetime.utcnow().isoformat()
+        rows = []
+        for t in transactions:
+            row_id = str(uuid.uuid4())
+            encrypted = t.encrypted_payload.hex() if t.encrypted_payload else ""
+            amount_cents = int(t.amount * 100) if t.amount else 0
+            metadata = json.dumps({"merchant_id": t.merchant_id or ""})
+            rows.append((
+                row_id,
+                t.transaction_id,
+                t.idempotency_key,
+                t.workflow_id,
+                amount_cents,
+                t.currency or "USD",
+                t.card_token or "",
+                t.card_last_four or "",
+                encrypted,
+                t.encryption_key_id or "default",
+                now_iso,
+                now_iso,
+                metadata,
+            ))
+        try:
+            await self.persistence.conn.executemany(
+                """
+                INSERT INTO saf_pending_transactions
+                    (id, transaction_id, idempotency_key, workflow_id,
+                     amount_cents, currency, card_token, card_last_four,
+                     encrypted_payload, encryption_key_id,
+                     status, created_at, queued_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_sync', ?, ?, ?)
+                ON CONFLICT(idempotency_key) DO NOTHING
+                """,
+                rows,
+            )
+            await self.persistence.conn.commit()
+            logger.info(f"Queued {len(transactions)} transactions for sync (batch)")
+        except Exception as e:
+            logger.error(f"Failed to batch-queue {len(transactions)} transactions: {e}")
+            raise
+
     async def get_pending_count(self) -> int:
         """Get count of transactions pending sync."""
         try:
@@ -560,45 +610,45 @@ class SyncManager:
         return result
 
     async def mark_synced(self, transaction_ids: List[str]):
-        """Mark transactions as synced in saf_pending_transactions."""
+        """Mark transactions as synced in saf_pending_transactions (single batched UPDATE)."""
+        if not transaction_ids:
+            return
         synced_at = datetime.utcnow().isoformat()
-        for tid in transaction_ids:
-            try:
-                await self.persistence.conn.execute(
-                    """
-                    UPDATE saf_pending_transactions
-                    SET status = 'synced', synced_at = ?
-                    WHERE transaction_id = ? AND status = 'pending_sync'
-                    """,
-                    (synced_at, tid),
-                )
-                await self.persistence.conn.commit()
-                logger.debug(f"Marked transaction {tid} as synced")
-            except Exception as e:
-                logger.error(f"Failed to mark transaction {tid} as synced: {e}")
+        placeholders = ",".join("?" * len(transaction_ids))
+        try:
+            await self.persistence.conn.execute(
+                f"UPDATE saf_pending_transactions SET status='synced', synced_at=? "
+                f"WHERE transaction_id IN ({placeholders}) AND status='pending_sync'",
+                [synced_at, *transaction_ids],
+            )
+            await self.persistence.conn.commit()
+            logger.debug(f"Marked {len(transaction_ids)} transactions as synced")
+        except Exception as e:
+            logger.error(f"Failed to batch-mark transactions as synced: {e}")
 
     async def mark_rejected(self, transaction_ids: List[str]):
         """
-        Mark server-rejected transactions as failed in saf_pending_transactions.
+        Mark server-rejected transactions as failed in saf_pending_transactions
+        (single batched UPDATE).
 
         This ends the infinite retry cycle: a transaction that the cloud explicitly
         rejects (4xx response) moves from pending_sync → failed instead of being
         re-queued on every sync cycle.
         """
-        for tid in transaction_ids:
-            try:
-                await self.persistence.conn.execute(
-                    """
-                    UPDATE saf_pending_transactions
-                    SET status = 'failed', last_sync_error = 'Rejected by cloud control plane'
-                    WHERE transaction_id = ? AND status = 'pending_sync'
-                    """,
-                    (tid,),
-                )
-                await self.persistence.conn.commit()
-                logger.warning(f"Marked transaction {tid} as failed (cloud-rejected)")
-            except Exception as e:
-                logger.error(f"Failed to mark transaction {tid} as rejected: {e}")
+        if not transaction_ids:
+            return
+        placeholders = ",".join("?" * len(transaction_ids))
+        try:
+            await self.persistence.conn.execute(
+                f"UPDATE saf_pending_transactions "
+                f"SET status='failed', last_sync_error='Rejected by cloud control plane' "
+                f"WHERE transaction_id IN ({placeholders}) AND status='pending_sync'",
+                transaction_ids,
+            )
+            await self.persistence.conn.commit()
+            logger.warning(f"Marked {len(transaction_ids)} transactions as failed (cloud-rejected)")
+        except Exception as e:
+            logger.error(f"Failed to batch-mark transactions as rejected: {e}")
 
     async def resolve_conflicts(self, server_response: Dict[str, Any]) -> Dict[str, Any]:
         """

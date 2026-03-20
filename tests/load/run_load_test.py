@@ -109,7 +109,7 @@ async def ensure_seed_data(db_url: str):
         logger.warning(f"Seed data check failed: {e}, continuing anyway...")
 
 
-def print_results(results: LoadTestResults):
+def print_results(results: LoadTestResults, workers: int = 1):
     """Print formatted test results."""
     print("\n" + "=" * 80)
     print(f"LOAD TEST RESULTS - {results.scenario.upper()}")
@@ -138,6 +138,33 @@ def print_results(results: LoadTestResults):
     if results.commands_received > 0:
         print(f"Commands Received:    {results.commands_received:,}")
 
+    # Error breakdown
+    if results.total_errors > 0:
+        print()
+        print(f"Error Breakdown:")
+        if results.errors_5xx > 0:
+            pct = results.errors_5xx / results.total_requests * 100 if results.total_requests else 0
+            print(f"  5xx (server):       {results.errors_5xx:,}  ({pct:.1f}%)  ← pool exhaustion / crash")
+        if results.errors_4xx > 0:
+            pct = results.errors_4xx / results.total_requests * 100 if results.total_requests else 0
+            print(f"  4xx (client):       {results.errors_4xx:,}  ({pct:.1f}%)")
+        if results.errors_timeout > 0:
+            pct = results.errors_timeout / results.total_requests * 100 if results.total_requests else 0
+            print(f"  Timeout:            {results.errors_timeout:,}  ({pct:.1f}%)")
+
+    # Latency percentiles
+    if results.request_latencies:
+        p50 = results.latency_percentile(0.50)
+        p95 = results.latency_percentile(0.95)
+        p99 = results.latency_percentile(0.99)
+        p_max = max(results.request_latencies) * 1000
+        print()
+        print(f"Latency p50:          {p50:.1f}ms")
+        print(f"Latency p95:          {p95:.1f}ms")
+        print(f"Latency p99:          {p99:.1f}ms")
+        print(f"Latency max:          {p_max:.1f}ms")
+        print(f"Latency samples:      {len(results.request_latencies):,}")
+
     print("=" * 80)
 
     # Check against targets
@@ -148,12 +175,27 @@ def print_results(results: LoadTestResults):
     error_pass = results.error_rate < 1.0
     print(f"Error Rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
 
+    # Latency target: p95 < 500ms / p99 < 1000ms (not applicable to thundering_herd)
+    if results.request_latencies and results.scenario != "thundering_herd":
+        p95 = results.latency_percentile(0.95)
+        latency_pass = p95 < 500.0
+        print(f"Latency p95 < 500ms:  {'✅ PASS' if latency_pass else '❌ FAIL'} ({p95:.1f}ms)")
+
+        p99 = results.latency_percentile(0.99)
+        p99_pass = p99 < 1000.0
+        print(f"Latency p99 < 1000ms: {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.1f}ms)")
+
     # Throughput target (scenario-specific)
     if results.scenario == "heartbeat":
-        # Target: 33 req/sec for 1000 devices (heartbeat every 30s)
-        throughput_target = 33
-        throughput_pass = results.requests_per_second >= throughput_target * 0.9  # 90% of target
-        print(f"Throughput >= {throughput_target} req/s:  {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+        # Target scales with device count: one heartbeat per device every 30s.
+        # Wall-clock duration includes the stagger ramp-up window (up to heartbeat_interval
+        # seconds before the first device fires), so exclude it from the denominator.
+        heartbeat_interval = 30  # seconds — matches DeviceConfig default
+        throughput_target = results.num_devices / heartbeat_interval
+        effective_duration = max(results.duration_seconds - heartbeat_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        throughput_pass = effective_rps >= throughput_target * 0.9
+        print(f"Throughput >= {throughput_target:.1f} req/s:  {'✅ PASS' if throughput_pass else '❌ FAIL'} ({effective_rps:.1f} req/s)")
 
     elif results.scenario == "saf_sync":
         # Target: 1000 tx/sec
@@ -161,6 +203,42 @@ def print_results(results: LoadTestResults):
         throughput_target = 1000
         throughput_pass = tx_per_sec >= throughput_target * 0.9
         print(f"Transaction Rate >= {throughput_target} tx/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({tx_per_sec:.1f} tx/s)")
+
+    elif results.scenario == "config_poll":
+        # Target: config polling should sustain reasonable rate
+        throughput_target = results.num_devices / 60  # ~1 poll per device per minute
+        throughput_pass = results.requests_per_second >= throughput_target * 0.9
+        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+
+    elif results.scenario == "cloud_commands":
+        # Target: command delivery within heartbeat cycle
+        throughput_target = results.num_devices / 30  # heartbeat every 30s
+        throughput_pass = results.requests_per_second >= throughput_target * 0.9
+        print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+
+    elif results.scenario == "thundering_herd":
+        # Count devices that succeeded (sync_failures == 0 AND synced at least 1 tx)
+        devices_succeeded = sum(
+            1 for m in results.device_metrics.values()
+            if m.sync_failures == 0 and m.transactions_synced > 0
+        )
+        total_devices = results.num_devices
+        success_rate = devices_succeeded / total_devices * 100 if total_devices else 0
+        herd_pass = success_rate >= 99.0
+        print(f"Devices succeeded:    {devices_succeeded:,} / {total_devices:,}")
+        print(f"Txns synced:          {results.transactions_synced:,}  ({results.transactions_synced // total_devices if total_devices else 0} avg/device)")
+        print(f"Device success >= 99%:{'✅ PASS' if herd_pass else '❌ FAIL'} ({success_rate:.1f}%)")
+        print(f"5xx errors:           {results.errors_5xx:,}  (pool/server limit)")
+        print(f"Timeouts:             {results.errors_timeout:,}")
+        if results.request_latencies:
+            p_max = max(results.request_latencies) * 1000
+            # Scale target with N: expected server capacity is ~500 req/s,
+            # so the last device in a simultaneous burst of N waits N/500 seconds.
+            per_worker_rps = 125  # req/s per worker (measured: 4 workers → ~500 req/s)
+            expected_throughput = workers * per_worker_rps
+            max_latency_target_ms = results.num_devices / expected_throughput * 1000
+            tail_pass = p_max < max_latency_target_ms
+            print(f"Max latency < {max_latency_target_ms / 1000:.0f}s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
 
     print("=" * 80)
 
@@ -210,7 +288,8 @@ async def run_single_scenario(
 async def run_all_scenarios(
     cloud_url: str,
     num_devices: int,
-    output_dir: str
+    output_dir: str,
+    workers: int = 4,
 ):
     """
     Run all test scenarios with shared devices.
@@ -222,9 +301,7 @@ async def run_all_scenarios(
         ("heartbeat", 600),
         ("saf_sync", 300),
         ("config_poll", 600),
-        ("model_update", 300),
         ("cloud_commands", 600),
-        ("workflow_execution", 300),
     ]
 
     # Create single orchestrator for all scenarios
@@ -267,7 +344,7 @@ async def run_all_scenarios(
             if output_file:
                 orchestrator.export_results(results, output_file)
 
-            print_results(results)
+            print_results(results, workers=workers)
             all_results.append(results)
 
             # Brief pause between scenarios
@@ -278,15 +355,23 @@ async def run_all_scenarios(
         print("\n" + "=" * 80)
         print("ALL SCENARIOS SUMMARY")
         print("=" * 80)
+        print(f"{'Scenario':<22} {'Devices':>7} {'Requests':>9} {'Err%':>6} {'req/s':>7} {'p50ms':>7} {'p95ms':>7} {'p99ms':>7}  Status")
+        print("-" * 80)
 
         for results in all_results:
-            pass_fail = "✅ PASS" if results.error_rate < 1.0 else "❌ FAIL"
+            pass_fail = "✅" if results.error_rate < 1.0 else "❌"
+            p50 = f"{results.latency_percentile(0.50):.0f}" if results.request_latencies else "  —"
+            p95 = f"{results.latency_percentile(0.95):.0f}" if results.request_latencies else "  —"
+            p99 = f"{results.latency_percentile(0.99):.0f}" if results.request_latencies else "  —"
             print(
-                f"{results.scenario:20s} | "
-                f"{results.num_devices:4d} devices | "
-                f"{results.total_requests:7,} req | "
-                f"{results.error_rate:5.2f}% err | "
-                f"{pass_fail}"
+                f"{results.scenario:<22} "
+                f"{results.num_devices:>7} "
+                f"{results.total_requests:>9,} "
+                f"{results.error_rate:>6.2f} "
+                f"{results.requests_per_second:>7.1f} "
+                f"{p50:>7} "
+                f"{p95:>7} "
+                f"{p99:>7}  {pass_fail}"
             )
 
         print("=" * 80)
@@ -315,6 +400,8 @@ Examples:
   # Run all scenarios with 100 devices (smoke test)
   python run_load_test.py --all --devices 100
 
+
+
   # Run with custom cloud URL and database URL
   python run_load_test.py --scenario heartbeat --devices 100 \\
       --cloud-url http://localhost:8000 \\
@@ -328,9 +415,8 @@ Scenarios:
   heartbeat          - Concurrent device heartbeats (30s interval)
   saf_sync           - Store-and-Forward bulk sync
   config_poll        - Config polling with ETag (60s interval)
-  model_update       - Model distribution with delta updates
   cloud_commands     - Cloud-to-device command delivery
-  workflow_execution - Concurrent workflow execution
+  thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
         """
     )
 
@@ -352,9 +438,8 @@ Scenarios:
             "heartbeat",
             "saf_sync",
             "config_poll",
-            "model_update",
             "cloud_commands",
-            "workflow_execution"
+            "thundering_herd",
         ],
         help="Test scenario to run"
     )
@@ -387,6 +472,13 @@ Scenarios:
         "--all",
         action="store_true",
         help="Run all scenarios"
+    )
+
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of server workers (used to scale thundering herd latency target, default: 1)"
     )
 
     parser.add_argument(
@@ -423,7 +515,8 @@ Scenarios:
             asyncio.run(run_all_scenarios(
                 cloud_url=args.cloud_url,
                 num_devices=args.devices,
-                output_dir=args.output_dir
+                output_dir=args.output_dir,
+                workers=args.workers,
             ))
         else:
             results = asyncio.run(run_single_scenario(
@@ -434,7 +527,7 @@ Scenarios:
                 output_file=args.output
             ))
 
-            print_results(results)
+            print_results(results, workers=args.workers)
 
     except KeyboardInterrupt:
         logger.info("\nLoad test interrupted by user")

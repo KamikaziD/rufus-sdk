@@ -17,6 +17,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 class TestWebhookRetryIntegration:
     """Integration tests for webhook retry mechanism."""
 

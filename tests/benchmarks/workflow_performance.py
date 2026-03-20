@@ -85,7 +85,7 @@ def benchmark_import_caching(iterations: int = 1000):
     """Benchmark import caching effectiveness"""
     from rufus.builder import WorkflowBuilder
 
-    # Clear cache for accurate measurement
+    # NOTE: intentional use of private API for caching benchmark
     WorkflowBuilder._import_cache.clear()
 
     # Use a real rufus function for testing
@@ -93,6 +93,7 @@ def benchmark_import_caching(iterations: int = 1000):
 
     # First import (cache miss)
     start = time.perf_counter()
+    # NOTE: intentional use of private API for caching benchmark
     func1 = WorkflowBuilder._import_from_string(test_path)
     first_import_time = time.perf_counter() - start
 
@@ -100,6 +101,7 @@ def benchmark_import_caching(iterations: int = 1000):
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
+        # NOTE: intentional use of private API for caching benchmark
         func = WorkflowBuilder._import_from_string(test_path)
         times.append(time.perf_counter() - start)
 
@@ -108,6 +110,7 @@ def benchmark_import_caching(iterations: int = 1000):
         "first_import_ms": first_import_time * 1000,
         "cached_import_avg_ms": statistics.mean(times) * 1000,
         "speedup": first_import_time / statistics.mean(times),
+        # NOTE: intentional use of private API for caching benchmark
         "cache_size": len(WorkflowBuilder._import_cache),
     }
 

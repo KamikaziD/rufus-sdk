@@ -157,6 +157,7 @@ class TestSQLiteIntegration:
     """Integration tests for SQLitePersistenceProvider"""
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_complete_workflow_lifecycle(self, sqlite_with_schema):
         """Test complete workflow lifecycle from creation to completion"""
         provider = sqlite_with_schema
@@ -289,6 +290,7 @@ class TestSQLiteIntegration:
         assert payment_metric['metric_value'] == 1250.5
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_saga_compensation_flow(self, sqlite_with_schema):
         """Test Saga pattern with compensation"""
         provider = sqlite_with_schema
@@ -353,6 +355,7 @@ class TestSQLiteIntegration:
         assert rows[1][1] == 'COMPENSATE'
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_sub_workflow_hierarchy(self, sqlite_with_schema):
         """Test parent-child workflow relationships"""
         provider = sqlite_with_schema
@@ -512,9 +515,10 @@ class TestSQLiteIntegration:
         provider = SQLitePersistenceProvider(db_path=":memory:")
         await provider.initialize()
 
-        # Create minimal schema with all required columns
+        # initialize() already creates the schema via auto_init=True;
+        # use IF NOT EXISTS so this is a no-op when the table already exists
         await provider.conn.execute("""
-            CREATE TABLE workflow_executions (
+            CREATE TABLE IF NOT EXISTS workflow_executions (
                 id TEXT PRIMARY KEY,
                 workflow_type TEXT NOT NULL,
                 current_step INTEGER NOT NULL DEFAULT 0,

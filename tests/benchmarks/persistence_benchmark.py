@@ -73,78 +73,6 @@ class PersistenceBenchmark:
             'postgres': {}
         }
 
-    async def setup_schema(self):
-        """Set up database schema"""
-        # SQLite schema
-        await self.sqlite.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS workflow_executions (
-                id TEXT PRIMARY KEY,
-                workflow_type TEXT NOT NULL,
-                workflow_version TEXT NOT NULL DEFAULT 'v1',                             
-                current_step INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL,
-                state TEXT NOT NULL DEFAULT '{}',
-                steps_config TEXT NOT NULL DEFAULT '[]',
-                state_model_path TEXT NOT NULL,
-                saga_mode INTEGER DEFAULT 0,
-                completed_steps_stack TEXT DEFAULT '[]',
-                parent_execution_id TEXT,
-                blocked_on_child_id TEXT,
-                data_region TEXT DEFAULT 'us-east-1',
-                priority INTEGER DEFAULT 5,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                completed_at TEXT,
-                idempotency_key TEXT UNIQUE,
-                metadata TEXT DEFAULT '{}'
-            );
-
-            CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
-                execution_id TEXT NOT NULL,
-                step_name TEXT NOT NULL,
-                step_index INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'PENDING',
-                worker_id TEXT,
-                claimed_at TEXT,
-                started_at TEXT,
-                completed_at TEXT,
-                retry_count INTEGER DEFAULT 0,
-                max_retries INTEGER DEFAULT 3,
-                last_error TEXT,
-                task_data TEXT,
-                result TEXT,
-                idempotency_key TEXT UNIQUE,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS workflow_execution_logs (
-                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                workflow_id TEXT NOT NULL,
-                step_name TEXT,
-                log_level TEXT NOT NULL,
-                message TEXT NOT NULL,
-                logged_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                metadata TEXT DEFAULT '{}'
-            );
-
-            CREATE TABLE IF NOT EXISTS workflow_metrics (
-                metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                workflow_id TEXT NOT NULL,
-                workflow_type TEXT,
-                metric_name TEXT NOT NULL,
-                metric_value REAL NOT NULL,
-                unit TEXT,
-                step_name TEXT,
-                recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                tags TEXT DEFAULT '{}'
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_executions(status);
-            CREATE INDEX IF NOT EXISTS idx_workflow_type ON workflow_executions(workflow_type);
-            CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-        """)
 
     async def benchmark_save_workflow(self, provider_name: str, provider, iterations: int = 100):
         """Benchmark workflow save operations"""
@@ -282,9 +210,6 @@ class PersistenceBenchmark:
 
     async def run_all_benchmarks(self):
         """Run all benchmarks"""
-        print("Setting up schemas...")
-        await self.setup_schema()
-
         providers = [('sqlite', self.sqlite)]
         if self.postgres:
             providers.append(('postgres', self.postgres))
@@ -392,6 +317,8 @@ async def main():
 
     args = parser.parse_args()
 
+    postgres_url = args.postgres or os.environ.get("RUFUS_POSTGRES_URL")
+
     # Set up SQLite (in-memory for fair comparison)
     print("Initializing SQLite provider (in-memory)...")
     sqlite_provider = SQLitePersistenceProvider(db_path=":memory:")
@@ -399,16 +326,16 @@ async def main():
 
     # Set up PostgreSQL if URL provided
     postgres_provider = None
-    if args.postgres and POSTGRES_AVAILABLE:
+    if postgres_url and POSTGRES_AVAILABLE:
         print(f"Initializing PostgreSQL provider...")
-        postgres_provider = PostgresPersistenceProvider(db_url=args.postgres)
+        postgres_provider = PostgresPersistenceProvider(db_url=postgres_url)
         try:
             await postgres_provider.initialize()
         except Exception as e:
             print(f"Warning: Could not connect to PostgreSQL: {e}")
             print("Running SQLite-only benchmarks...")
             postgres_provider = None
-    elif args.postgres and not POSTGRES_AVAILABLE:
+    elif postgres_url and not POSTGRES_AVAILABLE:
         print("Warning: PostgreSQL provider not available (asyncpg not installed)")
         print("Running SQLite-only benchmarks...")
     else:
