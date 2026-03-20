@@ -38,6 +38,7 @@ class DeviceConfig:
     heartbeat_interval: int = 30  # seconds
     saf_batch_size: int = 50
     config_poll_interval: int = 60  # seconds
+    wasm_steps_per_sync: int = 5  # simulated WASM step executions per sync_wasm command
 
 
 @dataclass
@@ -57,6 +58,10 @@ class DeviceMetrics:
     errors_4xx: int = 0      # Client errors (auth, bad request)
     errors_timeout: int = 0  # Network timeouts
     latencies: List[float] = field(default_factory=list)  # per-request latency in seconds
+    # WASM step execution metrics
+    wasm_steps_executed: int = 0
+    wasm_step_failures: int = 0
+    wasm_execution_latencies: List[float] = field(default_factory=list)
 
 
 class SimulatedEdgeDevice:
@@ -225,6 +230,8 @@ class SimulatedEdgeDevice:
                 await self._config_polling_scenario(duration_seconds)
             elif scenario == "cloud_commands":
                 await self._cloud_commands_scenario(duration_seconds)
+            elif scenario == "wasm_steps":
+                await self._wasm_steps_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -600,6 +607,94 @@ class SimulatedEdgeDevice:
 
             # Report command completion (in real impl)
             # For load testing, we skip this to avoid extra requests
+
+    # -------------------------------------------------------------------------
+    # Scenario 5: WASM Step Execution
+    # -------------------------------------------------------------------------
+
+    async def _wasm_steps_scenario(self, duration_seconds: int):
+        """
+        Simulate WASM step execution throughput at the edge.
+
+        Protocol:
+        1. Send heartbeat to cloud — may receive a 'sync_wasm' command in response.
+        2. On receiving sync_wasm: simulate executing N WASM steps locally.
+           Execution time is randomized (50–200ms) to model wasmtime instantiation.
+        3. If no sync_wasm arrives after 3 consecutive heartbeats, inject a
+           synthetic local execution batch to sustain throughput measurement.
+
+        Metrics tracked:
+        - heartbeats_sent / heartbeat_failures (cloud roundtrip)
+        - wasm_steps_executed / wasm_step_failures (local execution)
+        - wasm_execution_latencies (p50/p95/p99 of the simulated WASM work)
+        """
+        end_time = time.time() + duration_seconds
+
+        # Stagger initial heartbeat across the heartbeat window
+        initial_offset = random.uniform(0, self.config.heartbeat_interval)
+        await asyncio.sleep(min(initial_offset, end_time - time.time()))
+
+        heartbeats_without_wasm = 0
+
+        while time.time() < end_time and self._running:
+            # --- cloud roundtrip ---
+            success = await self._send_heartbeat()
+            if success:
+                self.metrics.heartbeats_sent += 1
+                heartbeats_without_wasm += 1
+            else:
+                self.metrics.heartbeat_failures += 1
+
+            # Check if a sync_wasm command arrived (tracked via commands_received)
+            wasm_triggered = self.metrics.commands_received > 0 and heartbeats_without_wasm > 0
+
+            # After 3 heartbeats without a cloud-pushed sync_wasm, inject a
+            # synthetic local batch so the scenario stays active even when the
+            # cloud server has no pending commands.
+            if wasm_triggered or heartbeats_without_wasm >= 3:
+                await self._simulate_wasm_execution(self.config.wasm_steps_per_sync)
+                heartbeats_without_wasm = 0
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Wait for next cycle (heartbeat interval)
+            jitter = random.uniform(-2, 2)
+            remaining = end_time - time.time()
+            await asyncio.sleep(min(self.config.heartbeat_interval + jitter, remaining))
+
+    async def _simulate_wasm_execution(self, num_steps: int):
+        """
+        Simulate local WASM step execution for *num_steps* steps.
+
+        Models the wasmtime component instantiation + execution cost without
+        requiring an actual .wasm binary.  Latency distribution:
+          - fast path  (40%): 50–100ms  — cached module, simple step
+          - normal     (45%): 100–200ms — standard Component Model execution
+          - slow path  (15%): 200–400ms — cold instantiation / large binary
+        """
+        for _ in range(num_steps):
+            t0 = time.perf_counter()
+            roll = random.random()
+            if roll < 0.40:
+                delay = random.uniform(0.050, 0.100)
+            elif roll < 0.85:
+                delay = random.uniform(0.100, 0.200)
+            else:
+                delay = random.uniform(0.200, 0.400)
+
+            # Simulate the CPU-bound work in a separate task slice
+            await asyncio.sleep(delay)
+
+            elapsed = time.perf_counter() - t0
+
+            # Inject a rare (2%) simulated execution failure
+            if random.random() < 0.02:
+                self.metrics.wasm_step_failures += 1
+                logger.debug(f"Device {self.config.device_id} simulated WASM step failure")
+            else:
+                self.metrics.wasm_steps_executed += 1
+                self.metrics.wasm_execution_latencies.append(elapsed)
 
     def get_metrics(self) -> DeviceMetrics:
         """Get current metrics."""

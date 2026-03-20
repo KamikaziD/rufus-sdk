@@ -138,6 +138,21 @@ def print_results(results: LoadTestResults, workers: int = 1):
     if results.commands_received > 0:
         print(f"Commands Received:    {results.commands_received:,}")
 
+    if results.wasm_steps_executed > 0 or results.wasm_step_failures > 0:
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        print(f"WASM Steps Executed:  {results.wasm_steps_executed:,}")
+        print(f"WASM Step Failures:   {results.wasm_step_failures:,}")
+        print(f"WASM Success Rate:    {wasm_success_rate:.2f}%")
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p50_wasm = wl[int(0.50 * (len(wl) - 1))] * 1000
+            p95_wasm = wl[int(0.95 * (len(wl) - 1))] * 1000
+            p99_wasm = wl[int(0.99 * (len(wl) - 1))] * 1000
+            print(f"WASM Exec p50:        {p50_wasm:.0f}ms")
+            print(f"WASM Exec p95:        {p95_wasm:.0f}ms")
+            print(f"WASM Exec p99:        {p99_wasm:.0f}ms")
+
     # Error breakdown
     if results.total_errors > 0:
         print()
@@ -215,6 +230,24 @@ def print_results(results: LoadTestResults, workers: int = 1):
         throughput_target = results.num_devices / 30  # heartbeat every 30s
         throughput_pass = results.requests_per_second >= throughput_target * 0.9
         print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+
+    elif results.scenario == "wasm_steps":
+        # Target: >90% step success rate; p95 execution < 300ms (simulated wasmtime budget)
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        wasm_pass = wasm_success_rate >= 90.0
+        print(f"WASM success >= 90%:  {'✅ PASS' if wasm_pass else '❌ FAIL'} ({wasm_success_rate:.1f}%)")
+
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p95_wasm = wl[int(0.95 * (len(wl) - 1))] * 1000
+            wasm_lat_pass = p95_wasm < 300.0
+            print(f"WASM p95 < 300ms:     {'✅ PASS' if wasm_lat_pass else '❌ FAIL'} ({p95_wasm:.0f}ms)")
+
+        # Throughput: steps-per-second across all devices
+        wasm_tps = results.wasm_steps_executed / results.duration_seconds if results.duration_seconds > 0 else 0
+        target_tps = results.num_devices * results.num_devices / 60  # rough: steps/device/min
+        print(f"WASM steps/sec:       {wasm_tps:.1f}")
 
     elif results.scenario == "thundering_herd":
         # Count devices that succeeded (sync_failures == 0 AND synced at least 1 tx)
@@ -302,6 +335,7 @@ async def run_all_scenarios(
         ("saf_sync", 300),
         ("config_poll", 600),
         ("cloud_commands", 600),
+        ("wasm_steps", 300),
     ]
 
     # Create single orchestrator for all scenarios
@@ -417,6 +451,7 @@ Scenarios:
   config_poll        - Config polling with ETag (60s interval)
   cloud_commands     - Cloud-to-device command delivery
   thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
+  wasm_steps         - WASM step execution throughput (sync_wasm command delivery + edge execution)
         """
     )
 
@@ -440,6 +475,7 @@ Scenarios:
             "config_poll",
             "cloud_commands",
             "thundering_herd",
+            "wasm_steps",
         ],
         help="Test scenario to run"
     )

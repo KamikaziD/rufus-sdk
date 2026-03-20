@@ -42,6 +42,11 @@ class LoadTestResults:
     errors_4xx: int = 0      # Client errors — auth, bad request
     errors_timeout: int = 0  # Network timeouts
 
+    # WASM step execution metrics (wasm_steps scenario)
+    wasm_steps_executed: int = 0
+    wasm_step_failures: int = 0
+    wasm_execution_latencies: List[float] = field(default_factory=list)
+
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
 
@@ -92,6 +97,22 @@ class LoadTestResults:
         d["errors_5xx"] = self.errors_5xx
         d["errors_4xx"] = self.errors_4xx
         d["errors_timeout"] = self.errors_timeout
+        if self.wasm_steps_executed > 0 or self.wasm_step_failures > 0:
+            d["wasm_steps_executed"] = self.wasm_steps_executed
+            d["wasm_step_failures"] = self.wasm_step_failures
+            total_wasm = self.wasm_steps_executed + self.wasm_step_failures
+            d["wasm_step_success_rate"] = (
+                f"{self.wasm_steps_executed / total_wasm * 100:.2f}%"
+                if total_wasm else "N/A"
+            )
+            if self.wasm_execution_latencies:
+                wl = sorted(self.wasm_execution_latencies)
+                idx_p50 = int(0.50 * (len(wl) - 1))
+                idx_p95 = int(0.95 * (len(wl) - 1))
+                idx_p99 = int(0.99 * (len(wl) - 1))
+                d["wasm_exec_p50_ms"] = f"{wl[idx_p50] * 1000:.1f}"
+                d["wasm_exec_p95_ms"] = f"{wl[idx_p95] * 1000:.1f}"
+                d["wasm_exec_p99_ms"] = f"{wl[idx_p99] * 1000:.1f}"
         return d
 
 
@@ -324,6 +345,9 @@ class LoadTestOrchestrator:
                 results.errors_4xx += metrics.errors_4xx
                 results.errors_timeout += metrics.errors_timeout
                 results.request_latencies.extend(metrics.latencies)
+                results.wasm_steps_executed += metrics.wasm_steps_executed
+                results.wasm_step_failures += metrics.wasm_step_failures
+                results.wasm_execution_latencies.extend(metrics.wasm_execution_latencies)
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -578,6 +602,25 @@ class ScenarioRunner:
         await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
             scenario="cloud_commands",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_wasm_steps_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 300,
+    ) -> LoadTestResults:
+        """Run Scenario 6: WASM Step Execution Throughput.
+
+        Measures:
+        - Cloud: sync_wasm command delivery via heartbeat
+        - Edge:  simulated WASM step execution latency distribution
+        """
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="wasm_steps",
             duration_seconds=duration_seconds,
             skip_device_setup=True,
         )

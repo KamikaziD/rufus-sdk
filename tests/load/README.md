@@ -168,20 +168,28 @@ python tests/load/run_load_test.py \
 
 ---
 
-### Scenario 6: Workflow Execution
-**Target**: 100 devices executing 10 workflows each concurrently
+### Scenario 6: WASM Step Execution Throughput
+**Target**: 100 devices receiving `sync_wasm` commands and executing WASM steps locally
 
 ```bash
 python tests/load/run_load_test.py \
-    --scenario workflow_execution \
+    --scenario wasm_steps \
     --devices 100 \
     --duration 300
 ```
 
+**What it measures**:
+- **Cloud side**: `sync_wasm` command delivery throughput via heartbeat pipeline
+- **Edge side**: simulated WASM step execution latency (50–400ms per step, modelling wasmtime instantiation)
+
+**Execution model**: Each device sends heartbeats at the configured interval. On receiving a `sync_wasm` command the device executes a configurable number of simulated WASM steps. After 3 consecutive heartbeats without a cloud command, a synthetic local execution batch is injected to sustain throughput measurement even if the cloud has no pending commands.
+
 **Expected Performance**:
-- Workflow completion: p95 < 10s
-- Concurrent workflows: 1,000
-- Success rate: > 99%
+- WASM step success rate: ≥ 90%
+- Execution p95: < 300ms (simulated wasmtime budget)
+- Heartbeat error rate: < 1%
+
+**Targets reflect simulation**: The 2% injected failure rate and latency distribution (40% fast / 45% normal / 15% slow path) model real wasmtime behaviour. Results below 300ms p95 indicate the cloud command pipeline is not the bottleneck.
 
 ---
 

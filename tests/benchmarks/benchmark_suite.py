@@ -2,7 +2,7 @@
 Rufus SDK — Comprehensive Benchmark Suite
 ==========================================
 
-Covers 11 sections:
+Covers 12 sections:
   1. JSON Serialization
   2. Import Caching
   3. SQLite Persistence
@@ -14,6 +14,7 @@ Covers 11 sections:
   9. Ed25519 Signatures      (requires cryptography)
  10. API Key Hashing
  11. Full SAF Pipeline       (requires cryptography)
+ 12. WASM Bridge Dispatch    (requires rufus-sdk-edge)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -828,6 +829,202 @@ async def bench_saf_pipeline(n: int) -> Section:
 
 
 # ---------------------------------------------------------------------------
+# Section 12 — WASM Bridge Dispatch
+# ---------------------------------------------------------------------------
+
+async def bench_wasm_bridge_dispatch(n: int) -> Section:
+    sec = Section("12. WASM Bridge Dispatch")
+
+    try:
+        from rufus_edge.platform.wasm_bridge import (
+            NativeWasmBridge,
+            detect_wasm_bridge,
+        )
+        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+    except ImportError as exc:
+        sec.note(f"rufus-sdk-edge not installed — skipping ({exc})")
+        return sec
+
+    # ------------------------------------------------------------------
+    # 12a: detect_wasm_bridge() overhead (factory call + sys.platform check)
+    # ------------------------------------------------------------------
+    for _ in range(500):  # warmup
+        detect_wasm_bridge()
+
+    times_detect = []
+    for _ in range(n):
+        t = time.perf_counter()
+        detect_wasm_bridge()
+        times_detect.append(time.perf_counter() - t)
+
+    st = _stats(times_detect)
+    sec.add("detect_wasm_bridge()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12b: JSON state encode/decode at the component boundary
+    #      This is the overhead every WASM step pays to cross the Python→Wasm boundary.
+    # ------------------------------------------------------------------
+    state_payload = {
+        "workflow_id": "wf_" + "x" * 20,
+        "amount_cents": 9999,
+        "currency": "USD",
+        "merchant": "Acme Corp",
+        "card_last_four": "4242",
+        "risk_flags": ["high_velocity", "new_device"],
+        "device_id": "pos-edge-001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "metadata": {k: f"v{k}" for k in range(20)},
+    }
+    state_json = json.dumps(state_payload)
+    assert len(state_json) > 300, "state payload too small"
+
+    for _ in range(500):
+        json.loads(json.dumps(state_payload))
+
+    times_enc = []
+    for _ in range(n):
+        t = time.perf_counter()
+        json.dumps(state_payload)
+        times_enc.append(time.perf_counter() - t)
+
+    times_dec = []
+    for _ in range(n):
+        t = time.perf_counter()
+        json.loads(state_json)
+        times_dec.append(time.perf_counter() - t)
+
+    st = _stats(times_enc)
+    sec.add("state encode (bridge boundary)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+    st = _stats(times_dec)
+    sec.add("state decode (bridge boundary)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12c: NativeWasmBridge.execute_component dispatch overhead
+    #      _call_component is mocked so we measure pure Python dispatch cost
+    #      (import resolution, call overhead, not wasmtime itself).
+    # ------------------------------------------------------------------
+    CM_BINARY = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 200
+    bridge = NativeWasmBridge()
+    _original_call = ComponentStepRuntime._call_component
+
+    def _mock_call(binary, state_json_arg, step_name):
+        return '{"ok": true}'
+
+    ComponentStepRuntime._call_component = staticmethod(_mock_call)
+    try:
+        for _ in range(200):  # warmup
+            bridge.execute_component(CM_BINARY, state_json, "execute")
+
+        times_bridge = []
+        for _ in range(n):
+            t = time.perf_counter()
+            bridge.execute_component(CM_BINARY, state_json, "execute")
+            times_bridge.append(time.perf_counter() - t)
+    finally:
+        ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+    st = _stats(times_bridge)
+    sec.add("NativeWasmBridge dispatch (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12d: SqliteWasmBinaryResolver.resolve() from in-memory SQLite
+    #      Measures the lookup cost from device_wasm_cache — the first
+    #      thing every WASM step does before calling the bridge.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite
+        import hashlib as _hashlib
+
+        fake_binary = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 1024
+        fake_hash = _hashlib.sha256(fake_binary).hexdigest()
+
+        async with aiosqlite.connect(":memory:") as conn:
+            await conn.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (fake_hash, fake_binary),
+            )
+            await conn.commit()
+
+            resolver = SqliteWasmBinaryResolver(conn)
+
+            # warmup
+            for _ in range(20):
+                await resolver.resolve(fake_hash)
+
+            resolve_n = max(10, n // 10)
+            times_resolve = []
+            for _ in range(resolve_n):
+                t = time.perf_counter()
+                await resolver.resolve(fake_hash)
+                times_resolve.append(time.perf_counter() - t)
+
+        st = _stats(times_resolve)
+        sec.add("SqliteWasmBinaryResolver.resolve (1KB)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping resolver benchmark")
+
+    # ------------------------------------------------------------------
+    # 12e: Full dispatch chain — resolve → hash verify → bridge (mocked)
+    #      End-to-end cost of ComponentStepRuntime._dispatch() without
+    #      actual wasmtime execution.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite as _aiosqlite
+
+        async with _aiosqlite.connect(":memory:") as conn:
+            await conn.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (fake_hash, fake_binary),
+            )
+            await conn.commit()
+
+            from unittest.mock import MagicMock
+
+            wasm_config = MagicMock()
+            wasm_config.wasm_hash = fake_hash
+            wasm_config.entrypoint = "execute"
+            wasm_config.state_mapping = None
+            wasm_config.timeout_ms = 5000
+            wasm_config.fallback_on_error = "fail"
+
+            resolver2 = SqliteWasmBinaryResolver(conn)
+            runtime = ComponentStepRuntime(resolver2, bridge=None)
+
+            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            try:
+                # warmup
+                for _ in range(5):
+                    await runtime._dispatch(wasm_config, state_payload)
+
+                chain_n = max(10, n // 20)
+                times_chain = []
+                for _ in range(chain_n):
+                    t = time.perf_counter()
+                    await runtime._dispatch(wasm_config, state_payload)
+                    times_chain.append(time.perf_counter() - t)
+            finally:
+                ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+        st = _stats(times_chain)
+        sec.add("full chain: resolve+verify+bridge (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping full chain benchmark")
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -844,6 +1041,7 @@ def _defaults(quick: bool, override: Optional[int]) -> Dict[str, int]:
         "ed25519_n": 500,
         "apikey_n": 5000,
         "saf_n": 200,
+        "wasm_n": 500,
     }
     if quick:
         base = {k: max(10, v // 10) for k, v in base.items()}
@@ -868,22 +1066,22 @@ async def _run(args) -> List[Section]:
         print("  NOTE: cryptography not installed — sections 7–11 will be skipped")
     print()
 
-    print("[1/11] JSON Serialization...")
+    print("[1/12] JSON Serialization...")
     sections.append(bench_json_serialization(counts["json_n"]))
 
-    print("[2/11] Import Caching...")
+    print("[2/12] Import Caching...")
     sections.append(bench_import_caching(counts["import_n"]))
 
-    print("[3/11] SQLite Persistence...")
+    print("[3/12] SQLite Persistence...")
     sections.append(await bench_sqlite(counts["sqlite_n"]))
 
-    print("[4/11] E2E Workflow...")
+    print("[4/12] E2E Workflow...")
     sections.append(await bench_e2e_workflow(counts["e2e_n"]))
 
-    print("[5/11] Async Event Loop...")
+    print("[5/12] Async Event Loop...")
     sections.append(await bench_event_loop(counts["loop_n"]))
 
-    print("[6/11] Pydantic State Model...")
+    print("[6/12] Pydantic State Model...")
     sections.append(bench_pydantic(counts["pydantic_n"]))
 
     if skip_security:
@@ -900,20 +1098,23 @@ async def _run(args) -> List[Section]:
             s.note("skipped")
             sections.append(s)
     else:
-        print("[7/11] Fernet Encryption...")
+        print("[7/12] Fernet Encryption...")
         sections.append(bench_fernet(counts["fernet_n"]))
 
-        print("[8/11] HMAC-SHA256...")
+        print("[8/12] HMAC-SHA256...")
         sections.append(bench_hmac(counts["hmac_n"]))
 
-        print("[9/11] Ed25519 Signatures...")
+        print("[9/12] Ed25519 Signatures...")
         sections.append(bench_ed25519(counts["ed25519_n"]))
 
-        print("[10/11] API Key Hashing...")
+        print("[10/12] API Key Hashing...")
         sections.append(bench_api_key_hashing(counts["apikey_n"]))
 
-        print("[11/11] Full SAF Pipeline...")
+        print("[11/12] Full SAF Pipeline...")
         sections.append(await bench_saf_pipeline(counts["saf_n"]))
+
+    print("[12/12] WASM Bridge Dispatch...")
+    sections.append(await bench_wasm_bridge_dispatch(counts["wasm_n"]))
 
     return sections
 
