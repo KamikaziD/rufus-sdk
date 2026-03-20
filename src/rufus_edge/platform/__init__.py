@@ -14,6 +14,13 @@ import sys
 from typing import Optional
 
 from rufus_edge.platform.base import HttpResponse, PlatformAdapter, SystemMetrics
+from rufus_edge.platform.wasm_bridge import (
+    WasmBridgeProtocol,
+    NativeWasmBridge,
+    PyodideWasmBridge,
+    WasiWasmBridge,
+    detect_wasm_bridge,
+)
 
 
 def detect_platform(
@@ -47,4 +54,9 @@ __all__ = [
     "HttpResponse",
     "SystemMetrics",
     "detect_platform",
+    "WasmBridgeProtocol",
+    "NativeWasmBridge",
+    "PyodideWasmBridge",
+    "WasiWasmBridge",
+    "detect_wasm_bridge",
 ]

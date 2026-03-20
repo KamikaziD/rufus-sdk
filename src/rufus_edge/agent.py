@@ -106,6 +106,7 @@ class RufusEdgeAgent:
         self.sync_manager: Optional[SyncManager] = None
         self.config_manager: Optional[ConfigManager] = None
         self.workflow_syncer: Optional[EdgeWorkflowSyncer] = None
+        self._wasm_resolver = None  # SqliteWasmBinaryResolver, set in start()
 
         # State
         self._is_running = False
@@ -127,6 +128,10 @@ class RufusEdgeAgent:
         # Initialize persistence
         self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
         await self.persistence.initialize()
+
+        # Wire WASM binary resolver so WASM steps can read from device_wasm_cache
+        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
 
         # Auto-bootstrap factory-fresh devices (no pre-configured API key)
         if not self.api_key and self.cloud_url:
@@ -344,6 +349,7 @@ class RufusEdgeAgent:
             workflow_observer=self.observer,
             initial_data=data,
             owner_id=self.device_id,
+            wasm_binary_resolver=self._wasm_resolver,
         )
 
         # Execute to completion
@@ -631,6 +637,18 @@ class RufusEdgeAgent:
                 f"({n} consecutive heartbeat failures). Last error: {reason}"
             )
 
+    def _reload_wasm_resolver(self) -> None:
+        """Re-instantiate the WASM resolver against the live SQLite connection.
+
+        aiosqlite.Connection rows are immediately visible after INSERT, so
+        re-instantiation is only needed to pick up a fresh conn reference if
+        persistence was re-initialized.  Called after a successful sync_wasm
+        command to ensure new WASM binaries are available to the next workflow.
+        """
+        if self.persistence and self.persistence.conn:
+            from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+            self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
+
     def register_command_handler(self, command_type: str, handler) -> None:
         """Register an async handler for a cloud command type.
 
@@ -668,6 +686,7 @@ class RufusEdgeAgent:
         elif cmd_type == "sync_wasm":
             if self.config_manager:
                 await self.config_manager.handle_sync_wasm_command(cmd_data)
+                self._reload_wasm_resolver()
             else:
                 logger.warning("sync_wasm command received but config_manager is not set")
         elif cmd_type in self._custom_command_handlers:

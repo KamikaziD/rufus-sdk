@@ -51,10 +51,15 @@ class ComponentStepRuntime:
 
     Args:
         resolver: A ``WasmBinaryResolver`` that provides raw ``.wasm`` bytes.
+        bridge:   Optional ``WasmBridgeProtocol`` for platform-specific execution.
+                  When set, Component Model binaries are dispatched through the
+                  bridge instead of the default ``_call_component`` (wasmtime) path.
+                  The cloud path (bridge=None) is completely unchanged.
     """
 
-    def __init__(self, resolver):
+    def __init__(self, resolver, bridge=None):
         self._resolver = resolver
+        self._bridge = bridge
 
     async def execute(
         self,
@@ -119,10 +124,19 @@ class ComponentStepRuntime:
 
         loop = asyncio.get_event_loop()
         try:
-            result_json = await loop.run_in_executor(
-                None,
-                lambda: self._call_component(binary, state_json, step_name),
-            )
+            if self._bridge is not None:
+                # Platform-specific bridge (edge / browser / WASI path)
+                _bridge = self._bridge
+                result_json = await loop.run_in_executor(
+                    None,
+                    lambda: _bridge.execute_component(binary, state_json, step_name),
+                )
+            else:
+                # Default cloud path — wasmtime direct call (unchanged)
+                result_json = await loop.run_in_executor(
+                    None,
+                    lambda: self._call_component(binary, state_json, step_name),
+                )
         except Exception as exc:
             return self._handle_error(wasm_config, exc)
 

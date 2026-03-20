@@ -261,3 +261,76 @@ class TestWasmRuntimeCMDelegation:
             result = await runtime.execute(config, {})
 
         assert result == {"legacy": True}
+
+
+# ---------------------------------------------------------------------------
+# ComponentStepRuntime — bridge integration
+# ---------------------------------------------------------------------------
+
+class TestComponentStepRuntimeBridgeIntegration:
+    """Verify that the optional bridge param routes correctly."""
+
+    @pytest.mark.asyncio
+    async def test_bridge_used_when_set_call_component_skipped(self):
+        """When bridge is provided, _call_component must NOT be called."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        fake_bridge = MagicMock()
+        fake_bridge.execute_component = MagicMock(return_value='{"bridge_result": true}')
+
+        runtime = ComponentStepRuntime(resolver, bridge=fake_bridge)
+
+        with patch.object(ComponentStepRuntime, "_call_component") as mock_native:
+            config = make_config(wasm_hash=wasm_hash)
+            result = await runtime.execute(config, {"x": 1})
+
+        # Bridge was called; native path was not
+        fake_bridge.execute_component.assert_called_once()
+        mock_native.assert_not_called()
+        assert result == {"bridge_result": True}
+
+    @pytest.mark.asyncio
+    async def test_cloud_path_unchanged_when_bridge_is_none(self):
+        """Without a bridge, the default _call_component (wasmtime) path runs."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        runtime = ComponentStepRuntime(resolver, bridge=None)
+
+        with patch.object(
+            ComponentStepRuntime,
+            "_call_component",
+            return_value='{"cloud": true}',
+        ) as mock_native:
+            config = make_config(wasm_hash=wasm_hash)
+            result = await runtime.execute(config, {})
+
+        mock_native.assert_called_once()
+        assert result == {"cloud": True}
+
+    @pytest.mark.asyncio
+    async def test_bridge_error_respects_fallback_on_error_skip(self):
+        """Bridge RuntimeError must be caught and handled by _handle_error policy."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        fake_bridge = MagicMock()
+        fake_bridge.execute_component = MagicMock(
+            side_effect=RuntimeError("bridge execution failed")
+        )
+
+        runtime = ComponentStepRuntime(resolver, bridge=fake_bridge)
+        config = make_config(wasm_hash=wasm_hash, fallback_on_error="skip")
+
+        result = await runtime.execute(config, {})
+        assert result == {}

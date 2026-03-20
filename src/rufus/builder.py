@@ -582,10 +582,17 @@ class WorkflowBuilder:
 
         # Auto-create ComponentStepRuntime when a resolver is provided.
         # ComponentStepRuntime handles both Component Model and legacy core modules.
+        # When rufus-sdk-edge is installed, auto-detect the platform bridge so
+        # WASM execution uses the correct runtime (native/pyodide/wasi).
         wasm_runtime = None
         if wasm_binary_resolver is not None:
             from rufus.implementations.execution.component_runtime import ComponentStepRuntime
-            wasm_runtime = ComponentStepRuntime(wasm_binary_resolver)
+            try:
+                from rufus_edge.platform.wasm_bridge import detect_wasm_bridge
+                bridge = detect_wasm_bridge()
+            except ImportError:
+                bridge = None  # cloud-only deployment — no rufus-sdk-edge installed
+            wasm_runtime = ComponentStepRuntime(wasm_binary_resolver, bridge=bridge)
 
         # Auto-select paged inference provider when any step uses paging_strategy != "none".
         # Prefers explicitly supplied provider; falls back to platform-appropriate default.

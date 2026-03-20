@@ -53,6 +53,25 @@ py2wasm \
 echo "==> Build succeeded: ${OUTPUT}"
 ls -lh "${OUTPUT}"
 
+# Phase 2: Pre-initialize with Wizer (cold-start killer)
+# Target: <5ms boot time instead of 300ms–2s
+# Install: cargo install wizer --all-features
+if command -v wizer &>/dev/null; then
+    SNAPSHOT_OUT="${DIST_DIR}/rufus_edge_snapshotted.wasm"
+    echo "==> Snapshotting Python runtime with Wizer..."
+    wizer \
+        --allow-wasi \
+        --dir=. \
+        --init-func=rufus_pre_init \
+        -o "${SNAPSHOT_OUT}" \
+        "${OUTPUT}"
+    echo "==> Snapshot complete: ${SNAPSHOT_OUT}"
+    ls -lh "${SNAPSHOT_OUT}"
+else
+    echo "NOTE: Wizer not found — skipping snapshot (install: cargo install wizer --all-features)"
+    echo "      Without snapshot, cold-start is 300ms–2s instead of <5ms"
+fi
+
 # Smoke test (requires wasmtime)
 if command -v wasmtime &>/dev/null; then
     echo "==> Smoke test (wasmtime)…"
