@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rufus — Sovereign Dispatcher Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1c2230;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --amber:    #f9a825;
+    --red:      #f85149;
+    --blue:     #1565c0;
+    --purple:   #9c27b0;
+    --radius:   8px;
+    --mono:     "SF Mono", "Fira Code", monospace;
+    --sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .header-title span { color: var(--accent); }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  .badge-green  { color: var(--green);  border-color: var(--green);  background: #0d2e18; }
+  .badge-grey   { color: var(--muted);  border-color: var(--border); background: var(--surface2); }
+  .badge-red    { color: var(--red);    border-color: var(--red);    background: #2a0d0d; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .header-spacer { flex: 1; }
+
+  /* ── Controls ────────────────────────────────────────────────────────── */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  select, button {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  select:focus, button:hover { border-color: var(--accent); outline: none; }
+
+  .btn-primary   { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-primary:hover { background: #79b8ff; border-color: #79b8ff; }
+  .btn-danger    { background: #5a1a1a; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover { background: #7a2020; }
+  .btn-success   { background: #0d2e18; color: var(--green); border-color: var(--green); }
+  .btn-success:hover { background: #12401f; }
+  .btn-warn      { background: #2a1a00; color: var(--amber); border-color: var(--amber); }
+  .btn-warn:hover { background: #3a2400; }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── Legacy banner ───────────────────────────────────────────────────── */
+  #legacy-banner {
+    display: none;
+    background: #3a1a00;
+    border-bottom: 1px solid var(--amber);
+    padding: 8px 24px;
+    color: var(--amber);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* ── Main layout ─────────────────────────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    grid-template-rows: auto auto;
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* ── Fleet canvas ────────────────────────────────────────────────────── */
+  #fleet-panel {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .canvas-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  #fleet-canvas {
+    display: block;
+    border-radius: 4px;
+    image-rendering: pixelated;
+    cursor: crosshair;
+  }
+  #canvas-tooltip {
+    position: absolute;
+    background: rgba(0,0,0,0.85);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+    pointer-events: none;
+    white-space: nowrap;
+    display: none;
+    z-index: 5;
+    border: 1px solid var(--border);
+  }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ── Stats panel ─────────────────────────────────────────────────────── */
+  #stats-panel {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--muted); }
+  .stat-value { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+  .stat-value.green  { color: var(--green); }
+  .stat-value.amber  { color: var(--amber); }
+  .stat-value.blue   { color: var(--accent); }
+
+  .net-controls {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .net-controls button { width: 100%; }
+
+  .cond-select { margin-top: 10px; }
+  .cond-select label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .cond-select select { width: 100%; }
+
+  /* ── Log panel ───────────────────────────────────────────────────────── */
+  #log-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  #log-output {
+    background: #0a0d12;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 180px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  #log-output .log-offline  { color: var(--amber); }
+  #log-output .log-sync     { color: var(--accent); }
+  #log-output .log-synced   { color: var(--green); }
+  #log-output .log-warn     { color: var(--amber); }
+  #log-output .log-declined { color: var(--red); }
+  #log-output .log-highrisk { color: var(--purple); }
+
+  /* ── Responsive ──────────────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    .main { grid-template-columns: 1fr; }
+    #stats-panel { grid-column: 1; grid-row: 2; }
+    #log-panel   { grid-row: 3; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-title">RUFUS <span>SOVEREIGN DISPATCHER</span></div>
+  <div id="cloud-badge" class="badge badge-grey">
+    <span class="dot"></span>
+    <span id="cloud-label">Checking…</span>
+  </div>
+  <div class="header-spacer"></div>
+  <div class="controls">
+    <label style="color:var(--muted);font-size:12px">Devices</label>
+    <select id="device-count" title="Number of devices">
+      <option value="10">10</option>
+      <option value="25">25</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:var(--muted)">
+      <input type="checkbox" id="legacy-toggle" style="cursor:pointer">
+      Legacy Mode
+    </label>
+    <button id="start-btn" class="btn-primary">▶ Start</button>
+    <button id="stop-btn" disabled>■ Stop</button>
+  </div>
+</header>
+
+<!-- Legacy warning banner -->
+<div id="legacy-banner">
+  ⚠️ Legacy Mode: 100 independent setTimeout callbacks running on the main thread.
+  The UI will freeze — this demonstrates the problem the Sovereign Dispatcher solves.
+</div>
+
+<!-- Main content -->
+<div class="main">
+
+  <!-- Fleet heatmap -->
+  <div class="panel" id="fleet-panel">
+    <div class="panel-title">Device Fleet — One Pixel Per Device</div>
+    <div class="canvas-wrap">
+      <canvas id="fleet-canvas" width="400" height="300"></canvas>
+      <div id="canvas-tooltip"></div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="swatch" style="background:#1a237e"></div>Idle</div>
+      <div class="legend-item"><div class="swatch" style="background:#2e7d32"></div>Online</div>
+      <div class="legend-item"><div class="swatch" style="background:#c62828"></div>Processing payment</div>
+      <div class="legend-item"><div class="swatch" style="background:#f9a825"></div>Offline / SAF queued</div>
+      <div class="legend-item"><div class="swatch" style="background:#1565c0"></div>Syncing SAF</div>
+      <div class="legend-item"><div class="swatch" style="background:#4a148c"></div>Workflow done</div>
+    </div>
+  </div>
+
+  <!-- Stats + controls -->
+  <div class="panel" id="stats-panel">
+    <div class="panel-title">Fleet Stats</div>
+
+    <div class="stat-row">
+      <span class="stat-label">Txns / sec</span>
+      <span class="stat-value green" id="stat-sps">—</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">p99 payment</span>
+      <span class="stat-value blue" id="stat-p99">—</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">SAF queue depth</span>
+      <span class="stat-value amber" id="stat-saf">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Synced txns</span>
+      <span class="stat-value green" id="stat-synced">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Approved online / offline</span>
+      <span class="stat-value green" id="stat-approved">0 / 0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Declined</span>
+      <span class="stat-value" style="color:var(--red)" id="stat-declined">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Risk HIGH+</span>
+      <span class="stat-value" style="color:var(--purple)" id="stat-highrisk">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Online / Total</span>
+      <span class="stat-value" id="stat-online">0 / 0</span>
+    </div>
+
+    <div class="net-controls">
+      <button id="cut-btn" class="btn-danger" disabled>⚡ Cut Network</button>
+      <button id="restore-btn" class="btn-success" disabled>🔄 Restore Network</button>
+    </div>
+
+    <div class="cond-select">
+      <label>Network condition</label>
+      <select id="cond-select">
+        <option value="good" selected>Good (~2ms)</option>
+        <option value="degraded">Degraded (~100ms)</option>
+        <option value="lossy">Lossy (20% drop)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="panel" id="log-panel">
+    <div class="panel-title">Event Log</div>
+    <div id="log-output"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const CLOUD_URL = "http://localhost:8000";
+const REGISTRATION_KEY = "demo-registration-key-2024";  // matches RUFUS_REGISTRATION_KEY in .env
+const MAX_LOG   = 30;
+
+const STATE_COLORS = [
+  "#1a237e",  // 0 IDLE
+  "#2e7d32",  // 1 ONLINE
+  "#c62828",  // 2 WASM_EXEC
+  "#4a148c",  // 3 WORKFLOW_DONE
+  "#e65100",  // 4 OFFLINE
+  "#f9a825",  // 5 SAF_QUEUED
+  "#1565c0",  // 6 SYNCING
+  "#00695c",  // 7 SYNCED
+];
+const STATE_NAMES = [
+  "Idle", "Online", "WASM exec", "Workflow done",
+  "Offline", "SAF queued", "Syncing", "Synced",
+];
+
+let worker         = null;
+let deviceStates   = [];
+let numDevices     = 50;
+let gridCols       = 1;
+let gridRows       = 1;
+let pixelSize      = 12;
+let _cloudReachable = false;
+
+const canvas  = document.getElementById("fleet-canvas");
+const ctx     = canvas.getContext("2d");
+const tooltip = document.getElementById("canvas-tooltip");
+
+// ── Cloud connectivity check ───────────────────────────────────────────────
+async function checkCloud() {
+  let reachable = false;
+  try {
+    const resp = await fetch(`${CLOUD_URL}/health`, {
+      signal: AbortSignal.timeout(1500)
+    });
+    reachable = resp.ok;
+  } catch { /* fall through */ }
+
+  const changed = reachable !== _cloudReachable;
+  _cloudReachable = reachable;
+  setCloudBadge(reachable);
+
+  // Notify worker whenever reachability changes
+  if (worker && changed) {
+    worker.postMessage({ type: "CLOUD_STATUS", reachable });
+  }
+  return reachable;
+}
+
+function setCloudBadge(online) {
+  const badge = document.getElementById("cloud-badge");
+  const label = document.getElementById("cloud-label");
+  if (online) {
+    badge.className = "badge badge-green";
+    label.textContent = `Connected ✓ ${CLOUD_URL}`;
+  } else {
+    badge.className = "badge badge-grey";
+    label.textContent = "Offline / Simulation Only";
+  }
+}
+
+checkCloud();
+setInterval(checkCloud, 30000);
+
+// ── Canvas sizing ──────────────────────────────────────────────────────────
+function computeGrid(n) {
+  // Aim for a roughly square grid
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  // Pixel size based on count
+  let px;
+  if (n <= 25)       px = 16;
+  else if (n <= 100) px = 12;
+  else               px = 8;
+  const gap = 1;
+  return { cols, rows, px, gap };
+}
+
+function resizeCanvas(n) {
+  const { cols, rows, px, gap } = computeGrid(n);
+  gridCols  = cols;
+  gridRows  = rows;
+  pixelSize = px;
+
+  canvas.width  = cols * (px + gap) + gap;
+  canvas.height = rows * (px + gap) + gap;
+  canvas.style.width  = canvas.width  + "px";
+  canvas.style.height = canvas.height + "px";
+}
+
+function drawDevice(index, stateIndex) {
+  const { px, gap } = { px: pixelSize, gap: 1 };
+  const col = index % gridCols;
+  const row = Math.floor(index / gridCols);
+  const x   = col * (px + gap) + gap;
+  const y   = row * (px + gap) + gap;
+  ctx.fillStyle = STATE_COLORS[stateIndex] || "#1a237e";
+  ctx.fillRect(x, y, px, px);
+}
+
+function initCanvas(n) {
+  resizeCanvas(n);
+  deviceStates = new Uint8Array(n);
+  ctx.fillStyle = "#1a237e";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < n; i++) drawDevice(i, 0);
+}
+
+// ── Canvas tooltip ─────────────────────────────────────────────────────────
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const px = pixelSize, gap = 1;
+  const col = Math.floor(mx / (px + gap));
+  const row = Math.floor(my / (px + gap));
+  const idx = row * gridCols + col;
+  if (idx >= 0 && idx < numDevices) {
+    const state = deviceStates[idx];
+    tooltip.style.display = "block";
+    tooltip.style.left = (mx + 14) + "px";
+    tooltip.style.top  = (my - 10) + "px";
+    tooltip.textContent = `#${idx + 1}  ${STATE_NAMES[state] || "?"}`;
+  } else {
+    tooltip.style.display = "none";
+  }
+});
+canvas.addEventListener("mouseleave", () => {
+  tooltip.style.display = "none";
+});
+
+// ── Worker message handler ─────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
+
+  if (type === "STATE_UPDATE") {
+    const { deviceIndex, newState } = e.data;
+    if (deviceIndex < numDevices) {
+      deviceStates[deviceIndex] = newState;
+      drawDevice(deviceIndex, newState);
+    }
+
+  } else if (type === "STATS") {
+    const { txnsPerSec, p99Payment, totalSynced, totalSafQueued, onlineCount, totalDevices,
+            approvedOnline, approvedOffline, declined, highRiskCount } = e.data;
+    document.getElementById("stat-sps").textContent      = (txnsPerSec || 0).toLocaleString();
+    document.getElementById("stat-p99").textContent      = (p99Payment || 0) + "ms";
+    document.getElementById("stat-saf").textContent      = (totalSafQueued || 0).toLocaleString();
+    document.getElementById("stat-synced").textContent   = (totalSynced || 0).toLocaleString();
+    document.getElementById("stat-approved").textContent = `${approvedOnline || 0} / ${approvedOffline || 0}`;
+    document.getElementById("stat-declined").textContent = (declined || 0).toLocaleString();
+    document.getElementById("stat-highrisk").textContent = (highRiskCount || 0).toLocaleString();
+    document.getElementById("stat-online").textContent   = `${onlineCount} / ${totalDevices}`;
+
+  } else if (type === "SAF_CHANGE") {
+    // stats tick handles the aggregate; individual pixel already updated by STATE_UPDATE
+
+  } else if (type === "LOG") {
+    appendLog(e.data.message);
+
+  } else if (type === "REGISTERED") {
+    appendLog(`device-${String(e.data.deviceIndex + 1).padStart(3, "0")} registered with control plane`);
+  }
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────
+function appendLog(msg) {
+  const out = document.getElementById("log-output");
+  const line = document.createElement("div");
+
+  if (msg.includes("OFFLINE") || msg.includes("went OFFLINE") || msg.includes("missed")) {
+    line.className = "log-offline";
+  } else if (msg.includes("SYNCING") || msg.includes("Syncing") || msg.includes("uploading")) {
+    line.className = "log-sync";
+  } else if (msg.includes("✓") || msg.includes("SYNCED")) {
+    line.className = "log-synced";
+  } else if (msg.includes("DECLINED")) {
+    line.className = "log-declined";
+  } else if (msg.includes("risk: HIGH") || msg.includes("risk: CRITICAL")) {
+    line.className = "log-highrisk";
+  } else if (msg.includes("⚠️") || msg.includes("Legacy")) {
+    line.className = "log-warn";
+  }
+  line.textContent = msg;
+  out.appendChild(line);
+
+  // Trim to MAX_LOG lines
+  while (out.children.length > MAX_LOG) out.removeChild(out.firstChild);
+  out.scrollTop = out.scrollHeight;
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+const startBtn   = document.getElementById("start-btn");
+const stopBtn    = document.getElementById("stop-btn");
+const cutBtn     = document.getElementById("cut-btn");
+const restoreBtn = document.getElementById("restore-btn");
+const legacyChk  = document.getElementById("legacy-toggle");
+const condSel    = document.getElementById("cond-select");
+const devCount   = document.getElementById("device-count");
+
+startBtn.addEventListener("click", async () => {
+  numDevices = parseInt(devCount.value, 10);
+  const legacy = legacyChk.checked;
+
+  initCanvas(numDevices);
+
+  if (worker) { worker.terminate(); }
+  worker = new Worker("./worker.js");
+  worker.onmessage = handleWorkerMessage;
+
+  // Do a fresh connectivity check right before starting so the worker
+  // knows immediately whether cloud is reachable (avoids CORS flood)
+  const reachable = await checkCloud();
+  worker.postMessage({ type: "INIT", numDevices, cloudUrl: CLOUD_URL, registrationKey: REGISTRATION_KEY, batchSize: 50, legacyMode: legacy, cloudReachable: reachable });
+  worker.postMessage({ type: "START" });
+
+  startBtn.disabled = true;
+  stopBtn.disabled  = false;
+  cutBtn.disabled   = false;
+  restoreBtn.disabled = false;
+  devCount.disabled = true;
+
+  if (legacy) {
+    document.getElementById("legacy-banner").style.display = "block";
+  }
+  appendLog(`▶ Started ${numDevices} devices in ${legacy ? "legacy" : "sovereign"} mode`);
+});
+
+stopBtn.addEventListener("click", () => {
+  if (worker) {
+    worker.postMessage({ type: "STOP" });
+    worker.terminate();
+    worker = null;
+  }
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  cutBtn.disabled   = true;
+  restoreBtn.disabled = true;
+  devCount.disabled = false;
+  document.getElementById("legacy-banner").style.display = "none";
+  appendLog("■ Stopped");
+});
+
+cutBtn.addEventListener("click", () => {
+  if (worker) worker.postMessage({ type: "CUT_NETWORK" });
+  appendLog("⚡ Network cut by user");
+  cutBtn.disabled = true;
+  restoreBtn.disabled = false;
+});
+
+restoreBtn.addEventListener("click", () => {
+  if (worker) worker.postMessage({ type: "RESTORE_NETWORK" });
+  appendLog("🔄 Network restore triggered by user");
+  cutBtn.disabled = false;
+  restoreBtn.disabled = true;
+});
+
+condSel.addEventListener("change", () => {
+  if (worker) worker.postMessage({ type: "SET_CONDITION", condition: condSel.value });
+});
+
+legacyChk.addEventListener("change", () => {
+  document.getElementById("legacy-banner").style.display =
+    legacyChk.checked ? "block" : "none";
+});
+
+// ── Initial canvas ─────────────────────────────────────────────────────────
+initCanvas(parseInt(devCount.value, 10));
+appendLog("Rufus Sovereign Dispatcher — Browser Demo 2");
+appendLog(`Cloud URL: ${CLOUD_URL}  (checking connectivity…)`);
+</script>
+</body>
+</html>

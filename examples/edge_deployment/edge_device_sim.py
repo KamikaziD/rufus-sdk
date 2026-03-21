@@ -20,6 +20,8 @@ Environment variables:
     TELEMETRY_INTERVAL    Seconds between telemetry cycles (default: 30)
     PAYMENT_INTERVAL      Seconds between payment simulation cycles (default: 20)
     EDGE_WORKFLOW_SYNC    Push completed workflows to cloud + purge SQLite (default: true)
+    NETWORK_CONDITION     Simulated network profile (default: good).
+                          Choices: perfect|good|lan|wan|degraded|flaky|offline|auto
 """
 
 import asyncio
@@ -32,6 +34,8 @@ import httpx
 
 # Resolve step modules from the same directory as this script
 sys.path.insert(0, os.path.dirname(__file__))
+
+from network_simulator import NetworkConditionSimulator  # noqa: E402
 
 import payment_sim_steps      # noqa: E402  (after sys.path patch)
 import txn_monitoring_steps  # noqa: E402  (registers velocity tracker, etc.)
@@ -54,6 +58,11 @@ REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
 TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
 PAYMENT_INTERVAL = int(os.getenv("PAYMENT_INTERVAL", "20"))
 EDGE_WORKFLOW_SYNC = os.getenv("EDGE_WORKFLOW_SYNC", "true").lower() == "true"
+NETWORK_CONDITION = os.getenv("NETWORK_CONDITION", "good")
+
+# Shared network simulator — all HTTP clients use this transport so the
+# network profile can be changed at runtime (e.g. NETWORK_CONDITION=auto)
+_net_sim = NetworkConditionSimulator(NETWORK_CONDITION)
 
 # Persist API key alongside the SQLite DB so it survives container restarts
 _API_KEY_FILE = DB_PATH + ".apikey"
@@ -223,7 +232,7 @@ async def register_device() -> str:
     except FileNotFoundError:
         pass
 
-    async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=15) as client:
+    async with _net_sim.make_client(base_url=CLOUD_URL, timeout=15.0) as client:
         device_name = (
             f"ATM Device {DEVICE_ID}" if DEVICE_TYPE == "atm"
             else f"POS Device {DEVICE_ID}"
@@ -412,7 +421,7 @@ async def main():
     # Wait for server to be reachable
     for attempt in range(20):
         try:
-            async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=5) as client:
+            async with _net_sim.make_client(base_url=CLOUD_URL, timeout=5.0) as client:
                 resp = await client.get("/health")
                 if resp.status_code == 200:
                     logger.info("Cloud control plane is healthy")
@@ -429,7 +438,7 @@ async def main():
     # Always PATCH sdk_version on startup so restarts refresh the DB value
     if api_key:
         try:
-            async with httpx.AsyncClient(base_url=CLOUD_URL, timeout=10) as client:
+            async with _net_sim.make_client(base_url=CLOUD_URL, timeout=10.0) as client:
                 await client.patch(
                     f"/api/v1/devices/{DEVICE_ID}",
                     json={"sdk_version": "1.0.0rc5"},
@@ -454,6 +463,9 @@ async def main():
 
     await agent.start()
     logger.info("Edge agent running — starting telemetry loop...")
+
+    if NETWORK_CONDITION == "auto":
+        asyncio.create_task(_net_sim.auto_cycle())
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
