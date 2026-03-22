@@ -300,6 +300,7 @@
       <div class="legend-item"><div class="swatch" style="background:#f9a825"></div>Offline / SAF queued</div>
       <div class="legend-item"><div class="swatch" style="background:#1565c0"></div>Syncing SAF</div>
       <div class="legend-item"><div class="swatch" style="background:#4a148c"></div>Workflow done</div>
+      <div class="legend-item"><div class="swatch" style="background:#ff7043"></div>Mesh relay</div>
     </div>
   </div>
 
@@ -322,6 +323,10 @@
     <div class="stat-row">
       <span class="stat-label">Synced txns</span>
       <span class="stat-value green" id="stat-synced">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Mesh relayed</span>
+      <span class="stat-value" style="color:#ff7043" id="stat-mesh-relayed">0</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Approved online / offline</span>
@@ -378,10 +383,11 @@ const STATE_COLORS = [
   "#f9a825",  // 5 SAF_QUEUED
   "#1565c0",  // 6 SYNCING
   "#00695c",  // 7 SYNCED
+  "#ff7043",  // 8 MESH_RELAY
 ];
 const STATE_NAMES = [
   "Idle", "Online", "WASM exec", "Workflow done",
-  "Offline", "SAF queued", "Syncing", "Synced",
+  "Offline", "SAF queued", "Syncing", "Synced", "Mesh relay",
 ];
 
 let worker         = null;
@@ -512,15 +518,16 @@ function handleWorkerMessage(e) {
 
   } else if (type === "STATS") {
     const { txnsPerSec, p99Payment, totalSynced, totalSafQueued, onlineCount, totalDevices,
-            approvedOnline, approvedOffline, declined, highRiskCount } = e.data;
-    document.getElementById("stat-sps").textContent      = (txnsPerSec || 0).toLocaleString();
-    document.getElementById("stat-p99").textContent      = (p99Payment || 0) + "ms";
-    document.getElementById("stat-saf").textContent      = (totalSafQueued || 0).toLocaleString();
-    document.getElementById("stat-synced").textContent   = (totalSynced || 0).toLocaleString();
-    document.getElementById("stat-approved").textContent = `${approvedOnline || 0} / ${approvedOffline || 0}`;
-    document.getElementById("stat-declined").textContent = (declined || 0).toLocaleString();
-    document.getElementById("stat-highrisk").textContent = (highRiskCount || 0).toLocaleString();
-    document.getElementById("stat-online").textContent   = `${onlineCount} / ${totalDevices}`;
+            approvedOnline, approvedOffline, declined, highRiskCount, meshRelayed } = e.data;
+    document.getElementById("stat-sps").textContent           = (txnsPerSec || 0).toLocaleString();
+    document.getElementById("stat-p99").textContent           = (p99Payment || 0) + "ms";
+    document.getElementById("stat-saf").textContent           = (totalSafQueued || 0).toLocaleString();
+    document.getElementById("stat-synced").textContent        = (totalSynced || 0).toLocaleString();
+    document.getElementById("stat-mesh-relayed").textContent  = (meshRelayed || 0).toLocaleString();
+    document.getElementById("stat-approved").textContent      = `${approvedOnline || 0} / ${approvedOffline || 0}`;
+    document.getElementById("stat-declined").textContent      = (declined || 0).toLocaleString();
+    document.getElementById("stat-highrisk").textContent      = (highRiskCount || 0).toLocaleString();
+    document.getElementById("stat-online").textContent        = `${onlineCount} / ${totalDevices}`;
 
   } else if (type === "SAF_CHANGE") {
     // stats tick handles the aggregate; individual pixel already updated by STATE_UPDATE
@@ -538,7 +545,9 @@ function appendLog(msg) {
   const out = document.getElementById("log-output");
   const line = document.createElement("div");
 
-  if (msg.includes("OFFLINE") || msg.includes("went OFFLINE") || msg.includes("missed")) {
+  if (msg.includes("MESH_RELAY")) {
+    line.style.color = "#ff7043";
+  } else if (msg.includes("OFFLINE") || msg.includes("went OFFLINE") || msg.includes("missed")) {
     line.className = "log-offline";
   } else if (msg.includes("SYNCING") || msg.includes("Syncing") || msg.includes("uploading")) {
     line.className = "log-sync";

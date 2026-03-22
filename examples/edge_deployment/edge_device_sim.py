@@ -59,6 +59,8 @@ TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
 PAYMENT_INTERVAL = int(os.getenv("PAYMENT_INTERVAL", "20"))
 EDGE_WORKFLOW_SYNC = os.getenv("EDGE_WORKFLOW_SYNC", "true").lower() == "true"
 NETWORK_CONDITION = os.getenv("NETWORK_CONDITION", "good")
+PEER_LISTEN_PORT = int(os.getenv("PEER_LISTEN_PORT", "0"))
+PEER_URLS = [u for u in os.getenv("PEER_URLS", "").split(",") if u.strip()]
 
 # Shared network simulator — all HTTP clients use this transport so the
 # network profile can be changed at runtime (e.g. NETWORK_CONDITION=auto)
@@ -459,6 +461,8 @@ async def main():
         config_poll_interval=60,
         sync_interval=60,
         workflow_sync_enabled=EDGE_WORKFLOW_SYNC,
+        peer_listen_port=PEER_LISTEN_PORT,
+        peer_urls=PEER_URLS,
     )
 
     await agent.start()

@@ -19,6 +19,7 @@ const STATE = {
   SAF_QUEUED:    5,
   SYNCING:       6,
   SYNCED:        7,
+  MESH_RELAY:    8,   // routing SAF through a peer (transient)
 };
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ let approvedOnline  = 0;
 let approvedOffline = 0;
 let declined        = 0;
 let highRiskCount   = 0;
+let meshRelayed     = 0;
 
 // ── Message handler ────────────────────────────────────────────────────────
 self.onmessage = async (e) => {
@@ -227,6 +229,11 @@ async function deviceLoop(dev) {
           log(`${devLabel(dev)} went OFFLINE (${dev.missedHeartbeats} missed heartbeats)`);
         }
       }
+    }
+
+    // Mesh relay: when globally offline with queued SAF, try to route via a peer
+    if (!networkUp && dev.safQueue.length > 0) {
+      await tryMeshRelay(dev);
     }
 
     const jitter = (dev.index % 10) * 200;
@@ -735,6 +742,80 @@ async function fetchWithCondition(url, options = {}) {
   }
 }
 
+// ── Mesh peer relay (BFS, max 3 hops) ─────────────────────────────────────
+const PEER_RADIUS = 5;  // devices within ±PEER_RADIUS index are spatial peers
+
+function getPeerIndices(dev) {
+  const peers = [];
+  for (let offset = -PEER_RADIUS; offset <= PEER_RADIUS; offset++) {
+    if (offset === 0) continue;
+    const idx = dev.index + offset;
+    if (idx >= 0 && idx < devices.length) peers.push(idx);
+  }
+  return peers;
+}
+
+function findRelayPeer(forDev, maxDepth = 3) {
+  const visited = new Set([forDev.index]);
+  let frontier = getPeerIndices(forDev);
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const nextFrontier = [];
+    for (const idx of frontier) {
+      if (visited.has(idx)) continue;
+      visited.add(idx);
+      const peer = devices[idx];
+      if (!peer) continue;
+      if (peer.state === STATE.ONLINE || peer.state === STATE.SYNCED) {
+        return { peer, hops: depth };
+      }
+      // Expand: add peer's spatial neighbours to next frontier
+      for (const ni of getPeerIndices(peer)) {
+        if (!visited.has(ni)) nextFrontier.push(ni);
+      }
+    }
+    frontier = nextFrontier;
+    if (frontier.length === 0) break;
+  }
+  return null;
+}
+
+async function tryMeshRelay(dev) {
+  if (dev.safQueue.length === 0) return false;
+  const relay = findRelayPeer(dev);
+  if (!relay) return false;
+
+  const { peer, hops } = relay;
+  setState(dev, STATE.MESH_RELAY);
+
+  const label   = devLabel(dev);
+  const typeTag = `[${dev.deviceType.toUpperCase()}]`;
+  const count   = dev.safQueue.length;
+  const hopWord = hops === 1 ? "hop" : "hops";
+
+  log(
+    `${label} ${typeTag} MESH_RELAY  via device-${String(peer.index + 1).padStart(3, "0")} ` +
+    `(${hops} ${hopWord})  ${count} txn${count !== 1 ? "s" : ""} relayed`
+  );
+
+  // Hand SAF entries to relay peer with relay_source marker
+  const pending = dev.safQueue.splice(0);
+  for (const entry of pending) {
+    entry.txn.relay_source = dev.id;
+    peer.safQueue.push(entry);
+  }
+  postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: 0 });
+  meshRelayed += count;
+
+  // Prompt relay peer to drain immediately if it's currently online
+  if (peer.state === STATE.ONLINE || peer.state === STATE.SYNCED) {
+    drainSAF(peer).catch(() => {});
+  }
+
+  setState(dev, STATE.OFFLINE);
+  return true;
+}
+
 // ── Stats loop ─────────────────────────────────────────────────────────────
 function startStatsLoop() {
   setInterval(() => {
@@ -767,6 +848,7 @@ function startStatsLoop() {
       approvedOffline,
       declined,
       highRiskCount,
+      meshRelayed,
     });
 
     txnCount = 0;

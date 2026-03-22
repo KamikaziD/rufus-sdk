@@ -705,6 +705,80 @@ class SyncManager:
 
         return resolution
 
+    async def _build_signed_transaction_dicts(self) -> List[dict]:
+        """
+        Build signed transaction dicts for all pending transactions.
+
+        Returns the same format as _sync_batch prepares — suitable for
+        forwarding via a mesh relay peer's /peer/relay/saf endpoint.
+        """
+        pending = await self._get_pending_transactions()
+        result = []
+        for t in pending:
+            txn_dict = {
+                "transaction_id": t.transaction_id,
+                "encrypted_blob": (
+                    t.encrypted_payload.hex() if t.encrypted_payload else ""
+                ),
+                "encryption_key_id": t.encryption_key_id or "default",
+                "merchant_id": t.merchant_id or "",
+                "amount_cents": int(t.amount * 100) if t.amount else 0,
+                "currency": t.currency or "USD",
+                "card_token": t.card_token or "",
+                "card_last_four": t.card_last_four or "",
+                "workflow_id": t.workflow_id or "",
+            }
+            hmac_input = (
+                f"{txn_dict['transaction_id']}|"
+                f"{txn_dict['encrypted_blob']}|"
+                f"{txn_dict['encryption_key_id']}"
+            )
+            txn_dict["hmac"] = self._calculate_hmac(hmac_input)
+            result.append(txn_dict)
+        return result
+
+    async def sync_batch_direct(self, transactions: List[dict]) -> dict:
+        """
+        Forward pre-signed transaction dicts to the cloud (used by relay server).
+
+        Accepts transactions as already-prepared dicts (from a peer relay request)
+        and POSTs them to the cloud sync endpoint under this device's credentials.
+        The originating device's HMAC is forwarded unchanged — integrity is end-to-end.
+        """
+        if not self._adapter:
+            raise RuntimeError("Platform adapter not initialized")
+
+        payload = {
+            "transactions": transactions,
+            "device_sequence": await self._next_sequence(),
+            "device_timestamp": datetime.utcnow().isoformat(),
+        }
+        payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+        headers = {
+            "X-API-Key": self.api_key,
+            "X-Device-ID": self.device_id,
+        }
+
+        response = await self._adapter.http_post(
+            f"{self.sync_url}/api/v1/devices/{self.device_id}/sync",
+            body=payload_bytes,
+            headers=headers,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "accepted": data.get("accepted", []),
+                "rejected": data.get("rejected", []),
+            }
+        raise RuntimeError(
+            f"Cloud sync returned HTTP {response.status_code}: {response.text}"
+        )
+
+    async def mark_relayed(self, transaction_ids: List[str]):
+        """Mark peer-relayed transactions as synced so they aren't re-queued."""
+        await self.mark_synced(transaction_ids)
+
     async def check_connectivity(self) -> bool:
         """Check if cloud control plane is reachable."""
         if not self._adapter:

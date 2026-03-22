@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from rufus.builder import WorkflowBuilder
@@ -73,6 +73,8 @@ class RufusEdgeAgent:
         heartbeat_interval: int = 60,
         workflow_sync_enabled: bool = True,
         platform_adapter: Optional[PlatformAdapter] = None,
+        peer_listen_port: int = 0,
+        peer_urls: Optional[List[str]] = None,
     ):
         """
         Initialize the edge agent.
@@ -86,6 +88,8 @@ class RufusEdgeAgent:
             config_poll_interval: Seconds between config polls
             sync_interval: Seconds between sync attempts
             heartbeat_interval: Seconds between heartbeats
+            peer_listen_port: Port for inbound peer relay server (0 = disabled)
+            peer_urls: Known peer device URLs for BFS mesh routing ([] = disabled)
         """
         self.device_id = device_id
         self.cloud_url = cloud_url.rstrip("/")
@@ -97,6 +101,8 @@ class RufusEdgeAgent:
         self.heartbeat_interval = heartbeat_interval
         self.workflow_sync_enabled = workflow_sync_enabled
         self._platform_adapter: Optional[PlatformAdapter] = platform_adapter
+        self._peer_listen_port = peer_listen_port
+        self._peer_urls: List[str] = list(peer_urls or [])
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -116,6 +122,8 @@ class RufusEdgeAgent:
         self._heartbeat_consecutive_failures: int = 0
         # Custom command handlers registered by application code
         self._custom_command_handlers: dict = {}
+        # Mesh peer relay (initialized in start() when peer_urls/peer_listen_port are set)
+        self._mesh_router = None
 
     async def start(self):
         """Start the edge agent."""
@@ -200,6 +208,30 @@ class RufusEdgeAgent:
 
         # Start config polling
         await self.config_manager.start_polling()
+
+        # Mesh peer relay — spin up relay server and BFS router if configured
+        if self._peer_listen_port > 0 or self._peer_urls:
+            from rufus_edge.peer_relay import MeshRouter
+            self._mesh_router = MeshRouter(
+                device_id=self.device_id,
+                sync_manager=self.sync_manager,
+            )
+
+        if self._peer_listen_port > 0:
+            from rufus_edge.peer_relay import PeerRelayServer, create_relay_app
+            relay_app = create_relay_app(
+                sync_manager=self.sync_manager,
+                device_id=self.device_id,
+                peer_urls=self._peer_urls,
+                is_online_fn=lambda: self._is_online,
+            )
+            relay_server = PeerRelayServer(relay_app, self._peer_listen_port)
+            self._background_tasks.append(
+                asyncio.create_task(relay_server.start())
+            )
+            logger.info(
+                f"[Mesh] Relay server started on port {self._peer_listen_port}"
+            )
 
         self._is_running = True
         logger.info(f"Rufus Edge Agent started: {self.device_id}")
@@ -519,6 +551,26 @@ class RufusEdgeAgent:
                                 logger.info(f"Workflow sync complete: {ws_result}")
                         except Exception as exc:
                             logger.warning(f"Workflow sync error: {exc}")
+
+                else:
+                    # Offline: attempt mesh peer relay if peers are configured
+                    if self._mesh_router and self.sync_manager:
+                        pending = await self.sync_manager.get_pending_count()
+                        if pending > 0:
+                            relay_txns = await self.sync_manager._build_signed_transaction_dicts()
+                            if relay_txns:
+                                logger.info(
+                                    f"[Mesh] Offline — probing {len(self._peer_urls)} peer(s)..."
+                                )
+                                result = await self._mesh_router.find_relay(
+                                    relay_txns, self._peer_urls
+                                )
+                                if result and result.accepted_ids:
+                                    await self.sync_manager.mark_relayed(result.accepted_ids)
+                                    logger.info(
+                                        f"[Mesh] Relayed {len(result.accepted_ids)} txns "
+                                        f"via {result.relay_path}"
+                                    )
 
             except asyncio.CancelledError:
                 break
