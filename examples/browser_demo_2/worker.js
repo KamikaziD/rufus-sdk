@@ -155,6 +155,8 @@ function initDevices(n) {
       missedHeartbeats: 0,
       seqNum: 0,
       registered: false,
+      relayLoad: 0,          // concurrent relay bursts currently carrying
+      relayLoadTotal: 0,     // lifetime relay count for leaderboard
     });
   }
 }
@@ -487,50 +489,89 @@ async function heartbeat(dev) {
 async function drainSAF(dev) {
   if (dev.safQueue.length === 0) return;
   setState(dev, STATE.SYNCING);
-  const pending   = dev.safQueue.splice(0);
-  const txns      = pending.map(p => p.txn);
-  const wfRecords = pending.flatMap(p => p.workflows);
-  const key       = dev.apiKey || "browser-demo-key";
-  const label     = devLabel(dev);
-  const typeTag   = `[${dev.deviceType.toUpperCase()}]`;
 
-  log(`${label} ${typeTag} SYNCING  uploading ${txns.length} txns…`);
+  // Partition by relay_source: own txns vs foreign (relayed) txns
+  const allItems = dev.safQueue.splice(0);
+  const ownItems = allItems.filter(it => !it.txn.relay_source);
+  const foreignGroups = {};
+  for (const it of allItems.filter(it => it.txn.relay_source)) {
+    const src = it.txn.relay_source;
+    (foreignGroups[src] = foreignGroups[src] || []).push(it);
+  }
 
+  const key   = dev.apiKey || "browser-demo-key";
+  const label = devLabel(dev);
+  const typeTag = `[${dev.deviceType.toUpperCase()}]`;
+  const totalCount = allItems.length;
+
+  log(`${label} ${typeTag} SYNCING  uploading ${totalCount} txns (${ownItems.length} own, ${totalCount - ownItems.length} relayed)…`);
+
+  // POST own transactions
+  if (ownItems.length > 0) {
+    const wfRecords = ownItems.flatMap(p => p.workflows || []);
+    const ok = await postSafBatch(dev, ownItems.map(it => it.txn), null, key);
+    if (ok && wfRecords.length > 0) await syncWorkflows(dev, wfRecords);
+  }
+
+  // POST each foreign group to the originating device's endpoint with mesh_relay metadata
+  for (const [sourceId, items] of Object.entries(foreignGroups)) {
+    const sourceDev = devices.find(d => d.id === sourceId);
+    if (!sourceDev) continue;
+    const firstItem = items[0];
+    const relayMeta = {
+      relay_device_id: dev.id,
+      hop_count: firstItem.txn.relay_hops || 1,
+      relayed_at: new Date(firstItem.txn.relayed_at || Date.now()).toISOString(),
+    };
+    const wfRecords = items.flatMap(p => p.workflows || []);
+    const ok = await postSafBatch(sourceDev, items.map(it => it.txn), relayMeta, sourceDev.apiKey || "browser-demo-key");
+    if (ok && wfRecords.length > 0) await syncWorkflows(sourceDev, wfRecords);
+  }
+
+  postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: 0 });
+
+  // Summarise risk from all workflow records
+  const allWfRecords = allItems.flatMap(p => p.workflows || []);
+  const risks = allWfRecords
+    .filter(w => w.workflow_type === "TransactionMonitoring")
+    .map(w => { try { return JSON.parse(w.state).risk_level || "LOW"; } catch { return "LOW"; } });
+  const riskSummary = [...new Set(risks)].join("/") || "LOW";
+
+  setState(dev, STATE.SYNCED);
+  log(`${label} ${typeTag} SYNCED   ✓ ${totalCount} txns  risk: ${riskSummary}`);
+  await sleep(800);
+  setState(dev, STATE.ONLINE);
+}
+
+async function postSafBatch(targetDev, txns, relayMeta, key) {
+  if (txns.length === 0) return true;
+  // Strip relay metadata fields from txn objects before posting
+  const cleaned = txns.map(({ relay_source, relay_hops, relayed_at, ...rest }) => rest);
+  const body = {
+    transactions: cleaned,
+    device_sequence: targetDev.seqNum++,
+    device_timestamp: new Date().toISOString(),
+  };
+  if (relayMeta) body.mesh_relay = relayMeta;
   try {
-    const resp = await fetchWithCondition(`${cloudUrl}/api/v1/devices/${dev.id}/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": key },
-      body: JSON.stringify({
-        transactions: txns,
-        device_sequence: dev.seqNum++,
-        device_timestamp: new Date().toISOString(),
-      }),
-    });
+    const resp = await fetchWithCondition(
+      `${cloudUrl}/api/v1/devices/${targetDev.id}/sync`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { "X-API-Key": key } : {}),
+        },
+        body: JSON.stringify(body),
+      }
+    );
     if (resp.ok) {
       totalSynced += txns.length;
-      postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: 0 });
-
-      // Sync workflow records (PaymentSimulation + TransactionMonitoring per txn)
-      if (wfRecords.length > 0) await syncWorkflows(dev, wfRecords);
-
-      // Summarise risk levels from monitoring records
-      const risks = wfRecords
-        .filter(w => w.workflow_type === "TransactionMonitoring")
-        .map(w => { try { return JSON.parse(w.state).risk_level || "LOW"; } catch { return "LOW"; } });
-      const riskSummary = [...new Set(risks)].join("/") || "LOW";
-
-      setState(dev, STATE.SYNCED);
-      log(`${label} ${typeTag} SYNCED   ✓ ${txns.length} txns  risk: ${riskSummary}`);
-      await sleep(800);
-      setState(dev, STATE.ONLINE);
-    } else {
-      dev.safQueue.unshift(...pending);
-      setState(dev, STATE.SAF_QUEUED);
-      postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: dev.safQueue.length });
+      return true;
     }
+    return false;
   } catch {
-    dev.safQueue.unshift(...pending);
-    setState(dev, STATE.OFFLINE);
+    return false;
   }
 }
 
@@ -626,7 +667,7 @@ function buildPaymentSimRecord(workflowId, dev, payment, paymentStatus, authCode
       steps: JSON.parse(PAYMENT_SIM_STEPS_CONFIG),
     }),
     current_step:          "Complete_Payment",
-    status:                paymentStatus === "DECLINED" ? "FAILED" : "COMPLETED",
+    status:                "COMPLETED",
     state:                 JSON.stringify({
       device_id:              dev.id,
       device_type:            dev.deviceType,
@@ -745,14 +786,25 @@ async function fetchWithCondition(url, options = {}) {
 // ── Mesh peer relay (BFS, max 3 hops) ─────────────────────────────────────
 const PEER_RADIUS = 5;  // devices within ±PEER_RADIUS index are spatial peers
 
+function lcgNext(seed) {
+  return (seed * 1664525 + 1013904223) & 0xffffffff;
+}
+
 function getPeerIndices(dev) {
-  const peers = [];
-  for (let offset = -PEER_RADIUS; offset <= PEER_RADIUS; offset++) {
-    if (offset === 0) continue;
-    const idx = dev.index + offset;
-    if (idx >= 0 && idx < devices.length) peers.push(idx);
+  const indices = [];
+  for (let d = -PEER_RADIUS; d <= PEER_RADIUS; d++) {
+    if (d === 0) continue;
+    const idx = dev.index + d;
+    if (idx >= 0 && idx < devices.length) indices.push(idx);
   }
-  return peers;
+  // Seeded shuffle — each device has a stable but different ordering
+  let seed = dev.index * 2654435761;
+  for (let i = indices.length - 1; i > 0; i--) {
+    seed = lcgNext(seed);
+    const j = Math.abs(seed) % (i + 1);
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return indices;
 }
 
 function findRelayPeer(forDev, maxDepth = 3) {
@@ -766,7 +818,7 @@ function findRelayPeer(forDev, maxDepth = 3) {
       visited.add(idx);
       const peer = devices[idx];
       if (!peer) continue;
-      if (peer.state === STATE.ONLINE || peer.state === STATE.SYNCED) {
+      if ((peer.state === STATE.ONLINE || peer.state === STATE.SYNCED) && peer.relayLoad < 5) {
         return { peer, hops: depth };
       }
       // Expand: add peer's spatial neighbours to next frontier
@@ -787,30 +839,40 @@ async function tryMeshRelay(dev) {
 
   const { peer, hops } = relay;
   setState(dev, STATE.MESH_RELAY);
+  peer.relayLoad++;
 
   const label   = devLabel(dev);
   const typeTag = `[${dev.deviceType.toUpperCase()}]`;
-  const count   = dev.safQueue.length;
+  const items   = dev.safQueue.splice(0);
+  const count   = items.length;
   const hopWord = hops === 1 ? "hop" : "hops";
+
+  // Tag items with relay metadata
+  for (const item of items) {
+    item.txn.relay_source   = dev.id;
+    item.txn.relay_hops     = hops;
+    item.txn.relayed_at     = Date.now();
+    peer.safQueue.push(item);
+  }
+
+  postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: 0 });
+  postMessage({ type: "RELAY_EDGE", from: dev.index, to: peer.index, hops, count });
+  meshRelayed += count;
+  peer.relayLoadTotal += count;
 
   log(
     `${label} ${typeTag} MESH_RELAY  via device-${String(peer.index + 1).padStart(3, "0")} ` +
     `(${hops} ${hopWord})  ${count} txn${count !== 1 ? "s" : ""} relayed`
   );
 
-  // Hand SAF entries to relay peer with relay_source marker
-  const pending = dev.safQueue.splice(0);
-  for (const entry of pending) {
-    entry.txn.relay_source = dev.id;
-    peer.safQueue.push(entry);
-  }
-  postMessage({ type: "SAF_CHANGE", deviceIndex: dev.index, queueDepth: 0 });
-  meshRelayed += count;
-
   // Prompt relay peer to drain immediately if it's currently online
   if (peer.state === STATE.ONLINE || peer.state === STATE.SYNCED) {
     drainSAF(peer).catch(() => {});
   }
+
+  // relayLoad released after drain completes (or peer drains asynchronously)
+  // Use a brief delay to decrement after the drain has likely started
+  setTimeout(() => { peer.relayLoad = Math.max(0, peer.relayLoad - 1); }, 5000);
 
   setState(dev, STATE.OFFLINE);
   return true;
@@ -850,6 +912,17 @@ function startStatsLoop() {
       highRiskCount,
       meshRelayed,
     });
+
+    // Post leaderboard update
+    const heroMap = {};
+    for (const d of devices) {
+      if (d.relayLoadTotal > 0) heroMap[d.id] = { count: d.relayLoadTotal, index: d.index };
+    }
+    const heroes = Object.entries(heroMap)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 5)
+      .map(([id, v]) => [id, v.count]);
+    postMessage({ type: "LEADERBOARD", heroes });
 
     txnCount = 0;
     txnWindowStart = now;

@@ -421,6 +421,7 @@ class DeviceService:
         api_key: Optional[str] = None,
         device_sequence: int = 0,
         payload_signature: Optional[str] = None,
+        relay_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Process synced transactions from edge device with HMAC verification.
@@ -524,13 +525,26 @@ class DeviceService:
                         continue
 
                     # Insert transaction (idempotent - ignore duplicates from race conditions)
+                    relay_device_id = relay_metadata.get("relay_device_id") if relay_metadata else None
+                    relay_source_device_id = relay_metadata.get("relay_source_device_id") if relay_metadata else None
+                    hop_count = relay_metadata.get("hop_count") if relay_metadata else None
+                    relayed_at_raw = relay_metadata.get("relayed_at") if relay_metadata else None
+                    relayed_at = None
+                    if relayed_at_raw:
+                        try:
+                            relayed_at = datetime.fromisoformat(str(relayed_at_raw).replace("Z", "+00:00"))
+                        except Exception:
+                            relayed_at = None
+
                     result = await conn.fetchrow(
                         """
                         INSERT INTO saf_transactions (
                             id, transaction_id, idempotency_key, device_id, merchant_id,
                             amount_cents, currency, card_token, card_last_four,
-                            encrypted_payload, encryption_key_id, workflow_id, status, synced_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced', $13)
+                            encrypted_payload, encryption_key_id, workflow_id,
+                            relay_device_id, relay_source_device_id, hop_count, relayed_at,
+                            status, synced_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'synced', $17)
                         ON CONFLICT (idempotency_key) DO NOTHING
                         RETURNING transaction_id
                         """,
@@ -546,6 +560,10 @@ class DeviceService:
                         txn.get("encrypted_payload"),
                         txn.get("encryption_key_id"),
                         txn.get("workflow_id"),
+                        relay_device_id,
+                        relay_source_device_id,
+                        hop_count,
+                        relayed_at,
                         datetime.utcnow()
                     )
 
@@ -589,7 +607,8 @@ class DeviceService:
         async with self.persistence.pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT transaction_id, merchant_id, amount_cents, currency,
-                          card_last_four, status, workflow_id, synced_at, created_at
+                          card_last_four, status, workflow_id, synced_at, created_at,
+                          relay_device_id, relay_source_device_id, hop_count, relayed_at
                    FROM saf_transactions WHERE device_id = $1
                    ORDER BY synced_at DESC NULLS LAST LIMIT $2""",
                 device_id, limit,
@@ -1108,3 +1127,104 @@ class DeviceService:
             "new_api_key": new_key,  # Only time returned in plaintext
             "rotated_at": now.isoformat(),
         }
+
+    async def get_mesh_stats(self, device_id: str) -> dict:
+        """Get mesh relay stats for a device."""
+        db = self.persistence
+        if not hasattr(db, 'pool'):
+            return {"device_id": device_id, "relayed_for_others": 0, "saved_by_peers": 0, "total_relay_hops": 0, "last_relay_at": None}
+        try:
+            async with db.pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE relay_device_id = $1)   AS relayed_for_others,
+                        COUNT(*) FILTER (WHERE device_id = $1 AND relay_device_id IS NOT NULL) AS saved_by_peers,
+                        COALESCE(SUM(hop_count) FILTER (WHERE relay_device_id = $1), 0) AS total_relay_hops,
+                        MAX(relayed_at) FILTER (WHERE relay_device_id = $1) AS last_relay_at
+                    FROM saf_transactions
+                    WHERE device_id = $1 OR relay_device_id = $1
+                """, device_id)
+                if row is None:
+                    return {"device_id": device_id, "relayed_for_others": 0, "saved_by_peers": 0, "total_relay_hops": 0, "last_relay_at": None}
+                return {
+                    "device_id": device_id,
+                    "relayed_for_others": row["relayed_for_others"] or 0,
+                    "saved_by_peers": row["saved_by_peers"] or 0,
+                    "total_relay_hops": int(row["total_relay_hops"] or 0),
+                    "last_relay_at": row["last_relay_at"].isoformat() if row["last_relay_at"] else None,
+                }
+        except Exception as e:
+            logger.error(f"get_mesh_stats failed: {e}")
+            return {"device_id": device_id, "relayed_for_others": 0, "saved_by_peers": 0, "total_relay_hops": 0, "last_relay_at": None}
+
+    async def get_mesh_topology(self) -> dict:
+        """Get fleet mesh topology — relay edges and node stats."""
+        db = self.persistence
+        now_iso = datetime.utcnow().isoformat()
+        if not hasattr(db, 'pool'):
+            return {"nodes": [], "edges": [], "generated_at": now_iso}
+        try:
+            async with db.pool.acquire() as conn:
+                edge_rows = await conn.fetch("""
+                    SELECT relay_source_device_id AS source_device_id,
+                           relay_device_id,
+                           COUNT(*) AS relay_count,
+                           AVG(hop_count)::float AS avg_hop_count
+                    FROM saf_transactions
+                    WHERE relay_device_id IS NOT NULL
+                      AND relay_source_device_id IS NOT NULL
+                    GROUP BY relay_source_device_id, relay_device_id
+                    ORDER BY relay_count DESC
+                    LIMIT 200
+                """)
+                if not edge_rows:
+                    return {"nodes": [], "edges": [], "generated_at": now_iso}
+
+                # Collect all device IDs from edges
+                device_ids = set()
+                for row in edge_rows:
+                    device_ids.add(row["source_device_id"])
+                    device_ids.add(row["relay_device_id"])
+
+                # Fetch device types
+                device_type_map = {}
+                if device_ids:
+                    dev_rows = await conn.fetch(
+                        "SELECT device_id, device_type FROM edge_devices WHERE device_id = ANY($1::text[])",
+                        list(device_ids)
+                    )
+                    for dr in dev_rows:
+                        device_type_map[dr["device_id"]] = dr["device_type"]
+
+                # Build per-node stats
+                node_stats = {}
+                for did in device_ids:
+                    node_stats[did] = {"relayed_for_others": 0, "saved_by_peers": 0}
+                for row in edge_rows:
+                    node_stats[row["relay_device_id"]]["relayed_for_others"] += row["relay_count"]
+                    node_stats[row["source_device_id"]]["saved_by_peers"] += row["relay_count"]
+
+                max_relay = max((v["relayed_for_others"] for v in node_stats.values()), default=1) or 1
+                nodes = [
+                    {
+                        "device_id": did,
+                        "device_type": device_type_map.get(did, "pos"),
+                        "relayed_for_others": stats["relayed_for_others"],
+                        "saved_by_peers": stats["saved_by_peers"],
+                        "relay_score": round(stats["relayed_for_others"] / max_relay, 4),
+                    }
+                    for did, stats in node_stats.items()
+                ]
+                edges = [
+                    {
+                        "source_device_id": row["source_device_id"],
+                        "relay_device_id": row["relay_device_id"],
+                        "relay_count": row["relay_count"],
+                        "avg_hop_count": round(row["avg_hop_count"] or 1.0, 2),
+                    }
+                    for row in edge_rows
+                ]
+                return {"nodes": nodes, "edges": edges, "generated_at": now_iso}
+        except Exception as e:
+            logger.error(f"get_mesh_topology failed: {e}")
+            return {"nodes": [], "edges": [], "generated_at": now_iso}

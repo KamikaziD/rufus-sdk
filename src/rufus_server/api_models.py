@@ -142,8 +142,9 @@ class EncryptedTransaction(BaseModel):
 class SyncRequest(BaseModel):
     """Request to sync offline transactions."""
     transactions: List[EncryptedTransaction]
-    device_sequence: int
-    device_timestamp: datetime
+    device_sequence: int = 0
+    device_timestamp: Optional[datetime] = None
+    mesh_relay: Optional["MeshRelayMeta"] = None   # set when a relay peer is posting on behalf of another device
 
 
 class SyncAck(BaseModel):
@@ -177,6 +178,46 @@ class WorkflowSyncResponse(BaseModel):
     accepted_workflow_ids: List[str]
     audit_rows_inserted: int
     skipped: int = 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mesh Relay Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MeshRelayMeta(BaseModel):
+    """Relay metadata included when a peer device forwards SAF transactions."""
+    relay_device_id: str
+    hop_count: int = 1
+    relayed_at: Optional[str] = None
+
+
+class DeviceMeshStats(BaseModel):
+    device_id: str
+    relayed_for_others: int
+    saved_by_peers: int
+    total_relay_hops: int
+    last_relay_at: Optional[str]
+
+
+class MeshTopologyNode(BaseModel):
+    device_id: str
+    device_type: str
+    relayed_for_others: int
+    saved_by_peers: int
+    relay_score: float   # 0-1 normalized
+
+
+class MeshTopologyEdge(BaseModel):
+    source_device_id: str
+    relay_device_id: str
+    relay_count: int
+    avg_hop_count: float
+
+
+class MeshTopologyResponse(BaseModel):
+    nodes: List[MeshTopologyNode]
+    edges: List[MeshTopologyEdge]
+    generated_at: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────

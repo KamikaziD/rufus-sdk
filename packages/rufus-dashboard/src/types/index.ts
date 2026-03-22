@@ -158,3 +158,34 @@ export interface RufusUser {
   org_id?: string;
   accessToken: string;
 }
+
+// ── Mesh Relay Types ─────────────────────────────────────────────────────────
+
+export interface DeviceMeshStats {
+  device_id: string;
+  relayed_for_others: number;
+  saved_by_peers: number;
+  total_relay_hops: number;
+  last_relay_at: string | null;
+}
+
+export interface MeshTopologyNode {
+  device_id: string;
+  device_type: string;
+  relayed_for_others: number;
+  saved_by_peers: number;
+  relay_score: number;   // 0-1
+}
+
+export interface MeshTopologyEdge {
+  source_device_id: string;
+  relay_device_id: string;
+  relay_count: number;
+  avg_hop_count: number;
+}
+
+export interface MeshTopologyResponse {
+  nodes: MeshTopologyNode[];
+  edges: MeshTopologyEdge[];
+  generated_at: string;
+}

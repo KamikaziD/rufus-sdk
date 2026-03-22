@@ -64,6 +64,7 @@ from rufus_server.api_models import (
     WorkflowDefinitionResponse, WorkflowDefinitionDetailResponse,
     ServerCommandRequest, ServerCommandResponse,
     WorkflowSyncRequest, WorkflowSyncResponse,
+    MeshRelayMeta, DeviceMeshStats, MeshTopologyNode, MeshTopologyEdge, MeshTopologyResponse,
 )
 
 # --- FastAPI App Setup ---
@@ -1878,12 +1879,22 @@ async def sync_device_transactions(
         for t in request_data.transactions
     ]
 
+    relay_metadata = None
+    if request_data.mesh_relay:
+        relay_metadata = {
+            "relay_device_id": request_data.mesh_relay.relay_device_id,
+            "relay_source_device_id": device_id,  # the device whose endpoint was called is the origin
+            "hop_count": request_data.mesh_relay.hop_count,
+            "relayed_at": request_data.mesh_relay.relayed_at,
+        }
+
     result = await device_service.sync_transactions(
         device_id=device_id,
         transactions=transactions,
         api_key=x_api_key,  # Pass API key for HMAC verification
         device_sequence=request_data.device_sequence if hasattr(request_data, "device_sequence") else 0,
         payload_signature=x_payload_signature,
+        relay_metadata=relay_metadata,
     )
 
     # Convert to response format
@@ -1912,6 +1923,27 @@ async def list_device_saf(
             if txn.get(key) and hasattr(txn[key], "isoformat"):
                 txn[key] = txn[key].isoformat()
     return {"transactions": transactions}
+
+
+@app.get("/api/v1/devices/{device_id}/mesh-stats", tags=["Devices"])
+async def device_mesh_stats(
+    device_id: str,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Get mesh relay statistics for a device (how many txns it relayed vs was saved by peers)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    return await device_service.get_mesh_stats(device_id)
+
+
+@app.get("/api/v1/mesh/topology", tags=["Devices"])
+async def mesh_topology(
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Get fleet-wide mesh relay topology graph (nodes + edges)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    return await device_service.get_mesh_topology()
 
 
 @app.post("/api/v1/devices/{device_id}/rotate-key", tags=["Devices"])

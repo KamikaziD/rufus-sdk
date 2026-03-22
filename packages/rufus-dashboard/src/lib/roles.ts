@@ -78,6 +78,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Approvals",  href: "/approvals",   icon: "CheckSquare",      requiredRoles: ["SUPER_ADMIN", "WORKFLOW_OPERATOR"] },
   { label: "Devices",    href: "/devices",     icon: "Cpu",              requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR", "AUDITOR", "READ_ONLY"] },
   { label: "Workers",    href: "/workers",     icon: "Server",           requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR"] },
+  { label: "Fleet Topology", href: "/fleet-topology", icon: "Network", requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "WORKFLOW_OPERATOR", "AUDITOR", "READ_ONLY"] },
   { label: "Policies",   href: "/policies",    icon: "Shield",           requiredRoles: ["SUPER_ADMIN", "FLEET_MANAGER", "AUDITOR"] },
   { label: "Schedules",  href: "/schedules",   icon: "Clock",            requiredRoles: ["SUPER_ADMIN", "WORKFLOW_OPERATOR"] },
   { label: "Audit",      href: "/audit",       icon: "FileText",         requiredRoles: ["SUPER_ADMIN", "AUDITOR"] },

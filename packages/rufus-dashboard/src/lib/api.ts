@@ -7,6 +7,8 @@ import type {
   AuditQueryResponse,
   Policy,
   DeviceCommand,
+  DeviceMeshStats,
+  MeshTopologyResponse,
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_RUFUS_API_URL ?? "http://localhost:8000";
@@ -652,6 +654,10 @@ export interface SafTransaction {
   status: string;
   created_at: string;
   synced_at: string | null;
+  relay_device_id?: string | null;
+  relay_source_device_id?: string | null;
+  hop_count?: number | null;
+  relayed_at?: string | null;
 }
 
 export async function getDeviceSafTransactions(
@@ -890,4 +896,14 @@ export function pushWorkflowToDevices(
       target_filter: body.target_filter ?? {},
     }),
   });
+}
+
+// ── Mesh Relay API ────────────────────────────────────────────────────────────
+
+export async function getDeviceMeshStats(token: string, deviceId: string): Promise<DeviceMeshStats> {
+  return apiFetch<DeviceMeshStats>(`/api/v1/devices/${deviceId}/mesh-stats`, token);
+}
+
+export async function getMeshTopology(token: string): Promise<MeshTopologyResponse> {
+  return apiFetch<MeshTopologyResponse>(`/api/v1/mesh/topology`, token);
 }

@@ -73,6 +73,7 @@ class PeerRelayClient:
         peer_url: str,
         transactions: List[dict],
         source_device_id: str,
+        hop_count: int = 1,
     ) -> Optional[RelayResult]:
         """POST /peer/relay/saf — forward signed SAF transactions to a relay peer."""
         import httpx
@@ -80,7 +81,7 @@ class PeerRelayClient:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
                     f"{peer_url}/peer/relay/saf",
-                    json={"transactions": transactions},
+                    json={"transactions": transactions, "hop_count": hop_count},
                     headers={"X-Relay-Source": source_device_id},
                 )
             if resp.status_code == 200:
@@ -143,7 +144,7 @@ class MeshRouter:
                         f"[Mesh] Found online relay at {peer_url} ({depth} hop(s))"
                     )
                     result = await self._client.relay_saf(
-                        peer_url, transactions, self._device_id
+                        peer_url, transactions, self._device_id, hop_count=depth
                     )
                     if result:
                         result.relay_path = [*hop_path, peer_url]
@@ -198,9 +199,11 @@ def create_relay_app(
 
     @app.post("/peer/relay/saf")
     async def relay_saf(request: Request):
+        from datetime import datetime as _dt
         source = request.headers.get("X-Relay-Source", "unknown")
         body = await request.json()
         transactions = body.get("transactions", [])
+        hop_count = body.get("hop_count", 1)
 
         if not transactions:
             return JSONResponse({"accepted": [], "rejected": []})
@@ -209,8 +212,14 @@ def create_relay_app(
             f"[Mesh] Inbound relay from {source}: {len(transactions)} txn(s)"
         )
 
+        relay_metadata = {
+            "relay_device_id": device_id,
+            "hop_count": hop_count,
+            "relayed_at": _dt.utcnow().isoformat(),
+        }
+
         try:
-            result = await sync_manager.sync_batch_direct(transactions)
+            result = await sync_manager.sync_batch_direct(transactions, relay_metadata=relay_metadata)
             return JSONResponse(result)
         except Exception as e:
             logger.error(f"[Mesh] Relay sync_batch_direct failed: {e}")

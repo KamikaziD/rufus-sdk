@@ -737,13 +737,20 @@ class SyncManager:
             result.append(txn_dict)
         return result
 
-    async def sync_batch_direct(self, transactions: List[dict]) -> dict:
+    async def sync_batch_direct(
+        self,
+        transactions: List[dict],
+        relay_metadata: Optional[dict] = None,
+    ) -> dict:
         """
         Forward pre-signed transaction dicts to the cloud (used by relay server).
 
         Accepts transactions as already-prepared dicts (from a peer relay request)
         and POSTs them to the cloud sync endpoint under this device's credentials.
         The originating device's HMAC is forwarded unchanged — integrity is end-to-end.
+
+        relay_metadata: when set, included as mesh_relay in the POST body so the
+        server can record which device relayed these transactions.
         """
         if not self._adapter:
             raise RuntimeError("Platform adapter not initialized")
@@ -753,6 +760,8 @@ class SyncManager:
             "device_sequence": await self._next_sequence(),
             "device_timestamp": datetime.utcnow().isoformat(),
         }
+        if relay_metadata:
+            payload["mesh_relay"] = relay_metadata
         payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
         headers = {
             "X-API-Key": self.api_key,

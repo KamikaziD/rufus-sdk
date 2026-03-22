@@ -661,10 +661,10 @@ function WebhooksTab({ token }: { token: string | undefined }) {
                     </div>
                     <p className="font-mono text-xs text-zinc-500 truncate">{wh.url}</p>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {wh.events.slice(0, 4).map((ev) => (
+                      {(Array.isArray(wh.events) ? wh.events : []).slice(0, 4).map((ev) => (
                         <BadgeOutline key={ev} className="font-mono">{ev}</BadgeOutline>
                       ))}
-                      {wh.events.length > 4 && (
+                      {Array.isArray(wh.events) && wh.events.length > 4 && (
                         <BadgeOutline>+{wh.events.length - 4}</BadgeOutline>
                       )}
                     </div>

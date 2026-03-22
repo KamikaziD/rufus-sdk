@@ -142,19 +142,21 @@
   }
   .canvas-wrap {
     position: relative;
-    display: inline-block;
+    display: block;
+    width: 100%;
   }
   #fleet-canvas {
     display: block;
-    border-radius: 4px;
-    image-rendering: pixelated;
+    width: 100%;
+    border-radius: 6px;
     cursor: crosshair;
+    background: #060810;
   }
   #canvas-tooltip {
     position: absolute;
-    background: rgba(0,0,0,0.85);
+    background: rgba(6,8,16,0.92);
     color: var(--text);
-    padding: 4px 8px;
+    padding: 5px 10px;
     border-radius: 4px;
     font-size: 11px;
     font-family: var(--mono);
@@ -163,6 +165,7 @@
     display: none;
     z-index: 5;
     border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
   }
 
   .legend {
@@ -181,7 +184,7 @@
   .swatch {
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: 50%;
     flex-shrink: 0;
   }
 
@@ -288,9 +291,9 @@
 
   <!-- Fleet heatmap -->
   <div class="panel" id="fleet-panel">
-    <div class="panel-title">Device Fleet — One Pixel Per Device</div>
+    <div class="panel-title">Device Fleet — Mesh Network Graph</div>
     <div class="canvas-wrap">
-      <canvas id="fleet-canvas" width="400" height="300"></canvas>
+      <canvas id="fleet-canvas"></canvas>
       <div id="canvas-tooltip"></div>
     </div>
     <div class="legend">
@@ -345,6 +348,11 @@
       <span class="stat-value" id="stat-online">0 / 0</span>
     </div>
 
+    <div id="relay-leaderboard" style="display:none; margin-top:10px;">
+      <div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Relay Heroes</div>
+      <div id="relay-heroes-list" style="font-size:11px; font-family:var(--mono);"></div>
+    </div>
+
     <div class="net-controls">
       <button id="cut-btn" class="btn-danger" disabled>⚡ Cut Network</button>
       <button id="restore-btn" class="btn-success" disabled>🔄 Restore Network</button>
@@ -372,30 +380,36 @@
 // ── State ──────────────────────────────────────────────────────────────────
 const CLOUD_URL = "http://localhost:8000";
 const REGISTRATION_KEY = "demo-registration-key-2024";  // matches RUFUS_REGISTRATION_KEY in .env
-const MAX_LOG   = 30;
+const MAX_LOG    = 30;
+const PEER_RADIUS = 5;  // must match worker.js
 
+// State index → fill color
 const STATE_COLORS = [
-  "#1a237e",  // 0 IDLE
-  "#2e7d32",  // 1 ONLINE
-  "#c62828",  // 2 WASM_EXEC
-  "#4a148c",  // 3 WORKFLOW_DONE
-  "#e65100",  // 4 OFFLINE
-  "#f9a825",  // 5 SAF_QUEUED
-  "#1565c0",  // 6 SYNCING
-  "#00695c",  // 7 SYNCED
-  "#ff7043",  // 8 MESH_RELAY
+  "#1e2a5e",  // 0 IDLE        — dim navy
+  "#1b5e20",  // 1 ONLINE      — dark green
+  "#b71c1c",  // 2 WASM_EXEC   — deep red
+  "#4a148c",  // 3 WORKFLOW_DONE— purple
+  "#4a2e00",  // 4 OFFLINE     — dark amber
+  "#f9a825",  // 5 SAF_QUEUED  — amber
+  "#0d47a1",  // 6 SYNCING     — blue
+  "#00695c",  // 7 SYNCED      — teal
+  "#ff7043",  // 8 MESH_RELAY  — orange
+];
+// Glow colors for active states
+const STATE_GLOW = [
+  null, "#2e7d32", null, null, null, "#f9a825", "#1565c0", null, "#ff7043",
 ];
 const STATE_NAMES = [
   "Idle", "Online", "WASM exec", "Workflow done",
   "Offline", "SAF queued", "Syncing", "Synced", "Mesh relay",
 ];
 
-let worker         = null;
-let deviceStates   = [];
-let numDevices     = 50;
-let gridCols       = 1;
-let gridRows       = 1;
-let pixelSize      = 12;
+let worker          = null;
+let deviceStates    = [];
+let nodePositions   = [];
+let numDevices      = 50;
+let relayEdges      = new Map();  // `${from}-${to}` → { from, to, expiresAt }
+let animFrameId     = null;
 let _cloudReachable = false;
 
 const canvas  = document.getElementById("fleet-canvas");
@@ -416,7 +430,6 @@ async function checkCloud() {
   _cloudReachable = reachable;
   setCloudBadge(reachable);
 
-  // Notify worker whenever reachability changes
   if (worker && changed) {
     worker.postMessage({ type: "CLOUD_STATUS", reachable });
   }
@@ -438,65 +451,160 @@ function setCloudBadge(online) {
 checkCloud();
 setInterval(checkCloud, 30000);
 
-// ── Canvas sizing ──────────────────────────────────────────────────────────
-function computeGrid(n) {
-  // Aim for a roughly square grid
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  // Pixel size based on count
-  let px;
-  if (n <= 25)       px = 16;
-  else if (n <= 100) px = 12;
-  else               px = 8;
-  const gap = 1;
-  return { cols, rows, px, gap };
+// ── Node layout ────────────────────────────────────────────────────────────
+function computeNodePositions(n, W, H) {
+  const margin = 32;
+  const aspect = W / H;
+  const cols   = Math.ceil(Math.sqrt(n * aspect));
+  const rows   = Math.ceil(n / cols);
+  const cellW  = (W - 2 * margin) / cols;
+  const cellH  = (H - 2 * margin) / rows;
+
+  // seeded LCG — same seed → same layout every run
+  let seed = 0xdeadbeef;
+  const lcg = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  };
+
+  return Array.from({ length: n }, (_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx  = margin + col * cellW + cellW / 2;
+    const cy  = margin + row * cellH + cellH / 2;
+    return {
+      x: cx + (lcg() - 0.5) * cellW * 0.6,
+      y: cy + (lcg() - 0.5) * cellH * 0.6,
+    };
+  });
 }
 
-function resizeCanvas(n) {
-  const { cols, rows, px, gap } = computeGrid(n);
-  gridCols  = cols;
-  gridRows  = rows;
-  pixelSize = px;
-
-  canvas.width  = cols * (px + gap) + gap;
-  canvas.height = rows * (px + gap) + gap;
-  canvas.style.width  = canvas.width  + "px";
-  canvas.style.height = canvas.height + "px";
-}
-
-function drawDevice(index, stateIndex) {
-  const { px, gap } = { px: pixelSize, gap: 1 };
-  const col = index % gridCols;
-  const row = Math.floor(index / gridCols);
-  const x   = col * (px + gap) + gap;
-  const y   = row * (px + gap) + gap;
-  ctx.fillStyle = STATE_COLORS[stateIndex] || "#1a237e";
-  ctx.fillRect(x, y, px, px);
-}
-
+// ── Canvas init ────────────────────────────────────────────────────────────
 function initCanvas(n) {
-  resizeCanvas(n);
-  deviceStates = new Uint8Array(n);
-  ctx.fillStyle = "#1a237e";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  for (let i = 0; i < n; i++) drawDevice(i, 0);
+  const panelEl = document.getElementById("fleet-panel");
+  const W = Math.max(300, panelEl.clientWidth - 32);
+  const H = Math.max(220, Math.round(W * 0.48));
+
+  canvas.width  = W;
+  canvas.height = H;
+
+  deviceStates  = new Uint8Array(n);
+  nodePositions = computeNodePositions(n, W, H);
+  relayEdges.clear();
+
+  scheduleRender();
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+function scheduleRender() {
+  if (!animFrameId) {
+    animFrameId = requestAnimationFrame(renderGraph);
+  }
+}
+
+function renderGraph() {
+  animFrameId = null;
+  const W = canvas.width, H = canvas.height;
+  const n = numDevices;
+  const now = Date.now();
+
+  // Background
+  ctx.fillStyle = "#060810";
+  ctx.fillRect(0, 0, W, H);
+
+  // Expire old relay edges
+  for (const [k, e] of relayEdges) {
+    if (e.expiresAt < now) relayEdges.delete(k);
+  }
+
+  // ── Peer connection lines (static, very dim) ───────────────────────────
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth   = 0.8;
+  for (let i = 0; i < n; i++) {
+    const a = nodePositions[i];
+    for (let d = 1; d <= PEER_RADIUS && i + d < n; d++) {
+      const b = nodePositions[i + d];
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // ── Active relay edges (orange, fading) ────────────────────────────────
+  let hasActive = false;
+  for (const [, e] of relayEdges) {
+    const ttl = e.expiresAt - now;
+    if (ttl <= 0 || e.from >= n || e.to >= n) continue;
+    hasActive = true;
+    const alpha = Math.min(1, ttl / 600);  // fade in last 600 ms
+    const a = nodePositions[e.from];
+    const b = nodePositions[e.to];
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,112,67,${alpha * 0.85})`;
+    ctx.lineWidth   = 1.2 + alpha * 1.2;
+    ctx.shadowColor = "#ff7043";
+    ctx.shadowBlur  = 8 * alpha;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Device nodes ──────────────────────────────────────────────────────
+  for (let i = 0; i < n; i++) {
+    const s   = deviceStates[i];
+    const pos = nodePositions[i];
+    const col = STATE_COLORS[s] || STATE_COLORS[0];
+    const glow = STATE_GLOW[s];
+    const r   = (s === 8) ? 6 : (s === 5 || s === 1) ? 5 : 4;
+
+    if (glow) {
+      ctx.save();
+      ctx.shadowColor = glow;
+      ctx.shadowBlur  = (s === 8) ? 14 : 8;
+      ctx.fillStyle   = col;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Keep animating while relay edges are fading
+  if (hasActive) scheduleRender();
 }
 
 // ── Canvas tooltip ─────────────────────────────────────────────────────────
 canvas.addEventListener("mousemove", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-  const px = pixelSize, gap = 1;
-  const col = Math.floor(mx / (px + gap));
-  const row = Math.floor(my / (px + gap));
-  const idx = row * gridCols + col;
-  if (idx >= 0 && idx < numDevices) {
-    const state = deviceStates[idx];
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+  let found = -1;
+  const HIT_R2 = 100; // 10px hit radius
+  for (let i = 0; i < numDevices; i++) {
+    const p  = nodePositions[i];
+    const dx = mx - p.x, dy = my - p.y;
+    if (dx * dx + dy * dy < HIT_R2) { found = i; break; }
+  }
+
+  if (found >= 0) {
+    const state = deviceStates[found];
     tooltip.style.display = "block";
-    tooltip.style.left = (mx + 14) + "px";
-    tooltip.style.top  = (my - 10) + "px";
-    tooltip.textContent = `#${idx + 1}  ${STATE_NAMES[state] || "?"}`;
+    tooltip.style.left    = (e.clientX - rect.left + 14) + "px";
+    tooltip.style.top     = (e.clientY - rect.top  - 10) + "px";
+    tooltip.textContent   = `#${found + 1}  ${STATE_NAMES[state] || "?"}`;
   } else {
     tooltip.style.display = "none";
   }
@@ -513,7 +621,7 @@ function handleWorkerMessage(e) {
     const { deviceIndex, newState } = e.data;
     if (deviceIndex < numDevices) {
       deviceStates[deviceIndex] = newState;
-      drawDevice(deviceIndex, newState);
+      scheduleRender();
     }
 
   } else if (type === "STATS") {
@@ -531,6 +639,15 @@ function handleWorkerMessage(e) {
 
   } else if (type === "SAF_CHANGE") {
     // stats tick handles the aggregate; individual pixel already updated by STATE_UPDATE
+
+  } else if (type === "LEADERBOARD") {
+    updateLeaderboard(e.data.heroes);
+
+  } else if (type === "RELAY_EDGE") {
+    const { from, to } = e.data;
+    const key = `${from}-${to}`;
+    relayEdges.set(key, { from, to, expiresAt: Date.now() + 2500 });
+    scheduleRender();
 
   } else if (type === "LOG") {
     appendLog(e.data.message);
@@ -566,6 +683,21 @@ function appendLog(msg) {
   // Trim to MAX_LOG lines
   while (out.children.length > MAX_LOG) out.removeChild(out.firstChild);
   out.scrollTop = out.scrollHeight;
+}
+
+// ── Relay Leaderboard ──────────────────────────────────────────────────────
+function updateLeaderboard(heroes) {
+  if (!heroes || heroes.length === 0) return;
+  const panel = document.getElementById("relay-leaderboard");
+  const list  = document.getElementById("relay-heroes-list");
+  if (!panel || !list) return;
+  panel.style.display = "block";
+  list.innerHTML = heroes.map(([id, count], i) =>
+    `<div style="display:flex;justify-content:space-between;padding:2px 0;color:var(--text)">` +
+    `<span style="color:var(--muted)">${String(i + 1).padStart(2, "0")} ${id.slice(0, 14)}…</span>` +
+    `<span style="color:#ff7043;font-weight:600">${count}</span>` +
+    `</div>`
+  ).join("");
 }
 
 // ── Controls ───────────────────────────────────────────────────────────────
@@ -644,7 +776,10 @@ legacyChk.addEventListener("change", () => {
 });
 
 // ── Initial canvas ─────────────────────────────────────────────────────────
-initCanvas(parseInt(devCount.value, 10));
+// Defer until layout is complete so fleet-panel has its final width
+requestAnimationFrame(() => {
+  initCanvas(parseInt(devCount.value, 10));
+});
 appendLog("Rufus Sovereign Dispatcher — Browser Demo 2");
 appendLog(`Cloud URL: ${CLOUD_URL}  (checking connectivity…)`);
 </script>
