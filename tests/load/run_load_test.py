@@ -322,6 +322,15 @@ def print_results(results: LoadTestResults, workers: int = 1):
             tail_pass = p_max < max_latency_target_ms
             print(f"Max latency < {max_latency_target_ms / 1000:.0f}s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
 
+    elif results.scenario == "msgspec_codec":
+        rps = results.total_requests / results.duration_seconds if results.duration_seconds > 0 else 0
+        rps_pass = rps >= 50.0  # sanity floor — preflight + heartbeat should always clear this
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Requests:             {results.total_requests:,}")
+        print(f"Heartbeats sent:      {results.heartbeats_sent:,}")
+        print(f"Req/sec >= 50:        {'✅ PASS' if rps_pass else '❌ FAIL'} ({rps:.1f} req/sec)")
+        print(f"Error rate:           {results.error_rate:.2f}%")
+
     print("=" * 80)
 
 
@@ -347,7 +356,7 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd",)
+        _local_only = scenario in ("wasm_thundering_herd", "msgspec_codec")
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,
@@ -391,6 +400,7 @@ async def run_all_scenarios(
         ("cloud_commands", 600),
         ("wasm_steps", 300),
         ("wasm_thundering_herd", 60),
+        ("msgspec_codec", 120),
     ]
 
     # Create single orchestrator for all scenarios
@@ -507,7 +517,8 @@ Scenarios:
   cloud_commands     - Cloud-to-device command delivery
   thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
   wasm_steps         - WASM step execution throughput (sync_wasm command delivery + edge execution)
-  wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: p99 < 50ms)
+  wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: >= 0.8 steps/device/sec)
+  msgspec_codec      - Heartbeat load with msgspec preflight (validates typed decode fast path)
         """
     )
 
@@ -533,6 +544,7 @@ Scenarios:
             "thundering_herd",
             "wasm_steps",
             "wasm_thundering_herd",
+            "msgspec_codec",
         ],
         help="Test scenario to run"
     )
