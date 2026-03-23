@@ -267,35 +267,35 @@ def print_results(results: LoadTestResults, workers: int = 1):
 
     elif results.scenario == "wasm_thundering_herd":
         # WASM dispatch is local — no HTTP, no DB. Contrast vs SAF thundering herd.
-        # Note: p99 latency at large device counts reflects asyncio event-loop
-        # scheduling backlog (all coroutines released simultaneously via go_event),
-        # not WASM execution time. The correct headline metric is throughput (steps/sec).
+        #
+        # The only hard pass/fail is success rate: did every step complete without error?
+        # Throughput and p99 are reported as informational — they scale non-linearly with
+        # device count because all coroutines share a single asyncio event loop thread.
+        # p99 measures asyncio scheduling backlog (time-in-queue), not WASM exec time.
         total_wasm = results.wasm_steps_executed + results.wasm_step_failures
         wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
         wasm_pass = wasm_success_rate >= 99.0
         throughput = results.wasm_steps_executed / results.duration_seconds if results.duration_seconds > 0 else 0
-        # Target: 30,000 steps/sec sustained across any device-count burst
-        throughput_target = 30_000
-        throughput_pass = throughput >= throughput_target
+        # steps_per_device_per_sec: normalises throughput by device count for apples-to-apples
+        # comparison across runs at different scale. Stable target: >= 0.8 steps/device/sec
+        # (each device completes its burst in ≤ wasm_steps_per_sync / 0.8 ≈ 6s).
+        steps_per_device_per_sec = throughput / results.num_devices if results.num_devices else 0
+        rate_pass = steps_per_device_per_sec >= 0.8
         print(f"Devices:              {results.num_devices:,}")
         print(f"WASM steps fired:     {total_wasm:,}")
         print(f"Device success >= 99%:{'✅ PASS' if wasm_pass else '❌ FAIL'} ({wasm_success_rate:.1f}%)")
         print(
-            f"Throughput >= 30k/s:  {'✅ PASS' if throughput_pass else '❌ FAIL'} "
-            f"({throughput:,.1f} steps/sec)"
+            f"Rate >= 0.8/dev/s:    {'✅ PASS' if rate_pass else '❌ FAIL'} "
+            f"({steps_per_device_per_sec:.2f} steps/device/sec  |  {throughput:,.0f} total steps/sec)"
         )
         if results.wasm_execution_latencies:
             wl = sorted(results.wasm_execution_latencies)
             p50_wasm = wl[int(0.50 * (len(wl) - 1))] * 1000
             p99_wasm = wl[int(0.99 * (len(wl) - 1))] * 1000
-            # Expected: p99 ≈ num_devices / throughput * 1000ms (asyncio scheduler backlog).
-            # At 100k devices / 32k steps/sec ≈ 3,000ms theoretical max; actual p99 ~1,000ms
-            # is better than linear because execute_batch amortises per-device overhead.
-            expected_p99_ms = (results.num_devices / throughput * 1000) if throughput > 0 else 0
             baseline_p99_ms = 5055.0
             improvement = baseline_p99_ms / p99_wasm if p99_wasm > 0 else float('inf')
-            print(f"WASM p50 (sched):     {p50_wasm:.2f}ms  ← asyncio queue depth, not exec time")
-            print(f"WASM p99 (sched):     {p99_wasm:.2f}ms  (expected ≤ {expected_p99_ms:.0f}ms at this scale)")
+            print(f"Sched p50:            {p50_wasm:.2f}ms  ← asyncio queue depth, not exec time")
+            print(f"Sched p99:            {p99_wasm:.2f}ms  (scales with device count)")
             print(f"Improvement vs SAF:   {improvement:.0f}x vs pre-Sovereign-Dispatcher SAF p99={baseline_p99_ms:.0f}ms")
 
     elif results.scenario == "thundering_herd":

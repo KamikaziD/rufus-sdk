@@ -349,7 +349,7 @@ class LoadTestOrchestrator:
             if scenario == "wasm_thundering_herd":
                 logger.info(
                     f"WASM THUNDERING HERD: Releasing {num_devices} simultaneous "
-                    f"local WASM dispatches NOW (target: >= 30,000 steps/sec)"
+                    f"local WASM dispatches NOW (target: >= 0.8 steps/device/sec)"
                 )
             else:
                 logger.info(
@@ -685,9 +685,9 @@ class ScenarioRunner:
         """Run WASM Thundering Herd: coordinated burst of local WASM dispatches.
 
         All devices fire simultaneously (go_event barrier) — no HTTP, no DB write.
-        Expected: throughput >= 30,000 steps/sec vs SAF thundering herd p50 ~6s.
-        p99 latency reflects asyncio scheduler backlog at large device counts, not
-        WASM execution time — throughput is the correct headline metric.
+        Pass criterion: success rate >= 99% + >= 0.8 steps/device/sec (scale-invariant).
+        p99 latency reflects asyncio scheduler backlog, not WASM exec time — it grows
+        with device count and is reported as informational context only.
         """
         await orchestrator.setup_devices(num_devices)
         return await orchestrator.run_scenario(
