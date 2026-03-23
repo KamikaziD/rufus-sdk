@@ -244,6 +244,10 @@ class SimulatedEdgeDevice:
                 await self._wasm_steps_scenario(duration_seconds)
             elif scenario == "wasm_thundering_herd":
                 await self._wasm_thundering_herd_scenario()
+            elif scenario == "msgspec_codec":
+                # msgspec_codec is a heartbeat run with a server-side preflight already done
+                # by ScenarioRunner.run_msgspec_codec_test(). Devices just run heartbeat.
+                await self._heartbeat_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 

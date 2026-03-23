@@ -356,7 +356,7 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd", "msgspec_codec")
+        _local_only = scenario in ("wasm_thundering_herd",)
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,

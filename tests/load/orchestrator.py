@@ -275,7 +275,7 @@ class LoadTestOrchestrator:
             _local_only = scenario in ("wasm_thundering_herd",)
             await self.setup_devices(
                 num_devices,
-                cleanup_first=not _local_only,
+                cleanup_first=True,
                 register_with_server=not _local_only,
             )
 
