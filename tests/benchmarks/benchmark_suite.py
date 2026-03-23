@@ -2,7 +2,7 @@
 Rufus SDK — Comprehensive Benchmark Suite
 ==========================================
 
-Covers 12 sections:
+Covers 13 sections:
   1. JSON Serialization
   2. Import Caching
   3. SQLite Persistence
@@ -14,7 +14,8 @@ Covers 12 sections:
   9. Ed25519 Signatures      (requires cryptography)
  10. API Key Hashing
  11. Full SAF Pipeline       (requires cryptography)
- 12. WASM Bridge Dispatch    (requires rufus-sdk-edge)
+ 12. msgspec Typed Codec     (requires msgspec)
+ 13. WASM Bridge Dispatch    (requires rufus-sdk-edge)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -71,6 +72,12 @@ try:
     _UVLOOP_AVAILABLE = True
 except ImportError:
     _UVLOOP_AVAILABLE = False
+
+try:
+    import msgspec as _msgspec
+    _MSGSPEC_AVAILABLE = True
+except ImportError:
+    _MSGSPEC_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Module-level state — must be importable as dotted paths for WorkflowBuilder
@@ -829,11 +836,82 @@ async def bench_saf_pipeline(n: int) -> Section:
 
 
 # ---------------------------------------------------------------------------
-# Section 12 — WASM Bridge Dispatch
+# Section 12 — msgspec Typed Codec
+# ---------------------------------------------------------------------------
+
+def bench_msgspec_codec(n: int) -> Section:
+    sec = Section("12. msgspec Typed Codec")
+
+    if not _MSGSPEC_AVAILABLE:
+        sec.note("msgspec not installed — skipping")
+        return sec
+
+    from rufus.providers.dtos import WorkflowRecord
+    from rufus.utils.serialization import decode_typed, encode_struct, deserialize, serialize_bytes
+
+    record = WorkflowRecord(
+        id="wf-bench-001",
+        workflow_type="BenchmarkWorkflow",
+        status="ACTIVE",
+        current_step=2,
+        state={"amount": 50000, "user_id": "u_42", "approved": True},
+        steps_config=[{"name": "Step1", "type": "STANDARD"}, {"name": "Step2", "type": "ASYNC"}],
+        state_model_path="benchmark.State",
+        saga_mode=False,
+        completed_steps_stack=[{"step": "Step1"}],
+        metadata={"source": "api"},
+    )
+    struct_bytes = _msgspec.json.encode(record)
+    dict_repr = _msgspec.to_builtins(record)
+    dict_bytes = serialize_bytes(dict_repr)
+
+    # Warmup
+    for _ in range(min(n, 200)):
+        encode_struct(record)
+        decode_typed(struct_bytes, WorkflowRecord)
+        deserialize(dict_bytes)
+
+    # encode_struct (struct → bytes)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        encode_struct(record)
+        times.append(time.perf_counter() - t)
+    st = _stats(times)
+    sec.add("encode_struct (struct→bytes)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # decode_typed (bytes → struct, typed fast path)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        decode_typed(struct_bytes, WorkflowRecord)
+        times.append(time.perf_counter() - t)
+    st_typed = _stats(times)
+    sec.add("decode_typed (bytes→struct)", ops_per_sec=st_typed["ops_per_sec"], p95_ms=st_typed["p95_ms"])
+
+    # dict decode (orjson/stdlib, for comparison)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        deserialize(dict_bytes)
+        times.append(time.perf_counter() - t)
+    st_dict = _stats(times)
+    speedup = st_typed["ops_per_sec"] / st_dict["ops_per_sec"] if st_dict["ops_per_sec"] else 0
+    sec.add(
+        f"dict decode for comparison ({speedup:.1f}× slower than typed decode)",
+        ops_per_sec=st_dict["ops_per_sec"],
+        p95_ms=st_dict["p95_ms"],
+    )
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
+# Section 13 — WASM Bridge Dispatch
 # ---------------------------------------------------------------------------
 
 async def bench_wasm_bridge_dispatch(n: int) -> Section:
-    sec = Section("12. WASM Bridge Dispatch")
+    sec = Section("13. WASM Bridge Dispatch")
 
     try:
         from rufus_edge.platform.wasm_bridge import (
@@ -1124,6 +1202,7 @@ def _defaults(quick: bool, override: Optional[int]) -> Dict[str, int]:
         "ed25519_n": 500,
         "apikey_n": 5000,
         "saf_n": 200,
+        "msgspec_n": 10000,
         "wasm_n": 500,
     }
     if quick:
@@ -1143,6 +1222,7 @@ async def _run(args) -> List[Section]:
     print("  RUFUS SDK — COMPREHENSIVE BENCHMARK SUITE")
     print("=" * 78)
     print(f"  orjson     : {'yes' if _ORJSON_AVAILABLE else 'no'}")
+    print(f"  msgspec    : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")
     print(f"  cryptography: {'yes' if _CRYPTO_AVAILABLE else 'no'}")
     print(f"  uvloop     : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
     if skip_security and not args.no_security:
@@ -1196,7 +1276,10 @@ async def _run(args) -> List[Section]:
         print("[11/12] Full SAF Pipeline...")
         sections.append(await bench_saf_pipeline(counts["saf_n"]))
 
-    print("[12/12] WASM Bridge Dispatch...")
+    print("[12/13] msgspec Typed Codec...")
+    sections.append(bench_msgspec_codec(counts["msgspec_n"]))
+
+    print("[13/13] WASM Bridge Dispatch...")
     sections.append(await bench_wasm_bridge_dispatch(counts["wasm_n"]))
 
     return sections

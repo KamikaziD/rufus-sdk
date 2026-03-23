@@ -171,7 +171,7 @@ class Workflow:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any],
+    def from_dict(cls, data,
                   persistence_provider: 'PersistenceProvider', # Use string literal
                   execution_provider: 'ExecutionProvider', # Use string literal
                   workflow_builder: 'WorkflowBuilder', # Still need type hint for mypy
@@ -179,6 +179,10 @@ class Workflow:
                   template_engine_cls: Type['TemplateEngine'], # Use string literal
                   workflow_observer: 'WorkflowObserver' # Use string literal
                   ) -> 'Workflow':
+        # Accept both plain dicts and msgspec.Struct instances (WorkflowRecord)
+        if not isinstance(data, dict):
+            import msgspec
+            data = msgspec.to_builtins(data)
 
         workflow_type = data.get("workflow_type")
         state_model_path = data.get("state_model_path")

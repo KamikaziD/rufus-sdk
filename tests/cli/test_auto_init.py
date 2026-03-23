@@ -179,9 +179,9 @@ class TestSQLiteAutoInit:
             loaded = await provider.load_workflow('test-workflow-123')
 
             assert loaded is not None
-            assert loaded['id'] == 'test-workflow-123'
-            assert loaded['workflow_type'] == 'TestWorkflow'
-            assert loaded['status'] == 'RUNNING'
+            assert loaded.id == 'test-workflow-123'
+            assert loaded.workflow_type == 'TestWorkflow'
+            assert loaded.status == 'RUNNING'
 
             await provider.close()
 

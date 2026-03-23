@@ -2,6 +2,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 from rufus.providers.persistence import PersistenceProvider
+from rufus.providers.dtos import WorkflowRecord, TaskRecord
 
 class InMemoryPersistence(PersistenceProvider):
     """An in-memory persistence provider for testing and simple use cases."""
@@ -30,9 +31,32 @@ class InMemoryPersistence(PersistenceProvider):
         """Saves the workflow state to the in-memory dictionary."""
         self._workflows[workflow_id] = workflow_data
 
-    async def load_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+    async def load_workflow(self, workflow_id: str) -> Optional[WorkflowRecord]:
         """Loads the workflow state from the in-memory dictionary."""
-        return self._workflows.get(workflow_id)
+        data = self._workflows.get(workflow_id)
+        if data is None:
+            return None
+        return WorkflowRecord(
+            id=data.get("id", workflow_id),
+            workflow_type=data.get("workflow_type", ""),
+            status=data.get("status", "ACTIVE"),
+            current_step=data.get("current_step", 0),
+            state=data.get("state", {}),
+            steps_config=data.get("steps_config", []),
+            state_model_path=data.get("state_model_path", ""),
+            workflow_version=data.get("workflow_version"),
+            definition_snapshot=data.get("definition_snapshot"),
+            saga_mode=data.get("saga_mode", False),
+            completed_steps_stack=data.get("completed_steps_stack", []),
+            parent_execution_id=data.get("parent_execution_id"),
+            blocked_on_child_id=data.get("blocked_on_child_id"),
+            data_region=data.get("data_region"),
+            priority=data.get("priority"),
+            idempotency_key=data.get("idempotency_key"),
+            metadata=data.get("metadata"),
+            owner_id=data.get("owner_id"),
+            org_id=data.get("org_id"),
+        )
 
     async def list_workflows(self, **filters) -> List[Dict[str, Any]]:
         """Lists workflows from the in-memory dictionary, with optional filtering."""
@@ -149,10 +173,10 @@ class InMemoryPersistence(PersistenceProvider):
         self.register_scheduled_workflow(schedule_name, workflow_type, cron_expression, initial_data, enabled)
 
 
-    async def create_task_record(self, execution_id: str, step_name: str, step_index: int, task_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, max_retries: int = 3) -> Dict[str, Any]:
+    async def create_task_record(self, execution_id: str, step_name: str, step_index: int, task_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, max_retries: int = 3) -> TaskRecord:
         """Creates a task record in-memory."""
         task_id = f"task_{execution_id}_{step_index}_{time.time()}"
-        record = {
+        raw = {
             "task_id": task_id,
             "execution_id": execution_id,
             "step_name": step_name,
@@ -163,10 +187,19 @@ class InMemoryPersistence(PersistenceProvider):
             "metadata": metadata,
             "retry_count": 0,
             "max_retries": max_retries,
-            "created_at": time.time()
         }
-        self._task_records[task_id] = record
-        return record
+        self._task_records[task_id] = raw
+        return TaskRecord(
+            task_id=task_id,
+            execution_id=execution_id,
+            step_name=step_name,
+            step_index=step_index,
+            status="PENDING",
+            task_data=task_data,
+            idempotency_key=idempotency_key or task_id,
+            retry_count=0,
+            max_retries=max_retries,
+        )
 
     def create_task_record_sync(self, execution_id: str, step_name: str, step_index: int, task_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, max_retries: int = 3) -> Dict[str, Any]:
         """Synchronously creates a task record."""
@@ -186,9 +219,23 @@ class InMemoryPersistence(PersistenceProvider):
         self.update_task_status(task_id, status, result, error_message)
 
 
-    async def get_task_record(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_record(self, task_id: str) -> Optional[TaskRecord]:
         """Retrieves a task record from in-memory."""
-        return self._task_records.get(task_id)
+        raw = self._task_records.get(task_id)
+        if raw is None:
+            return None
+        return TaskRecord(
+            task_id=raw["task_id"],
+            execution_id=raw["execution_id"],
+            step_name=raw["step_name"],
+            step_index=raw["step_index"],
+            status=raw["status"],
+            task_data=raw.get("task_data"),
+            result=raw.get("result"),
+            idempotency_key=raw.get("idempotency_key"),
+            retry_count=raw.get("retry_count", 0),
+            max_retries=raw.get("max_retries", 3),
+        )
 
     def get_task_record_sync(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Synchronously retrieves a task record."""

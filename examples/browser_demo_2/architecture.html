@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rufus SDK — Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #c9d1d9;
+    --muted:    #8b949e;
+    --blue:     #58a6ff;
+    --green:    #3fb950;
+    --orange:   #ff7043;
+    --purple:   #bc8cff;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 0 1rem 4rem;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ── */
+  header {
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 3rem;
+  }
+  header h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: #e6edf3;
+    letter-spacing: -0.02em;
+  }
+  header .subtitle {
+    margin-top: 0.4rem;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  /* ── Sections ── */
+  section {
+    margin-bottom: 3rem;
+    padding-bottom: 3rem;
+    border-bottom: 1px solid var(--border);
+  }
+  section:last-child {
+    border-bottom: none;
+  }
+  h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #e6edf3;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  h2 .num {
+    color: var(--blue);
+    font-size: 0.85rem;
+    font-weight: 500;
+    font-family: "SF Mono", "Cascadia Mono", "Fira Code", monospace;
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+    border-radius: 4px;
+    padding: 1px 7px;
+  }
+  p { margin-bottom: 0.8rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── Code / Pre ── */
+  code {
+    font-family: "SF Mono", "Cascadia Mono", "Fira Code", ui-monospace, monospace;
+    font-size: 0.85em;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--green);
+  }
+  pre {
+    font-family: "SF Mono", "Cascadia Mono", "Fira Code", ui-monospace, monospace;
+    font-size: 0.82rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.2rem 1.4rem;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 1rem 0;
+    color: var(--text);
+    white-space: pre;
+  }
+  pre .c  { color: var(--muted); }           /* comment */
+  pre .k  { color: var(--blue); }            /* keyword / label */
+  pre .s  { color: var(--orange); }          /* string */
+  pre .g  { color: var(--green); }           /* green accent */
+  pre .p  { color: var(--purple); }          /* purple accent */
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin: 1rem 0;
+  }
+  th {
+    text-align: left;
+    padding: 0.5rem 0.8rem;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--blue); font-family: "SF Mono", monospace; white-space: nowrap; }
+
+  /* ── Provider grid ── */
+  .provider-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .provider-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+  }
+  .provider-card .name {
+    font-family: "SF Mono", monospace;
+    font-size: 0.8rem;
+    color: var(--blue);
+    margin-bottom: 0.25rem;
+  }
+  .provider-card .label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #e6edf3;
+    margin-bottom: 0.3rem;
+  }
+  .provider-card .desc {
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* ── Package boxes ── */
+  .pkg-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 1rem 0;
+  }
+  .pkg {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    display: flex;
+    gap: 1.2rem;
+    align-items: flex-start;
+  }
+  .pkg.core   { border-color: rgba(88, 166, 255, 0.4); background: rgba(88, 166, 255, 0.04); }
+  .pkg.edge   { border-color: rgba(63, 185, 80, 0.35); background: rgba(63, 185, 80, 0.04); }
+  .pkg.server { border-color: rgba(255, 112, 67, 0.35); background: rgba(255, 112, 67, 0.04); }
+  .pkg-name {
+    font-family: "SF Mono", monospace;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    min-width: 160px;
+  }
+  .pkg.core   .pkg-name { color: var(--blue); }
+  .pkg.edge   .pkg-name { color: var(--green); }
+  .pkg.server .pkg-name { color: var(--orange); }
+  .pkg-body {}
+  .pkg-tagline {
+    font-size: 0.88rem;
+    color: #e6edf3;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+  }
+  .pkg-extras {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .pkg-extras code {
+    font-size: 0.78em;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--muted);
+  }
+
+  /* ── Implementation grid ── */
+  .impl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+  .impl-cat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.7rem 0.9rem;
+  }
+  .impl-cat .cat-name {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .impl-cat .items {
+    font-family: "SF Mono", monospace;
+    font-size: 0.77rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── Platform table ── */
+  .platform-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.6rem;
+    margin: 1rem 0;
+  }
+  .plat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+  }
+  .plat-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e6edf3;
+    margin-bottom: 0.5rem;
+  }
+  .plat-item {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.6;
+    font-family: "SF Mono", monospace;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1>Rufus SDK — Architecture</h1>
+  <p class="subtitle">How it's built, from the inside out.</p>
+</header>
+
+<!-- ───────────────────────── 1. What is Rufus? ───────────────────────── -->
+<section>
+  <h2><span class="num">01</span> What is Rufus?</h2>
+  <p>
+    Rufus is a workflow engine for fintech edge devices — POS terminals, ATMs, mobile
+    readers, browsers, and cloud servers — all running the same code. You define a workflow
+    once in YAML, and the engine runs it wherever you deploy it. The same payment-processing
+    logic that runs on an offline ATM also runs in a browser and in a cloud API server,
+    without modification.
+  </p>
+</section>
+
+<!-- ───────────────────────── 2. The Core Engine ───────────────────────── -->
+<section>
+  <h2><span class="num">02</span> The Core Engine</h2>
+  <p>
+    A workflow is a YAML file plus a set of Python functions. The engine (the
+    <code>Workflow</code> class in <code>src/rufus/workflow.py</code>) reads the YAML,
+    calls the functions in order, and tracks state in a typed Python object (a Pydantic
+    <code>BaseModel</code> subclass). That's it.
+  </p>
+  <p>
+    Each step function gets the current state and returns a dict of changes. The engine
+    merges those changes in, persists the new state, and moves to the next step.
+  </p>
+<pre>
+<span class="c"># A minimal step function</span>
+<span class="k">def</span> validate_card(state, context, **user_input) -> dict:
+    <span class="k">if</span> state.amount > state.floor_limit:
+        <span class="k">return</span> {<span class="s">"requires_online_auth"</span>: <span class="g">True</span>}
+    <span class="k">return</span> {<span class="s">"requires_online_auth"</span>: <span class="g">False</span>}
+</pre>
+  <p>
+    The engine itself has no opinion on databases, task queues, or deployment targets.
+    Those are supplied by the six provider interfaces described next.
+  </p>
+  <p>
+    <strong>Hot-path DTOs use <code>msgspec.Struct</code>.</strong>
+    Persistence providers return typed structs (<code>WorkflowRecord</code>,
+    <code>TaskRecord</code>, <code>MetricRecord</code>) instead of plain dicts.
+    <code>msgspec.json.decode(bytes, type=WorkflowRecord)</code> constructs the struct
+    directly from bytes with no intermediate dict allocation — the typed-decode fast path
+    gives a 5–10× throughput improvement on the DTO round-trip vs a dict decode.
+  </p>
+</section>
+
+<!-- ───────────────────────── 3. The Six Plugs ───────────────────────── -->
+<section>
+  <h2><span class="num">03</span> The Six Plugs (Provider Pattern)</h2>
+  <p>
+    The <code>Workflow</code> constructor requires exactly six provider arguments. Pass
+    <code>None</code> for any of them and you get a <code>ValueError</code> at startup —
+    not a silent failure at runtime. Each is an abstract base class; you can swap any
+    implementation without touching the engine.
+  </p>
+
+  <div class="provider-grid">
+    <div class="provider-card">
+      <div class="name">PersistenceProvider</div>
+      <div class="label">Storage</div>
+      <div class="desc">Reads and writes workflow state, audit logs, and task records. 16 required abstract methods; 6 edge-only methods that raise NotImplementedError in the base class.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">ExecutionProvider</div>
+      <div class="label">Task Runner</div>
+      <div class="desc">Dispatches async, parallel, and sub-workflow tasks. 6 required abstract methods. Controls whether work happens inline, in threads, or across Celery workers.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">WorkflowObserver</div>
+      <div class="label">Progress Reporter</div>
+      <div class="desc">Receives lifecycle events: step executed, workflow paused, compensation started, child workflow started, etc. All methods have no-op defaults — subclass only what you need.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">ExpressionEvaluator</div>
+      <div class="label">Logic Evaluator</div>
+      <div class="desc">Evaluates conditions in DECISION steps. Default implementation runs Python expressions against the current state dict.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">TemplateEngine</div>
+      <div class="label">Text Templates</div>
+      <div class="desc">Renders dynamic content — HTTP URLs, headers, bodies — from workflow state. Default implementation uses Jinja2.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">WorkflowBuilder</div>
+      <div class="label">Workflow Loader</div>
+      <div class="desc">Loads YAML definitions, resolves dotted-path imports via importlib, caches imports in a class-level dict, and wires all providers together when creating a workflow instance.</div>
+    </div>
+  </div>
+
+  <p>Two additional <em>optional</em> constructor arguments exist for advanced use cases:</p>
+  <div class="provider-grid">
+    <div class="provider-card">
+      <div class="name">wasm_runtime</div>
+      <div class="label">WASM Runtime</div>
+      <div class="desc">Executes pre-compiled WebAssembly modules via WASI. Required only if your workflow has WASM steps.</div>
+    </div>
+    <div class="provider-card">
+      <div class="name">inference_provider</div>
+      <div class="label">ML Inference</div>
+      <div class="desc">Runs on-device model inference (TFLite, ONNX, llama.cpp). Required only if your workflow has AI_INFERENCE steps.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── 4. What Ships in the Box ───────────────────────── -->
+<section>
+  <h2><span class="num">04</span> What Ships in the Box</h2>
+  <p>
+    The <code>src/rufus/implementations/</code> directory contains 7 categories of
+    ready-to-use providers across 29 files. You can mix and match — for example, use the
+    Postgres persistence provider with the Celery execution provider and the OpenTelemetry
+    observer.
+  </p>
+
+<pre>
+<span class="k">Workflow</span>
+  │
+  ├── <span class="k">PersistenceProvider</span>    memory · postgres · sqlite
+  ├── <span class="k">ExecutionProvider</span>      sync · thread_pool · celery · wasm_runtime · component_runtime
+  ├── <span class="k">WorkflowObserver</span>       noop · logging · events · otel
+  ├── <span class="k">ExpressionEvaluator</span>    simple
+  ├── <span class="k">TemplateEngine</span>         jinja2
+  ├── <span class="k">Serialization</span>          orjson · msgspec (typed decode) · stdlib json
+  └── <span class="k">Inference</span>              tflite · onnx · llamacpp_paged · paged_browser · factory
+</pre>
+
+  <div class="impl-grid">
+    <div class="impl-cat">
+      <div class="cat-name">Persistence</div>
+      <div class="items">memory<br>postgres<br>sqlite</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Execution</div>
+      <div class="items">sync<br>thread_pool<br>celery<br>wasm_runtime<br>component_runtime</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Observability</div>
+      <div class="items">noop<br>logging<br>events<br>otel</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Inference</div>
+      <div class="items">tflite<br>onnx<br>llamacpp_paged<br>paged_browser<br>factory</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Expression</div>
+      <div class="items">simple</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Templating</div>
+      <div class="items">jinja2</div>
+    </div>
+    <div class="impl-cat">
+      <div class="cat-name">Security</div>
+      <div class="items">crypto_utils<br>secrets_provider<br>semantic_firewall</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── 5. Step Types ───────────────────────── -->
+<section>
+  <h2><span class="num">05</span> Step Types</h2>
+  <p>
+    Every step in a workflow YAML has a <code>type</code> field. Ten types are built in:
+  </p>
+  <table>
+    <thead>
+      <tr><th>Type</th><th>What it does</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>STANDARD</td><td>Runs a Python function synchronously. The most common type.</td></tr>
+      <tr><td>ASYNC</td><td>Dispatches a long-running task via the execution provider; workflow pauses until done.</td></tr>
+      <tr><td>PARALLEL</td><td>Runs multiple tasks at the same time; results are merged back into state.</td></tr>
+      <tr><td>HTTP</td><td>Calls an external service over HTTP. Supports Jinja2 templating for URLs and bodies.</td></tr>
+      <tr><td>DECISION</td><td>Evaluates a condition and jumps to a different step via <code>WorkflowJumpDirective</code>.</td></tr>
+      <tr><td>LOOP</td><td>Runs a step repeatedly over a collection or until a condition is met.</td></tr>
+      <tr><td>FIRE_AND_FORGET</td><td>Dispatches a task without waiting for the result. Good for notifications and audit logs.</td></tr>
+      <tr><td>CRON_SCHEDULE</td><td>Runs a step on a cron expression schedule (e.g. every midnight, every 5 minutes).</td></tr>
+      <tr><td>HUMAN_IN_LOOP</td><td>Pauses the workflow and waits for a human to supply input before resuming.</td></tr>
+      <tr><td>AI_INFERENCE</td><td>Runs on-device ML inference using TFLite, ONNX, or a paged LLM provider.</td></tr>
+      <tr><td>WASM</td><td>Executes a pre-compiled WebAssembly binary. State passed as JSON on stdin; result read from stdout.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────────────────────── 6. The Extension System ───────────────────────── -->
+<section>
+  <h2><span class="num">06</span> The Extension System</h2>
+  <p>
+    Third-party packages can add new step types without modifying Rufus. The
+    <code>WorkflowBuilder</code> uses Python's standard
+    <code>importlib.metadata.entry_points</code> API to discover them automatically at
+    startup. No config changes, no registration calls — just install the package.
+  </p>
+  <p>How to publish an extension:</p>
+
+<pre>
+<span class="c"># 1. Define your step class (must subclass WorkflowStep)</span>
+<span class="k">class</span> MyCustomStep(WorkflowStep):
+    STEP_TYPE_NAME = <span class="s">"MY_CUSTOM"</span>
+
+    <span class="k">async def</span> execute(self, state, context):
+        <span class="c"># your logic here</span>
+        ...
+</pre>
+
+<pre>
+<span class="c"># 2. Register it in your package's pyproject.toml — one line</span>
+[project.entry-points.<span class="s">"rufus.steps"</span>]
+my_custom = <span class="s">"my_package.steps:MyCustomStep"</span>
+</pre>
+
+<pre>
+<span class="c"># 3. At startup, WorkflowBuilder discovers it automatically</span>
+eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>)
+<span class="k">for</span> ep <span class="k">in</span> eps:
+    step_cls = ep.load()          <span class="c"># must subclass WorkflowStep</span>
+    name = getattr(step_cls, <span class="s">"STEP_TYPE_NAME"</span>, ep.name)
+    self._step_registry[name] = step_cls
+</pre>
+
+  <p>
+    After that, any workflow YAML can use <code>type: MY_CUSTOM</code> and the engine will
+    route to your class. The discovered steps participate in the full provider system —
+    they receive the same state, context, and observer callbacks as built-in steps.
+  </p>
+</section>
+
+<!-- ───────────────────────── 7. The Three Packages ───────────────────────── -->
+<section>
+  <h2><span class="num">07</span> The Three Packages</h2>
+  <p>
+    The SDK is split into three installable packages. Start with the core; add the others
+    only when you need them.
+  </p>
+
+  <div class="pkg-stack">
+    <div class="pkg core">
+      <div class="pkg-name">rufus-sdk</div>
+      <div class="pkg-body">
+        <div class="pkg-tagline">The engine alone (~15 MB installed)</div>
+        <div class="pkg-extras">
+          Extras: <code>[postgres]</code> <code>[cli]</code> <code>[performance]</code> <code>[otel]</code>
+        </div>
+      </div>
+    </div>
+    <div class="pkg edge">
+      <div class="pkg-name">rufus-sdk-edge</div>
+      <div class="pkg-body">
+        <div class="pkg-tagline">Adds offline storage, store-and-forward sync, config polling, and platform adapters</div>
+        <div class="pkg-extras">
+          Extras: <code>[edge]</code> <code>[browser]</code> <code>[wasi]</code> <code>[native-wasm]</code>
+        </div>
+      </div>
+    </div>
+    <div class="pkg server">
+      <div class="pkg-name">rufus-sdk-server</div>
+      <div class="pkg-body">
+        <div class="pkg-tagline">Adds REST API, device fleet management, and command dispatch</div>
+        <div class="pkg-extras">
+          Extras: <code>[server]</code> <code>[celery]</code> <code>[auth]</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<pre>
+<span class="c"># Edge device only</span>
+pip install <span class="s">'rufus-sdk-edge[edge]'</span>
+
+<span class="c"># Cloud server</span>
+pip install <span class="s">'rufus-sdk[postgres,performance]'</span> <span class="s">'rufus-sdk-server[server,celery,auth]'</span>
+
+<span class="c"># Browser (Pyodide)</span>
+<span class="c"># — micropip.install('rufus-sdk-edge[browser]') from a Web Worker</span>
+</pre>
+</section>
+
+<!-- ───────────────────────── 8. Run Anywhere ───────────────────────── -->
+<section>
+  <h2><span class="num">08</span> Run Anywhere</h2>
+  <p>
+    The edge package adds a <code>PlatformAdapter</code> Protocol with exactly three methods.
+    Swap the adapter and your workflow code runs on a completely different platform with no
+    changes to step functions or YAML.
+  </p>
+
+<pre>
+<span class="k">class</span> PlatformAdapter(Protocol):
+    <span class="k">async def</span> http_get(self, url: str, headers: dict) -> dict: ...
+    <span class="k">async def</span> http_post(self, url: str, payload: dict, headers: dict) -> dict: ...
+    <span class="k">async def</span> get_system_metrics(self) -> dict: ...
+</pre>
+
+  <div class="platform-row">
+    <div class="plat">
+      <div class="plat-name">Native (Linux/macOS)</div>
+      <div class="plat-item">http_get / http_post<br>→ httpx async client</div>
+      <div class="plat-item">get_system_metrics<br>→ psutil</div>
+    </div>
+    <div class="plat">
+      <div class="plat-name">Browser (Pyodide)</div>
+      <div class="plat-item">http_get / http_post<br>→ JS fetch via FFI</div>
+      <div class="plat-item">get_system_metrics<br>→ JS performance API</div>
+    </div>
+    <div class="plat">
+      <div class="plat-name">WASI</div>
+      <div class="plat-item">http_get / http_post<br>→ wasi:http/outgoing</div>
+      <div class="plat-item">get_system_metrics<br>→ wasi:clocks / stub</div>
+    </div>
+  </div>
+
+  <p>
+    The same YAML workflow definition runs across all three. The platform adapter is
+    injected at startup — step functions never import platform-specific libraries directly.
+  </p>
+</section>
+
+
+<!-- ─────────────────────── 9. Performance Benchmarks ───────────────────── -->
+<section>
+  <h2><span class="num">09</span> Performance Benchmarks</h2>
+  <p>
+    Numbers measured on Apple Silicon (M-series) with the full optimization stack enabled:
+    <code>uvloop</code> event loop, <code>orjson</code> serialization, <code>msgspec</code>
+    typed decode, and import caching. All figures are from
+    <code>tests/benchmarks/workflow_performance.py</code> and
+    <code>tests/benchmarks/persistence_benchmark.py</code>.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Benchmark</th>
+        <th>Result</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>orjson serialize</td>
+        <td>3,554,000 ops/sec</td>
+        <td>10,000-iteration run; no warmup excluded</td>
+      </tr>
+      <tr>
+        <td>orjson deserialize</td>
+        <td>2,265,000 ops/sec</td>
+        <td>JSON bytes → Python dict</td>
+      </tr>
+      <tr>
+        <td>msgspec encode_struct</td>
+        <td>2,260,000 ops/sec · 0.44 µs/op</td>
+        <td>WorkflowRecord struct → JSON bytes</td>
+      </tr>
+      <tr>
+        <td>msgspec typed decode</td>
+        <td>1,496,000 ops/sec · 0.67 µs/op</td>
+        <td>JSON bytes → WorkflowRecord; 1.25× faster than dict path</td>
+      </tr>
+      <tr>
+        <td>import cache hit</td>
+        <td>240× speedup</td>
+        <td>WorkflowBuilder._import_cache; first import ≈ 0.03 ms, cached ≈ 0.00 ms</td>
+      </tr>
+      <tr>
+        <td>async/await p50 latency</td>
+        <td>14.6 µs</td>
+        <td>uvloop Loop; p99 = 20.2 µs</td>
+      </tr>
+      <tr>
+        <td>workflow step throughput</td>
+        <td>696,000 steps/sec</td>
+        <td>In-process SyncExecutor, no I/O</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>SQLite persistence layer (in-memory, 100–200 iterations each):</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Operation</th>
+        <th>Mean (ms)</th>
+        <th>P95 (ms)</th>
+        <th>Ops/sec</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>save_workflow</td>
+        <td>0.147</td>
+        <td>0.275</td>
+        <td>6,818</td>
+      </tr>
+      <tr>
+        <td>load_workflow</td>
+        <td>0.089</td>
+        <td>0.130</td>
+        <td>11,290</td>
+      </tr>
+      <tr>
+        <td>load_workflow (msgspec path)</td>
+        <td>0.086</td>
+        <td>0.106</td>
+        <td>11,617</td>
+      </tr>
+      <tr>
+        <td>list_workflows</td>
+        <td>0.374</td>
+        <td>0.440</td>
+        <td>2,672</td>
+      </tr>
+      <tr>
+        <td>create_task</td>
+        <td>0.062</td>
+        <td>0.081</td>
+        <td>16,214</td>
+      </tr>
+      <tr>
+        <td>log_execution</td>
+        <td>0.057</td>
+        <td>0.069</td>
+        <td>17,409</td>
+      </tr>
+      <tr>
+        <td>record_metric</td>
+        <td>0.057</td>
+        <td>0.066</td>
+        <td>17,481</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    Run the full benchmark suite locally with:
+  </p>
+<pre>
+<span class="c"># SDK micro-benchmarks (serialization, async overhead, throughput)</span>
+python tests/benchmarks/workflow_performance.py
+
+<span class="c"># Persistence layer (SQLite by default; add --postgres URL to compare)</span>
+python tests/benchmarks/persistence_benchmark.py
+
+<span class="c"># All 13 benchmark sections (includes WASM, msgspec codec, SAF sync)</span>
+python tests/benchmarks/benchmark_suite.py
+</pre>
+
+  <p>
+    <strong>Load test scenarios</strong> in <code>tests/load/orchestrator.py</code> drive
+    simulated edge devices against the cloud control plane:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Scenario</th>
+        <th>What it measures</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>heartbeat</td>
+        <td>Device heartbeat throughput and server-side connection pool behaviour</td>
+      </tr>
+      <tr>
+        <td>saf_sync</td>
+        <td>Store-and-forward transaction batch upload; measures sync latency and error rate</td>
+      </tr>
+      <tr>
+        <td>config_poll</td>
+        <td>ETag-based config polling; validates 304 Not Modified cache hit rate</td>
+      </tr>
+      <tr>
+        <td>cloud_commands</td>
+        <td>Command fanout to fleet; end-to-end latency from POST → edge ACK</td>
+      </tr>
+      <tr>
+        <td>wasm_steps</td>
+        <td>On-device WASM step execution latency distribution</td>
+      </tr>
+      <tr>
+        <td>wasm_thundering_herd</td>
+        <td>Concurrent WASM cold-start stress; measures p95/p99 under load</td>
+      </tr>
+      <tr>
+        <td>msgspec_codec</td>
+        <td>DTO encode/decode preflight; confirms msgspec fast path is active before load run</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+</div>
+</body>
+</html>

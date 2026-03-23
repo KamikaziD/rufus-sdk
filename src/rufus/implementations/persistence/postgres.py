@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from rufus.implementations.security.crypto_utils import encrypt_string, decrypt_string
 from rufus.workflow import Workflow # Assuming Workflow class is in rufus.workflow
 from rufus.providers.persistence import PersistenceProvider # Import the interface
+from rufus.providers.dtos import WorkflowRecord, TaskRecord
 from rufus.utils.serialization import serialize, deserialize  # High-performance JSON serialization
 
 
@@ -214,30 +215,27 @@ class PostgresPersistenceProvider(PersistenceProvider):
                     logger.error(f"Decryption failed for workflow {workflow_id}: {e}")
                     raise
 
-            workflow_dict = {
-                'id': str(row['id']),
-                'workflow_type': row['workflow_type'],
-                'workflow_version': row['workflow_version'],
-                'definition_snapshot': deserialize(row['definition_snapshot']) if row['definition_snapshot'] else None,
-                'current_step': row['current_step'],
-                'status': row['status'],
-                # Ensure state is a dict if it was a JSON string
-                'state': deserialize(state_data) if isinstance(state_data, str) else state_data,
-                'steps_config': deserialize(row['steps_config']) if isinstance(row['steps_config'], str) else row['steps_config'],
-                'state_model_path': row['state_model_path'],
-                'saga_mode': row['saga_mode'],
-                'completed_steps_stack': deserialize(row['completed_steps_stack']) if isinstance(row['completed_steps_stack'], str) else row['completed_steps_stack'],
-                'parent_execution_id': str(row['parent_execution_id']) if row['parent_execution_id'] else None,
-                'blocked_on_child_id': str(row['blocked_on_child_id']) if row['blocked_on_child_id'] else None,
-                'data_region': row['data_region'],
-                'priority': row['priority'],
-                'idempotency_key': row['idempotency_key'],
-                'metadata': deserialize(row['metadata']) if isinstance(row['metadata'], str) else row['metadata'],
-                'owner_id': row['owner_id'],
-                'org_id': row['org_id']
-            }
-
-            return workflow_dict
+            return WorkflowRecord(
+                id=str(row['id']),
+                workflow_type=row['workflow_type'],
+                workflow_version=row['workflow_version'],
+                definition_snapshot=deserialize(row['definition_snapshot']) if row['definition_snapshot'] else None,
+                current_step=row['current_step'],
+                status=row['status'],
+                state=deserialize(state_data) if isinstance(state_data, str) else state_data,
+                steps_config=deserialize(row['steps_config']) if isinstance(row['steps_config'], str) else row['steps_config'],
+                state_model_path=row['state_model_path'],
+                saga_mode=row['saga_mode'],
+                completed_steps_stack=deserialize(row['completed_steps_stack']) if isinstance(row['completed_steps_stack'], str) else row['completed_steps_stack'],
+                parent_execution_id=str(row['parent_execution_id']) if row['parent_execution_id'] else None,
+                blocked_on_child_id=str(row['blocked_on_child_id']) if row['blocked_on_child_id'] else None,
+                data_region=row['data_region'],
+                priority=row['priority'],
+                idempotency_key=row['idempotency_key'],
+                metadata=deserialize(row['metadata']) if isinstance(row['metadata'], str) else row['metadata'],
+                owner_id=row['owner_id'],
+                org_id=row['org_id'],
+            )
 
     async def list_workflows(self, **filters) -> List[Dict[str, Any]]:
         """List workflows based on filters (e.g., status, workflow_type)"""
@@ -573,7 +571,14 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 serialize(metadata) if metadata else '{}',
                 max_retries
             )
-            return dict(row)
+            return TaskRecord(
+                task_id=str(row['task_id']),
+                execution_id=execution_id,
+                step_name=step_name,
+                step_index=step_index,
+                status='PENDING',
+                idempotency_key=row['idempotency_key'],
+            )
 
     async def update_task_status(self, task_id: str, status: str, result: Optional[Dict[str, Any]] = None, error_message: Optional[str] = None) -> None:
         """
@@ -608,17 +613,17 @@ class PostgresPersistenceProvider(PersistenceProvider):
             """, task_id)
 
             if row:
-                return {
-                    'task_id': str(row['task_id']),
-                    'execution_id': str(row['execution_id']),
-                    'step_name': row['step_name'],
-                    'step_index': row['step_index'],
-                    'status': row['status'],
-                    'task_data': deserialize(row['task_data']) if row['task_data'] else {},
-                    'idempotency_key': row['idempotency_key'],
-                    'retry_count': row['retry_count'],
-                    'max_retries': row['max_retries']
-                }
+                return TaskRecord(
+                    task_id=str(row['task_id']),
+                    execution_id=str(row['execution_id']),
+                    step_name=row['step_name'],
+                    step_index=row['step_index'],
+                    status=row['status'],
+                    task_data=deserialize(row['task_data']) if row['task_data'] else {},
+                    idempotency_key=row['idempotency_key'],
+                    retry_count=row['retry_count'],
+                    max_retries=row['max_retries'],
+                )
             return None
 
     # --- Heartbeat Operations (Zombie Detection & Recovery) ---

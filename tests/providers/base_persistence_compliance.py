@@ -42,8 +42,8 @@ class BasePersistenceCompliance:
         await provider.save_workflow("wf-001", data)
         loaded = await provider.load_workflow("wf-001")
         assert loaded is not None
-        assert loaded["id"] == "wf-001"
-        assert loaded["workflow_type"] == "TestWF"
+        assert loaded.id == "wf-001"
+        assert loaded.workflow_type == "TestWF"
 
     @pytest.mark.asyncio
     async def test_load_nonexistent_workflow_returns_none(self, provider):
@@ -98,7 +98,7 @@ class BasePersistenceCompliance:
             task_data={"key": "value"},
         )
         assert record is not None
-        task_id = record.get("task_id") or record.get("id")
+        task_id = record.task_id
         assert task_id is not None
 
         fetched = await provider.get_task_record(task_id)
@@ -126,10 +126,10 @@ class BasePersistenceCompliance:
             step_name="StepB",
             step_index=0,
         )
-        task_id = record.get("task_id") or record.get("id")
+        task_id = record.task_id
         await provider.update_task_status(task_id, "COMPLETED", result={"done": True})
         fetched = await provider.get_task_record(task_id)
-        assert fetched["status"] == "COMPLETED"
+        assert fetched.status == "COMPLETED"
 
     # ── Logging ──────────────────────────────────────────────────────────────
 

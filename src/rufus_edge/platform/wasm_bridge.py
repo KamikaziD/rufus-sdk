@@ -229,6 +229,14 @@ class PyodideWasmBridge:
         result = run_sync(rufusWasmExecute(binary, state_json, step_name))
         return str(result)
 
+    def execute_batch(
+        self,
+        binary: bytes,
+        states_json: list,
+        step_name: str,
+    ) -> list:
+        return [self.execute_component(binary, s, step_name) for s in states_json]
+
 
 # ---------------------------------------------------------------------------
 # WASI 0.3 compiled agent implementation
@@ -263,6 +271,14 @@ class WasiWasmBridge:
             step_name,
         )
         return result_bytes.decode("utf-8")
+
+    def execute_batch(
+        self,
+        binary: bytes,
+        states_json: list,
+        step_name: str,
+    ) -> list:
+        return [self.execute_component(binary, s, step_name) for s in states_json]
 
 
 # ---------------------------------------------------------------------------

@@ -695,3 +695,41 @@ class ScenarioRunner:
             skip_device_setup=True,
         )
 
+
+    @staticmethod
+    async def run_msgspec_codec_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 500,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run msgspec codec variant: heartbeat load with msgspec serialization path.
+
+        Identical to the heartbeat scenario but validates that the msgspec encode/decode
+        path is live before starting. Use this to confirm throughput numbers after the
+        msgspec DTO migration — compare req/s against the baseline heartbeat run.
+        """
+        try:
+            import msgspec as _ms
+            from rufus.providers.dtos import WorkflowRecord
+            _sample = WorkflowRecord(
+                id="preflight",
+                workflow_type="T",
+                status="ACTIVE",
+                current_step=0,
+                state={},
+                steps_config=[],
+                state_model_path="t.S",
+            )
+            _ms.json.decode(_ms.json.encode(_sample), type=WorkflowRecord)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[msgspec_codec_test] preflight failed ({exc}), running heartbeat path anyway"
+            )
+
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="heartbeat",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )

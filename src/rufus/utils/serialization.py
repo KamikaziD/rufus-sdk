@@ -1,19 +1,25 @@
 """
-High-performance JSON serialization utilities using orjson.
+High-performance JSON serialization utilities using orjson and msgspec.
 
 orjson is a Rust-based JSON library that's 3-5x faster than stdlib json
 and produces smaller output with more efficient encoding.
 
+msgspec provides typed JSON decode that constructs structs directly from bytes
+with no intermediate dict allocation — 5-10× faster on known-type paths.
+
 Features:
 - Fast serialization (3-5x faster than json.dumps)
 - Fast deserialization (2-3x faster than json.loads)
+- Typed decode via msgspec (zero-copy struct construction)
 - Automatic datetime/UUID handling
 - Compact output (no unnecessary whitespace)
 - Memory efficient
 """
 
 import os
-from typing import Any, Optional, Dict, List, Union
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
+
+T = TypeVar("T")
 
 # Try to use orjson for performance, fallback to stdlib json
 _ORJSON_ENABLED = os.getenv("RUFUS_USE_ORJSON", "true").lower() == "true"
@@ -31,6 +37,18 @@ else:
     import json
     _backend = "json (stdlib)"
     _USING_ORJSON = False
+
+# msgspec backend for typed decode
+_MSGSPEC_ENABLED = os.getenv("RUFUS_USE_MSGSPEC", "true").lower() == "true"
+_USING_MSGSPEC = False
+if _MSGSPEC_ENABLED:
+    try:
+        import msgspec as _msgspec
+        _msgspec_json_decoder = _msgspec.json.Decoder()
+        _msgspec_json_encoder = _msgspec.json.Encoder()
+        _USING_MSGSPEC = True
+    except ImportError:
+        pass
 
 
 def serialize(obj: Any, pretty: bool = False) -> str:
@@ -150,13 +168,67 @@ def deserialize_dict_values(data: Dict[str, str]) -> Dict[str, Any]:
     return {key: deserialize(value) for key, value in data.items()}
 
 
+def decode_typed(json_bytes: Union[str, bytes], type: Type[T]) -> T:
+    """
+    Deserialize JSON directly into a typed msgspec.Struct — the fast path.
+
+    Constructs the struct from bytes with no intermediate dict allocation.
+    Falls back to deserialize() + manual construction if msgspec is unavailable.
+
+    Args:
+        json_bytes: JSON string or bytes to decode
+        type: The msgspec.Struct subclass to decode into
+
+    Returns:
+        An instance of the given type
+
+    Examples:
+        >>> record = decode_typed(row_bytes, type=WorkflowRecord)
+    """
+    if _USING_MSGSPEC:
+        if isinstance(json_bytes, str):
+            json_bytes = json_bytes.encode("utf-8")
+        return _msgspec.json.decode(json_bytes, type=type)
+    # Fallback: deserialize to dict then construct manually
+    data = deserialize(json_bytes)
+    return type(**data)
+
+
+def encode_struct(obj) -> bytes:
+    """
+    Encode a msgspec.Struct to JSON bytes.
+
+    Faster than orjson for struct types because msgspec knows the schema upfront
+    and skips Python-level introspection.
+
+    Args:
+        obj: A msgspec.Struct instance
+
+    Returns:
+        JSON bytes
+
+    Examples:
+        >>> encode_struct(workflow_record)
+        b'{"id":"abc","workflow_type":"Payment",...}'
+    """
+    if _USING_MSGSPEC:
+        return _msgspec_json_encoder.encode(obj)
+    # Fallback via orjson/json after converting to dict
+    import msgspec
+    return serialize_bytes(msgspec.to_builtins(obj))
+
+
 def get_backend() -> str:
     """
     Get the current JSON serialization backend.
 
     Returns:
-        "orjson" or "json (stdlib)"
+        "orjson", "orjson+msgspec", or "json (stdlib)"
     """
+    if _USING_MSGSPEC and _USING_ORJSON:
+        return "orjson+msgspec"
+    if _USING_MSGSPEC:
+        return "msgspec"
     return _backend
 
 
