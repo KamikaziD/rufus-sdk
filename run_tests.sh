@@ -157,8 +157,9 @@ menu_load() {
     echo "  4) Cloud commands"
     echo "  5) Thundering herd  (SAF burst — all devices simultaneous)"
     echo "  6) WASM steps       (sustained throughput, real bridge dispatch)"
-    echo "  7) WASM thundering herd  (local burst — target p99 < 50ms)"
-    echo "  8) All scenarios in sequence"
+    echo "  7) WASM thundering herd  (local burst — target >= 0.8 steps/device/sec)"
+    echo "  8) msgspec codec         (heartbeat load, validates msgspec fast path)"
+    echo "  9) All scenarios in sequence"
     echo "  b) Back"
     echo
     read -rp "  Choice: " choice
@@ -199,15 +200,24 @@ menu_load() {
             ;;
         7)
             echo
-            info "WASM dispatch is local — no HTTP, no DB. Expected p99 < 50ms."
+            info "WASM dispatch is local — no HTTP, no DB."
+            info "Pass criterion: success >= 99% + >= 0.8 steps/device/sec (scale-invariant)."
+            info "p99 reflects asyncio scheduler backlog, not WASM exec time — grows with device count."
             info "Contrast: SAF thundering herd p50 is typically ~6,000ms."
-            info "Baseline (pre-Sovereign Dispatcher): p99 = 5,055ms at 50,000 devices."
-            info "Target (post-Sovereign Dispatcher):  p99 < 50ms."
             echo
             devices=$(prompt_devices 1000)
             run "python tests/load/run_load_test.py --scenario wasm_thundering_herd --devices ${devices} --workers ${workers}"
             ;;
         8)
+            echo
+            info "Runs heartbeat load after confirming the msgspec encode/decode fast path is live."
+            info "Compare req/s against a baseline heartbeat run to quantify msgspec overhead."
+            echo
+            devices=$(prompt_devices 500)
+            duration=$(prompt_duration 120)
+            run "python tests/load/run_load_test.py --scenario msgspec_codec --devices ${devices} --duration ${duration} --workers ${workers}"
+            ;;
+        9)
             devices=$(prompt_devices 100)
             run "python tests/load/run_load_test.py --all --devices ${devices} --workers ${workers}"
             ;;
