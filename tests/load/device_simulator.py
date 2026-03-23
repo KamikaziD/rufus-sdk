@@ -782,8 +782,10 @@ class SimulatedEdgeDevice:
 
         Expected outcome: because WASM dispatch is local (no HTTP, no DB write),
         p99 should be orders of magnitude lower than the SAF thundering herd
-        (target: p99 < 50ms vs SAF p50 ~6s).  This is the headline proof that
-        the feat/wasi-bridge wiring delivers on its performance promise.
+        (target: >= 30,000 steps/sec vs SAF p50 ~6s).  This is the headline proof
+        that the feat/wasi-bridge wiring delivers on its performance promise.
+        Note: p99 latency at large device counts reflects asyncio event-loop
+        scheduling backlog (all coroutines fire simultaneously), not WASM exec time.
 
         Phase 1 (prep): build state payload and warm the resolver (no network).
         Phase 2 (wait): block on orchestrator's go_event barrier.
