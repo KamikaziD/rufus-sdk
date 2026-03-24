@@ -69,6 +69,13 @@ let declined        = 0;
 let highRiskCount   = 0;
 let meshRelayed     = 0;
 
+// Wire format tracking (JSON vs Proto sizes)
+let lastHeartbeatJsonBytes  = 0;
+let lastHeartbeatProtoBytes = 0;
+let lastSafBatchJsonBytes   = 0;
+let lastSafBatchProtoBytes  = 0;
+let lastSafBatchCount       = 0;
+
 // ── Message handler ────────────────────────────────────────────────────────
 self.onmessage = async (e) => {
   const { type, ...payload } = e.data;
@@ -470,14 +477,20 @@ async function heartbeat(dev) {
   if (!dev.registered && !dev.apiKey) return false;
   const key = dev.apiKey || "browser-demo-key";
   try {
+    const bodyObj = {
+      device_status: "online",
+      pending_saf_count: dev.safQueue.length,
+      sdk_version: "1.0.0rc5",
+    };
+    const bodyStr = JSON.stringify(bodyObj);
+    // Track wire sizes for benchmark panel
+    lastHeartbeatJsonBytes  = new TextEncoder().encode(bodyStr).length;
+    lastHeartbeatProtoBytes = estimateHeartbeatProto(dev);
+
     const resp = await fetchWithCondition(`${cloudUrl}/api/v1/devices/${dev.id}/heartbeat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": key },
-      body: JSON.stringify({
-        device_status: "online",
-        pending_saf_count: dev.safQueue.length,
-        sdk_version: "1.0.0rc5",
-      }),
+      body: bodyStr,
     });
     return resp.ok;
   } catch {
@@ -553,6 +566,15 @@ async function postSafBatch(targetDev, txns, relayMeta, key) {
     device_timestamp: new Date().toISOString(),
   };
   if (relayMeta) body.mesh_relay = relayMeta;
+
+  // Track wire sizes for benchmark panel (own txns only, not relay)
+  if (!relayMeta) {
+    const bodyStr = JSON.stringify(body);
+    lastSafBatchJsonBytes  = new TextEncoder().encode(bodyStr).length;
+    lastSafBatchProtoBytes = estimateSafBatchProto(cleaned);
+    lastSafBatchCount      = cleaned.length;
+  }
+
   try {
     const resp = await fetchWithCondition(
       `${cloudUrl}/api/v1/devices/${targetDev.id}/sync`,
@@ -911,6 +933,13 @@ function startStatsLoop() {
       declined,
       highRiskCount,
       meshRelayed,
+      wireStats: {
+        hbJson:   lastHeartbeatJsonBytes,
+        hbProto:  lastHeartbeatProtoBytes,
+        safJson:  lastSafBatchJsonBytes,
+        safProto: lastSafBatchProtoBytes,
+        safCount: lastSafBatchCount,
+      },
     });
 
     // Post leaderboard update
@@ -928,6 +957,44 @@ function startStatsLoop() {
     txnWindowStart = now;
     if (latencyTimings.length > 1000) latencyTimings = latencyTimings.slice(-1000);
   }, 1000);
+}
+
+// ── Proto wire size estimator ──────────────────────────────────────────────
+// Mirrors src/rufus/proto/edge.proto field definitions.
+// Used for JSON vs proto payload comparison panel — no library needed.
+function _varintSize(n) {
+  if (n <= 0) return 1;
+  let size = 0; while (n > 0) { n >>>= 7; size++; } return size;
+}
+function _protoStr(s) {
+  const bytes = new TextEncoder().encode(s || "").length;
+  return 1 + _varintSize(bytes) + bytes;  // tag(1B) + length-varint + content
+}
+function _protoInt(v) { return 1 + _varintSize(Math.abs(v | 0)); }
+
+function estimateHeartbeatProto(dev) {
+  // HeartbeatMsg fields: device_id(1), device_status(2), pending_saf_count(3),
+  //                      sdk_version(4), timestamp_ms(5 int64)
+  return _protoStr(dev.id) + _protoStr("online") + _protoInt(dev.safQueue.length) +
+         _protoStr("1.0.0rc5") + 9;  // int64: tag(1) + fixed 8 bytes
+}
+
+function estimateSafBatchProto(txns) {
+  // EncryptedTransaction fields: transaction_id(1), encrypted_blob(2),
+  //   encryption_key_id(3), hmac(4), merchant_id(5), amount_cents(6),
+  //   currency(7), card_last_four(8), workflow_id(9)
+  // SyncBatch: transactions(1 repeated), device_sequence(2), device_timestamp(3)
+  if (!txns || txns.length === 0) return 0;
+  const t = txns[0];
+  const perTxn = _protoStr(t.transaction_id || "") + _protoStr(t.encrypted_blob || "") +
+    _protoStr(t.encryption_key_id || "") + _protoStr(t.hmac || "") +
+    _protoStr(t.merchant_id || "") + _protoInt(t.amount_cents || 0) +
+    _protoStr(t.currency || "USD") + _protoStr(t.card_last_four || "") +
+    _protoStr(t.workflow_id || "");
+  const txnsTotal = perTxn * txns.length;
+  // SyncBatch wrapper: repeated field tag+len + sequence int + timestamp str
+  return 1 + _varintSize(txnsTotal) + txnsTotal + _protoInt(0) +
+         _protoStr(new Date().toISOString());
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
