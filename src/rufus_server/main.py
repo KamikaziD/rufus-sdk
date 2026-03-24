@@ -387,6 +387,20 @@ async def startup_event():
             except Exception as e:
                 logger.error(f"Failed to mount custom router '{router_path}': {e}")
 
+    # Initialize NATS Bridge (when RUFUS_NATS_URL is set)
+    nats_url = os.getenv("RUFUS_NATS_URL")
+    if nats_url:
+        from rufus_server.nats_bridge import NATSBridge, set_nats_bridge
+        nats_bridge = NATSBridge(
+            nats_url=nats_url,
+            device_service=device_service,
+            persistence=persistence_provider,
+            nats_credentials=os.getenv("RUFUS_NATS_CREDENTIALS"),
+        )
+        await nats_bridge.start()
+        set_nats_bridge(nats_bridge)
+        logger.info(f"NATSBridge started — server-side NATS bridge active at {nats_url}")
+
     print("Rufus Edge Control Plane started.")
 
 
@@ -409,6 +423,11 @@ async def shutdown_event():
         await persistence_provider.close()
     if execution_provider:
         await execution_provider.close()
+    # Shut down NATS bridge if running
+    from rufus_server.nats_bridge import get_nats_bridge
+    nats_bridge = get_nats_bridge()
+    if nats_bridge:
+        await nats_bridge.stop()
     print("Rufus Edge Control Plane shut down.")
 
 
@@ -425,6 +444,19 @@ async def health_check():
 # ─────────────────────────────────────────────────────────────────────────────
 # Workflow Management APIs
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _as_dict(raw) -> dict:
+    """Normalise a load_workflow result to a plain dict (handles msgspec Structs)."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        import msgspec
+        return msgspec.to_builtins(raw)
+    except Exception:
+        if hasattr(raw, "__struct_fields__"):
+            return {f: getattr(raw, f) for f in raw.__struct_fields__}
+        return vars(raw)
+
 
 async def _get_workflow_or_404(workflow_id: str):
     """Load a workflow by ID, raising 404 if not found."""
@@ -527,6 +559,7 @@ async def get_workflow_status(
             raw = await persistence_provider.load_workflow(workflow_id)
             if raw is None:
                 raise  # genuine 404 — row doesn't exist
+            raw = _as_dict(raw)
             # Return read-only status from raw DB data — no step reconstruction needed
             state = raw.get("state", {})
             if isinstance(state, str):
@@ -1012,7 +1045,7 @@ async def retry_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1067,7 +1100,7 @@ async def cancel_workflow(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1107,7 +1140,7 @@ async def rewind_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1173,7 +1206,7 @@ async def resume_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 

@@ -115,13 +115,14 @@ menu_pytest() {
 
 menu_benchmarks() {
     header "Benchmarks"
-    echo "  1) Benchmark suite — quick  (~1s)"
-    echo "  2) Benchmark suite — full  (~10s)"
-    echo "  3) Benchmark suite — full, JSON output"
+    echo "  1) Benchmark suite — quick  (~8s)"
+    echo "  2) Benchmark suite — full  (~60s)"
+    echo "  3) Benchmark suite — JSON output"
     echo "  4) Benchmark suite — skip security sections"
     echo "  5) Workflow performance"
     echo "  6) Persistence — SQLite only"
     echo "  7) Persistence — SQLite + PostgreSQL"
+    echo "  8) Proto wire format  (betterproto vs JSON size + throughput)"
     echo "  b) Back"
     echo
     read -rp "  Choice: " choice
@@ -141,6 +142,13 @@ menu_benchmarks() {
                 run "python tests/benchmarks/persistence_benchmark.py"
             fi
             ;;
+        8)
+            echo
+            info "Compares betterproto binary vs orjson JSON for HeartbeatMsg and WorkflowRecord."
+            info "Expected: HeartbeatMsg JSON=287B proto=48B (6x), WorkflowRecord JSON=4.2KB proto=690B (6x)"
+            echo
+            run "python tests/benchmarks/benchmark_proto.py"
+            ;;
         b|B) return ;;
         *) warn "Unknown choice." ;;
     esac
@@ -159,7 +167,8 @@ menu_load() {
     echo "  6) WASM steps       (sustained throughput, real bridge dispatch)"
     echo "  7) WASM thundering herd  (local burst — target >= 0.8 steps/device/sec)"
     echo "  8) msgspec codec         (heartbeat load, validates msgspec fast path)"
-    echo "  9) All scenarios in sequence"
+    echo "  9) NATS transport        (direct JetStream publish latency — target p99 <10ms)"
+    echo " 10) All scenarios in sequence"
     echo "  b) Back"
     echo
     read -rp "  Choice: " choice
@@ -218,6 +227,18 @@ menu_load() {
             run "python tests/load/run_load_test.py --scenario msgspec_codec --devices ${devices} --duration ${duration} --workers ${workers}"
             ;;
         9)
+            echo
+            info "Publishes heartbeats directly to NATS JetStream — no HTTP, measures ack round-trip."
+            info "Pass criterion (scale-aware): p99 <10ms @<=100 devices, <25ms @<=1k, <50ms @<=10k, <150ms beyond."
+            info "Requires NATS running (docker stack or RUFUS_NATS_URL env)."
+            echo
+            local nats_url="${RUFUS_NATS_URL:-nats://localhost:4222}"
+            info "Using NATS URL: ${nats_url}"
+            devices=$(prompt_devices 50)
+            duration=$(prompt_duration 60)
+            RUFUS_NATS_URL="${nats_url}" run "python tests/load/run_load_test.py --scenario nats_transport --devices ${devices} --duration ${duration} --workers ${workers}"
+            ;;
+        10)
             devices=$(prompt_devices 100)
             run "python tests/load/run_load_test.py --all --devices ${devices} --workers ${workers}"
             ;;

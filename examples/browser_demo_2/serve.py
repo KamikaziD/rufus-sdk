@@ -26,6 +26,6 @@ class CrossOriginHandler(SimpleHTTPRequestHandler):
 
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-print("Rufus Browser Demo 2 — http://localhost:8082")
+print("Rufus Browser Demo 2 — http://localhost:8082 - http://localhost:8082/architecture.html")
 print("Press Ctrl+C to stop.")
 HTTPServer(("", 8082), CrossOriginHandler).serve_forever()

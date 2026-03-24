@@ -2,7 +2,7 @@
 Rufus SDK — Comprehensive Benchmark Suite
 ==========================================
 
-Covers 13 sections:
+Covers 14 sections:
   1. JSON Serialization
   2. Import Caching
   3. SQLite Persistence
@@ -16,6 +16,7 @@ Covers 13 sections:
  11. Full SAF Pipeline       (requires cryptography)
  12. msgspec Typed Codec     (requires msgspec)
  13. WASM Bridge Dispatch    (requires rufus-sdk-edge)
+ 14. Proto Codec             (requires betterproto; generated code optional)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -78,6 +79,12 @@ try:
     _MSGSPEC_AVAILABLE = True
 except ImportError:
     _MSGSPEC_AVAILABLE = False
+
+try:
+    import betterproto as _betterproto
+    _BETTERPROTO_AVAILABLE = True
+except ImportError:
+    _BETTERPROTO_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Module-level state — must be importable as dotted paths for WorkflowBuilder
@@ -1186,6 +1193,127 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
 
 
 # ---------------------------------------------------------------------------
+# Section 14 — Proto Codec (pack_message / unpack_message)
+# ---------------------------------------------------------------------------
+
+def bench_proto_codec(n: int) -> "Section":
+    """Benchmark pack_message/unpack_message envelope codec vs raw orjson baseline.
+
+    Tests the serialization.py envelope system introduced in Phase 4:
+      - JSON envelope (ENCODING_JSON prefix + orjson/json payload)
+      - Proto envelope (ENCODING_PROTO prefix + betterproto bytes, when available)
+
+    Payload: HeartbeatMsg-equivalent dict (~287B JSON / ~48B proto).
+    """
+    sec = Section("14. Proto Codec (pack_message)")
+
+    try:
+        from rufus.utils.serialization import pack_message, unpack_message, _USING_PROTO
+    except ImportError as exc:
+        sec.note(f"rufus SDK not on path — skipping ({exc})")
+        return sec
+
+    hb_dict = {
+        "device_id": "pos-terminal-bench-001",
+        "device_status": "online",
+        "pending_sync_count": 3,
+        "last_sync_at": "2026-03-24T12:34:56.789Z",
+        "config_version": "v1.0.0rc5",
+        "sdk_version": "1.0.0rc5",
+        "sent_at": "2026-03-24T12:35:00.000Z",
+    }
+
+    # ------------------------------------------------------------------
+    # 14a: JSON envelope — pack_message(dict) → ENCODING_JSON + orjson/json
+    # ------------------------------------------------------------------
+    for _ in range(500):  # warmup
+        pack_message(hb_dict)
+
+    times_pack_json = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        data = pack_message(hb_dict)
+        times_pack_json.append(time.perf_counter() - t0)
+
+    st_pj = _stats(times_pack_json)
+    encoded_json_size = len(data)
+    sec.add("pack_message JSON envelope", ops_per_sec=st_pj["ops_per_sec"], p95_ms=st_pj["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 14b: JSON envelope — unpack_message
+    # ------------------------------------------------------------------
+    json_data = pack_message(hb_dict)
+    for _ in range(500):
+        unpack_message(json_data)
+
+    times_unpack_json = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        unpack_message(json_data)
+        times_unpack_json.append(time.perf_counter() - t0)
+
+    st_uj = _stats(times_unpack_json)
+    sec.add("unpack_message JSON envelope", ops_per_sec=st_uj["ops_per_sec"], p95_ms=st_uj["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 14c: Proto envelope (only when betterproto available)
+    # ------------------------------------------------------------------
+    if _USING_PROTO and _BETTERPROTO_AVAILABLE:
+        try:
+            from rufus.proto.gen import HeartbeatMsg  # type: ignore
+            proto_msg = HeartbeatMsg(**hb_dict)
+
+            for _ in range(500):
+                pack_message(hb_dict, proto_msg)
+
+            times_pack_proto = []
+            for _ in range(n):
+                t0 = time.perf_counter()
+                data_proto = pack_message(hb_dict, proto_msg)
+                times_pack_proto.append(time.perf_counter() - t0)
+
+            st_pp = _stats(times_pack_proto)
+            encoded_proto_size = len(data_proto)
+            sec.add("pack_message proto envelope", ops_per_sec=st_pp["ops_per_sec"], p95_ms=st_pp["p95_ms"])
+
+            # unpack_message proto
+            for _ in range(500):
+                unpack_message(data_proto, proto_type=HeartbeatMsg)
+
+            times_unpack_proto = []
+            for _ in range(n):
+                t0 = time.perf_counter()
+                unpack_message(data_proto, proto_type=HeartbeatMsg)
+                times_unpack_proto.append(time.perf_counter() - t0)
+
+            st_up = _stats(times_unpack_proto)
+            sec.add("unpack_message proto envelope", ops_per_sec=st_up["ops_per_sec"], p95_ms=st_up["p95_ms"])
+
+            size_ratio = encoded_json_size / encoded_proto_size if encoded_proto_size else 0
+            sec.note(
+                f"Payload sizes: JSON={encoded_json_size}B  proto={encoded_proto_size}B  "
+                f"({size_ratio:.1f}× smaller with proto)\n"
+                f"  pack JSON:   p50={st_pj['p50_ms']:.3f}ms  p95={st_pj['p95_ms']:.3f}ms\n"
+                f"  pack proto:  p50={st_pp['p50_ms']:.3f}ms  p95={st_pp['p95_ms']:.3f}ms\n"
+                f"  Speed delta: {abs(st_pp['ops_per_sec'] - st_pj['ops_per_sec']):.0f} ops/sec "
+                f"({'proto faster' if st_pp['ops_per_sec'] > st_pj['ops_per_sec'] else 'json faster'})"
+            )
+        except ImportError:
+            sec.note(
+                "betterproto installed but generated code not found — "
+                "run `make proto` to generate src/rufus/proto/gen/. "
+                "JSON envelope benchmark above still valid."
+            )
+    else:
+        sec.note(
+            f"betterproto not installed (pip install betterproto) — "
+            f"JSON envelope only. JSON payload size: {encoded_json_size}B"
+        )
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -1204,6 +1332,7 @@ def _defaults(quick: bool, override: Optional[int]) -> Dict[str, int]:
         "saf_n": 200,
         "msgspec_n": 10000,
         "wasm_n": 500,
+        "proto_n": 10000,
     }
     if quick:
         base = {k: max(10, v // 10) for k, v in base.items()}
@@ -1221,30 +1350,31 @@ async def _run(args) -> List[Section]:
     print("\n" + "=" * 78)
     print("  RUFUS SDK — COMPREHENSIVE BENCHMARK SUITE")
     print("=" * 78)
-    print(f"  orjson     : {'yes' if _ORJSON_AVAILABLE else 'no'}")
-    print(f"  msgspec    : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")
+    print(f"  orjson      : {'yes' if _ORJSON_AVAILABLE else 'no'}")
+    print(f"  msgspec     : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")
+    print(f"  betterproto : {'yes' if _BETTERPROTO_AVAILABLE else 'no'}")
     print(f"  cryptography: {'yes' if _CRYPTO_AVAILABLE else 'no'}")
-    print(f"  uvloop     : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
+    print(f"  uvloop      : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
     if skip_security and not args.no_security:
         print("  NOTE: cryptography not installed — sections 7–11 will be skipped")
     print()
 
-    print("[1/12] JSON Serialization...")
+    print("[1/14] JSON Serialization...")
     sections.append(bench_json_serialization(counts["json_n"]))
 
-    print("[2/12] Import Caching...")
+    print("[2/14] Import Caching...")
     sections.append(bench_import_caching(counts["import_n"]))
 
-    print("[3/12] SQLite Persistence...")
+    print("[3/14] SQLite Persistence...")
     sections.append(await bench_sqlite(counts["sqlite_n"]))
 
-    print("[4/12] E2E Workflow...")
+    print("[4/14] E2E Workflow...")
     sections.append(await bench_e2e_workflow(counts["e2e_n"]))
 
-    print("[5/12] Async Event Loop...")
+    print("[5/14] Async Event Loop...")
     sections.append(await bench_event_loop(counts["loop_n"]))
 
-    print("[6/12] Pydantic State Model...")
+    print("[6/14] Pydantic State Model...")
     sections.append(bench_pydantic(counts["pydantic_n"]))
 
     if skip_security:
@@ -1261,26 +1391,29 @@ async def _run(args) -> List[Section]:
             s.note("skipped")
             sections.append(s)
     else:
-        print("[7/12] Fernet Encryption...")
+        print("[7/14] Fernet Encryption...")
         sections.append(bench_fernet(counts["fernet_n"]))
 
-        print("[8/12] HMAC-SHA256...")
+        print("[8/14] HMAC-SHA256...")
         sections.append(bench_hmac(counts["hmac_n"]))
 
-        print("[9/12] Ed25519 Signatures...")
+        print("[9/14] Ed25519 Signatures...")
         sections.append(bench_ed25519(counts["ed25519_n"]))
 
-        print("[10/12] API Key Hashing...")
+        print("[10/14] API Key Hashing...")
         sections.append(bench_api_key_hashing(counts["apikey_n"]))
 
-        print("[11/12] Full SAF Pipeline...")
+        print("[11/14] Full SAF Pipeline...")
         sections.append(await bench_saf_pipeline(counts["saf_n"]))
 
-    print("[12/13] msgspec Typed Codec...")
+    print("[12/14] msgspec Typed Codec...")
     sections.append(bench_msgspec_codec(counts["msgspec_n"]))
 
-    print("[13/13] WASM Bridge Dispatch...")
+    print("[13/14] WASM Bridge Dispatch...")
     sections.append(await bench_wasm_bridge_dispatch(counts["wasm_n"]))
+
+    print("[14/14] Proto Codec (pack_message)...")
+    sections.append(bench_proto_codec(counts["proto_n"]))
 
     return sections
 

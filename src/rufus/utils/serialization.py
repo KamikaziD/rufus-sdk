@@ -1,5 +1,5 @@
 """
-High-performance JSON serialization utilities using orjson and msgspec.
+High-performance JSON serialization utilities using orjson, msgspec, and betterproto.
 
 orjson is a Rust-based JSON library that's 3-5x faster than stdlib json
 and produces smaller output with more efficient encoding.
@@ -7,10 +7,16 @@ and produces smaller output with more efficient encoding.
 msgspec provides typed JSON decode that constructs structs directly from bytes
 with no intermediate dict allocation — 5-10× faster on known-type paths.
 
+betterproto provides Protocol Buffer binary encoding — 5-7× smaller than JSON
+for NATS wire transport. Enabled when RUFUS_USE_PROTO=true (default) and
+betterproto is installed.
+
 Features:
 - Fast serialization (3-5x faster than json.dumps)
 - Fast deserialization (2-3x faster than json.loads)
 - Typed decode via msgspec (zero-copy struct construction)
+- Proto binary encoding via betterproto (5-7× smaller for NATS)
+- Envelope byte for mixed-protocol rollout (JSON + proto coexistence)
 - Automatic datetime/UUID handling
 - Compact output (no unnecessary whitespace)
 - Memory efficient
@@ -218,13 +224,124 @@ def encode_struct(obj) -> bytes:
     return serialize_bytes(msgspec.to_builtins(obj))
 
 
-def get_backend() -> str:
+# ---------------------------------------------------------------------------
+# Proto codec (betterproto, optional — gated by RUFUS_USE_PROTO)
+# ---------------------------------------------------------------------------
+
+_PROTO_ENABLED = os.getenv("RUFUS_USE_PROTO", "true").lower() == "true"
+_USING_PROTO = False
+if _PROTO_ENABLED:
+    try:
+        import betterproto as _betterproto
+        _USING_PROTO = True
+    except ImportError:
+        pass
+
+# Wire-format envelope bytes (leading byte in packed messages)
+ENCODING_JSON  = b"\x01"
+ENCODING_PROTO = b"\x02"
+
+
+def encode_proto(msg) -> bytes:
     """
-    Get the current JSON serialization backend.
+    Encode a betterproto Message to binary protobuf bytes.
+
+    Falls back to JSON serialization if betterproto is unavailable.
+
+    Args:
+        msg: A betterproto.Message subclass instance
 
     Returns:
-        "orjson", "orjson+msgspec", or "json (stdlib)"
+        Protobuf binary bytes (or JSON bytes as fallback)
     """
+    if _USING_PROTO:
+        return bytes(msg)
+    # JSON fallback: serialize the message's __dict__
+    return serialize_bytes(
+        {k: v for k, v in vars(msg).items() if not k.startswith("_")}
+    )
+
+
+def decode_proto(data: bytes, msg_type: Type[T]) -> T:
+    """
+    Decode protobuf binary bytes into a betterproto Message.
+
+    Falls back to JSON deserialization if betterproto is unavailable.
+
+    Args:
+        data: Protobuf binary bytes
+        msg_type: betterproto.Message subclass to decode into
+
+    Returns:
+        An instance of msg_type
+    """
+    if _USING_PROTO:
+        return msg_type().parse(data)
+    data_dict = deserialize(data)
+    return msg_type(**data_dict)
+
+
+def pack_message(payload: Any, proto_msg=None) -> bytes:
+    """
+    Pack a message with an envelope byte for mixed-protocol coexistence.
+
+    When betterproto is available and proto_msg is provided, encodes as proto
+    with ENCODING_PROTO prefix. Otherwise encodes payload as JSON with
+    ENCODING_JSON prefix.
+
+    The leading envelope byte allows JSON-only clients and proto-enabled
+    clients to coexist on the same NATS subject during rollout.
+
+    Args:
+        payload: Python dict / object (used for JSON path)
+        proto_msg: A betterproto.Message instance (used for proto path)
+
+    Returns:
+        Envelope byte + encoded body
+    """
+    if _USING_PROTO and proto_msg is not None:
+        return ENCODING_PROTO + bytes(proto_msg)
+    return ENCODING_JSON + serialize_bytes(payload)
+
+
+def unpack_message(data: bytes, proto_type: Optional[Type[T]] = None) -> Any:
+    """
+    Unpack a message previously packed with pack_message().
+
+    Reads the leading envelope byte to detect encoding, then decodes
+    accordingly. If the envelope byte is missing, falls back to JSON.
+
+    Args:
+        data: Raw bytes from NATS (envelope byte + body)
+        proto_type: betterproto.Message subclass for proto decode path
+
+    Returns:
+        Decoded Python object (proto message instance or dict)
+    """
+    if not data:
+        return {}
+
+    envelope = data[:1]
+    body = data[1:]
+
+    if envelope == ENCODING_PROTO and _USING_PROTO and proto_type is not None:
+        return proto_type().parse(body)
+
+    # JSON path (ENCODING_JSON or no envelope byte)
+    raw = body if envelope in (ENCODING_JSON, ENCODING_PROTO) else data
+    return deserialize(raw)
+
+
+def get_backend() -> str:
+    """
+    Get the current serialization backend string.
+
+    Returns:
+        One of: "orjson+msgspec+proto", "orjson+msgspec", "orjson", "msgspec",
+        "json (stdlib)"
+    """
+    if _USING_MSGSPEC and _USING_ORJSON and _USING_PROTO:
+        return "orjson+msgspec+proto"
     if _USING_MSGSPEC and _USING_ORJSON:
         return "orjson+msgspec"
     if _USING_MSGSPEC:

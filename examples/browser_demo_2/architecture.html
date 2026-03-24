@@ -398,7 +398,8 @@
   ├── <span class="k">WorkflowObserver</span>       noop · logging · events · otel
   ├── <span class="k">ExpressionEvaluator</span>    simple
   ├── <span class="k">TemplateEngine</span>         jinja2
-  ├── <span class="k">Serialization</span>          orjson · msgspec (typed decode) · stdlib json
+  ├── <span class="k">Serialization</span>          orjson · msgspec (typed decode) · betterproto · stdlib json
+  ├── <span class="k">NATS Transport</span>         NATSEdgeTransport · NATSBridge · NATSExecutionProvider · NATSEventObserver
   └── <span class="k">Inference</span>              tflite · onnx · llamacpp_paged · paged_browser · factory
 </pre>
 
@@ -409,11 +410,11 @@
     </div>
     <div class="impl-cat">
       <div class="cat-name">Execution</div>
-      <div class="items">sync<br>thread_pool<br>celery<br>wasm_runtime<br>component_runtime</div>
+      <div class="items">sync<br>thread_pool<br>celery<br>nats_executor<br>wasm_runtime<br>component_runtime</div>
     </div>
     <div class="impl-cat">
       <div class="cat-name">Observability</div>
-      <div class="items">noop<br>logging<br>events<br>otel</div>
+      <div class="items">noop<br>logging<br>events<br>nats_events<br>otel</div>
     </div>
     <div class="impl-cat">
       <div class="cat-name">Inference</div>
@@ -526,7 +527,7 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
       <div class="pkg-body">
         <div class="pkg-tagline">Adds offline storage, store-and-forward sync, config polling, and platform adapters</div>
         <div class="pkg-extras">
-          Extras: <code>[edge]</code> <code>[browser]</code> <code>[wasi]</code> <code>[native-wasm]</code>
+          Extras: <code>[edge]</code> <code>[browser]</code> <code>[wasi]</code> <code>[native-wasm]</code> <code>[nats]</code>
         </div>
       </div>
     </div>
@@ -535,7 +536,7 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
       <div class="pkg-body">
         <div class="pkg-tagline">Adds REST API, device fleet management, and command dispatch</div>
         <div class="pkg-extras">
-          Extras: <code>[server]</code> <code>[celery]</code> <code>[auth]</code>
+          Extras: <code>[server]</code> <code>[celery]</code> <code>[auth]</code> <code>[nats]</code>
         </div>
       </div>
     </div>
@@ -719,7 +720,7 @@ python tests/benchmarks/workflow_performance.py
 <span class="c"># Persistence layer (SQLite by default; add --postgres URL to compare)</span>
 python tests/benchmarks/persistence_benchmark.py
 
-<span class="c"># All 13 benchmark sections (includes WASM, msgspec codec, SAF sync)</span>
+<span class="c"># All 14 benchmark sections (includes WASM, msgspec codec, SAF sync, proto codec)</span>
 python tests/benchmarks/benchmark_suite.py
 </pre>
 
@@ -764,8 +765,91 @@ python tests/benchmarks/benchmark_suite.py
         <td>msgspec_codec</td>
         <td>DTO encode/decode preflight; confirms msgspec fast path is active before load run</td>
       </tr>
+      <tr>
+        <td>nats_transport</td>
+        <td>Direct NATS JetStream heartbeat publish latency (p99 target: &lt;10ms, no HTTP)</td>
+      </tr>
     </tbody>
   </table>
+</section>
+
+<!-- ─────────────────────── 10. NATS JetStream Transport ───────────────────── -->
+<section>
+  <h2><span class="num">10</span> NATS JetStream Transport</h2>
+  <p>
+    When <code>RUFUS_NATS_URL</code> is set, the SDK switches from HTTP polling to
+    <strong>NATS JetStream</strong> for all device-to-cloud and cloud-to-device communication.
+    HTTP stays fully functional as the fallback — NATS is purely additive.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Capability</th>
+        <th>HTTP (default)</th>
+        <th>NATS (opt-in)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Command delivery latency</td>
+        <td>up to 60 s (polling interval)</td>
+        <td>&lt;10 ms (push consumer)</td>
+      </tr>
+      <tr>
+        <td>SAF sync latency</td>
+        <td>~300 ms HTTP round-trip</td>
+        <td>~5 ms request/reply</td>
+      </tr>
+      <tr>
+        <td>Heartbeat payload size</td>
+        <td>~287 B (JSON)</td>
+        <td>~48 B (proto, 6×)</td>
+      </tr>
+      <tr>
+        <td>Offline command delivery</td>
+        <td>On next heartbeat poll</td>
+        <td>JetStream replay on reconnect</td>
+      </tr>
+      <tr>
+        <td>Dashboard events</td>
+        <td>REST polling (1–3 s)</td>
+        <td>WebSocket sub (&lt;50 ms)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Key NATS components:</p>
+  <ul style="margin: 0.75rem 0 0.75rem 1.5rem; line-height: 2;">
+    <li><code>NATSEdgeTransport</code> — edge-side transport (replaces httpx heartbeat loop)</li>
+    <li><code>NATSBridge</code> — server-side bridge; injects same DeviceService as HTTP endpoints</li>
+    <li><code>NATSExecutionProvider</code> — replaces Celery+Redis for workflow task dispatch</li>
+    <li><code>NATSEventObserver</code> — publishes workflow lifecycle events to JetStream</li>
+    <li><code>nats-client.ts</code> — dashboard WebSocket client (nats.ws, subjects: <code>workflow.events.&gt;</code>, <code>devices.*.heartbeat</code>)</li>
+  </ul>
+
+  <p>Wire format uses an envelope byte prefix for mixed-client rollout:</p>
+<pre>
+<span class="c"># ENCODING_JSON  = 0x01  (JSON payload, readable by all clients)</span>
+<span class="c"># ENCODING_PROTO = 0x02  (betterproto binary, 5–7× smaller)</span>
+<span class="k">from</span> rufus.utils.serialization <span class="k">import</span> pack_message, unpack_message
+
+data = pack_message(payload_dict)           <span class="c"># JSON envelope (0x01 + orjson bytes)</span>
+data = pack_message(payload_dict, proto_msg) <span class="c"># proto envelope (0x02 + betterproto bytes)</span>
+obj  = unpack_message(data, HeartbeatMsg)   <span class="c"># auto-detects envelope byte</span>
+</pre>
+
+  <p>
+    Run the proto codec benchmark to see envelope overhead vs payload reduction:
+  </p>
+<pre>
+python tests/benchmarks/benchmark_proto.py
+<span class="c"># Expected: HeartbeatMsg JSON=287B proto=48B (6.0×), WorkflowRecord JSON=4.2KB proto=690B (6.1×)</span>
+
+RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
+  --scenario nats_transport --devices 100 --duration 120
+<span class="c"># Expected: p99 &lt; 10ms (vs 50–300ms HTTP heartbeat)</span>
+</pre>
 </section>
 
 </div>

@@ -75,6 +75,8 @@ class RufusEdgeAgent:
         platform_adapter: Optional[PlatformAdapter] = None,
         peer_listen_port: int = 0,
         peer_urls: Optional[List[str]] = None,
+        nats_url: Optional[str] = None,
+        nats_credentials: Optional[str] = None,
     ):
         """
         Initialize the edge agent.
@@ -90,6 +92,10 @@ class RufusEdgeAgent:
             heartbeat_interval: Seconds between heartbeats
             peer_listen_port: Port for inbound peer relay server (0 = disabled)
             peer_urls: Known peer device URLs for BFS mesh routing ([] = disabled)
+            nats_url: NATS server URL (e.g. "nats://localhost:4222"). When set,
+                      activates NATSEdgeTransport for sub-ms command delivery.
+                      Also read from RUFUS_NATS_URL environment variable.
+            nats_credentials: Optional path to NATS credentials file (NKey/JWT).
         """
         self.device_id = device_id
         self.cloud_url = cloud_url.rstrip("/")
@@ -103,6 +109,8 @@ class RufusEdgeAgent:
         self._platform_adapter: Optional[PlatformAdapter] = platform_adapter
         self._peer_listen_port = peer_listen_port
         self._peer_urls: List[str] = list(peer_urls or [])
+        self._nats_url: Optional[str] = nats_url or os.getenv("RUFUS_NATS_URL")
+        self._nats_credentials: Optional[str] = nats_credentials or os.getenv("RUFUS_NATS_CREDENTIALS")
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -113,6 +121,9 @@ class RufusEdgeAgent:
         self.config_manager: Optional[ConfigManager] = None
         self.workflow_syncer: Optional[EdgeWorkflowSyncer] = None
         self._wasm_resolver = None  # SqliteWasmBinaryResolver, set in start()
+
+        # Transport (initialized in start())
+        self._transport = None
 
         # State
         self._is_running = False
@@ -187,6 +198,22 @@ class RufusEdgeAgent:
                 device_id=self.device_id,
                 api_key=self.api_key,
             )
+
+        # Initialize transport (NATS when RUFUS_NATS_URL is set, else HTTP)
+        from rufus_edge.transport import create_transport
+        self._transport = create_transport(
+            device_id=self.device_id,
+            cloud_url=self.cloud_url,
+            api_key=self.api_key,
+            nats_url=self._nats_url,
+            nats_credentials=self._nats_credentials,
+        )
+        await self._transport.connect()
+
+        # If NATS is active, subscribe to command and config push channels
+        if self._nats_url:
+            await self._transport.subscribe_commands(self._handle_cloud_command)
+            await self._transport.subscribe_config_push(self._on_config_push)
 
         # Register config change callback to reload workflows
         self.config_manager.on_config_change(self._on_config_change)
@@ -315,6 +342,10 @@ class RufusEdgeAgent:
             return
 
         logger.info(f"Stopping Rufus Edge Agent: {self.device_id}")
+
+        # Disconnect transport first (before cancelling tasks that may use it)
+        if self._transport:
+            await self._transport.disconnect()
 
         # Cancel background tasks
         for task in self._background_tasks:
@@ -657,24 +688,34 @@ class RufusEdgeAgent:
             },
         }
 
+        if not self._transport:
+            return
+
         try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{self.cloud_url}/api/v1/devices/{self.device_id}/heartbeat",
-                    json=payload,
-                    headers={"X-API-Key": self.api_key} if self.api_key else {},
-                )
-            if response.status_code == 200:
-                self._heartbeat_consecutive_failures = 0
-                for cmd in response.json().get("commands", []):
-                    await self._handle_cloud_command(cmd)
-            else:
-                self._heartbeat_consecutive_failures += 1
-                self._log_heartbeat_failure(f"unexpected status {response.status_code}")
+            commands = await self._transport.send_heartbeat(payload)
+            self._heartbeat_consecutive_failures = 0
+            for cmd in commands:
+                await self._handle_cloud_command(cmd)
         except Exception as e:
             self._heartbeat_consecutive_failures += 1
             self._log_heartbeat_failure(str(e))
+
+    async def _on_config_push(self, config_data: Dict[str, Any]) -> None:
+        """Handle a server-initiated config push (NATS mode)."""
+        try:
+            from rufus_edge.models import DeviceConfig
+            new_config = DeviceConfig(**config_data)
+            old_config = self.config_manager._current_config
+            self.config_manager._current_config = new_config
+            logger.info(f"[Config] NATS push received — version {new_config.version}")
+            if old_config is None or old_config.version != new_config.version:
+                for cb in self.config_manager._on_config_change_callbacks:
+                    try:
+                        cb(new_config)
+                    except Exception as e:
+                        logger.error(f"Config change callback error: {e}")
+        except Exception as e:
+            logger.error(f"[Config] Failed to apply NATS config push: {e}")
 
     def _log_heartbeat_failure(self, reason: str):
         """Graduated heartbeat failure logging."""

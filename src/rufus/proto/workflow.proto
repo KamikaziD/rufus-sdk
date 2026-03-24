@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package rufus.workflow;
+
+option python_betterproto_package = "rufus.proto.gen";
+
+// All 11 workflow status strings used across the codebase
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  COMPLETED = 2;
+  FAILED = 3;
+  WAITING_HUMAN = 4;
+  PENDING_ASYNC = 5;
+  PENDING_SUB_WORKFLOW = 6;
+  WAITING_CHILD_HUMAN_INPUT = 7;
+  FAILED_CHILD_WORKFLOW = 8;
+  FAILED_ROLLED_BACK = 9;
+  FAILED_WORKER_CRASH = 10;
+  CANCELLED = 11;
+}
+
+// Compact workflow execution record for inter-service transport.
+// state_json stores the Pydantic model as JSON bytes — workflow state
+// schemas vary per workflow type and cannot be flattened into proto fields.
+message WorkflowRecord {
+  string id = 1;
+  string workflow_type = 2;
+  WorkflowStatus status = 3;
+  int32 current_step = 4;
+  bytes state_json = 5;       // JSON-encoded workflow state (Pydantic model)
+  string owner_id = 6;
+  string created_at = 7;      // ISO-8601
+  string updated_at = 8;      // ISO-8601
+  string current_step_name = 9;
+  string parent_execution_id = 10;
+  string data_region = 11;
+}
+
+// Task dispatch envelope sent from executor to worker
+message TaskDispatch {
+  string task_id = 1;
+  string workflow_id = 2;
+  string func_path = 3;
+  bytes state_json = 4;       // JSON-encoded state_data dict
+  int32 current_step_index = 5;
+  string data_region = 6;
+  string trace_id = 7;
+  string step_name = 8;
+  int32 attempt = 9;
+}
+
+// Task result sent from worker back to executor
+message TaskResult {
+  string task_id = 1;
+  string workflow_id = 2;
+  bool success = 3;
+  bytes result_json = 4;      // JSON-encoded result dict
+  string error_message = 5;
+  int32 step_index = 6;
+  int64 duration_ms = 7;
+}

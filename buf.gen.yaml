@@ -1,0 +1,6 @@
+version: v1
+plugins:
+  - plugin: buf.build/community/danielgtaylor-python-betterproto
+    out: src/rufus/proto/gen
+    opt:
+      - python_package=rufus.proto.gen

@@ -19,6 +19,68 @@ import psutil
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared NATS connection singleton (nats_transport scenario)
+# One connection is shared across all simulated devices — creating N separate
+# connections (N up to 100k) would exhaust OS file descriptors immediately.
+# ---------------------------------------------------------------------------
+_NATS_NC = None   # nats.aio.client.Client
+_NATS_JS = None   # JetStream context
+_NATS_LOCK: Optional[asyncio.Lock] = None
+_NATS_IMPORT_ERROR: Optional[str] = None  # set once if nats-py missing
+_NATS_PUBLISH_SEM: Optional[asyncio.Semaphore] = None  # caps concurrent in-flight publishes
+
+# Max concurrent JetStream publishes on the shared connection.
+# Each publish is a request/reply round-trip; beyond ~500 concurrent the
+# NATS server queues internally and measured latency reflects queue depth,
+# not wire latency. 500 gives throughput headroom without overwhelming either
+# the server or the asyncio event loop scheduler.
+_NATS_MAX_CONCURRENT = 500
+
+
+async def _get_shared_nats(nats_url: str):
+    """Return (nc, js, sem) shared across all devices, connecting once."""
+    global _NATS_NC, _NATS_JS, _NATS_LOCK, _NATS_IMPORT_ERROR, _NATS_PUBLISH_SEM
+
+    if _NATS_IMPORT_ERROR:
+        return None, None, None
+
+    # Lazy-init asyncio primitives (must be created inside a running loop)
+    if _NATS_LOCK is None:
+        _NATS_LOCK = asyncio.Lock()
+    if _NATS_PUBLISH_SEM is None:
+        _NATS_PUBLISH_SEM = asyncio.Semaphore(_NATS_MAX_CONCURRENT)
+
+    # Fast path — already connected, no lock needed
+    if _NATS_NC is not None and not _NATS_NC.is_closed:
+        return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
+    async with _NATS_LOCK:
+        # Re-check inside lock (another coroutine may have connected while we waited)
+        if _NATS_NC is not None and not _NATS_NC.is_closed:
+            return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
+        try:
+            import nats as _nats_mod
+        except ImportError:
+            _NATS_IMPORT_ERROR = (
+                "\n  ✘  nats-py not installed in this venv.\n"
+                "     Fix: pip install nats-py\n"
+                "     Then re-run the scenario.\n"
+            )
+            return None, None, None
+
+        try:
+            _NATS_NC = await _nats_mod.connect(servers=[nats_url])
+            _NATS_JS = _NATS_NC.jetstream()
+            logger.info(f"[nats_transport] Shared NATS connection established: {nats_url}")
+        except Exception as exc:
+            logger.error(f"[nats_transport] Cannot connect to NATS at {nats_url}: {exc}")
+            _NATS_NC = None
+            _NATS_JS = None
+
+    return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
 
 # Retry configuration (can be overridden by environment variables)
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
@@ -248,6 +310,8 @@ class SimulatedEdgeDevice:
                 # msgspec_codec is a heartbeat run with a server-side preflight already done
                 # by ScenarioRunner.run_msgspec_codec_test(). Devices just run heartbeat.
                 await self._heartbeat_scenario(duration_seconds)
+            elif scenario == "nats_transport":
+                await self._nats_transport_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -859,6 +923,75 @@ class SimulatedEdgeDevice:
 
         if self.metrics_callback:
             await self.metrics_callback(self.config.device_id, self.metrics)
+
+    # -------------------------------------------------------------------------
+    # Scenario 8: NATS Transport Publish Latency
+    # -------------------------------------------------------------------------
+
+    async def _nats_transport_scenario(self, duration_seconds: int):
+        """
+        Publish heartbeats directly to NATS JetStream (no HTTP).
+
+        All devices share a single NATS connection and a concurrency semaphore
+        (_NATS_MAX_CONCURRENT = 500) that caps in-flight publishes.  Without
+        the semaphore, 100k simultaneous js.publish() calls each become a
+        request/reply that queues internally in NATS and the event loop
+        scheduler stalls — measured latency becomes queue depth, not wire RTT.
+
+        Startup is staggered (random sleep up to 1s) so 100k coroutines don't
+        all race the connection lock at once.
+
+        Pass criteria:
+          - p99 publish latency < 10ms  (vs 50-300ms HTTP heartbeat)
+          - error rate < 1%
+
+        Requires RUFUS_NATS_URL or NATS_URL env var and nats-py installed.
+        """
+        import os
+        import json as _json
+        nats_url = os.getenv("RUFUS_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
+
+        # Stagger startup so 100k coroutines don't simultaneously race the lock
+        await asyncio.sleep(random.uniform(0, 1.0))
+
+        nc, js, sem = await _get_shared_nats(nats_url)
+
+        if nc is None:
+            if _NATS_IMPORT_ERROR:
+                print(_NATS_IMPORT_ERROR, flush=True)
+            return
+
+        subject = f"devices.{self.config.device_id}.heartbeat"
+        end_time = time.time() + duration_seconds
+
+        while time.time() < end_time and self._running:
+            payload = {
+                "device_id": self.config.device_id,
+                "device_status": "online",
+                "pending_sync_count": len(self._pending_transactions),
+                "sent_at": datetime.utcnow().isoformat() + "Z",
+                "sdk_version": "1.0.0rc5",
+            }
+            data = b"\x01" + _json.dumps(payload).encode()
+
+            t0 = time.perf_counter()
+            try:
+                async with sem:
+                    await js.publish(subject, data)
+                elapsed = time.perf_counter() - t0
+                self.metrics.latencies.append(elapsed)
+                self.metrics.heartbeats_sent += 1
+                self.metrics.total_requests += 1
+            except Exception as e:
+                self.metrics.heartbeat_failures += 1
+                self.metrics.total_errors += 1
+                logger.debug(f"[{self.config.device_id}] NATS publish error: {e}")
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Each device publishes every ~1s; stagger prevents synchronised bursts
+            await asyncio.sleep(1.0 + random.uniform(-0.1, 0.1))
 
     def get_metrics(self) -> DeviceMetrics:
         """Get current metrics."""

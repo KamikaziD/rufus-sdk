@@ -1,0 +1,344 @@
+"""
+NATSEdgeTransport — sub-millisecond edge-to-cloud transport via NATS JetStream.
+
+Activated when RUFUS_NATS_URL is set. Falls back gracefully to HTTP if the
+NATS server is unreachable at connect() time (logged as warning).
+
+Subject hierarchy:
+  devices.{device_id}.heartbeat     → publish  (DEVICE_HEARTBEATS stream)
+  devices.{device_id}.commands      → subscribe (DEVICE_COMMANDS workqueue)
+  devices.{device_id}.sync          → request/reply (SAF sync)
+  devices.{device_id}.config.req    → request/reply (config fetch)
+  devices.{device_id}.config        → subscribe (CONFIG_UPDATES last-per-subject)
+  devices.{device_id}.workflows     → publish  (DEVICE_WF_SYNC stream)
+
+Commands use a durable push consumer — JetStream holds unacked commands
+while the device is offline and replays them on reconnect.
+
+Config stream uses max_msgs_per_subject=1 so the device always gets the
+latest config even after days offline.
+"""
+import asyncio
+import json
+import logging
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# JetStream stream names
+_STREAM_HEARTBEATS = "DEVICE_HEARTBEATS"
+_STREAM_COMMANDS   = "DEVICE_COMMANDS"
+_STREAM_CONFIG     = "CONFIG_UPDATES"
+_STREAM_WF_SYNC    = "DEVICE_WF_SYNC"
+
+# Request/reply timeout
+_REQUEST_TIMEOUT = 10.0
+
+
+class NATSEdgeTransport:
+    """NATS JetStream transport for edge devices."""
+
+    def __init__(
+        self,
+        device_id: str,
+        nats_url: str,
+        api_key: str = "",
+        nats_credentials: Optional[str] = None,
+    ):
+        self.device_id = device_id
+        self.nats_url = nats_url
+        self.api_key = api_key
+        self.nats_credentials = nats_credentials
+
+        self._nc = None    # nats.Client
+        self._js = None    # JetStreamContext
+        self._connected = False
+        self._subscriptions: list = []
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def connect(self) -> None:
+        """Connect to NATS and initialise JetStream context."""
+        try:
+            import nats
+
+            connect_kwargs: Dict[str, Any] = {
+                "servers": [self.nats_url],
+                "reconnected_cb": self._on_reconnect,
+                "error_cb": self._on_error,
+                "closed_cb": self._on_closed,
+                "max_reconnect_attempts": -1,  # reconnect forever
+            }
+            if self.nats_credentials:
+                connect_kwargs["credentials"] = self.nats_credentials
+
+            self._nc = await nats.connect(**connect_kwargs)
+            self._js = self._nc.jetstream()
+            self._connected = True
+            logger.info(f"[NATSTransport] Connected to {self.nats_url} — NATS Edge transport active")
+
+        except ImportError:
+            logger.warning("[NATSTransport] nats-py not installed — falling back to HTTP. "
+                           "Install with: pip install nats-py")
+            self._connected = False
+        except Exception as e:
+            logger.warning(f"[NATSTransport] Connect failed ({e}) — falling back to HTTP")
+            self._connected = False
+
+    async def disconnect(self) -> None:
+        """Drain and close NATS connection."""
+        if self._nc and self._connected:
+            try:
+                await self._nc.drain()
+            except Exception:
+                pass
+            self._connected = False
+            logger.info("[NATSTransport] Disconnected")
+
+    # ------------------------------------------------------------------
+    # Connectivity
+    # ------------------------------------------------------------------
+
+    async def check_connectivity(self) -> bool:
+        """Return True if NATS connection is live."""
+        return self._connected and self._nc is not None and not self._nc.is_closed
+
+    # ------------------------------------------------------------------
+    # Heartbeat
+    # ------------------------------------------------------------------
+
+    async def send_heartbeat(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Publish heartbeat to JetStream. Commands arrive via subscribe_commands(),
+        so this always returns [].
+        """
+        if not self._connected:
+            return []
+
+        subject = f"devices.{self.device_id}.heartbeat"
+        try:
+            from rufus.utils.serialization import pack_message, _USING_PROTO
+            if _USING_PROTO:
+                try:
+                    from rufus.proto.gen import HeartbeatMsg
+                    msg = HeartbeatMsg(
+                        device_id=payload.get("device_id", self.device_id),
+                        device_status=payload.get("device_status", "online"),
+                        pending_sync_count=payload.get("metrics", {}).get("pending_sync_count", 0),
+                        last_sync_at=payload.get("metrics", {}).get("last_sync_at") or "",
+                        config_version=payload.get("metrics", {}).get("config_version") or "",
+                        sent_at=payload.get("sent_at", ""),
+                    )
+                    data = pack_message(payload, msg)
+                except ImportError:
+                    data = pack_message(payload)
+            else:
+                data = pack_message(payload)
+
+            await self._js.publish(subject, data)
+        except Exception as e:
+            logger.warning(f"[NATSTransport] Heartbeat publish failed: {e}")
+
+        # Commands arrive via push consumer — no return value needed
+        return []
+
+    # ------------------------------------------------------------------
+    # Command subscription
+    # ------------------------------------------------------------------
+
+    async def subscribe_commands(self, callback: Callable[[Dict[str, Any]], Any]) -> None:
+        """
+        Subscribe to cloud commands via durable JetStream push consumer.
+
+        Commands persist in JetStream until ACK'd, so the device receives
+        queued commands on reconnect even after extended offline periods.
+        """
+        if not self._connected:
+            return
+
+        subject = f"devices.{self.device_id}.commands"
+        consumer_name = f"rufus-edge-{self.device_id}"
+
+        try:
+            sub = await self._js.subscribe(
+                subject,
+                durable=consumer_name,
+                cb=self._make_command_handler(callback),
+                manual_ack=True,
+            )
+            self._subscriptions.append(sub)
+            logger.info(f"[NATSTransport] Subscribed to commands on {subject}")
+        except Exception as e:
+            logger.error(f"[NATSTransport] Command subscription failed: {e}")
+
+    def _make_command_handler(self, callback):
+        from rufus.utils.serialization import unpack_message
+
+        async def _handler(msg):
+            try:
+                data = unpack_message(msg.data)
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(data)
+                else:
+                    callback(data)
+                await msg.ack()
+            except Exception as e:
+                logger.error(f"[NATSTransport] Command handler error: {e}")
+                await msg.nak()
+
+        return _handler
+
+    # ------------------------------------------------------------------
+    # SAF sync
+    # ------------------------------------------------------------------
+
+    async def sync_transactions(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send SAF transaction batch via NATS request/reply.
+        """
+        if not self._connected:
+            return {"error": "NATS not connected"}
+
+        subject = f"devices.{self.device_id}.sync"
+        try:
+            from rufus.utils.serialization import pack_message, unpack_message, _USING_PROTO
+            if _USING_PROTO:
+                try:
+                    from rufus.proto.gen import SyncBatch, EncryptedTransaction
+                    txns = []
+                    for t in batch.get("transactions", []):
+                        txns.append(EncryptedTransaction(
+                            transaction_id=t.get("transaction_id", ""),
+                            encrypted_blob=t.get("encrypted_blob", ""),
+                            encryption_key_id=t.get("encryption_key_id", ""),
+                            merchant_id=t.get("merchant_id", ""),
+                            amount_cents=t.get("amount_cents", 0),
+                            currency=t.get("currency", "USD"),
+                            card_token=t.get("card_token", ""),
+                            card_last_four=t.get("card_last_four", ""),
+                            workflow_id=t.get("workflow_id", ""),
+                            hmac=t.get("hmac", ""),
+                        ))
+                    proto_msg = SyncBatch(
+                        transactions=txns,
+                        device_sequence=batch.get("device_sequence", 0),
+                        device_timestamp=batch.get("device_timestamp", ""),
+                        device_id=self.device_id,
+                    )
+                    data = pack_message(batch, proto_msg)
+                except ImportError:
+                    data = pack_message(batch)
+            else:
+                data = pack_message(batch)
+
+            reply = await self._nc.request(subject, data, timeout=_REQUEST_TIMEOUT)
+            return unpack_message(reply.data)
+        except Exception as e:
+            logger.warning(f"[NATSTransport] sync_transactions failed: {e}")
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+
+    async def pull_config(self, etag: Optional[str]) -> Dict[str, Any]:
+        """
+        Fetch device config via NATS request/reply.
+        """
+        if not self._connected:
+            return {"not_modified": False, "config": None, "etag": etag,
+                    "error": "NATS not connected"}
+
+        subject = f"devices.{self.device_id}.config.req"
+        try:
+            from rufus.utils.serialization import pack_message, unpack_message
+            req_payload = {"device_id": self.device_id, "if_none_match": etag or ""}
+            data = pack_message(req_payload)
+
+            reply = await self._nc.request(subject, data, timeout=_REQUEST_TIMEOUT)
+            result = unpack_message(reply.data)
+
+            # Normalise to standard pull_config response shape
+            if isinstance(result, dict):
+                if "not_modified" not in result:
+                    result["not_modified"] = False
+            return result
+        except Exception as e:
+            logger.warning(f"[NATSTransport] pull_config failed: {e}")
+            return {"not_modified": False, "config": None, "etag": etag, "error": str(e)}
+
+    async def subscribe_config_push(self, callback: Callable[[Dict[str, Any]], Any]) -> None:
+        """
+        Subscribe to server-initiated config pushes via CONFIG_UPDATES stream.
+
+        The server publishes to devices.{id}.config with max_msgs_per_subject=1
+        so the device always receives the latest config on reconnect.
+        """
+        if not self._connected:
+            return
+
+        subject = f"devices.{self.device_id}.config"
+        consumer_name = f"rufus-config-{self.device_id}"
+        from rufus.utils.serialization import unpack_message
+
+        async def _handler(msg):
+            try:
+                config_data = unpack_message(msg.data)
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(config_data)
+                else:
+                    callback(config_data)
+                await msg.ack()
+            except Exception as e:
+                logger.error(f"[NATSTransport] Config push handler error: {e}")
+
+        try:
+            sub = await self._js.subscribe(
+                subject,
+                durable=consumer_name,
+                cb=_handler,
+                manual_ack=True,
+            )
+            self._subscriptions.append(sub)
+            logger.info(f"[NATSTransport] Subscribed to config push on {subject}")
+        except Exception as e:
+            logger.error(f"[NATSTransport] Config push subscription failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Workflow sync
+    # ------------------------------------------------------------------
+
+    async def sync_workflows(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Publish completed workflow batch to DEVICE_WF_SYNC stream.
+        """
+        if not self._connected:
+            return {"error": "NATS not connected"}
+
+        subject = f"devices.{self.device_id}.workflows"
+        try:
+            from rufus.utils.serialization import pack_message
+            data = pack_message(batch)
+            ack = await self._js.publish(subject, data)
+            return {"accepted_workflow_ids": batch.get("workflows", []),
+                    "seq": ack.seq}
+        except Exception as e:
+            logger.warning(f"[NATSTransport] sync_workflows failed: {e}")
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # NATS callbacks
+    # ------------------------------------------------------------------
+
+    async def _on_reconnect(self):
+        logger.info("[NATSTransport] Reconnected to NATS — JetStream replay will deliver queued messages")
+
+    async def _on_error(self, e):
+        logger.error(f"[NATSTransport] NATS error: {e}")
+
+    async def _on_closed(self):
+        logger.warning("[NATSTransport] NATS connection closed")
+        self._connected = False

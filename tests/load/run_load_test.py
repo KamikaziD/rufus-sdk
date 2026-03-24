@@ -331,6 +331,38 @@ def print_results(results: LoadTestResults, workers: int = 1):
         print(f"Req/sec >= 50:        {'✅ PASS' if rps_pass else '❌ FAIL'} ({rps:.1f} req/sec)")
         print(f"Error rate:           {results.error_rate:.2f}%")
 
+    elif results.scenario == "nats_transport":
+        # NATS JetStream publish latency — no HTTP, measures ack round-trip only.
+        # Target: p99 < 10ms (vs 50-300ms HTTP heartbeat path).
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Publishes sent:       {results.heartbeats_sent:,}")
+        print(f"Publish failures:     {results.heartbeat_failures:,}")
+        error_pass = results.error_rate < 1.0
+        print(f"Error rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+        if results.request_latencies:
+            p50 = results.latency_percentile(0.50)
+            p95 = results.latency_percentile(0.95)
+            p99 = results.latency_percentile(0.99)
+            # p99 target scales with load: <10ms at <=100 devices (idle NATS),
+            # <25ms at <=1k, <50ms at <=10k, <150ms beyond.
+            # Above 10k the asyncio scheduler backlog (not NATS itself) dominates p99 —
+            # same pattern as wasm_thundering_herd. p50 stays <2ms even at 100k devices.
+            if results.num_devices <= 100:
+                p99_threshold = 10.0
+            elif results.num_devices <= 1_000:
+                p99_threshold = 25.0
+            elif results.num_devices <= 10_000:
+                p99_threshold = 50.0
+            else:
+                p99_threshold = 150.0
+            p99_pass = p99 < p99_threshold
+            print(f"Publish p50:          {p50:.2f}ms")
+            print(f"Publish p95:          {p95:.2f}ms")
+            print(f"Publish p99 < {p99_threshold:.0f}ms:  {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.2f}ms)")
+            print(f"Samples:              {len(results.request_latencies):,}")
+        else:
+            print("  (no latency samples — is RUFUS_NATS_URL set and NATS server running?)")
+
     print("=" * 80)
 
 
@@ -356,7 +388,7 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd",)
+        _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,
@@ -401,6 +433,7 @@ async def run_all_scenarios(
         ("wasm_steps", 300),
         ("wasm_thundering_herd", 60),
         ("msgspec_codec", 120),
+        ("nats_transport", 120),
     ]
 
     # Create single orchestrator for all scenarios
@@ -519,6 +552,7 @@ Scenarios:
   wasm_steps         - WASM step execution throughput (sync_wasm command delivery + edge execution)
   wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: >= 0.8 steps/device/sec)
   msgspec_codec      - Heartbeat load with msgspec preflight (validates typed decode fast path)
+  nats_transport     - Publish heartbeats directly to NATS JetStream (p99 <10ms @<=100, <25ms @<=1k, <50ms @<=10k, <150ms beyond)
         """
     )
 
@@ -545,6 +579,7 @@ Scenarios:
             "wasm_steps",
             "wasm_thundering_herd",
             "msgspec_codec",
+            "nats_transport",
         ],
         help="Test scenario to run"
     )

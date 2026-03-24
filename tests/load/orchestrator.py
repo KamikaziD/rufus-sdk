@@ -272,7 +272,7 @@ class LoadTestOrchestrator:
                 "No devices available. Call setup_devices() first or set skip_device_setup=False")
         elif not skip_device_setup:
             # Single scenario mode — skip server registration for local-only scenarios
-            _local_only = scenario in ("wasm_thundering_herd",)
+            _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
             await self.setup_devices(
                 num_devices,
                 cleanup_first=True,
@@ -696,6 +696,30 @@ class ScenarioRunner:
             skip_device_setup=True,
         )
 
+
+    @staticmethod
+    async def run_nats_transport_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run NATS transport scenario: devices publish heartbeats directly to JetStream.
+
+        Measures JetStream publish ack latency (scale-aware p99 target:
+        <10ms @<=100 devices, <25ms @<=1k, <50ms @<=10k, <150ms beyond).
+        No HTTP calls, no server registration — pure NATS publish path.
+        Requires RUFUS_NATS_URL or NATS_URL env var.
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="nats_transport",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
 
     @staticmethod
     async def run_msgspec_codec_test(
