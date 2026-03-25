@@ -2,14 +2,22 @@ syntax = "proto3";
 
 package rufus.edge;
 
-option python_betterproto_package = "rufus.proto.gen";
-
 // Mesh relay metadata stamped on messages hopping between peer devices
 message MeshRelayMeta {
   string origin_device_id = 1;
   repeated string hop_path = 2;     // device IDs in relay chain
   int32 hop_count = 3;
   string relayed_at = 4;            // ISO-8601
+  float vector_score = 5;           // RUVON score of the winning relay peer
+  string relay_peer_id = 6;         // device_id of the peer that accepted the relay
+}
+
+// RUVON advisory mesh state advertised by a device in each heartbeat
+message VectorAdvisory {
+  float relay_score = 1;            // S(Vc) — this device's current RUVON routing score
+  float connectivity_quality = 2;   // 1.0 online, 0.5 degraded, 0.0 offline
+  int32 known_peers = 3;            // peer URLs in this device's mesh_peer_urls cache
+  bool is_local_master = 4;         // true when elected Local Master (cloud unreachable)
 }
 
 // Heartbeat sent from edge device to cloud control plane
@@ -22,6 +30,7 @@ message HeartbeatMsg {
   string sdk_version = 6;
   string sent_at = 7;               // ISO-8601
   MeshRelayMeta relay_meta = 8;     // set when relayed via peer mesh
+  VectorAdvisory vector_advisory = 9; // RUVON advisory state (Phase 5)
 }
 
 // A single command from cloud to edge device

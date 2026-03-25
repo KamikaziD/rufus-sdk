@@ -165,6 +165,11 @@ function initDevices(n) {
       registered: false,
       relayLoad: 0,          // concurrent relay bursts currently carrying
       relayLoadTotal: 0,     // lifetime relay count for leaderboard
+      // RUVON Phase 5 — vector advisory state
+      vectorC: 1.0,          // connectivity quality
+      vectorU: 0.0,          // uptime/stability (grows with relayLoadTotal)
+      vectorP: 1.0,          // capacity (1 - relayLoad/10)
+      isLocalMaster: false,  // true when elected as Local Master
     });
   }
 }
@@ -975,15 +980,55 @@ function startStatsLoop() {
       },
     });
 
-    // Post leaderboard update
+    // ── RUVON vector advisory update ───────────────────────────────────────
+    // Compute S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P per device.
+    // H=1 (all direct in demo), U normalised over fleet relay history.
+    const maxRelay = Math.max(...devices.map(d => d.relayLoadTotal), 1);
+    for (const d of devices) {
+      d.vectorC = (d.state === STATE.OFFLINE) ? 0.0
+                : (d.state === STATE.MESH_RELAY) ? 0.5
+                : 1.0;
+      d.vectorU = d.relayLoadTotal / maxRelay;
+      d.vectorP = 1.0 - Math.min(d.relayLoad / 10, 1.0);
+      d.vectorScore = 0.50 * d.vectorC + 0.15 + 0.25 * d.vectorU + 0.10 * d.vectorP;
+    }
+
+    // Elect Local Master: highest vectorScore among online devices
+    // (only when simulated "cloud" is unreachable — mirrors real election trigger)
+    if (!cloudReachable) {
+      let masterCandidate = null;
+      let masterScore = -1;
+      for (const d of devices) {
+        if (d.state !== STATE.OFFLINE && d.vectorScore > masterScore) {
+          masterScore = d.vectorScore;
+          masterCandidate = d;
+        }
+      }
+      for (const d of devices) d.isLocalMaster = false;
+      if (masterCandidate) masterCandidate.isLocalMaster = true;
+    } else {
+      for (const d of devices) d.isLocalMaster = false;
+    }
+
+    // Post leaderboard update — extended with RUVON score breakdown
     const heroMap = {};
     for (const d of devices) {
-      if (d.relayLoadTotal > 0) heroMap[d.id] = { count: d.relayLoadTotal, index: d.index };
+      if (d.relayLoadTotal > 0) heroMap[d.id] = {
+        count: d.relayLoadTotal,
+        index: d.index,
+        score: d.vectorScore,
+        C: d.vectorC,
+        U: d.vectorU,
+        P: d.vectorP,
+        isLocalMaster: d.isLocalMaster,
+      };
     }
     const heroes = Object.entries(heroMap)
-      .sort((a, b) => b[1].count - a[1].count)
+      .sort((a, b) => b[1].score - a[1].score)   // sort by RUVON score, not raw count
       .slice(0, 5)
-      .map(([id, v]) => [id, v.count]);
+      .map(([id, v]) => ({ id, count: v.count, score: v.score,
+                           C: v.C, U: v.U, P: v.P, isLocalMaster: v.isLocalMaster,
+                           index: v.index }));
     postMessage({ type: "LEADERBOARD", heroes });
 
     txnCount = 0;

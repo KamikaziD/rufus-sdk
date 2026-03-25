@@ -17,7 +17,7 @@ Table inventory (36 cloud tables + alembic_version managed by Alembic):
     scheduled_workflows
 
   Edge device management - cloud side (3):
-    edge_devices, worker_nodes, worker_commands
+    edge_devices (+ relay_server_url, mesh_advisory for RUVON), worker_nodes, worker_commands
 
   Live workflow updates (2):
     workflow_definitions, server_commands
@@ -256,6 +256,8 @@ edge_devices = Table(
     Column('last_sync_at', DateTime),
     Column('registered_at', DateTime, server_default=func.now()),
     Column('updated_at', DateTime, server_default=func.now(), onupdate=func.now()),
+    Column('relay_server_url', Text, nullable=True),   # RUVON: URL for inbound peer relay (e.g. "http://192.168.1.5:9001")
+    Column('mesh_advisory', Text, nullable=True),       # RUVON: last advertised vector advisory (JSON)
 
     Index('ix_device_status', 'status'),
     Index('ix_device_merchant', 'merchant_id'),

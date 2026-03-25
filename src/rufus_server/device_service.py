@@ -678,9 +678,14 @@ class DeviceService:
         device_id: str,
         status: str,
         metrics: Optional[Dict[str, Any]] = None,
+        vector_advisory: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Process device heartbeat.
+
+        vector_advisory: RUVON advisory state dict with keys:
+          relay_score, connectivity_quality, known_peers, is_local_master.
+          Stored in edge_devices.mesh_advisory (JSON) for topology queries.
 
         Returns:
             Dict with ack and pending commands
@@ -688,18 +693,33 @@ class DeviceService:
         import json
 
         async with self.persistence.pool.acquire() as conn:
-            # Update device heartbeat
-            await conn.execute(
-                """
-                UPDATE edge_devices
-                SET last_heartbeat_at = $1, status = $2, metadata = $3
-                WHERE device_id = $4
-                """,
-                datetime.utcnow(),  # Pass datetime object, not string
-                status,
-                json.dumps(metrics or {}),
-                device_id
-            )
+            # Update device heartbeat (include mesh_advisory when present)
+            if vector_advisory is not None:
+                await conn.execute(
+                    """
+                    UPDATE edge_devices
+                    SET last_heartbeat_at = $1, status = $2, metadata = $3,
+                        mesh_advisory = $4
+                    WHERE device_id = $5
+                    """,
+                    datetime.utcnow(),
+                    status,
+                    json.dumps(metrics or {}),
+                    json.dumps(vector_advisory),
+                    device_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE edge_devices
+                    SET last_heartbeat_at = $1, status = $2, metadata = $3
+                    WHERE device_id = $4
+                    """,
+                    datetime.utcnow(),
+                    status,
+                    json.dumps(metrics or {}),
+                    device_id,
+                )
 
         # Get pending commands
         commands = await self._get_pending_commands(device_id)
@@ -1131,6 +1151,59 @@ class DeviceService:
             "rotated_at": now.isoformat(),
         }
 
+    async def register_relay_server(self, device_id: str, host: str, port: int) -> dict:
+        """
+        Record that this device is running a RUVON peer relay server.
+        Sets relay_server_url so /mesh-peers can discover it.
+        """
+        relay_url = f"http://{host}:{port}"
+        db = self.persistence
+        if not hasattr(db, 'pool'):
+            return {"device_id": device_id, "relay_server_url": relay_url}
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE edge_devices SET relay_server_url = $1 WHERE device_id = $2",
+                relay_url, device_id,
+            )
+        logger.info(f"[RUVON] Relay server registered for {device_id}: {relay_url}")
+        return {"device_id": device_id, "relay_server_url": relay_url}
+
+    async def get_mesh_peers(self, device_id: str, max_age_seconds: int = 300) -> list:
+        """
+        Return active devices (excluding self) that are advertising a relay server URL.
+        Active = last_heartbeat_at within max_age_seconds (default 5 min).
+        Result is sorted by last_heartbeat_at DESC so freshest peers come first.
+        """
+        db = self.persistence
+        if not hasattr(db, 'pool'):
+            return []
+        try:
+            async with db.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT device_id, relay_server_url, last_heartbeat_at
+                    FROM edge_devices
+                    WHERE relay_server_url IS NOT NULL
+                      AND device_id != $1
+                      AND last_heartbeat_at > NOW() - ($2 * INTERVAL '1 second')
+                    ORDER BY last_heartbeat_at DESC
+                    """,
+                    device_id,
+                    max_age_seconds,
+                )
+            return [
+                {
+                    "device_id": row["device_id"],
+                    "relay_url": row["relay_server_url"],
+                    "last_heartbeat_at": row["last_heartbeat_at"].isoformat()
+                        if row["last_heartbeat_at"] else None,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"get_mesh_peers failed: {e}")
+            return []
+
     async def get_mesh_stats(self, device_id: str) -> dict:
         """Get mesh relay stats for a device."""
         db = self.persistence
@@ -1189,15 +1262,26 @@ class DeviceService:
                     device_ids.add(row["source_device_id"])
                     device_ids.add(row["relay_device_id"])
 
-                # Fetch device types
+                # Fetch device types + RUVON fields (relay_server_url, mesh_advisory)
                 device_type_map = {}
+                relay_url_map = {}
+                advisory_map = {}
                 if device_ids:
                     dev_rows = await conn.fetch(
-                        "SELECT device_id, device_type FROM edge_devices WHERE device_id = ANY($1::text[])",
+                        """SELECT device_id, device_type, relay_server_url, mesh_advisory
+                           FROM edge_devices WHERE device_id = ANY($1::text[])""",
                         list(device_ids)
                     )
                     for dr in dev_rows:
-                        device_type_map[dr["device_id"]] = dr["device_type"]
+                        did = dr["device_id"]
+                        device_type_map[did] = dr["device_type"]
+                        relay_url_map[did] = dr["relay_server_url"]
+                        raw_adv = dr["mesh_advisory"]
+                        if raw_adv:
+                            try:
+                                advisory_map[did] = json.loads(raw_adv)
+                            except Exception:
+                                pass
 
                 # Build per-node stats
                 node_stats = {}
@@ -1215,6 +1299,12 @@ class DeviceService:
                         "relayed_for_others": stats["relayed_for_others"],
                         "saved_by_peers": stats["saved_by_peers"],
                         "relay_score": round(stats["relayed_for_others"] / max_relay, 4),
+                        # RUVON Phase 5 fields
+                        "relay_server_url": relay_url_map.get(did),
+                        "vector_score": advisory_map.get(did, {}).get("relay_score"),
+                        "connectivity_quality": advisory_map.get(did, {}).get("connectivity_quality"),
+                        "known_peers": advisory_map.get(did, {}).get("known_peers"),
+                        "is_local_master": advisory_map.get(did, {}).get("is_local_master", False),
                     }
                     for did, stats in node_stats.items()
                 ]

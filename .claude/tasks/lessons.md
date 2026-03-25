@@ -266,6 +266,73 @@ userinfo: {
 **Correction:** Keep the existing pattern (each INSERT auto-commits individually) for per-row error tolerance. Only wrap in a transaction if you're willing to accept all-or-nothing semantics (which SAF sync is not).
 **Verification:** A batch with one bad row still accepts all valid rows; `accepted` list has the correct entries
 
+## Pattern: asyncpg Batch UPDATE column = ANY($n::uuid[]) Fails When Column Is varchar
+**Context:** `device_service._get_pending_commands()` batch-updating `device_commands.status` for a list of IDs
+**Anti-Pattern:** `WHERE command_id = ANY($2::uuid[])` — if `command_id` is `character varying` (not `uuid`), asyncpg raises `operator does not exist: character varying = uuid`; PostgreSQL cannot compare varchar to uuid without an explicit cast
+**Correction:** Match the cast to the actual column type: `WHERE command_id = ANY($2::text[])`. Always check the DB schema (`\d device_commands`) before writing array-cast SQL.
+**Verification:** NATSBridge heartbeat handler no longer logs `operator does not exist: character varying = uuid`
+
+## Pattern: aiosqlite Connection Must Be Closed Before pytest-asyncio Tears Down Per-Test Event Loop
+**Context:** `tests/edge/test_agent_wasm_integration.py` — tests that call `agent.start()` which opens an aiosqlite connection internally
+**Anti-Pattern:** Starting the agent (which opens `aiosqlite.connect(":memory:")`) inside a test without a matching `await conn.close()` in teardown. pytest-asyncio creates and closes a new event loop per test; aiosqlite's background I/O thread has pending futures bound to the old loop → the loop never shuts down → test suite hangs indefinitely (confirmed 18+ hours)
+**Correction:** Wrap test setup/teardown in an `asynccontextmanager` that calls `await agent.persistence.close()` in the `finally` block. Also explicitly `.close()` any coroutines passed to `mock asyncio.create_task` to suppress "never awaited" warnings.
+**Pattern:**
+```python
+@asynccontextmanager
+async def started_agent():
+    agent = make_agent()
+    await _start_agent_minimal(agent)
+    try:
+        yield agent
+    finally:
+        if agent.persistence:
+            await agent.persistence.close()
+        agent._is_running = False
+```
+**Verification:** Full test suite runs in <5s with no hanging processes; `ps aux | grep pytest` shows no zombie processes
+
+## Pattern: CLI Tests That Invoke Infinite-Loop Daemons Must Be Skipped
+**Context:** `tests/cli/test_zombie_commands.py` — `test_zombie_daemon_custom_interval` and `test_zombie_daemon_with_db_url`
+**Anti-Pattern:** Using `cli_runner.invoke(app, ["zombie-daemon", ...], input="\n")` hoping that `"\n"` as stdin causes the daemon to exit — the zombie-daemon command runs an infinite polling loop; stdin input is not monitored; `cli_runner.invoke` blocks forever
+**Correction:** Mark both tests `@pytest.mark.skip(reason="Daemon runs indefinitely - cannot be tested without signal injection")`. Only test daemon behavior via unit tests that mock the sleep loop, not via CLI invocation.
+**Verification:** `pytest tests/cli/test_zombie_commands.py` completes in 0.06s; full suite shows 4 passed 6 skipped for that file
+
+## Pattern: New API Request Fields That Expand a Protocol Must Be Optional
+**Context:** `DeviceHeartbeatRequest.vector_advisory` in `api_models.py` — added in RUVON Phase 5
+**Anti-Pattern:** Adding `vector_advisory: Dict[str, Any]` (required field) — all deployed edge agents that don't know about RUVON start failing heartbeat POSTs with 422 Unprocessable Entity the moment the server is updated
+**Correction:** Always add new request body fields as `Optional[...] = Field(default=None)`. The server handles `None` gracefully (skip the DB write), and old agents continue working without modification. Only promote to required after a coordinated fleet upgrade.
+**Verification:** An old-format heartbeat `{"device_status": "online", "metrics": {}}` returns 200 on the updated server; no 422 errors in logs
+
+## Pattern: Topology Queries Should JOIN the Device Registry in One Query, Not N Lookups
+**Context:** `device_service.get_mesh_topology()` — extended in RUVON Phase 5 to include relay_server_url, mesh_advisory per node
+**Anti-Pattern:** Fetching relay metadata with a separate `SELECT ... WHERE device_id = $1` inside a loop over nodes — O(N) round-trips to the DB for a fleet of N devices, making topology queries slow under load
+**Correction:** Extend the existing `SELECT device_id, device_type FROM edge_devices WHERE device_id = ANY($1::text[])` to also fetch `relay_server_url, mesh_advisory` in the same query. Build lookup dicts (`relay_url_map`, `advisory_map`) and join in Python. One DB round-trip regardless of fleet size.
+**Verification:** `get_mesh_topology()` for 100 devices generates 2 SQL queries (edges + device metadata), not 102
+
+## Pattern: Leaderboards Should Sort by the Computed Score, Not the Raw Activity Count
+**Context:** `browser_demo_2/worker.js` LEADERBOARD message — extended in RUVON Phase 5
+**Anti-Pattern:** Sorting heroes by `relayLoadTotal` (lifetime relay count) — a device that was busy relaying for a long time but is now degraded (low C, overloaded P) ranks above a fresh, healthy device with fewer relays but a higher current vector score
+**Correction:** Sort by `vectorScore = 0.50C + 0.15/H + 0.25U + 0.10P`. Include both `count` (for display) and `score` (for sorting) in each hero entry. The leaderboard then reflects current capability, not historical busyness.
+**Verification:** When a high-relay device goes offline (C=0.0), its score drops to ≈0.025 and it falls to the bottom of the leaderboard regardless of relay count
+
+## Pattern: Circuit Breakers Must Have a Half-Open Recovery State
+**Context:** `peer_relay.py` MeshRouter per-peer failure tracking for RUVON mesh routing
+**Anti-Pattern:** `return failures >= threshold` — once a peer accumulates N failures it is permanently skipped; a device that was temporarily offline and has recovered is never re-probed
+**Correction:** Three-state check using `last_fail` timestamp: CLOSED (failures < threshold) → OPEN (failures ≥ threshold AND last_fail within cooldown) → HALF-OPEN (failures ≥ threshold AND last_fail > cooldown seconds ago, allow one probe). A successful half-open probe resets failures to 0 (→ CLOSED); a failed probe updates `last_fail` (restarts the cooldown, stays OPEN). Store `_CB_HALF_OPEN_SECS` as a named constant at module level for easy tuning.
+**Verification:** After 3 failures, peer is skipped; after cooldown elapses, one probe is allowed; success restores normal routing
+
+## Pattern: Network Self-Registration Must Re-Check Each Sync Cycle, Not Just At Startup
+**Context:** `agent._register_relay_server()` — RUVON peer relay URL stored in cloud DB
+**Anti-Pattern:** Calling `_register_relay_server()` once in `start()` via `asyncio.create_task()` — if DHCP assigns a new IP between restarts or during a long run, the cloud holds a stale URL; other devices probe a dead address and take 3× 2s timeouts before the circuit opens
+**Correction:** (1) Use outbound-route IP detection (`socket.connect("8.8.8.8", 80); getsockname()[0]`) instead of `getfqdn()` — gives the actual LAN IP even on multi-homed hosts. (2) Cache the last-registered host in `edge_sync_state["relay_server_host"]`; compare before each cloud POST (no-op when stable = single SQLite read). (3) Call `_register_relay_server()` at the end of `_refresh_mesh_peers()` so it fires every online sync cycle.
+**Verification:** Change LAN IP; within one sync interval the cloud record updates and probes resume succeeding
+
+## Pattern: Distributed Election Tie-Breaking Requires Deterministic Per-Device Backoff
+**Context:** `agent._run_election()` — RUVON Local Master election when cloud is unreachable
+**Anti-Pattern:** Fixed 500ms self-promotion timeout for all devices — two devices with identical leadership scores both wait 500ms, both see no objection, both self-promote → dual-master split-brain
+**Correction:** Seed the backoff from the device ID: `seed = int(hashlib.sha256(device_id.encode()).hexdigest()[:8], 16); backoff_ms = 100 + (seed % 400)`. This gives each device a unique, stable wait time (100–500ms). Apply the same tie-break in the claim endpoint: `incoming_wins = score > my_score OR (score == my_score AND incoming_device_id < device_id)`. The lexicographically lower device_id always wins ties — consistent across all nodes without coordination.
+**Verification:** Two equal-score devices always elect the same one (lower device_id) regardless of timing
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip

@@ -1899,6 +1899,7 @@ async def device_heartbeat(
         device_id=device_id,
         status=request_data.device_status,
         metrics=request_data.metrics,
+        vector_advisory=request_data.vector_advisory,
     )
 
     return DeviceHeartbeatResponse(**result)
@@ -2007,6 +2008,42 @@ async def mesh_topology(
     if device_service is None:
         raise HTTPException(status_code=503, detail="Device service not initialized")
     return await device_service.get_mesh_topology()
+
+
+@app.post("/api/v1/devices/{device_id}/relay-server", tags=["Devices"])
+async def register_relay_server(
+    device_id: str,
+    body: dict,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+):
+    """
+    Register this device as a RUVON peer relay server.
+    Called by the edge agent on startup when peer_listen_port > 0.
+    Body: {"host": "192.168.1.5", "port": 9001}
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    host = body.get("host", "")
+    port = body.get("port", 0)
+    if not host or not port:
+        raise HTTPException(status_code=400, detail="host and port required")
+    return await device_service.register_relay_server(device_id, host, port)
+
+
+@app.get("/api/v1/devices/{device_id}/mesh-peers", tags=["Devices"])
+async def get_mesh_peers(
+    device_id: str,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+):
+    """
+    Return active RUVON relay peers known to the cloud (excluding self).
+    Active = last heartbeat within 5 minutes.
+    Used by edge agents to dynamically discover their peer neighborhood.
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    peers = await device_service.get_mesh_peers(device_id)
+    return {"peers": peers}
 
 
 @app.post("/api/v1/devices/{device_id}/rotate-key", tags=["Devices"])

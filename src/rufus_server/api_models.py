@@ -112,6 +112,10 @@ class DeviceHeartbeatRequest(BaseModel):
     active_workflows: int = Field(default=0)
     pending_sync: int = Field(default=0)
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    vector_advisory: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="RUVON advisory mesh state (relay_score, connectivity_quality, known_peers, is_local_master)",
+    )
 
 
 class DeviceHeartbeatResponse(BaseModel):
