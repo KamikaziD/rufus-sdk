@@ -831,17 +831,44 @@ python tests/benchmarks/benchmark_suite.py
   <p>Wire format uses an envelope byte prefix for mixed-client rollout:</p>
 <pre>
 <span class="c"># ENCODING_JSON  = 0x01  (JSON payload, readable by all clients)</span>
-<span class="c"># ENCODING_PROTO = 0x02  (betterproto binary, 5–7× smaller)</span>
+<span class="c"># ENCODING_PROTO = 0x02  (proto binary, 5–7× smaller)</span>
 <span class="k">from</span> rufus.utils.serialization <span class="k">import</span> pack_message, unpack_message
 
-data = pack_message(payload_dict)           <span class="c"># JSON envelope (0x01 + orjson bytes)</span>
-data = pack_message(payload_dict, proto_msg) <span class="c"># proto envelope (0x02 + betterproto bytes)</span>
-obj  = unpack_message(data, HeartbeatMsg)   <span class="c"># auto-detects envelope byte</span>
+data = pack_message(payload_dict)            <span class="c"># JSON envelope (0x01 + orjson bytes)</span>
+data = pack_message(payload_dict, proto_msg) <span class="c"># proto envelope (0x02 + proto bytes)</span>
+obj  = unpack_message(data, HeartbeatMsg)    <span class="c"># auto-detects envelope byte</span>
 </pre>
 
   <p>
-    Run the proto codec benchmark to see envelope overhead vs payload reduction:
+    <strong>Two proto backends, switchable at runtime via <code>RUFUS_PROTO_BACKEND</code>:</strong>
   </p>
+  <table>
+    <thead>
+      <tr><th>Backend</th><th>Default?</th><th>Encode speed</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>betterproto</td>
+        <td>Yes (default)</td>
+        <td>~2.3 M ops/sec</td>
+        <td>Pure Python dataclass-based; no C extension required; works in Pyodide/WASI</td>
+      </tr>
+      <tr>
+        <td>google.protobuf</td>
+        <td><code>RUFUS_PROTO_BACKEND=google</code></td>
+        <td>~3–4× faster</td>
+        <td>C extension; <code>SerializeToString</code> / <code>FromString</code> API; requires <code>protobuf&gt;=4.21</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    The serialization helpers detect which library is in use at runtime (<code>hasattr(msg, "SerializeToString")</code>)
+    and dispatch accordingly — application code never changes. Generated <code>_pb2.py</code> files
+    (google.protobuf) and betterproto dataclasses both live in <code>src/rufus/proto/gen/</code>;
+    the <code>__init__.py</code> selects the right set on import.
+  </p>
+
 <pre>
 python tests/benchmarks/benchmark_proto.py
 <span class="c"># Expected: HeartbeatMsg JSON=287B proto=48B (6.0×), WorkflowRecord JSON=4.2KB proto=690B (6.1×)</span>
@@ -852,9 +879,72 @@ RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
 </pre>
 </section>
 
-<!-- ─────────────────────── 11. RUVON Mesh Networking ───────────────────── -->
+<!-- ─────────────────────── 11. Store-and-Forward (SAF) ───────────────────── -->
 <section>
-  <h2><span class="num">11</span> RUVON — Vector-Optimised Mesh Networking</h2>
+  <h2><span class="num">11</span> Store-and-Forward (SAF)</h2>
+  <p>
+    SAF is the offline payment pipeline. When the cloud control plane is unreachable, the edge
+    agent approves transactions locally, queues them in a durable SQLite table, and replays the
+    batch to the cloud the moment connectivity is restored. No payment data is lost, and the
+    cashier experience is unaffected during an outage.
+  </p>
+
+<pre>
+<span class="c"># Offline path — called by the agent when cloud is unreachable</span>
+<span class="k">async def</span> process_transaction_offline(self, transaction: SAFTransaction) -> dict:
+    floor_limit = self.config_manager.get_floor_limit()   <span class="c"># hot-deployed via ETag</span>
+    <span class="k">if</span> transaction.amount > floor_limit:
+        <span class="k">return</span> {<span class="s">"approved"</span>: <span class="g">False</span>, <span class="s">"reason"</span>: <span class="s">"exceeds offline floor limit"</span>}
+    await self.sync_manager.queue_for_sync(transaction)   <span class="c"># persists to SQLite</span>
+    <span class="k">return</span> {<span class="s">"approved"</span>: <span class="g">True</span>, <span class="s">"is_offline"</span>: <span class="g">True</span>, <span class="s">"floor_limit"</span>: floor_limit}
+</pre>
+
+  <table>
+    <thead>
+      <tr><th>Component</th><th>What it does</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>saf_pending_transactions</td>
+        <td>Durable SQLite table on the edge device. Survives process restarts. Separate from <code>workflow_executions</code> — no cascade delete when workflows are purged.</td>
+      </tr>
+      <tr>
+        <td>Fernet encryption</td>
+        <td>Each transaction payload is encrypted with the device's <code>RUFUS_ENCRYPTION_KEY</code> before being written to SQLite. The encrypted blob and key ID travel together to the cloud.</td>
+      </tr>
+      <tr>
+        <td>HMAC-SHA256 integrity</td>
+        <td>Before each sync upload, the <code>SyncManager</code> computes <code>HMAC-SHA256(transaction_id | encrypted_blob | key_id)</code> over each record. The cloud verifies the signature on receipt. HMAC is end-to-end — forwarded unchanged when relayed via mesh.</td>
+      </tr>
+      <tr>
+        <td>Floor limit (ETag-controlled)</td>
+        <td>The cloud hot-deploys a per-device floor limit via the ETag config push. Transactions above the limit are rejected offline (require online authorisation); those at or below are approved locally. The limit is persisted in <code>device_config_cache</code> so it survives restarts.</td>
+      </tr>
+      <tr>
+        <td>Process-safe sync lock</td>
+        <td>A <code>sync_lock</code> table in SQLite acts as a per-process advisory lock, preventing concurrent sync attempts from two threads or processes on the same device.</td>
+      </tr>
+      <tr>
+        <td>Cloud reconciliation</td>
+        <td>On sync, the cloud returns <code>accepted</code> / <code>rejected</code> per row. Accepted rows are marked <code>synced</code> in <code>saf_transactions</code> (PostgreSQL). Rejected rows (flagged fraud, duplicate, etc.) update the edge record to <code>rejected</code> and trigger a local compensation step.</td>
+      </tr>
+      <tr>
+        <td>Mesh relay forwarding</td>
+        <td>When the originating device can't reach the cloud directly, the sync batch is forwarded through the RUVON mesh. The originating device's HMAC travels unchanged — the relay node does not re-sign.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    The cloud-side SAF accumulator is what drives the <strong>SAF Recovered</strong> KPI card
+    in the dashboard — the running dollar total of offline transactions that have been
+    successfully replayed and settled.
+  </p>
+</section>
+
+<!-- ─────────────────────── 12. RUVON Mesh Networking ───────────────────── -->
+<section>
+  <h2><span class="num">12</span> RUVON — Vector-Optimised Mesh Networking</h2>
   <p>
     When the cloud control plane is unreachable, edge devices don't go silent — they form a
     self-organising mesh using <strong>RUVON</strong> (Rufus Vector-Optimised Networking).
@@ -920,6 +1010,86 @@ RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
     The mesh topology panel in browser_demo_2 shows a live RUVON leaderboard — vector score
     breakdown bars (C / U / P dimensions) per device, sorted by score, with the local master
     flagged when <code>cloudReachable = false</code>.
+  </p>
+</section>
+
+<!-- ─────────────────────── 13. Security ───────────────────── -->
+<section>
+  <h2><span class="num">13</span> Security</h2>
+  <p>
+    Rufus is built for PCI-DSS-adjacent fintech deployments. Security is layered across
+    the edge device, the transport, and the cloud control plane.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Layer</th><th>Mechanism</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>At-rest encryption</td>
+        <td>Fernet (AES-128-CBC + HMAC)</td>
+        <td>All SAF transaction payloads are encrypted before being written to SQLite. Key is derived from <code>RUFUS_ENCRYPTION_KEY</code> (env var). Without the key, the SQLite file is unreadable ciphertext. A key ID travels with each record to support rotation.</td>
+      </tr>
+      <tr>
+        <td>Transport integrity</td>
+        <td>HMAC-SHA256</td>
+        <td>Each SAF batch record is HMAC-signed over <code>transaction_id | encrypted_blob | key_id</code> before upload. The cloud verifies the signature on receipt. Tampered or replayed records are rejected without touching workflow state.</td>
+      </tr>
+      <tr>
+        <td>Device authentication</td>
+        <td>API key per device</td>
+        <td>Each edge device registers with a unique API key stored in <code>edge_devices.api_key_hash</code> (bcrypt hash). The raw key is returned only at registration time. All subsequent requests carry the key in <code>X-Device-Key</code>; the server validates against the hash.</td>
+      </tr>
+      <tr>
+        <td>Cloud auth</td>
+        <td>Keycloak OIDC + JWT</td>
+        <td>Dashboard and API endpoints are protected by Keycloak 24. Next.js middleware validates the JWT on every request. Role-based access (<code>viewDevices</code>, <code>manageDevices</code>, <code>viewWorkflows</code>, <code>manageWorkflows</code>, <code>admin</code>) is enforced at the component level.</td>
+      </tr>
+      <tr>
+        <td>Input sanitization</td>
+        <td>Semantic Firewall</td>
+        <td><code>WorkflowInput</code> base class (Pydantic + bleach) validates and sanitizes all workflow inputs. Strict fields strip special characters; HTML fields are bleached against an allowlist. Prevents XSS and injection attacks from propagating into workflow state.</td>
+      </tr>
+      <tr>
+        <td>Key rotation</td>
+        <td>key_id field on SAF records</td>
+        <td>Each SAF record carries an <code>encryption_key_id</code>. When a key is rotated, old records are re-encrypted in a background job keyed off the old ID. New records immediately use the new key. The secrets provider abstraction (<code>SecretsProvider</code>) plugs into Vault, AWS Secrets Manager, or env vars.</td>
+      </tr>
+      <tr>
+        <td>Rate limiting</td>
+        <td>rate_limit_tracking table</td>
+        <td>Per-device rate limits on SAF sync, heartbeat, and config poll endpoints. Limits are persisted in PostgreSQL so they survive server restarts. Configurable per endpoint via <code>RUFUS_RATE_LIMIT_*</code> env vars.</td>
+      </tr>
+      <tr>
+        <td>Audit log</td>
+        <td>workflow_audit_log</td>
+        <td>Every workflow state transition is written to an append-only audit log with <code>event_type</code>, <code>old_status</code>, <code>new_status</code>, <code>actor</code>, and <code>execution_duration_ms</code>. The dashboard Audit page queries this log. Non-fatal write — audit failure never blocks the workflow.</td>
+      </tr>
+      <tr>
+        <td>NATS transport security</td>
+        <td>TLS + NKey auth</td>
+        <td>NATS connections use TLS by default when <code>RUFUS_NATS_URL</code> is <code>tls://</code>. NKey credentials are passed via <code>RUFUS_NATS_NKEY</code>. The proto envelope byte ensures clients that don't understand proto binaries fail loudly rather than silently misparse.</td>
+      </tr>
+    </tbody>
+  </table>
+
+<pre>
+<span class="c"># Minimal secure edge startup</span>
+export RUFUS_ENCRYPTION_KEY=<span class="s">"$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"</span>
+export RUFUS_HMAC_SECRET=<span class="s">"$(openssl rand -hex 32)"</span>
+export RUFUS_NATS_URL=<span class="s">"tls://nats.internal:4222"</span>
+
+<span class="c"># Rotate encryption key (re-encrypts old SAF records with new key)</span>
+rufus edge rotate-key --old-key $OLD_KEY --new-key $NEW_KEY --db /var/lib/rufus/edge.db
+</pre>
+
+  <p>
+    <strong>PCI-DSS posture:</strong> Rufus is designed to be PCI-DSS-compatible but not
+    certified out of the box. The architecture addresses the primary control areas: encrypted
+    cardholder data at rest (Fernet), integrity verification in transit (HMAC), audit logging,
+    role-based access, and key rotation hooks. A full PCI assessment requires infrastructure-level
+    controls (network segmentation, HSM key storage, etc.) beyond the SDK scope.
   </p>
 </section>
 
