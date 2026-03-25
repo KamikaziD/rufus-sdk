@@ -366,3 +366,9 @@ This guarantees z-order — stars are always on top regardless of node rendering
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
 **Correction:** Create only the missing table(s) directly via `asyncpg` with `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`, then stamp: `INSERT INTO alembic_version (version_num) VALUES ('<rev>') ON CONFLICT DO NOTHING`. Worker container has psycopg2; server container does not.
 **Verification:** `SELECT version_num FROM alembic_version` shows the new revision; target endpoint returns 200
+
+## Pattern: Edit Tool new_string Must Use Real Newlines, Not \n Escape Sequences
+**Context:** Adding a multi-line HTML section to `architecture.html` via the Edit tool
+**Anti-Pattern:** Writing `\n` as a two-character escape sequence inside the `new_string` parameter — the Edit tool writes them as literal backslash-n characters in the file. The browser renders `\n` as visible text: section headings show correctly but paragraph text, pre blocks, and table rows all display `\n` scattered through the content.
+**Correction:** Always use actual newlines (press Enter) inside `new_string` blocks. When a large multi-line block needs to be inserted, use the Write tool to rewrite the whole file, or use a Bash heredoc + Python script to do the replacement. The Edit tool's `new_string` is not a string literal in a programming language — it does not interpret escape sequences.
+**Verification:** Open the HTML file in a browser and confirm no visible `\n` characters appear in rendered text; `python3 -c "print(open('file.html').read().count('\\\\n'))"` returns 0
