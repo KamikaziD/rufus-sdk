@@ -852,6 +852,77 @@ RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
 </pre>
 </section>
 
+<!-- ─────────────────────── 11. RUVON Mesh Networking ───────────────────── -->
+<section>
+  <h2><span class="num">11</span> RUVON — Vector-Optimised Mesh Networking</h2>
+  <p>
+    When the cloud control plane is unreachable, edge devices don't go silent — they form a
+    self-organising mesh using <strong>RUVON</strong> (Rufus Vector-Optimised Networking).
+    Instead of a greedy BFS that picks the first online peer, every relay candidate is scored
+    using a four-dimensional vector:
+  </p>
+
+<pre>
+<span class="k">S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P</span>
+
+  C  = Connectivity quality  (1.0 online, 0.5 degraded, 0.0 offline)
+  H  = Hop distance          (1/H so closer peers score higher)
+  U  = Uptime / success rate (historical relay success rate, 0.0–1.0)
+  P  = Capacity              (1 − relay_load / relay_load_max, 0.0–1.0)
+</pre>
+
+  <p>
+    All candidates within 3 hops are collected, scored, sorted descending, and attempted in
+    order. The score and chosen peer ID are recorded in <code>edge_relay_log</code> and
+    carried in <code>MeshRelayMeta.vector_score</code> on every sync batch.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Feature</th><th>How it works</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Thundering-herd prevention</td>
+        <td>Startup jitter (uniform 0–50 % of heartbeat interval) + per-cycle drift (±10 %) prevents fleet-wide re-synchronisation after a shared outage.</td>
+      </tr>
+      <tr>
+        <td>3-state circuit breaker</td>
+        <td>CLOSED → OPEN (≥ 3 failures) → HALF-OPEN (120 s cooldown). Failed probes restart the 120 s window; successful probes reset the counter to zero.</td>
+      </tr>
+      <tr>
+        <td>Dynamic peer discovery</td>
+        <td>Devices register their outbound-route IP with <code>POST /api/v1/devices/{id}/relay-server</code> and refresh it every sync cycle (DHCP self-healing). Peers are fetched from <code>GET /api/v1/devices/{id}/mesh-peers</code> and cached in <code>edge_sync_state</code> for offline fallback.</td>
+      </tr>
+      <tr>
+        <td>Local master election</td>
+        <td>After cloud unreachable for &gt; 300 s, devices contest leadership via <code>POST /peer/election/claim</code>. Score: <code>S_lead = 0.50·P + 0.25·C + 0.25·U</code> (power source, CPU, uptime). Device-ID-seeded backoff (100–500 ms) avoids simultaneous claims; lexicographically lower device ID breaks score ties deterministically.</td>
+      </tr>
+      <tr>
+        <td>Advisory heartbeat</td>
+        <td>Each heartbeat carries a <code>VectorAdvisory</code> (relay_score, connectivity_quality, known_peers, is_local_master). The cloud stores this in <code>edge_devices.mesh_advisory</code> and exposes it via <code>GET /api/v1/mesh/topology</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+<pre>
+<span class="c"># RUVON scoring happens inside MeshRouter.find_relay()</span>
+<span class="c"># peer_relay.py — all candidates within 3 hops are collected first</span>
+<span class="k">def</span> _score_candidate(probe, hop, stats) -> float:
+    C = probe.connectivity_quality
+    H = hop                                        <span class="c"># 1, 2, or 3</span>
+    U = stats.get(<span class="s">"success_rate"</span>, <span class="g">0.5</span>)
+    P = <span class="g">1.0</span> - probe.relay_load / max(probe.relay_load_max, <span class="g">1</span>)
+    <span class="k">return</span> <span class="g">0.50</span>*C + <span class="g">0.15</span>*(<span class="g">1</span>/H) + <span class="g">0.25</span>*U + <span class="g">0.10</span>*P
+</pre>
+
+  <p>
+    The mesh topology panel in browser_demo_2 shows a live RUVON leaderboard — vector score
+    breakdown bars (C / U / P dimensions) per device, sorted by score, with the local master
+    flagged when <code>cloudReachable = false</code>.
+  </p>
+</section>
+
 </div>
 </body>
 </html>

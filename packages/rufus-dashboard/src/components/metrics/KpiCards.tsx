@@ -1,11 +1,11 @@
 "use client";
 
 interface KpiData {
-  activeWorkflows: number;
-  onlineDevices: number;
-  pendingHitl: number;
-  failedToday: number;
-  onlineWorkers?: number;
+  safRecoveredCents:   number;
+  onlineDevices:       number;
+  pendingHitl:         number;
+  failedToday:         number;
+  fraudPreventedCents: number;
 }
 
 interface KpiCardsProps {
@@ -16,11 +16,15 @@ interface KpiCardsProps {
 function KpiCard({
   title,
   value,
+  prefix,
+  subtitle,
   accentColor,
   isLoading,
 }: {
   title: string;
   value: number;
+  prefix?: string;
+  subtitle?: string;
   accentColor: string;
   isLoading?: boolean;
 }) {
@@ -30,19 +34,32 @@ function KpiCard({
       {isLoading ? (
         <div className="h-8 w-12 animate-pulse bg-zinc-800 rounded-none" />
       ) : (
-        <div className="font-mono text-3xl font-semibold text-[#E4E4E7]">{value.toLocaleString()}</div>
+        <>
+          <div className="font-mono text-3xl font-semibold text-[#E4E4E7]">
+            {prefix && <span className="text-lg text-zinc-500 mr-0.5">{prefix}</span>}
+            {value.toLocaleString()}
+          </div>
+          {subtitle && (
+            <div className="font-mono text-[10px] text-zinc-600 mt-1">{subtitle}</div>
+          )}
+        </>
       )}
     </div>
   );
 }
 
 export function KpiCards({ data, isLoading }: KpiCardsProps) {
+  const safDollars   = Math.round((data?.safRecoveredCents   ?? 0) / 100);
+  const fraudDollars = Math.round((data?.fraudPreventedCents ?? 0) / 100);
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
       <KpiCard
-        title="Active Workflows"
-        value={data?.activeWorkflows ?? 0}
-        accentColor="border-l-amber-500"
+        title="SAF Recovered"
+        value={safDollars}
+        prefix="$"
+        subtitle="offline txns synced to cloud"
+        accentColor="border-l-emerald-400"
         isLoading={isLoading}
       />
       <KpiCard
@@ -64,9 +81,11 @@ export function KpiCards({ data, isLoading }: KpiCardsProps) {
         isLoading={isLoading}
       />
       <KpiCard
-        title="Online Workers"
-        value={data?.onlineWorkers ?? 0}
-        accentColor="border-l-blue-500"
+        title="Fraud Prevented"
+        value={fraudDollars}
+        prefix="$"
+        subtitle="transactions blocked by scorer"
+        accentColor="border-l-violet-500"
         isLoading={isLoading}
       />
     </div>

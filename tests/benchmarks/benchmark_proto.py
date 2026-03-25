@@ -94,9 +94,10 @@ def main():
 
     # --- betterproto ---
     try:
-        # Try generated code first
+        # Try generated code first (import directly from module, not via backend switch)
         try:
-            from rufus.proto.gen import HeartbeatMsg, WorkflowRecord  # type: ignore
+            from rufus.proto.gen.edge import HeartbeatMsg  # type: ignore
+            from rufus.proto.gen.workflow import WorkflowRecord  # type: ignore
 
             hb = HeartbeatMsg(**{k: v for k, v in HEARTBEAT_DICT.items() if k != "pending_sync_count"},
                                pending_sync_count=HEARTBEAT_DICT["pending_sync_count"])
@@ -168,6 +169,51 @@ def main():
 
     except ImportError:
         print("betterproto not installed — proto results skipped (pip install betterproto)")
+
+    # --- google.protobuf (_pb2) ---
+    try:
+        _prev_backend = os.environ.get("RUFUS_PROTO_BACKEND")
+        os.environ["RUFUS_PROTO_BACKEND"] = "google"
+        try:
+            from rufus.proto.gen.edge_pb2 import HeartbeatMsg as HB_pb  # type: ignore
+            from rufus.proto.gen.workflow_pb2 import WorkflowRecord as WR_pb  # type: ignore
+
+            hb_pb = HB_pb(
+                device_id=HEARTBEAT_DICT["device_id"],
+                device_status=HEARTBEAT_DICT["device_status"],
+                pending_sync_count=HEARTBEAT_DICT["pending_sync_count"],
+                last_sync_at=HEARTBEAT_DICT["last_sync_at"],
+                config_version=HEARTBEAT_DICT["config_version"],
+                sdk_version=HEARTBEAT_DICT["sdk_version"],
+                sent_at=HEARTBEAT_DICT["sent_at"],
+            )
+            wf_state = {k: v for k, v in WORKFLOW_RECORD_DICT.items() if k != "status"}
+            # state_json is a bytes field in proto — encode str to bytes
+            if "state_json" in wf_state and isinstance(wf_state["state_json"], str):
+                wf_state["state_json"] = wf_state["state_json"].encode()
+            wf_pb = WR_pb(**wf_state)
+
+            size_hb_g, enc_hb_g, dec_hb_g = _bench(
+                "HeartbeatMsg (google.protobuf)",
+                lambda: hb_pb.SerializeToString(),
+                lambda d: HB_pb.FromString(d),
+                b"",
+            )
+            size_wf_g, enc_wf_g, dec_wf_g = _bench(
+                "WorkflowRecord (google.protobuf)",
+                lambda: wf_pb.SerializeToString(),
+                lambda d: WR_pb.FromString(d),
+                b"",
+            )
+            results.append(("HeartbeatMsg", "google.protobuf", size_hb_g, enc_hb_g, dec_hb_g))
+            results.append(("WorkflowRecord", "google.protobuf", size_wf_g, enc_wf_g, dec_wf_g))
+        except ImportError:
+            print("google.protobuf _pb2 code not found — run: buf generate (or make proto)")
+    finally:
+        if _prev_backend is None:
+            os.environ.pop("RUFUS_PROTO_BACKEND", None)
+        else:
+            os.environ["RUFUS_PROTO_BACKEND"] = _prev_backend
 
     # --- Print results table ---
     print()

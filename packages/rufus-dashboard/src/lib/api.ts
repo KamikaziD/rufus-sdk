@@ -452,6 +452,17 @@ export function getMetricsThroughput(
   return apiFetch(`/api/v1/metrics/throughput?hours=${hours}`, token);
 }
 
+export interface EdgeImpactData {
+  saf_recovered_cents:  number;
+  saf_recovered_count:  number;
+  fraud_prevented_cents: number;
+  fraud_prevented_count: number;
+}
+
+export function getEdgeImpact(token: string): Promise<EdgeImpactData> {
+  return apiFetch("/api/v1/metrics/edge-impact", token);
+}
+
 export function getSystemHealth(token: string): Promise<{ workers: WorkerSummary[] }> {
   return listWorkers(token);
 }

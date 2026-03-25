@@ -333,6 +333,34 @@ async def started_agent():
 **Correction:** Seed the backoff from the device ID: `seed = int(hashlib.sha256(device_id.encode()).hexdigest()[:8], 16); backoff_ms = 100 + (seed % 400)`. This gives each device a unique, stable wait time (100–500ms). Apply the same tie-break in the claim endpoint: `incoming_wins = score > my_score OR (score == my_score AND incoming_device_id < device_id)`. The lexicographically lower device_id always wins ties — consistent across all nodes without coordination.
 **Verification:** Two equal-score devices always elect the same one (lower device_id) regardless of timing
 
+## Pattern: PostgreSQL state Column Is TEXT, Not JSONB — Cast Before Extracting Fields
+**Context:** `GET /api/v1/metrics/edge-impact` — aggregating `amount` from `workflow_executions.state`
+**Anti-Pattern:** `state_data->>'action'` or `state->>'field'` — column `state_data` doesn't exist; `state` is `TEXT`, not `JSONB`; the `->>`/`->` operators only work on `jsonb`; raises `column "state_data" does not exist` or `operator does not exist: text ->> unknown`
+**Correction:** Cast to json first: `(state::json)->>'action'` and `((state::json)->>'amount')::numeric`. Use `COALESCE(SUM(...), 0)` to handle rows where the field is absent.
+**Verification:** `GET /metrics/edge-impact` returns non-zero values; no `operator does not exist` in postgres logs
+
+## Pattern: TypeScript null vs undefined — API JSON Returns null, Not undefined
+**Context:** `NodeTooltip` in fleet-topology — guarding optional RUVON fields like `vector_score`
+**Anti-Pattern:** `if (node.vector_score !== undefined)` — JSON serialization converts Python `None` to JSON `null`, which deserializes to JavaScript `null`, not `undefined`. `null !== undefined` is `true`, so the guard passes and `.toFixed(3)` crashes with `Cannot read properties of null`
+**Correction:** Use loose equality `!= null` which catches both `null` and `undefined`: `if (node.vector_score != null)`. Apply the same guard everywhere: leaderboard sort, stats bar count, tooltip rendering.
+**Verification:** No `Cannot read properties of null` crash in browser console; tooltip renders correctly for devices without VectorAdvisory
+
+## Pattern: Canvas Z-Order — Draw Overlapping Elements in a Second Pass, Not Inline
+**Context:** Fleet topology canvas — rendering ★ local master badge on top of all nodes
+**Anti-Pattern:** Drawing the star inside the node render loop at `r * 1.1` px offset (radius-relative, as small as 4px) — any subsequent node draw call covers it; star is invisible when nodes overlap
+**Correction:** Add a dedicated second render pass after the node loop. Draw all decorations (stars, badges) at a fixed size (18px) with a dark stroke for contrast and gold glow:
+```typescript
+ctx.font = `bold 18px sans-serif`;
+for (const node of masterNodes) {
+  ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 3;
+  ctx.strokeText("★", pos.x, pos.y - 18);
+  ctx.fillStyle = "#ffd700";
+  ctx.fillText("★", pos.x, pos.y - 18);
+}
+```
+This guarantees z-order — stars are always on top regardless of node rendering order.
+**Verification:** ★ is visible on every local master node; not covered by adjacent nodes
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip

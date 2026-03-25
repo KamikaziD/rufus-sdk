@@ -28,7 +28,7 @@ Repository = "https://github.com/KamikaziD/rufus-sdk"
 server = ["fastapi>=0.100", "uvicorn>=0.20", "starlette>=0.27", "slowapi>=0.1"]
 celery = ["celery>=5.3", "redis>=5.0", "psycopg2-binary>=2.9", "prometheus-client>=0.19"]
 auth = ["python-jose[cryptography]>=3.3"]
-nats = ["nats-py>=2.3", "betterproto>=2.0.0b7"]
+nats = ["nats-py>=2.3", "betterproto>=0.9.0", "protobuf>=4.21"]
 all = [
     "fastapi>=0.100", "uvicorn>=0.20", "starlette>=0.27", "slowapi>=0.1",
     "celery>=5.3", "redis>=5.0", "psycopg2-binary>=2.9", "prometheus-client>=0.19",

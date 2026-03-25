@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package rufus.events;
 
-option python_betterproto_package = "rufus.proto.gen";
-
 // Workflow lifecycle event published to NATS stream.
 // event_type strings match those used in events.py exactly so existing
 // dashboard subscribers (Redis pub/sub → NATS migration) stay compatible.

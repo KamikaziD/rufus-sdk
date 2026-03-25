@@ -270,12 +270,25 @@
 
   /* ── Relay section (enhanced) ────────────────────────────────────────── */
   .relay-hero-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 3px 0; font-size: 11px; font-family: var(--mono);
+    padding: 5px 0 4px; border-bottom: 1px solid rgba(48,54,61,0.5);
+    font-size: 11px; font-family: var(--mono);
   }
+  .relay-hero-row:last-child { border-bottom: none; }
+  .relay-hero-top  { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
   .relay-hero-id   { color: var(--muted); }
   .relay-hero-ct   { color: #ff7043; font-weight: 700; }
   .relay-hero-hop  { color: var(--muted); font-size: 10px; }
+  .relay-master-badge { background:#b8860b; color:#fff; font-size:9px; font-weight:700;
+    border-radius:3px; padding:1px 5px; margin-left:5px; letter-spacing:.04em; }
+  .ruvon-bars { display:flex; gap:3px; align-items:center; }
+  .ruvon-bar-wrap { display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+  .ruvon-bar-label { font-size:9px; color:var(--muted); line-height:1; }
+  .ruvon-bar-bg { width:36px; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
+  .ruvon-bar-fill { height:100%; border-radius:2px; transition: width .4s; }
+  .bar-c { background:#58a6ff; }
+  .bar-u { background:#3fb950; }
+  .bar-p { background:#bc8cff; }
+  .ruvon-score { font-size:10px; color:#e6edf3; font-weight:700; margin-left:4px; }
 
   /* ── Log panel ───────────────────────────────────────────────────────── */
   #log-panel {
@@ -920,20 +933,31 @@ function updateLeaderboard(heroes) {
     return;
   }
 
-  list.innerHTML = heroes.map(([id, count], i) =>
-    `<div class="relay-hero-row">` +
-    `<span class="relay-hero-id">${String(i + 1).padStart(2, "0")} ${id.slice(0, 12)}…</span>` +
-    `<span class="relay-hero-ct">${count} txns</span>` +
-    `</div>`
-  ).join("");
+  list.innerHTML = heroes.map(({ id, count, score, C, U, P, isLocalMaster }, i) => {
+    const pct = v => Math.round((v || 0) * 100);
+    const masterBadge = isLocalMaster
+      ? `<span class="relay-master-badge">★ MASTER</span>` : "";
+    return `<div class="relay-hero-row">` +
+      `<div class="relay-hero-top">` +
+        `<span class="relay-hero-id">${String(i + 1).padStart(2, "0")} ${id.slice(0, 12)}…${masterBadge}</span>` +
+        `<span class="relay-hero-ct">${count} txns</span>` +
+      `</div>` +
+      `<div class="ruvon-bars">` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">C</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-c" style="width:${pct(C)}%"></div></div></div>` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">U</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-u" style="width:${pct(U)}%"></div></div></div>` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">P</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-p" style="width:${pct(P)}%"></div></div></div>` +
+        `<span class="ruvon-score">${(score || 0).toFixed(2)}</span>` +
+      `</div>` +
+    `</div>`;
+  }).join("");
 
   // Mirror into wire panel relay heroes
   const wireHeroes = document.getElementById("wire-relay-heroes");
   if (wireHeroes && heroes.length > 0) {
-    wireHeroes.innerHTML = heroes.slice(0, 3).map(([id, count], i) =>
+    wireHeroes.innerHTML = heroes.slice(0, 3).map(({ id, count, score, isLocalMaster }, i) =>
       `<div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--mono);padding:1px 0">` +
-      `<span style="color:#ff9a7a">${String(i + 1).padStart(2, "0")} ${id.slice(0, 16)}…</span>` +
-      `<span style="color:#ff7043;font-weight:700">${count} relayed</span>` +
+      `<span style="color:${isLocalMaster ? "#b8860b" : "#ff9a7a"}">${String(i + 1).padStart(2, "0")} ${id.slice(0, 16)}…${isLocalMaster ? " ★" : ""}</span>` +
+      `<span style="color:#ff7043;font-weight:700">${(score || 0).toFixed(2)} / ${count} txns</span>` +
       `</div>`
     ).join("");
     wireHeroes.style.fontStyle = "normal";

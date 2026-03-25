@@ -878,6 +878,71 @@ async def get_metrics_throughput(
         raise HTTPException(status_code=500, detail=f"Failed to fetch throughput: {str(e)}")
 
 
+@app.get("/api/v1/metrics/edge-impact", tags=["Monitoring"])
+async def get_edge_impact_metrics(
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Business-impact KPIs that showcase the value of Rufus Edge:
+
+    - saf_recovered_cents  : total cents of offline transactions successfully synced to cloud
+    - saf_recovered_count  : number of those transactions
+    - fraud_prevented_cents: total cents of transactions blocked by the fraud scorer
+    - fraud_prevented_count: number of blocked transactions
+
+    Returns zeros when no data is available (no PostgreSQL backend, empty tables, etc.)
+    so the dashboard always renders without errors.
+    """
+    zero = {
+        "saf_recovered_cents": 0,
+        "saf_recovered_count": 0,
+        "fraud_prevented_cents": 0,
+        "fraud_prevented_count": 0,
+    }
+
+    if workflow_engine is None:
+        return zero
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        return zero
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            # SAF: sum all offline transactions that made it back to the cloud
+            saf_row = await conn.fetchrow("""
+                SELECT
+                    COALESCE(SUM(amount_cents), 0)  AS recovered_cents,
+                    COUNT(*)                         AS recovered_count
+                FROM saf_transactions
+                WHERE status = 'synced'
+            """)
+
+            # Fraud: completed workflows where the fraud scorer chose BLOCK
+            # state is stored as TEXT so must cast to json first
+            # Works for both auto-blocked (action='BLOCK') and human-reviewed (review_decision='BLOCK')
+            fraud_row = await conn.fetchrow("""
+                SELECT
+                    COUNT(*)                                                                        AS prevented_count,
+                    COALESCE(SUM(((state::json)->>'amount')::numeric * 100), 0)::bigint             AS prevented_cents
+                FROM workflow_executions
+                WHERE status = 'COMPLETED'
+                  AND (
+                      (state::json)->>'action'          = 'BLOCK'
+                   OR (state::json)->>'review_decision' = 'BLOCK'
+                  )
+            """)
+
+        return {
+            "saf_recovered_cents":  int(saf_row["recovered_cents"]),
+            "saf_recovered_count":  int(saf_row["recovered_count"]),
+            "fraud_prevented_cents": int(fraud_row["prevented_cents"]),
+            "fraud_prevented_count": int(fraud_row["prevented_count"]),
+        }
+    except Exception:
+        return zero
+
+
 @app.get("/api/v1/metrics/summary", tags=["Monitoring"])
 async def get_metrics_summary(hours: int = 24):
     """Get aggregated metrics across workflows (PostgreSQL backend required)."""

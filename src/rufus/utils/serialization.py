@@ -244,18 +244,21 @@ ENCODING_PROTO = b"\x02"
 
 def encode_proto(msg) -> bytes:
     """
-    Encode a betterproto Message to binary protobuf bytes.
+    Encode a proto Message to binary protobuf bytes.
 
-    Falls back to JSON serialization if betterproto is unavailable.
+    Supports both google.protobuf (SerializeToString) and betterproto (bytes())
+    via duck-typing. Falls back to JSON if proto is unavailable.
 
     Args:
-        msg: A betterproto.Message subclass instance
+        msg: A google.protobuf.Message or betterproto.Message instance
 
     Returns:
         Protobuf binary bytes (or JSON bytes as fallback)
     """
     if _USING_PROTO:
-        return bytes(msg)
+        if hasattr(msg, "SerializeToString"):   # google.protobuf
+            return msg.SerializeToString()
+        return bytes(msg)                        # betterproto
     # JSON fallback: serialize the message's __dict__
     return serialize_bytes(
         {k: v for k, v in vars(msg).items() if not k.startswith("_")}
@@ -264,19 +267,22 @@ def encode_proto(msg) -> bytes:
 
 def decode_proto(data: bytes, msg_type: Type[T]) -> T:
     """
-    Decode protobuf binary bytes into a betterproto Message.
+    Decode protobuf binary bytes into a proto Message.
 
-    Falls back to JSON deserialization if betterproto is unavailable.
+    Supports both google.protobuf (FromString) and betterproto (parse())
+    via duck-typing. Falls back to JSON if proto is unavailable.
 
     Args:
         data: Protobuf binary bytes
-        msg_type: betterproto.Message subclass to decode into
+        msg_type: google.protobuf.Message or betterproto.Message subclass
 
     Returns:
         An instance of msg_type
     """
     if _USING_PROTO:
-        return msg_type().parse(data)
+        if hasattr(msg_type, "FromString"):     # google.protobuf
+            return msg_type.FromString(data)
+        return msg_type().parse(data)            # betterproto
     data_dict = deserialize(data)
     return msg_type(**data_dict)
 
@@ -285,22 +291,24 @@ def pack_message(payload: Any, proto_msg=None) -> bytes:
     """
     Pack a message with an envelope byte for mixed-protocol coexistence.
 
-    When betterproto is available and proto_msg is provided, encodes as proto
+    When proto is available and proto_msg is provided, encodes as proto
     with ENCODING_PROTO prefix. Otherwise encodes payload as JSON with
     ENCODING_JSON prefix.
 
     The leading envelope byte allows JSON-only clients and proto-enabled
     clients to coexist on the same NATS subject during rollout.
 
+    Supports both google.protobuf and betterproto message types.
+
     Args:
         payload: Python dict / object (used for JSON path)
-        proto_msg: A betterproto.Message instance (used for proto path)
+        proto_msg: A proto Message instance (google.protobuf or betterproto)
 
     Returns:
         Envelope byte + encoded body
     """
     if _USING_PROTO and proto_msg is not None:
-        return ENCODING_PROTO + bytes(proto_msg)
+        return ENCODING_PROTO + encode_proto(proto_msg)
     return ENCODING_JSON + serialize_bytes(payload)
 
 
@@ -311,9 +319,11 @@ def unpack_message(data: bytes, proto_type: Optional[Type[T]] = None) -> Any:
     Reads the leading envelope byte to detect encoding, then decodes
     accordingly. If the envelope byte is missing, falls back to JSON.
 
+    Supports both google.protobuf and betterproto message types.
+
     Args:
         data: Raw bytes from NATS (envelope byte + body)
-        proto_type: betterproto.Message subclass for proto decode path
+        proto_type: Proto Message class for proto decode path
 
     Returns:
         Decoded Python object (proto message instance or dict)
@@ -325,7 +335,7 @@ def unpack_message(data: bytes, proto_type: Optional[Type[T]] = None) -> Any:
     body = data[1:]
 
     if envelope == ENCODING_PROTO and _USING_PROTO and proto_type is not None:
-        return proto_type().parse(body)
+        return decode_proto(body, proto_type)
 
     # JSON path (ENCODING_JSON or no envelope byte)
     raw = body if envelope in (ENCODING_JSON, ENCODING_PROTO) else data

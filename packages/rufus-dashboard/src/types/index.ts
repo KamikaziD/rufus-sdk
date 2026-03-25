@@ -182,7 +182,13 @@ export interface MeshTopologyNode {
   device_type: string;
   relayed_for_others: number;
   saved_by_peers: number;
-  relay_score: number;   // 0-1
+  relay_score: number;            // 0-1 legacy relay score
+  // RUVON fields (present when device has sent a VectorAdvisory heartbeat)
+  vector_score?: number;          // S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P
+  connectivity_quality?: number;  // C dimension (0-1)
+  known_peers?: number;           // peers known to this device
+  is_local_master?: boolean;      // elected local master when cloud unreachable
+  relay_server_url?: string;      // registered relay URL for this device
 }
 
 export interface MeshTopologyEdge {

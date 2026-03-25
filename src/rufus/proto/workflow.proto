@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package rufus.workflow;
 
-option python_betterproto_package = "rufus.proto.gen";
-
 // All 11 workflow status strings used across the codebase
 enum WorkflowStatus {
   WORKFLOW_STATUS_UNSPECIFIED = 0;

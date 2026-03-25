@@ -4,3 +4,5 @@ plugins:
     out: src/rufus/proto/gen
     opt:
       - python_package=rufus.proto.gen
+  - plugin: buf.build/protocolbuffers/python:v28
+    out: src/rufus/proto/gen
