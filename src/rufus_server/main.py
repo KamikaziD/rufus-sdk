@@ -991,6 +991,36 @@ async def get_workflow_audit_log(
         raise HTTPException(status_code=500, detail=f"Failed to fetch audit log: {str(e)}")
 
 
+@app.get("/api/v1/workflow/{workflow_id}/relay-context", tags=["Workflows"])
+async def get_workflow_relay_context(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Return mesh relay metadata for this workflow's SAF transaction, if relayed."""
+    if workflow_engine is None:
+        return {}
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        return {}
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT relay_device_id, relay_source_device_id, hop_count, relayed_at
+                FROM saf_transactions
+                WHERE workflow_id = $1
+                  AND relay_device_id IS NOT NULL
+                LIMIT 1
+            """, workflow_id)
+            if not row:
+                return {}
+            result = dict(row)
+            if result.get("relayed_at") and hasattr(result["relayed_at"], "isoformat"):
+                result["relayed_at"] = result["relayed_at"].isoformat()
+            return result
+    except Exception:
+        return {}
+
+
 @app.get("/api/v1/admin/workers", tags=["Monitoring"])
 async def get_registered_workers(
     limit: int = 100,

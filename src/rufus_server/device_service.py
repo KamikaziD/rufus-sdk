@@ -723,6 +723,7 @@ class DeviceService:
                 device_id
             )
             commands = []
+            command_ids = []
             for row in rows:
                 raw_data = row["command_data"]
                 if isinstance(raw_data, str):
@@ -735,11 +736,13 @@ class DeviceService:
                     "command_type": row["command_type"],
                     "command_data": raw_data,
                 })
+                command_ids.append(row["command_id"])
 
-                # Mark as sent
+            # Batch mark all fetched commands as sent — 1 round-trip regardless of count
+            if command_ids:
                 await conn.execute(
-                    "UPDATE device_commands SET status = 'sent', sent_at = $1 WHERE command_id = $2",
-                    datetime.utcnow(), row["command_id"]
+                    "UPDATE device_commands SET status = 'sent', sent_at = $1 WHERE command_id = ANY($2::text[])",
+                    datetime.utcnow(), command_ids
                 )
 
             return commands

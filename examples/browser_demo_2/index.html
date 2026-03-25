@@ -877,7 +877,7 @@ function appendLog(msg) {
 
 // ── Wire Protocol Panel ────────────────────────────────────────────────────
 function updateWirePanel(ws, meshRelayed) {
-  const { hbJson, hbProto, safJson, safProto, safCount } = ws;
+  const { hbJson, hbProto, safJson, safProto, safCount, safEstimated } = ws;
 
   if (hbJson > 0 && hbProto > 0) {
     const ratio = (hbJson / hbProto).toFixed(1);
@@ -900,7 +900,9 @@ function updateWirePanel(ws, meshRelayed) {
     document.getElementById("saf-ratio").textContent       = ratio + "×";
     document.getElementById("saf-json-bar").style.width    = "100%";
     document.getElementById("saf-proto-bar").style.width   = (safProto / safJson * 100).toFixed(1) + "%";
-    document.getElementById("saf-batch-label").textContent = `last drain · ${safCount} txn${safCount !== 1 ? "s" : ""}`;
+    document.getElementById("saf-batch-label").textContent = safEstimated
+      ? `(1 txn · estimated)`
+      : `last drain · ${safCount} txn${safCount !== 1 ? "s" : ""}`;
   }
 
   // Relay stats in wire panel

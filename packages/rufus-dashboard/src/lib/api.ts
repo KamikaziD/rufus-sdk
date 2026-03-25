@@ -9,6 +9,7 @@ import type {
   DeviceCommand,
   DeviceMeshStats,
   MeshTopologyResponse,
+  RelayContext,
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_RUFUS_API_URL ?? "http://localhost:8000";
@@ -81,9 +82,10 @@ export async function listWorkflows(
 }
 
 export async function getWorkflow(token: string, id: string): Promise<WorkflowStatusResponse> {
-  const [raw, auditRaw] = await Promise.all([
+  const [raw, auditRaw, relayRaw] = await Promise.all([
     apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/status`, token),
     apiFetch<Record<string, unknown>[]>(`/api/v1/workflow/${id}/audit`, token).catch(() => []),
+    apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/relay-context`, token).catch(() => null),
   ]);
   return {
     workflow_id: raw.workflow_id as string,
@@ -101,6 +103,9 @@ export async function getWorkflow(token: string, id: string): Promise<WorkflowSt
     workflow_type: raw.workflow_type as string | undefined,
     started_at: (raw.created_at ?? raw.started_at ?? null) as string | null,
     completed_at: (raw.completed_at ?? null) as string | null,
+    relay_context: (relayRaw?.relay_device_id)
+      ? relayRaw as unknown as RelayContext
+      : null,
   };
 }
 

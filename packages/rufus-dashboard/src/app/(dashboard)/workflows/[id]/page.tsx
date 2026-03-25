@@ -122,6 +122,7 @@ export default function WorkflowDetailPage({
             onHitlSubmit={(data) => resumeWorkflow.mutate({ id, userInput: data })}
             isSubmitting={resumeWorkflow.isPending}
             errorMessage={errorMessage}
+            relayContext={workflow.relay_context ?? null}
           />
         </div>
       </div>

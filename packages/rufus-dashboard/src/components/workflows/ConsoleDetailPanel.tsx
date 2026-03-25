@@ -5,7 +5,7 @@ import { StatePanel } from "@/components/workflows/StatePanel";
 import { HitlForm } from "@/components/workflows/HitlForm";
 import { FraudReviewPanel } from "@/components/approvals/FraudReviewPanel";
 import { LoanReviewPanel } from "@/components/approvals/LoanReviewPanel";
-import type { WorkflowStatus } from "@/types";
+import type { WorkflowStatus, RelayContext } from "@/types";
 
 interface AuditEntry {
   timestamp: string;
@@ -32,6 +32,7 @@ interface ConsoleDetailPanelProps {
   onHitlSubmit: (data: Record<string, unknown>) => void;
   isSubmitting: boolean;
   errorMessage?: string;
+  relayContext?: RelayContext | null;
 }
 
 function StateDiff({ before, after }: { before: unknown; after: unknown }) {
@@ -51,30 +52,84 @@ function StateDiff({ before, after }: { before: unknown; after: unknown }) {
   );
 }
 
-function ConsoleAuditTail({ entries }: { entries: AuditEntry[] }) {
-  const recent = [...entries].reverse().slice(0, 30);
+const EVENT_COLORS: Record<string, string> = {
+  WORKFLOW_COMPLETED:    "text-emerald-400",
+  WORKFLOW_FAILED:       "text-red-400",
+  WORKER_CRASH_DETECTED: "text-red-400",
+  WORKFLOW_RUNNING:      "text-sky-400",
+  WORKFLOW_CREATED:      "text-zinc-500",
+  WORKFLOW_PENDING:      "text-zinc-500",
+  WORKFLOW_PAUSED:       "text-amber-400",
+  WORKFLOW_CANCELLED:    "text-zinc-500",
+  STATUS_CHANGED:        "text-zinc-400",
+};
+
+function RelayBanner({ relay }: { relay: RelayContext }) {
   return (
-    <div className="border-t border-[#1E1E22] max-h-48 overflow-y-auto">
-      <div className="px-4 py-2 border-b border-[#1E1E22]">
-        <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">AUDIT TRAIL</span>
+    <div className="mx-4 mt-3 border border-orange-500/30 bg-orange-500/5 rounded px-3 py-2.5">
+      <div className="font-mono text-[10px] text-orange-400 font-semibold uppercase tracking-widest mb-2 flex items-center gap-2">
+        <span className="inline-block w-1.5 h-1.5 bg-orange-400 rounded-full" />
+        Mesh Relay
       </div>
-      {recent.length === 0 ? (
-        <p className="font-mono text-[11px] text-zinc-600 px-4 py-3">No entries.</p>
-      ) : (
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-[11px]">
         <div>
-          {recent.map((entry, i) => (
-            <div key={i} className="flex items-baseline gap-3 px-4 py-1.5 hover:bg-[#1A1A1E] font-mono text-[11px] border-b border-[#1E1E22]/50">
-              <span className="text-zinc-600 tabular-nums flex-shrink-0">
+          <span className="text-zinc-600">Relay device  </span>
+          <span className="text-zinc-300">{relay.relay_device_id}</span>
+        </div>
+        <div>
+          <span className="text-zinc-600">Hops  </span>
+          <span className="text-zinc-300">{relay.hop_count}</span>
+        </div>
+        {relay.relay_source_device_id && relay.relay_source_device_id !== relay.relay_device_id && (
+          <div>
+            <span className="text-zinc-600">Source  </span>
+            <span className="text-zinc-400">{relay.relay_source_device_id}</span>
+          </div>
+        )}
+        {relay.relayed_at && (
+          <div>
+            <span className="text-zinc-600">Relayed at  </span>
+            <span className="text-zinc-400">{new Date(relay.relayed_at).toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConsoleAuditTail({ entries }: { entries: AuditEntry[] }) {
+  const recent = [...entries].reverse().slice(0, 50);
+  return (
+    <div className="border-t border-[#1E1E22]">
+      <div className="px-4 py-2 border-b border-[#1E1E22] flex items-center justify-between flex-shrink-0">
+        <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">Audit Trail</span>
+        <span className="font-mono text-[10px] text-zinc-700">{entries.length} events</span>
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        {recent.length === 0 ? (
+          <p className="font-mono text-[11px] text-zinc-600 px-4 py-3">No entries.</p>
+        ) : recent.map((entry, i) => {
+          const colorClass = EVENT_COLORS[entry.event] ?? "text-zinc-400";
+          const oldStatus  = entry.details?.old as string | undefined;
+          const newStatus  = entry.details?.new as string | undefined;
+          return (
+            <div key={i} className="flex items-baseline gap-2 px-4 py-1.5 hover:bg-[#1A1A1E] font-mono text-[11px] border-b border-[#1E1E22]/50">
+              <span className="text-zinc-600 tabular-nums flex-shrink-0 w-16">
                 {new Date(entry.timestamp).toLocaleTimeString("en-GB", { hour12: false })}
               </span>
-              <span className="text-zinc-400">{entry.event}</span>
+              <span className={`flex-shrink-0 ${colorClass}`}>{entry.event}</span>
+              {oldStatus && newStatus && (
+                <span className="text-zinc-600 flex-shrink-0 text-[10px]">
+                  {oldStatus} → {newStatus}
+                </span>
+              )}
               {entry.step && (
-                <span className="text-zinc-600">→ {entry.step}</span>
+                <span className="text-zinc-500 truncate text-[10px]">@ {entry.step}</span>
               )}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -97,6 +152,7 @@ export function ConsoleDetailPanel({
   onHitlSubmit,
   isSubmitting,
   errorMessage,
+  relayContext,
 }: ConsoleDetailPanelProps) {
   // 1. DAG overlay
   if (showDAG) {
@@ -131,6 +187,7 @@ export function ConsoleDetailPanel({
           <div className="font-semibold mb-1">WORKFLOW FAILED</div>
           {errorMessage && <div className="text-red-400/80">{errorMessage}</div>}
         </div>
+        {relayContext && <RelayBanner relay={relayContext} />}
         <div className="flex-1 overflow-auto px-4">
           <StatePanel state={state} />
         </div>
@@ -212,6 +269,7 @@ export function ConsoleDetailPanel({
       <div className="flex-1 overflow-auto p-4">
         <StatePanel state={state} />
       </div>
+      {relayContext && <RelayBanner relay={relayContext} />}
       <ConsoleAuditTail entries={auditLog} />
     </div>
   );

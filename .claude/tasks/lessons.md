@@ -236,6 +236,36 @@ userinfo: {
 **Correction:** (1) Add `.env` to `.gitignore` before ever staging it. (2) Run `git rm --cached .env` to stop tracking it. (3) If already committed: soft-reset the commit, unstage .env, re-commit without it. Do NOT use `--no-verify` to bypass push protection.
 **Verification:** `git status` shows `.env` as untracked (??); `git push` succeeds without GH013 error
 
+## Pattern: buf generate Fails on betterproto-Specific Proto Options — Remove Them
+**Context:** Running `buf generate` after adding `option python_betterproto_package = "..."` to `.proto` files
+**Anti-Pattern:** Embedding `option python_betterproto_package = "rufus.proto.gen"` in the `.proto` file itself — buf's linter rejects it with `field python_betterproto_package of google.protobuf.FileOptions does not exist`; protoc also rejects it with `Option unknown`
+**Correction:** Remove the option from `.proto` files entirely — it's redundant since `buf.gen.yaml` already carries `opt: python_package=rufus.proto.gen`. betterproto reads the opt from buf, not from the proto file.
+**Verification:** `buf generate --path src/rufus/proto` exits 0; generated `*.py` and `*_pb2.py` appear in `gen/`
+
+## Pattern: buf generate Requires Remote Plugin Access — Use protoc as Fallback
+**Context:** Running `buf generate` when buf is installed but plugins aren't cached/available
+**Anti-Pattern:** Relying only on `buf generate` in CI or offline — the betterproto plugin (`buf.build/community/danielgtaylor-python-betterproto`) is fetched from the buf registry; fails with "plugin not found" when registry is unreachable
+**Correction:** Add a `make proto-protoc` target that uses local `protoc --python_out=` for the google.protobuf `_pb2.py` files. betterproto codegen still requires buf; document both paths in the Makefile.
+**Verification:** `make proto-protoc` generates `*_pb2.py` files; benchmark shows google.protobuf ~50× faster encode than betterproto at same wire size
+
+## Pattern: google.protobuf bytes Fields Require Python bytes, Not str
+**Context:** Constructing `WorkflowRecord` proto message with `state_json` field
+**Anti-Pattern:** `WorkflowRecord(state_json="{\"key\": \"value\"}")` — google.protobuf raises `TypeError: expected bytes, str found` for `bytes` proto fields
+**Correction:** Encode strings before assigning: `WorkflowRecord(state_json=state_str.encode())`. betterproto accepts str for bytes fields but google.protobuf is strict.
+**Verification:** `WR_pb.FromString(wf_pb.SerializeToString())` round-trips without TypeError
+
+## Pattern: DTO-Returning load_workflow Must Be Unwrapped Before Dict .get() Calls
+**Context:** `events.py _publish_full_workflow_state()` calling `.get()` on the result of `persistence.load_workflow()`
+**Anti-Pattern:** Assuming `load_workflow()` always returns a plain dict — it returns a `WorkflowRecord` msgspec.Struct; calling `.get("status")` on it raises `AttributeError: 'WorkflowRecord' object has no attribute 'get'`
+**Correction:** Check the return type and convert: `if hasattr(raw, "__struct_fields__"): workflow_dict = msgspec.to_builtins(raw)`. This is a general pattern: any code receiving the result of `load_workflow()` must handle both dict and Struct return types.
+**Verification:** No `Failed to publish full workflow state` errors in server logs; Redis pub/sub delivers workflow state to dashboard WebSocket clients
+
+## Pattern: Wrapping Per-Row INSERT Loop in asyncpg Transaction Breaks Per-Row Error Handling
+**Context:** `device_service.sync_transactions()` — proposal to wrap INSERT loop in `async with conn.transaction():`
+**Anti-Pattern:** Adding `async with conn.transaction():` around a loop that has per-row `try/except` — if any INSERT raises an exception, asyncpg marks the transaction as broken; no further queries can execute; remaining rows are silently skipped; partial `accepted`/`rejected` lists are returned but nothing commits
+**Correction:** Keep the existing pattern (each INSERT auto-commits individually) for per-row error tolerance. Only wrap in a transaction if you're willing to accept all-or-nothing semantics (which SAF sync is not).
+**Verification:** A batch with one bad row still accepts all valid rows; `accepted` list has the correct entries
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip

@@ -40,6 +40,13 @@ export interface StepInfo {
   input_schema?: Record<string, unknown>;
 }
 
+export interface RelayContext {
+  relay_device_id: string;
+  relay_source_device_id?: string;
+  hop_count: number;
+  relayed_at?: string;
+}
+
 export interface WorkflowStatusResponse {
   workflow_id: string;
   status: WorkflowStatus;
@@ -54,6 +61,7 @@ export interface WorkflowStatusResponse {
   blocked_on_child_id?: string;
   started_at?: string | null;
   completed_at?: string | null;
+  relay_context?: RelayContext | null;
 }
 
 export interface StepConfig {

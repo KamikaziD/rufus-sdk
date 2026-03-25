@@ -75,6 +75,7 @@ let lastHeartbeatProtoBytes = 0;
 let lastSafBatchJsonBytes   = 0;
 let lastSafBatchProtoBytes  = 0;
 let lastSafBatchCount       = 0;
+let safBatchEstimated       = false;
 
 // ── Message handler ────────────────────────────────────────────────────────
 self.onmessage = async (e) => {
@@ -573,6 +574,7 @@ async function postSafBatch(targetDev, txns, relayMeta, key) {
     lastSafBatchJsonBytes  = new TextEncoder().encode(bodyStr).length;
     lastSafBatchProtoBytes = estimateSafBatchProto(cleaned);
     lastSafBatchCount      = cleaned.length;
+    safBatchEstimated      = false;
   }
 
   try {
@@ -920,6 +922,36 @@ function startStatsLoop() {
       d.state === STATE.ONLINE || d.state === STATE.SYNCED || d.state === STATE.WORKFLOW_DONE
     ).length;
 
+    // Fallback: compute representative wire sizes when no real HB/SAF has fired yet
+    if (devices.length > 0 && lastHeartbeatJsonBytes === 0) {
+      const dev = devices[0];
+      const sampleHb = { device_status: "online", pending_saf_count: 0, sdk_version: "1.0.0rc5" };
+      lastHeartbeatJsonBytes  = new TextEncoder().encode(JSON.stringify(sampleHb)).length;
+      lastHeartbeatProtoBytes = estimateHeartbeatProto(dev);
+    }
+    if (lastSafBatchJsonBytes === 0) {
+      const sampleTxn = {
+        transaction_id:   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        encrypted_blob:   btoa("sample-payload"),
+        encryption_key_id: "browser-demo",
+        hmac:             "a".repeat(64),
+        merchant_id:      "WALMART-001",
+        amount_cents:     5000,
+        currency:         "USD",
+        card_last_four:   "1234",
+        workflow_id:      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      };
+      const sampleBody = {
+        transactions:     [sampleTxn],
+        device_sequence:  0,
+        device_timestamp: new Date().toISOString(),
+      };
+      lastSafBatchJsonBytes  = new TextEncoder().encode(JSON.stringify(sampleBody)).length;
+      lastSafBatchProtoBytes = estimateSafBatchProto([sampleTxn]);
+      lastSafBatchCount      = 1;
+      safBatchEstimated      = true;
+    }
+
     postMessage({
       type: "STATS",
       txnsPerSec,
@@ -934,11 +966,12 @@ function startStatsLoop() {
       highRiskCount,
       meshRelayed,
       wireStats: {
-        hbJson:   lastHeartbeatJsonBytes,
-        hbProto:  lastHeartbeatProtoBytes,
-        safJson:  lastSafBatchJsonBytes,
-        safProto: lastSafBatchProtoBytes,
-        safCount: lastSafBatchCount,
+        hbJson:        lastHeartbeatJsonBytes,
+        hbProto:       lastHeartbeatProtoBytes,
+        safJson:       lastSafBatchJsonBytes,
+        safProto:      lastSafBatchProtoBytes,
+        safCount:      lastSafBatchCount,
+        safEstimated:  safBatchEstimated,
       },
     });
 
