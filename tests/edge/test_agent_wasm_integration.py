@@ -10,6 +10,7 @@ Verifies that:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,16 +49,41 @@ async def _start_agent_minimal(agent: RufusEdgeAgent):
         mock_sm.initialize = AsyncMock()
         mock_sm.check_connectivity = AsyncMock(return_value=False)
 
-        # Prevent asyncio.create_task from spinning real tasks
-        mock_asyncio.create_task = MagicMock(return_value=MagicMock())
+        # Prevent asyncio.create_task from spinning real tasks; close each
+        # coroutine immediately so Python doesn't emit "never awaited" warnings.
+        created_coros: list = []
+
+        def _capture_create_task(coro):
+            created_coros.append(coro)
+            return MagicMock()
+
+        mock_asyncio.create_task = _capture_create_task
         mock_asyncio.sleep = AsyncMock()
 
         await agent.start()
+
+        for coro in created_coros:
+            coro.close()
 
         # Restore real asyncio so callers can use it
         agent._background_tasks.clear()
 
     return agent
+
+
+@asynccontextmanager
+async def started_agent():
+    """Context manager: yields a started agent and closes its SQLite connection on exit."""
+    agent = make_agent()
+    await _start_agent_minimal(agent)
+    try:
+        yield agent
+    finally:
+        # Close the aiosqlite connection so pytest-asyncio can tear down the
+        # event loop without the background thread hanging indefinitely.
+        if agent.persistence:
+            await agent.persistence.close()
+        agent._is_running = False
 
 
 # ---------------------------------------------------------------------------
@@ -72,17 +98,15 @@ class TestAgentWasmResolverWiring:
 
     @pytest.mark.asyncio
     async def test_wasm_resolver_set_after_start(self):
-        agent = make_agent()
-        await _start_agent_minimal(agent)
-        assert agent._wasm_resolver is not None
-        assert isinstance(agent._wasm_resolver, SqliteWasmBinaryResolver)
+        async with started_agent() as agent:
+            assert agent._wasm_resolver is not None
+            assert isinstance(agent._wasm_resolver, SqliteWasmBinaryResolver)
 
     @pytest.mark.asyncio
     async def test_wasm_resolver_uses_persistence_conn(self):
-        agent = make_agent()
-        await _start_agent_minimal(agent)
-        # The resolver's _conn should be the same object as persistence.conn
-        assert agent._wasm_resolver._conn is agent.persistence.conn
+        async with started_agent() as agent:
+            # The resolver's _conn should be the same object as persistence.conn
+            assert agent._wasm_resolver._conn is agent.persistence.conn
 
 
 # ---------------------------------------------------------------------------
@@ -92,34 +116,32 @@ class TestAgentWasmResolverWiring:
 class TestExecuteWorkflowPassesResolver:
     @pytest.mark.asyncio
     async def test_create_workflow_receives_resolver(self):
-        agent = make_agent()
-        await _start_agent_minimal(agent)
+        async with started_agent() as agent:
+            # Give the workflow builder a fake workflow type
+            agent.config_manager.get_workflow_config = MagicMock(
+                return_value={"type": "Test"}
+            )
 
-        # Give the workflow builder a fake workflow type
-        agent.config_manager.get_workflow_config = MagicMock(
-            return_value={"type": "Test"}
-        )
+            captured_kwargs: list[dict] = []
 
-        captured_kwargs: list[dict] = []
+            async def fake_create_workflow(**kwargs):
+                captured_kwargs.append(kwargs)
+                wf = MagicMock()
+                wf.id = "wf-001"
+                wf.status = "COMPLETED"
+                wf.state = MagicMock()
+                wf.state.model_dump = MagicMock(return_value={})
+                return wf
 
-        async def fake_create_workflow(**kwargs):
-            captured_kwargs.append(kwargs)
-            wf = MagicMock()
-            wf.id = "wf-001"
-            wf.status = "COMPLETED"
-            wf.state = MagicMock()
-            wf.state.model_dump = MagicMock(return_value={})
-            return wf
+            with patch.object(agent.workflow_builder, "create_workflow", side_effect=fake_create_workflow):
+                try:
+                    await agent.execute_workflow("Test", {})
+                except Exception:
+                    pass  # workflow config missing is fine; we just want to check the kwargs
 
-        with patch.object(agent.workflow_builder, "create_workflow", side_effect=fake_create_workflow):
-            try:
-                await agent.execute_workflow("Test", {})
-            except Exception:
-                pass  # workflow config missing is fine; we just want to check the kwargs
-
-        if captured_kwargs:
-            assert "wasm_binary_resolver" in captured_kwargs[0]
-            assert captured_kwargs[0]["wasm_binary_resolver"] is agent._wasm_resolver
+            if captured_kwargs:
+                assert "wasm_binary_resolver" in captured_kwargs[0]
+                assert captured_kwargs[0]["wasm_binary_resolver"] is agent._wasm_resolver
 
 
 # ---------------------------------------------------------------------------
@@ -129,18 +151,16 @@ class TestExecuteWorkflowPassesResolver:
 class TestReloadWasmResolver:
     @pytest.mark.asyncio
     async def test_reload_creates_new_resolver_from_conn(self):
-        agent = make_agent()
-        await _start_agent_minimal(agent)
+        async with started_agent() as agent:
+            original_resolver = agent._wasm_resolver
+            agent._reload_wasm_resolver()
+            new_resolver = agent._wasm_resolver
 
-        original_resolver = agent._wasm_resolver
-        agent._reload_wasm_resolver()
-        new_resolver = agent._wasm_resolver
-
-        # A new instance is created
-        assert new_resolver is not original_resolver
-        assert isinstance(new_resolver, SqliteWasmBinaryResolver)
-        # But it still points at the same live connection
-        assert new_resolver._conn is agent.persistence.conn
+            # A new instance is created
+            assert new_resolver is not original_resolver
+            assert isinstance(new_resolver, SqliteWasmBinaryResolver)
+            # But it still points at the same live connection
+            assert new_resolver._conn is agent.persistence.conn
 
     @pytest.mark.asyncio
     async def test_reload_no_op_when_persistence_none(self):
@@ -158,24 +178,22 @@ class TestReloadWasmResolver:
 class TestSyncWasmCommandReloadsResolver:
     @pytest.mark.asyncio
     async def test_sync_wasm_calls_reload(self):
-        agent = make_agent()
-        await _start_agent_minimal(agent)
+        async with started_agent() as agent:
+            agent.config_manager.handle_sync_wasm_command = AsyncMock()
+            reload_called = []
 
-        agent.config_manager.handle_sync_wasm_command = AsyncMock()
-        reload_called = []
+            original_reload = agent._reload_wasm_resolver
 
-        original_reload = agent._reload_wasm_resolver
+            def tracking_reload():
+                reload_called.append(True)
+                original_reload()
 
-        def tracking_reload():
-            reload_called.append(True)
-            original_reload()
+            agent._reload_wasm_resolver = tracking_reload
 
-        agent._reload_wasm_resolver = tracking_reload
+            await agent._handle_cloud_command({
+                "command_type": "sync_wasm",
+                "command_data": {"binary_hash": "abc123"},
+            })
 
-        await agent._handle_cloud_command({
-            "command_type": "sync_wasm",
-            "command_data": {"binary_hash": "abc123"},
-        })
-
-        agent.config_manager.handle_sync_wasm_command.assert_awaited_once()
-        assert len(reload_called) == 1
+            agent.config_manager.handle_sync_wasm_command.assert_awaited_once()
+            assert len(reload_called) == 1
