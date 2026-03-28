@@ -13,7 +13,9 @@ from rufus.models import (
     ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
     WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
     MergeStrategy, MergeConflictBehavior, HumanWorkflowStep, WasmWorkflowStep,
-    AIInferenceWorkflowStep
+    AIInferenceWorkflowStep,
+    AILLMInferenceWorkflowStep, HumanApprovalWorkflowStep, AuditEmitWorkflowStep,
+    ComplianceCheckWorkflowStep, EdgeModelCallWorkflowStep, WorkflowBuilderMetaStep,
 )
 
 
@@ -360,6 +362,116 @@ class Workflow:
                 return {cfg.output_key: cfg.default_result}
             raise
 
+    async def _execute_ai_llm_inference_step(self, step: 'AILLMInferenceWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an AI_LLM_INFERENCE step (Anthropic cloud, Ollama local, or BitNet edge)."""
+        import re as _re
+        cfg = step.llm_config
+
+        # Resolve $.steps.X.output style selectors in user_prompt against workflow state
+        state_dict = self.state.model_dump()
+        def _replace_selector(m):
+            path = m.group(1).replace("$.steps.", "").replace(".", "_")
+            # Try simple dot-path resolution
+            val = _resolve_state_path(state_dict, m.group(1).lstrip("$."))
+            return str(val) if val is not None else m.group(0)
+        rendered_prompt = _re.sub(r'(\$\.[^\s}]+)', _replace_selector, cfg.user_prompt)
+
+        if cfg.model_location in ("cloud", "auto"):
+            try:
+                import anthropic
+            except ImportError:
+                raise RuntimeError(
+                    "anthropic package is required for AI_LLM_INFERENCE with model_location='cloud'. "
+                    "Install it with: pip install anthropic"
+                )
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            msg = client.messages.create(
+                model=cfg.model,
+                max_tokens=cfg.max_tokens,
+                system=cfg.system_prompt,
+                messages=[{"role": "user", "content": rendered_prompt}],
+            )
+            return {"llm_result": msg.content[0].text}
+
+        elif cfg.model_location == "ollama":
+            import httpx
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.post(
+                    f"{cfg.ollama_base_url}/api/chat",
+                    json={
+                        "model": cfg.model,
+                        "messages": [
+                            {"role": "system", "content": cfg.system_prompt},
+                            {"role": "user", "content": rendered_prompt},
+                        ],
+                        "stream": False,
+                    },
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+                return {"llm_result": resp.json()["message"]["content"]}
+
+        else:  # "edge" → delegate to inference_provider (BitNet)
+            if self.inference_provider is None:
+                raise RuntimeError(
+                    f"InferenceProvider is not configured but step '{step.name}' requires it for edge model_location."
+                )
+            result = await self.inference_provider.run_inference(model_name=cfg.model, inputs=rendered_prompt)
+            output = result.outputs if hasattr(result, "outputs") else result
+            return {"llm_result": output}
+
+    async def _execute_audit_emit_step(self, step: 'AuditEmitWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an AUDIT_EMIT step — writes an immutable record to the audit trail."""
+        cfg = step.audit_config
+        await self.persistence.log_audit_event(
+            workflow_id=self.id,
+            event_type=cfg.event_type,
+            step_name=step.name,
+            metadata={
+                "severity": cfg.severity,
+                "payload": cfg.payload,
+                "retention_days": cfg.retention_days,
+                "tags": cfg.tags,
+                "pii_fields": cfg.pii_fields,
+            },
+        )
+        return {"audit_emitted": True, "event_type": cfg.event_type}
+
+    async def _execute_compliance_check_step(self, step: 'ComplianceCheckWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute a COMPLIANCE_CHECK step — evaluates a declarative ruleset against workflow state."""
+        import yaml as _yaml
+        cfg = step.compliance_config
+        try:
+            with open(cfg.ruleset) as f:
+                ruleset = _yaml.safe_load(f)
+        except FileNotFoundError:
+            raise RuntimeError(f"Compliance ruleset not found: {cfg.ruleset}")
+        state_dict = self.state.model_dump()
+        violations = []
+        rules = ruleset.get("rules", []) if isinstance(ruleset, dict) else []
+        for rule in rules:
+            condition = rule.get("condition", "True")
+            try:
+                passed = bool(eval(condition, {"__builtins__": {}}, {"state": state_dict}))  # noqa: S307
+            except Exception:
+                passed = False
+            if not passed:
+                violations.append({"rule_id": rule.get("id", "unknown"), "message": rule.get("message", "")})
+        num_rules = max(len(rules), 1)
+        score = round(1.0 - len(violations) / num_rules, 3)
+        return {"passed": len(violations) == 0, "score": score, "violations": violations}
+
+    async def _execute_edge_model_call_step(self, step: 'EdgeModelCallWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an EDGE_MODEL_CALL step — local inference with data sovereignty guarantee."""
+        if self.inference_provider is None:
+            raise RuntimeError(
+                f"InferenceProvider is not configured but step '{step.name}' requires it for EDGE_MODEL_CALL."
+            )
+        cfg = step.edge_config
+        result = await self.inference_provider.run_inference(model_name=cfg.model_id, inputs=cfg.prompt)
+        output = result.outputs if hasattr(result, "outputs") else result
+        return {"edge_result": output}
+
     async def _execute_loop_step(self, step: LoopStep, state: BaseModel, context: StepContext) -> Dict[str, Any]:
         """Execute a LOOP step in either ITERATE or WHILE mode."""
         print(f"[LOOP] Executing loop step: {step.name}, mode={step.mode}")
@@ -690,7 +802,7 @@ class Workflow:
             old_status = self.status
             self.status = "ACTIVE"
             current_paused_step = self.workflow_steps[self.current_step]
-            if isinstance(current_paused_step, HumanWorkflowStep):
+            if isinstance(current_paused_step, (HumanWorkflowStep, HumanApprovalWorkflowStep)):
                 # New path: do NOT increment — resume executes the same HITL step with user_input
                 _resuming_from_human = True
             else:
@@ -741,15 +853,19 @@ class Workflow:
             if self.saga_mode and isinstance(step, CompensatableStep):
                 state_snapshot_before = self.state.model_dump()
 
-            # Auto-pause for HumanWorkflowStep on first call (no user_input, not resuming)
+            # Auto-pause for HumanWorkflowStep / HumanApprovalWorkflowStep on first call
             if isinstance(step, HumanWorkflowStep) and not user_input and not _resuming_from_human:
                 raise WorkflowPauseDirective(result={})
+            if isinstance(step, HumanApprovalWorkflowStep) and not user_input and not _resuming_from_human:
+                raise WorkflowPauseDirective(result={"approval_config": step.approval_config.model_dump()})
 
             result = {}
             _step_start: Optional[float] = None  # monotonic start for sync steps only
             is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
                                                  FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
-                                                 WasmWorkflowStep, AIInferenceWorkflowStep))
+                                                 WasmWorkflowStep, AIInferenceWorkflowStep,
+                                                 AILLMInferenceWorkflowStep, ComplianceCheckWorkflowStep,
+                                                 EdgeModelCallWorkflowStep))
 
             if is_sync_step:
                 _step_start = time.monotonic()
@@ -765,6 +881,19 @@ class Workflow:
                         # No func: treat user_input as the result to merge into state
                         result = user_input.copy()
                     self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, HumanApprovalWorkflowStep):
+                    # Resume path: merge user_input (decision, approver_id, notes, etc.) into state
+                    result = user_input.copy()
+                    self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, AuditEmitWorkflowStep):
+                    result = await self._execute_audit_emit_step(step, context)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, WorkflowBuilderMetaStep):
+                    # No-op at runtime: provenance metadata is stored in the workflow
+                    # definition YAML; it does not modify runtime state.
+                    result = {}
                     await self.persistence.save_workflow(self.id, self.to_dict())
                 elif step.func:
                     result = await self.execution.execute_sync_step_function(
@@ -969,6 +1098,24 @@ class Workflow:
                 )
                 result = {"message": f"Workflow {step.target_workflow_type} scheduled as {schedule_name}",
                           "schedule_name": schedule_name}
+
+            elif isinstance(step, AILLMInferenceWorkflowStep):
+                result = await self._execute_ai_llm_inference_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, ComplianceCheckWorkflowStep):
+                result = await self._execute_compliance_check_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, EdgeModelCallWorkflowStep):
+                result = await self._execute_edge_model_call_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
 
             # --- Post-Execution Logic ---
             is_async_dispatch = isinstance(

@@ -159,7 +159,13 @@ class WorkflowBuilder:
             FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
             MergeStrategy, MergeConflictBehavior,
             AIInferenceWorkflowStep, AIInferenceConfig, HumanWorkflowStep,
-            WasmWorkflowStep, WasmConfig
+            WasmWorkflowStep, WasmConfig,
+            AILLMInferenceWorkflowStep, AILLMInferenceConfig,
+            HumanApprovalWorkflowStep, HumanApprovalConfig,
+            AuditEmitWorkflowStep, AuditEmitConfig,
+            ComplianceCheckWorkflowStep, ComplianceCheckConfig,
+            EdgeModelCallWorkflowStep, EdgeModelCallConfig,
+            WorkflowBuilderMetaStep, WorkflowBuilderMetaConfig,
         )
 
         steps = []
@@ -325,6 +331,71 @@ class WorkflowBuilder:
                     routes=routes
                 )
 
+            elif step_type_str == "AI_LLM_INFERENCE":
+                llm_config = AILLMInferenceConfig(**config.get("llm_config", {}))
+                step = AILLMInferenceWorkflowStep(
+                    name=config["name"],
+                    llm_config=llm_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior,
+                    routes=routes,
+                )
+
+            elif step_type_str == "HUMAN_APPROVAL":
+                approval_config = HumanApprovalConfig(**config.get("approval_config", {}))
+                step = HumanApprovalWorkflowStep(
+                    name=config["name"],
+                    approval_config=approval_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    routes=routes,
+                )
+
+            elif step_type_str == "AUDIT_EMIT":
+                audit_config = AuditEmitConfig(**config.get("audit_config", {}))
+                step = AuditEmitWorkflowStep(
+                    name=config["name"],
+                    audit_config=audit_config,
+                    automate_next=automate_next,
+                )
+
+            elif step_type_str == "COMPLIANCE_CHECK":
+                compliance_config = ComplianceCheckConfig(**config.get("compliance_config", {}))
+                step = ComplianceCheckWorkflowStep(
+                    name=config["name"],
+                    compliance_config=compliance_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior,
+                    routes=routes,
+                )
+
+            elif step_type_str == "EDGE_MODEL_CALL":
+                edge_config = EdgeModelCallConfig(**config.get("edge_config", {}))
+                step = EdgeModelCallWorkflowStep(
+                    name=config["name"],
+                    edge_config=edge_config,
+                    required_input=config.get("required_input", []),
+                    input_schema=input_schema,
+                    automate_next=automate_next,
+                    merge_strategy=merge_strategy,
+                    merge_conflict_behavior=merge_conflict_behavior,
+                )
+
+            elif step_type_str == "WORKFLOW_BUILDER_META":
+                meta_config = WorkflowBuilderMetaConfig(**config.get("meta_config", {}))
+                step = WorkflowBuilderMetaStep(
+                    name=config["name"],
+                    meta_config=meta_config,
+                    automate_next=automate_next,
+                )
+
             else: # Standard step type or implicit
                 # If func_path is None here, it means no 'function' was provided
                 # for a STANDARD step, which is an error unless it's a specific step type
@@ -334,7 +405,8 @@ class WorkflowBuilder:
 
                 # First, check if step_type_str is a known standard type (like STANDARD or is a custom class path)
                 # If it's not a custom class path (checked by '.' in name), and not a standard type, then it's truly unknown.
-                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULE", "PARALLEL", "HUMAN_IN_LOOP"] and \
+                if step_type_str not in ["STANDARD", "COMPENSATABLE", "ASYNC", "HTTP", "AI_INFERENCE", "FIRE_AND_FORGET", "LOOP", "CRON_SCHEDULE", "PARALLEL", "HUMAN_IN_LOOP",
+                                        "AI_LLM_INFERENCE", "HUMAN_APPROVAL", "AUDIT_EMIT", "COMPLIANCE_CHECK", "EDGE_MODEL_CALL", "WORKFLOW_BUILDER_META"] and \
                    "." not in step_type_str and step_type_str not in cls._marketplace_steps:
                     raise ValueError(f"Unknown step type: '{step_type_str}'")
 
