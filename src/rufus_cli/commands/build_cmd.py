@@ -232,8 +232,20 @@ async def _run_single_shot(
     else:
         content = result.yaml or ""
 
+    # Show quality gate info if retries were needed
+    if result.yaml_gate_attempts > 1:
+        _echo_warn(f"YAML quality gate needed {result.yaml_gate_attempts} attempt(s) to pass")
+    if result.stub_gate_attempts > 1:
+        _echo_warn(f"Stub quality gate needed {result.stub_gate_attempts} attempt(s) to pass")
+    if result.quality == "PARTIAL":
+        _echo_warn("Stubs could not be fully validated — review before use")
+
     if dry_run:
         typer.echo(content)
+        if result.stubs_py:
+            typer.echo("")
+            typer.secho("# --- Generated step stubs ---", fg=_CYAN)
+            typer.echo(result.stubs_py)
         step_count = len((result.workflow_dict or {}).get("steps", []))
         _echo_workflow(f"Dry run complete — {step_count} steps generated (not saved)")
         return
@@ -242,8 +254,17 @@ async def _run_single_shot(
         out.write_text(content)
         step_count = len((result.workflow_dict or {}).get("steps", []))
         _echo_workflow(f"Saved to {out} — {step_count} steps")
+        # Write stubs alongside YAML as <stem>_steps.py
+        if result.stubs_py:
+            stubs_path = out.with_name(out.stem + "_steps.py")
+            stubs_path.write_text(result.stubs_py)
+            _echo_workflow(f"Step stubs saved to {stubs_path}")
     else:
         typer.echo(content)
+        if result.stubs_py:
+            typer.echo("")
+            typer.secho("# --- Generated step stubs (use --out to save alongside YAML) ---", fg=_CYAN)
+            typer.echo(result.stubs_py)
 
 
 async def _run_explain(
@@ -266,6 +287,44 @@ async def _run_explain(
     typer.echo("")
 
 
+async def _interactive_stub_fill(builder, result) -> Optional[str]:
+    """Walk each STANDARD step stub and optionally fill via LLM description."""
+    import re
+    stubs_py = result.stubs_py
+    if not stubs_py:
+        return None
+
+    # Extract function names that have TODO bodies
+    todo_funcs = re.findall(r"^def (\w+)\(", stubs_py, re.MULTILINE)
+    if not todo_funcs:
+        return stubs_py
+
+    typer.echo("")
+    typer.secho(
+        f"[Stubs] {len(todo_funcs)} step function(s) generated. "
+        "Describe each one (press Enter to leave as TODO):",
+        fg=_CYAN,
+    )
+    for func_name in todo_funcs:
+        description = typer.prompt(f"  {func_name}", default="").strip()
+        if not description:
+            continue
+        try:
+            sig_match = re.search(r"(def " + re.escape(func_name) + r"\([^)]*\):)", stubs_py)
+            signature = sig_match.group(1) if sig_match else f"def {func_name}(state, context):"
+            stubs_py = await builder.stub_filler.fill_and_apply(
+                stubs_py=stubs_py,
+                func_name=func_name,
+                signature=signature,
+                description=description,
+            )
+            typer.secho(f"  ✓ {func_name} filled", fg=_GREEN)
+        except Exception as e:  # noqa: BLE001
+            _echo_warn(f"Could not fill '{func_name}': {e}")
+
+    return stubs_py
+
+
 async def _run_interactive(
     backend: str,
     model: Optional[str],
@@ -274,10 +333,14 @@ async def _run_interactive(
     out: Optional[Path],
 ) -> None:
     builder = _get_builder(backend, model, ollama_url, api_key)
-    typer.secho(f"\nRufus Workflow Builder (interactive) — backend={backend}, model={builder.model}", fg=_CYAN, bold=True)
+    typer.secho(
+        f"\nRufus Workflow Builder (interactive) — backend={backend}, model={builder.model}",
+        fg=_CYAN, bold=True,
+    )
     typer.secho("Type your intent, or 'help' for commands. Ctrl+C to exit.\n", fg=_CYAN)
 
     current_yaml: Optional[str] = None
+    current_stubs: Optional[str] = None
 
     while True:
         try:
@@ -294,7 +357,7 @@ async def _run_interactive(
             break
 
         if raw.lower() == "help":
-            typer.echo("Commands: exit | save [file] | show")
+            typer.echo("Commands: exit | save [file] | show | show-stubs")
             typer.echo("Or type your intent / modification request.")
             continue
 
@@ -305,12 +368,23 @@ async def _run_interactive(
                 _echo_warn("No workflow generated yet.")
             continue
 
+        if raw.lower() == "show-stubs":
+            if current_stubs:
+                typer.echo(current_stubs)
+            else:
+                _echo_warn("No stubs generated yet.")
+            continue
+
         if raw.lower().startswith("save"):
             parts = raw.split(maxsplit=1)
             save_path = Path(parts[1]) if len(parts) > 1 else out or Path("workflow.yaml")
             if current_yaml:
                 save_path.write_text(current_yaml)
                 _echo_workflow(f"Saved to {save_path}")
+                if current_stubs:
+                    stubs_path = save_path.with_name(save_path.stem + "_steps.py")
+                    stubs_path.write_text(current_stubs)
+                    _echo_workflow(f"Step stubs saved to {stubs_path}")
             else:
                 _echo_warn("No workflow to save yet.")
             continue
@@ -349,3 +423,6 @@ async def _run_interactive(
         _echo_workflow(f"{step_count} steps generated")
         if current_yaml:
             typer.echo(current_yaml)
+
+        # Stub fill-in phase: walk STANDARD steps and offer LLM body generation
+        current_stubs = await _interactive_stub_fill(builder, result)

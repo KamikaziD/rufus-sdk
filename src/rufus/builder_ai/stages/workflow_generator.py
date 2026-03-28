@@ -59,13 +59,24 @@ A score >= 80 is acceptable. Focus only on structural/semantic correctness.
 class WorkflowGenerator(LLMStageMixin):
     """Stage 4: Generate a full workflow dict from a step plan, with evaluator-optimizer loop."""
 
-    async def generate(self, plan: StepPlan, intent: RufusIntent, max_iterations: int = 3) -> Dict[str, Any]:
+    async def generate(
+        self,
+        plan: StepPlan,
+        intent: RufusIntent,
+        max_iterations: int = 3,
+        prior_errors: "list[str] | None" = None,
+    ) -> Dict[str, Any]:
         logger.debug("[Stage 4] Generating workflow for %d steps", len(plan.steps))
         user_msg = (
             f"Intent: {intent.model_dump_json()}\n"
             f"Step plan: {plan.model_dump_json()}\n"
             "Generate the complete workflow definition JSON."
         )
+        if prior_errors:
+            user_msg += (
+                "\n\nPrevious attempt was rejected by the schema validator with these errors. "
+                "Fix ALL of them:\n" + "\n".join(f"- {e}" for e in prior_errors)
+            )
         workflow_dict = None
         feedback = ""
         for attempt in range(max_iterations):

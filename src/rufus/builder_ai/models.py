@@ -76,3 +76,9 @@ class BuildResult(BaseModel):
     needs_clarification: bool = Field(False, description="True when the pipeline needs more info from the user")
     questions: List[str] = Field(default_factory=list, description="Clarifying questions to ask the user")
     errors: List[str] = Field(default_factory=list, description="Schema validation errors")
+    # Stub generation
+    stubs_py: Optional[str] = Field(None, description="Generated Python step function stubs (.py source)")
+    # Quality gate audit trail (mirrors browser_demo quality field)
+    yaml_gate_attempts: int = Field(1, description="Number of YAML generation attempts needed")
+    stub_gate_attempts: int = Field(1, description="Number of stub validation attempts needed")
+    quality: str = Field("GOOD", description="'GOOD' | 'PARTIAL' | 'FAILED'")
