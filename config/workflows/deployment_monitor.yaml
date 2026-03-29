@@ -1,0 +1,173 @@
+# DeploymentMonitor — Autonomous deployment sidecar workflow
+#
+# Runs every 15 minutes on edge devices (POS terminals, ATMs, kiosks).
+# Collects device metrics, scores health with a local ONNX model, and — when
+# health degrades — uses a local LLM to generate a performance improvement
+# suggestion.  The suggestion is surfaced to an operator via HITL before any
+# change is applied.  All AI inference runs locally (data_sovereignty: local)
+# so no metrics or config data leave the device without explicit approval.
+#
+# Self-healing loop:
+#   CollectMetrics → ScoreHealth → [healthy: loop] / [degraded:]
+#   GenerateSuggestions → ApprovalGate → ApplyChange → ReportOutcome → loop
+#
+# Deployment paths:
+#   - HOT-SWAP:      config-only changes (fraud thresholds, floor limits)
+#   - DRAIN+RESTART: structural changes (executor, DB schema, workflow YAML)
+#
+# Privacy: all LLM inference is local (Ollama). The control plane receives
+# only aggregate outcome metrics + the approved change, never raw metrics.
+
+workflow_type: DeploymentMonitor
+workflow_version: "1.0"
+description: "Autonomous performance monitoring and self-healing sidecar for edge devices"
+
+# Run on a 15-minute cron schedule.  The agent sleeps between runs.
+cron_expression: "*/15 * * * *"
+timezone: "UTC"
+
+initial_state_model: rufus_edge.sidecar.metrics:SidecarState
+
+steps:
+  # -------------------------------------------------------------------------
+  # Step 1: Collect device metrics
+  # Gathers CPU, RAM, SAF queue depth, step latency.
+  # Returns aggregated stats only — no PII, no transaction IDs.
+  # -------------------------------------------------------------------------
+  - name: CollectMetrics
+    type: STANDARD
+    function: rufus_edge.sidecar.metrics:collect_device_metrics
+    description: "Collect CPU, RAM, SAF queue depth, and latency percentiles"
+    automate_next: true
+    timeout_seconds: 10
+
+  # -------------------------------------------------------------------------
+  # Step 2: Score health
+  # ONNX model produces a 0.0–1.0 score.  Falls back to rule-based scoring
+  # if the ONNX model is not present on the device.
+  # -------------------------------------------------------------------------
+  - name: ScoreHealth
+    type: STANDARD
+    function: rufus_edge.sidecar.health_scorer:score_health
+    description: "Score device health 0.0–1.0 (ONNX or rule-based fallback)"
+    automate_next: true
+    timeout_seconds: 5
+
+  # -------------------------------------------------------------------------
+  # Step 3: Decide — healthy devices skip to ReportOutcome
+  # -------------------------------------------------------------------------
+  - name: HealthDecision
+    type: DECISION
+    function: rufus_edge.sidecar.decisions:health_gate
+    description: "Jump to ReportOutcome if health_score >= 0.7 (no action needed)"
+    # health_gate raises WorkflowJumpDirective("ReportOutcome") when healthy
+
+  # -------------------------------------------------------------------------
+  # Step 4: Generate suggestion (LOCAL LLM — never cloud)
+  # Uses Ollama with data_sovereignty: local.  No metrics leave the device.
+  # Produces: {"issue": "...", "change": {"key": "...", "value": "..."}, ...}
+  # -------------------------------------------------------------------------
+  - name: GenerateSuggestions
+    type: AI_LLM_INFERENCE
+    description: "Generate a targeted config improvement using local LLM"
+    llm_config:
+      backend: ollama
+      model: llama3
+      data_sovereignty: local
+      max_tokens: 512
+      temperature: 0.1
+    prompt_template: |
+      You are an expert Rufus edge device operator. Analyse the following
+      device metrics and identify the single most impactful config change.
+
+      Device metrics:
+      {{ state.metrics | tojson(indent=2) }}
+
+      Current config:
+      {{ state.current_config | tojson(indent=2) }}
+
+      Health score: {{ state.health_score }} (threshold: 0.7)
+
+      Return ONLY valid JSON with this exact schema:
+      {
+        "issue": "<one-sentence description of the performance problem>",
+        "change": {"key": "<config key>", "value": <new value>},
+        "expected_improvement": "<expected outcome>",
+        "risk": "low|medium|high",
+        "apply_mode": "hot_swap|drain_restart"
+      }
+    automate_next: true
+    timeout_seconds: 60
+
+  # -------------------------------------------------------------------------
+  # Step 5: Human-in-the-loop approval gate
+  # Stores approval request in SAF queue so it survives offline periods.
+  # Operator approves via cloud control plane dashboard.
+  # Resume input: {"approved": true/false, "operator_notes": "..."}
+  # -------------------------------------------------------------------------
+  - name: ApprovalGate
+    type: HUMAN_IN_LOOP
+    description: "Request operator approval before applying any change"
+    required_input:
+      - name: approved
+        type: bool
+        description: "Approve the suggested change"
+      - name: operator_notes
+        type: str
+        description: "Optional operator comment"
+        required: false
+    timeout_hours: 48
+    # SAF: if offline, the HITL request is queued and sent when connectivity resumes
+
+  # -------------------------------------------------------------------------
+  # Step 6: Check approval outcome — skip apply if rejected
+  # -------------------------------------------------------------------------
+  - name: ApprovalDecision
+    type: DECISION
+    function: rufus_edge.sidecar.decisions:approval_gate
+    description: "Jump to ReportOutcome if operator rejected the suggestion"
+    # approval_gate raises WorkflowJumpDirective("ReportOutcome") on rejection
+
+  # -------------------------------------------------------------------------
+  # Step 7: Apply the approved change
+  # Hot-swap reloads config without stopping the agent.
+  # Drain+restart waits for in-flight transactions to complete first.
+  # -------------------------------------------------------------------------
+  - name: ApplyChange
+    type: STANDARD
+    function: rufus_edge.sidecar.config_applier:apply_approved_change
+    description: "Apply config change: hot-swap or drain+restart"
+    automate_next: true
+    timeout_seconds: 120
+    # compensate_function: rufus_edge.sidecar.config_applier:rollback_change
+
+  # -------------------------------------------------------------------------
+  # Step 8: Report outcome to cloud control plane
+  # Sends aggregate outcome (applied/failed, metrics delta) via HTTP.
+  # Never sends raw transaction data.
+  # SAF: queued if offline, delivered on next sync.
+  # -------------------------------------------------------------------------
+  - name: ReportOutcome
+    type: HTTP
+    method: POST
+    url: "{{ env('RUFUS_CONTROL_PLANE_URL', 'http://localhost:8000') }}/api/v1/devices/{{ env('RUFUS_DEVICE_ID', 'unknown') }}/suggestions"
+    headers:
+      Content-Type: "application/json"
+      X-Device-Id: "{{ env('RUFUS_DEVICE_ID', 'unknown') }}"
+    body: |
+      {
+        "workflow_id": "{{ state.workflow_id }}",
+        "device_id": "{{ env('RUFUS_DEVICE_ID', 'unknown') }}",
+        "suggestion": {{ state.suggestion | tojson }},
+        "health_score_before": {{ state.health_score }},
+        "metrics_snapshot": {
+          "cpu_percent": {{ state.metrics.cpu_percent }},
+          "ram_percent": {{ state.metrics.ram_percent }},
+          "pending_saf_count": {{ state.metrics.pending_saf_count }},
+          "step_latency_p95_ms": {{ state.metrics.step_latency_p95_ms }}
+        },
+        "timestamp": "{{ now_iso() }}"
+      }
+    timeout_seconds: 30
+    on_error: continue
+    # on_error: continue — a failed report never blocks the sidecar loop
