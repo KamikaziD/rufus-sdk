@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from rufus.builder_ai.knowledge.raft_router import PrivacyLevel, RetrievalDecision
 
 
 class RufusIntent(BaseModel):
@@ -82,3 +85,14 @@ class BuildResult(BaseModel):
     yaml_gate_attempts: int = Field(1, description="Number of YAML generation attempts needed")
     stub_gate_attempts: int = Field(1, description="Number of stub validation attempts needed")
     quality: str = Field("GOOD", description="'GOOD' | 'PARTIAL' | 'FAILED'")
+    # RAG/RAFT knowledge base fields
+    retrieval_decision: Optional[Any] = Field(
+        None,
+        description="RetrievalDecision from RAFTRouter — strategy, confidence, chunks used",
+    )
+    privacy_level: str = Field(
+        "balanced",
+        description="Privacy tier used: 'strict' | 'balanced' | 'cloud'",
+    )
+    pii_redactions: int = Field(0, description="Number of PII redactions applied before cloud calls")
+    chunks_sent_to_cloud: bool = Field(False, description="Whether doc chunks were sent to a cloud LLM")

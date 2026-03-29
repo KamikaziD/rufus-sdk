@@ -19,6 +19,15 @@ from rufus.builder_ai.stages.workflow_generator import WorkflowGenerator
 
 logger = logging.getLogger(__name__)
 
+# Lazy import guards for optional knowledge module
+def _try_import_knowledge():
+    try:
+        from rufus.builder_ai.knowledge import KnowledgeBase, RAFTRouter
+        from rufus.builder_ai.knowledge.raft_router import PrivacyLevel
+        return KnowledgeBase, RAFTRouter, PrivacyLevel
+    except ImportError:
+        return None, None, None
+
 _DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "ollama": "llama3",
@@ -58,6 +67,8 @@ class AIWorkflowBuilder:
         model: Optional[str] = None,
         ollama_base_url: str = "http://localhost:11434",
         api_key: Optional[str] = None,
+        knowledge_base=None,   # Optional[KnowledgeBase]
+        privacy_level: str = "balanced",
     ):
         if backend not in ("anthropic", "ollama"):
             raise ValueError(
@@ -68,6 +79,20 @@ class AIWorkflowBuilder:
         self.model = model or _DEFAULT_MODELS[backend]
         self.ollama_base_url = ollama_base_url
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.knowledge_base = knowledge_base
+        self.privacy_level = privacy_level
+
+        # Wire RAFTRouter if knowledge base is provided
+        self.raft_router = None
+        if knowledge_base is not None:
+            _, RAFTRouter, PrivacyLevel = _try_import_knowledge()
+            if RAFTRouter is not None:
+                pl = PrivacyLevel(privacy_level) if PrivacyLevel else None
+                self.raft_router = RAFTRouter(
+                    knowledge_base,
+                    ollama_base_url=ollama_base_url,
+                    privacy_level=pl,
+                )
 
         llm_kwargs = dict(
             backend=self.backend,
@@ -84,6 +109,32 @@ class AIWorkflowBuilder:
         self.output_renderer = OutputRenderer()
         self.stub_generator = StubGenerator()
         self.stub_filler = StubFiller(**llm_kwargs)
+
+    @classmethod
+    def with_knowledge(
+        cls,
+        backend: str = "anthropic",
+        privacy_level: str = "balanced",
+        db_path=None,
+        **kwargs,
+    ) -> "AIWorkflowBuilder":
+        """Create an AIWorkflowBuilder with a local KnowledgeBase pre-loaded.
+
+        If the index doesn't exist yet, it will be built from the default source roots.
+        """
+        KnowledgeBase, _, _ = _try_import_knowledge()
+        if KnowledgeBase is None:
+            raise RuntimeError(
+                "Knowledge base requires optional RAG dependencies. "
+                "Install with: pip install 'rufus-sdk[rag]'"
+            )
+        from pathlib import Path
+        resolved_db_path = Path(db_path) if db_path else KnowledgeBase.DEFAULT_DB_PATH
+        kb = KnowledgeBase(db_path=resolved_db_path)
+        if not resolved_db_path.exists():
+            logger.info("[Pipeline] Knowledge index not found; building now...")
+            kb = KnowledgeBase.build(db_path=resolved_db_path)
+        return cls(backend=backend, knowledge_base=kb, privacy_level=privacy_level, **kwargs)
 
     async def build(
         self,
@@ -107,9 +158,26 @@ class AIWorkflowBuilder:
         """
         logger.info("[Pipeline] Starting build for prompt: %s", prompt[:80])
 
+        # Stage 0: RAG/RAFT routing decision (before any LLM stage)
+        decision = None
+        if self.raft_router is not None:
+            import asyncio
+            decision = await self.raft_router.decide(prompt, backend=self.backend)
+            logger.info(
+                "[Pipeline] Router: strategy=%s confidence=%.3f pii_redactions=%d",
+                decision.strategy, decision.confidence, decision.pii_redactions,
+            )
+            # RAFT: temporarily override model on all LLM stages
+            if decision.model_override:
+                for stage in (
+                    self.intent_parser, self.step_planner,
+                    self.workflow_generator, self.stub_filler,
+                ):
+                    stage.model = decision.model_override
+
         # Stage 1: Parse intent
         logger.info("[Pipeline] Stage 1 — Intent Parse")
-        intent = await self.intent_parser.parse(prompt)
+        intent = await self.intent_parser.parse(prompt, decision=decision)
 
         # Stage 2: Clarification check
         if intent.ambiguities and not clarification_answers:
@@ -123,7 +191,7 @@ class AIWorkflowBuilder:
 
         # Stage 3: Step Planner
         logger.info("[Pipeline] Stage 3 — Step Planner")
-        plan = await self.step_planner.plan(intent)
+        plan = await self.step_planner.plan(intent, decision=decision)
         logger.info("[Pipeline] Planned %d steps", len(plan.steps))
 
         # Stages 4-5: Workflow Generator + Schema Validator with quality-gate retry loop
@@ -137,7 +205,9 @@ class AIWorkflowBuilder:
         for attempt in range(_MAX_RETRIES):
             yaml_gate_attempts = attempt + 1
             logger.info("[Pipeline] Stage 4 — Workflow Generator (attempt %d)", yaml_gate_attempts)
-            workflow_dict = await self.workflow_generator.generate(plan, intent, prior_errors=prior_errors)
+            workflow_dict = await self.workflow_generator.generate(
+                plan, intent, prior_errors=prior_errors, decision=decision
+            )
 
             logger.info("[Pipeline] Stage 5 — Schema Validator (attempt %d)", yaml_gate_attempts)
             validated, yaml_errors = self.schema_validator.validate(workflow_dict)
@@ -169,7 +239,12 @@ class AIWorkflowBuilder:
 
         # Stage 7: Output Renderer
         logger.info("[Pipeline] Stage 7 — Output Renderer")
-        yaml_output = self.output_renderer.render(validated, prompt, lint_report)
+        yaml_output = self.output_renderer.render(
+            validated, prompt, lint_report,
+            decision=decision,
+            privacy_level=self.privacy_level,
+            pii_redactions=decision.pii_redactions if decision else 0,
+        )
 
         # Stage 8: Stub Generator + quality-gate retry loop
         stubs_py: Optional[str] = None
@@ -216,6 +291,10 @@ class AIWorkflowBuilder:
             yaml_gate_attempts=yaml_gate_attempts,
             stub_gate_attempts=stub_gate_attempts,
             quality=quality,
+            retrieval_decision=decision,
+            privacy_level=self.privacy_level,
+            pii_redactions=decision.pii_redactions if decision else 0,
+            chunks_sent_to_cloud=decision.chunks_sent_to_cloud if decision else False,
         )
 
     async def _repair_stubs(self, stubs_py: str, errors: List[str]) -> str:

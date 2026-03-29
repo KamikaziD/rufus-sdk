@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from rufus.builder_ai.models import RufusIntent, StepPlan
 from rufus.builder_ai.stages.base import LLMStageMixin
+
+if TYPE_CHECKING:
+    from rufus.builder_ai.knowledge.raft_router import RetrievalDecision
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +68,12 @@ class WorkflowGenerator(LLMStageMixin):
         intent: RufusIntent,
         max_iterations: int = 3,
         prior_errors: "list[str] | None" = None,
+        decision: "Optional[RetrievalDecision]" = None,
     ) -> Dict[str, Any]:
         logger.debug("[Stage 4] Generating workflow for %d steps", len(plan.steps))
+        system = self._inject_knowledge(
+            _SYSTEM_PROMPT, decision, focus_types=["yaml_example"]
+        )
         user_msg = (
             f"Intent: {intent.model_dump_json()}\n"
             f"Step plan: {plan.model_dump_json()}\n"
@@ -84,7 +91,7 @@ class WorkflowGenerator(LLMStageMixin):
                 user_msg_with_feedback = user_msg + f"\n\nPrevious attempt issues to fix:\n{feedback}"
             else:
                 user_msg_with_feedback = user_msg
-            raw = await self._call_llm(system=_SYSTEM_PROMPT, user=user_msg_with_feedback, temperature=0.1)
+            raw = await self._call_llm(system=system, user=user_msg_with_feedback, temperature=0.1)
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]

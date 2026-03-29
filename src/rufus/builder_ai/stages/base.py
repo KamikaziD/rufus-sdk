@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from rufus.builder_ai.knowledge.raft_router import RetrievalDecision
 
 
 class LLMStageMixin:
@@ -56,6 +59,38 @@ class LLMStageMixin:
             return msg.content[0].text
 
         return await loop.run_in_executor(None, _sync_call)
+
+    def _inject_knowledge(
+        self,
+        system: str,
+        decision: "RetrievalDecision | None",
+        focus_types: Optional[List[str]] = None,
+        max_context_tokens: int = 2500,
+    ) -> str:
+        """Augment a system prompt with pre-fetched knowledge chunks.
+
+        Args:
+            system:             Original system prompt.
+            decision:           RetrievalDecision from RAFTRouter (or None to skip).
+            focus_types:        Only include chunks of these chunk_type values.
+                                Falls back to all chunks if none match.
+            max_context_tokens: Approximate token budget for injected context.
+
+        Returns:
+            Augmented system prompt, or original if no retrieval was performed.
+        """
+        if decision is None or decision.strategy.value == "none" or not decision.chunks:
+            return system
+
+        from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+        block = build_knowledge_block(
+            decision.chunks,
+            max_context_tokens=max_context_tokens,
+            focus_types=focus_types,
+        )
+        if not block:
+            return system
+        return system + block
 
     async def _call_ollama(self, system: str, user: str) -> str:
         import httpx

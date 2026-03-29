@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING, Optional
 
 from rufus.builder_ai.models import RufusIntent
 from rufus.builder_ai.stages.base import LLMStageMixin
+
+if TYPE_CHECKING:
+    from rufus.builder_ai.knowledge.raft_router import RetrievalDecision
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +43,16 @@ Rules:
 class IntentParser(LLMStageMixin):
     """Stage 1: Parse a natural language prompt into a structured RufusIntent."""
 
-    async def parse(self, prompt: str) -> RufusIntent:
+    async def parse(
+        self,
+        prompt: str,
+        decision: "Optional[RetrievalDecision]" = None,
+    ) -> RufusIntent:
         logger.debug("[Stage 1] Parsing intent from prompt: %s", prompt[:80])
-        raw = await self._call_llm(system=_SYSTEM_PROMPT, user=prompt, temperature=0.2)
+        system = self._inject_knowledge(
+            _SYSTEM_PROMPT, decision, focus_types=["explanation", "step_reference"]
+        )
+        raw = await self._call_llm(system=system, user=prompt, temperature=0.2)
         raw = raw.strip()
         # Strip markdown code fences if the model wrapped the JSON
         if raw.startswith("```"):

@@ -21,7 +21,7 @@ from rufus.providers.execution import ExecutionProvider
 from rufus.providers.observer import WorkflowObserver
 
 # Import new command modules
-from rufus_cli.commands import config_cmd, workflow_cmd, db_cmd, interactive, build_cmd
+from rufus_cli.commands import config_cmd, workflow_cmd, db_cmd, interactive, build_cmd, rag_cmd
 
 app = typer.Typer(
     help="Rufus - Python-native workflow orchestration engine",
@@ -34,6 +34,7 @@ app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(db_cmd.app, name="db")
 app.add_typer(interactive.app, name="interactive")
 app.add_typer(build_cmd.app, name="build")
+app.add_typer(rag_cmd.app, name="rag")
 
 # Convenience aliases for workflow commands at top level
 @app.command("list")

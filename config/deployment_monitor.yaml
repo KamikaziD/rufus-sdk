@@ -1,0 +1,153 @@
+# Deployment Sidecar Agent — Autonomous Performance Monitor
+#
+# Runs every 15 minutes on the edge device. Collects metrics, scores health,
+# and when anomalies are detected, proposes ONE config change to a human operator.
+# After operator approval (via cloud control plane HITL), applies the change
+# using WASM-sandboxed config writes (hot-swap or drain+restart).
+#
+# Privacy: all AI inference uses local Ollama only — metrics never leave the device
+# in plaintext. Only aggregated, anonymised suggestion data is sent to the cloud.
+
+workflow_type: DeploymentMonitor
+workflow_version: "1.0"
+initial_state_model: rufus_edge.sidecar.metrics:DeviceMetrics
+
+# Runs on a cron schedule — the CRON_SCHEDULE step type handles this
+trigger:
+  type: schedule
+  cron_expression: "*/15 * * * *"
+
+steps:
+  # Step 1: Collect device metrics (CPU, RAM, SAF queue, latency)
+  - name: CollectMetrics
+    type: STANDARD
+    function: rufus_edge.sidecar.metrics:collect_device_metrics
+    automate_next: true
+
+  # Step 2: Score device health (ONNX model or rule-based fallback)
+  - name: ScoreHealth
+    type: STANDARD
+    function: rufus_edge.sidecar.health_scorer:score_device_health
+    automate_next: true
+
+  # Step 3: Check if we should generate suggestions (skip if healthy)
+  - name: CheckShouldSuggest
+    type: DECISION
+    function: rufus_edge.sidecar.decisions:check_should_suggest
+    routes:
+      - condition: "state.should_generate_suggestions == False"
+        next_step: ReportHealthy
+
+  # Step 4: Generate a performance suggestion using local LLM (privacy: local only)
+  - name: GenerateSuggestions
+    type: AI_LLM_INFERENCE
+    automate_next: true
+    llm_config:
+      backend: ollama
+      model: llama3
+      data_sovereignty: local        # Never send metrics to cloud LLM
+      system_prompt: |
+        You are a Rufus edge device performance analyst.
+        Analyze the device metrics and health issues provided.
+        Identify the SINGLE most impactful performance issue.
+        Propose ONE specific, safe configuration change to address it.
+
+        Available config keys that can be changed:
+        - fraud_threshold (float 0.0-1.0): fraud detection sensitivity
+        - floor_limit (int): max transaction value approved offline
+        - max_retry_count (int): max step retries before failure
+        - saf_sync_interval_seconds (int): how often SAF syncs to cloud
+        - http_timeout_seconds (int): HTTP step timeout
+        - max_concurrent_workflows (int): workflow concurrency limit
+        - heartbeat_interval_seconds (int): heartbeat frequency
+
+        Return ONLY valid JSON:
+        {
+          "issue": "brief description of the problem",
+          "change": {"key": "config_key_name", "value": new_value},
+          "expected_improvement": "what will improve and by roughly how much",
+          "risk": "low|medium|high"
+        }
+      user_prompt: |
+        Device metrics: {{ state.metrics | tojson }}
+        Health score: {{ state.health_score }}
+        Issues detected: {{ state.health_issues | tojson }}
+        Current config snapshot: {{ env.RUFUS_EDGE_CONFIG_SNAPSHOT | default('{}') }}
+
+  # Step 5: Human approval gate (HITL via cloud control plane)
+  # When offline: stores request in SAF queue, syncs when online
+  - name: ApprovalGate
+    type: HUMAN_IN_LOOP
+    automate_next: false
+    required_input:
+      - approved: bool
+      - operator_notes: str
+    approval_config:
+      title: "Device Performance Suggestion Requires Approval"
+      description: |
+        Device {{ env.DEVICE_ID }} has detected a performance issue.
+        Suggested change: {{ state.suggestion.change.key }} = {{ state.suggestion.change.value }}
+        Expected improvement: {{ state.suggestion.expected_improvement }}
+        Health score: {{ state.health_score }} / 1.0
+      timeout_hours: 48
+      channels:
+        - dashboard
+        - email
+      approvers:
+        - role:device-operator
+        - role:infra-admin
+
+  # Step 6: Apply the approved change (WASM sandboxed for safety)
+  - name: ApplyChange
+    type: WASM
+    automate_next: true
+    wasm_config:
+      module: rufus_edge/sidecar/wasm/apply_config.wasm
+      # WASM module reads approved proposal from stdin, writes outcome to stdout
+      # Sandbox limits: 32MB heap, no network, filesystem limited to /config and /tmp
+      memory_limit_mb: 32
+      timeout_seconds: 60
+    # Fallback if WASM not available (non-sandboxed Python)
+    fallback_function: rufus_edge.sidecar.config_applier:apply_config_change
+
+  # Step 7: Report outcome to cloud control plane
+  - name: ReportOutcome
+    type: HTTP
+    automate_next: false
+    http_config:
+      method: POST
+      url: "{{ env.RUFUS_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/deployments"
+      timeout_seconds: 10
+      headers:
+        Content-Type: application/json
+        Authorization: "Bearer {{ env.RUFUS_DEVICE_TOKEN }}"
+      body: |
+        {
+          "workflow_id": "{{ state.workflow_id }}",
+          "suggestion": {{ state.suggestion | tojson }},
+          "approved": {{ state.approved }},
+          "operator_notes": "{{ state.operator_notes }}",
+          "apply_outcome": "{{ state.apply_outcome }}",
+          "health_score_before": {{ state.health_score }},
+          "metrics_snapshot": {{ state.metrics | tojson }},
+          "device_id": "{{ env.DEVICE_ID }}",
+          "timestamp": "{{ now() }}"
+        }
+
+  # Terminal step: healthy device, nothing to do
+  - name: ReportHealthy
+    type: HTTP
+    automate_next: false
+    http_config:
+      method: POST
+      url: "{{ env.RUFUS_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/heartbeat"
+      timeout_seconds: 5
+      headers:
+        Authorization: "Bearer {{ env.RUFUS_DEVICE_TOKEN }}"
+      body: |
+        {
+          "health_score": {{ state.health_score }},
+          "metrics": {{ state.metrics | tojson }},
+          "device_id": "{{ env.DEVICE_ID }}",
+          "timestamp": "{{ now() }}"
+        }

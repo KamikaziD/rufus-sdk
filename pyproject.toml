@@ -74,6 +74,13 @@ protobuf = {version = ">=4.21", optional = true}
 # AI Workflow Builder (optional) — Ollama uses httpx (already a core dep)
 anthropic = {version = ">=0.25", optional = true}
 
+# Knowledge base / RAG (optional)
+lancedb = {version = ">=0.6", optional = true}
+fastembed = {version = ">=0.3", optional = true}
+rank-bm25 = {version = ">=0.2", optional = true}
+psutil = {version = ">=5.9", optional = true}
+sqlite-vec = {version = ">=0.1", optional = true}
+
 [tool.poetry.extras]
 postgres = ["asyncpg"]
 cli = ["rich"]
@@ -81,6 +88,9 @@ performance = ["uvloop"]
 otel = ["opentelemetry-sdk", "opentelemetry-exporter-otlp-proto-grpc"]
 nats = ["nats-py", "betterproto", "protobuf"]
 builder = ["anthropic"]
+rag = ["lancedb", "fastembed", "rank-bm25", "psutil"]
+rag-edge = ["fastembed", "sqlite-vec", "rank-bm25", "psutil"]
+builder-full = ["anthropic", "lancedb", "fastembed", "rank-bm25", "psutil"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0"

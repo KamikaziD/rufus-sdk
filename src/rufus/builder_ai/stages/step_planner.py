@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING, Optional
 
 from rufus.builder_ai.models import RufusIntent, StepPlan, StepPlanEdge, StepPlanEntry
 from rufus.builder_ai.stages.base import LLMStageMixin
+
+if TYPE_CHECKING:
+    from rufus.builder_ai.knowledge.raft_router import RetrievalDecision
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +54,21 @@ Rules:
 class StepPlanner(LLMStageMixin):
     """Stage 3: Generate a step plan from a resolved intent."""
 
-    async def plan(self, intent: RufusIntent) -> StepPlan:
+    async def plan(
+        self,
+        intent: RufusIntent,
+        decision: "Optional[RetrievalDecision]" = None,
+    ) -> StepPlan:
         logger.debug("[Stage 3] Planning steps for domain: %s", intent.domain)
+        system = self._inject_knowledge(
+            _SYSTEM_PROMPT, decision,
+            focus_types=["yaml_example", "step_reference", "lesson"],
+        )
         user_msg = (
             f"Intent: {intent.model_dump_json()}\n"
             "Generate the minimal step plan for this workflow."
         )
-        raw = await self._call_llm(system=_SYSTEM_PROMPT, user=user_msg, temperature=0.2)
+        raw = await self._call_llm(system=system, user=user_msg, temperature=0.2)
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
