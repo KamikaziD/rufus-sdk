@@ -121,7 +121,7 @@ def test_register_schedule_inserts_row():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 
@@ -181,7 +181,7 @@ def test_poll_triggers_due_workflows():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 
@@ -228,7 +228,7 @@ def test_poll_skips_future_workflows():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 

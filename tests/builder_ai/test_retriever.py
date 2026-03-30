@@ -127,7 +127,7 @@ def test_max_similarity_returns_highest_score():
     from rufus.builder_ai.knowledge.indexer import Chunk
 
     chunks = [_make_chunk(score=0.5), _make_chunk(score=0.9), _make_chunk(score=0.3)]
-    assert max_similarity(chunks) == pytest.approx(0.9)
+    assert max_similarity(chunks) == 0.9
 
 
 def test_max_similarity_empty_returns_zero():
@@ -138,7 +138,7 @@ def test_max_similarity_empty_returns_zero():
 def test_max_similarity_single_chunk():
     from rufus.builder_ai.knowledge.retriever import max_similarity
     chunks = [_make_chunk(score=0.72)]
-    assert max_similarity(chunks) == pytest.approx(0.72)
+    assert max_similarity(chunks) == 0.72
 
 
 # ---------------------------------------------------------------------------

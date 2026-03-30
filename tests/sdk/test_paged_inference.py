@@ -30,6 +30,8 @@ if "numpy" not in sys.modules:
     _np.array = MagicMock(return_value=[])
     _np.zeros = MagicMock(return_value=[])
     _np.expand_dims = MagicMock(return_value=[])
+    _np.isscalar = lambda x: isinstance(x, (int, float, complex, bool))
+    _np.bool_ = bool
     sys.modules["numpy"] = _np
 
 # Stub tflite_runtime so TFLiteInferenceProvider doesn't crash at import

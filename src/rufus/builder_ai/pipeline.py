@@ -228,6 +228,10 @@ class AIWorkflowBuilder:
                 errors=yaml_errors,
                 yaml_gate_attempts=yaml_gate_attempts,
                 quality="FAILED",
+                retrieval_decision=decision,
+                privacy_level=self.privacy_level,
+                pii_redactions=decision.pii_redactions if decision else 0,
+                chunks_sent_to_cloud=decision.chunks_sent_to_cloud if decision else False,
             )
 
         # Stage 6: Governance Linter
@@ -280,6 +284,10 @@ class AIWorkflowBuilder:
                         yaml_gate_attempts=yaml_gate_attempts,
                         stub_gate_attempts=stub_gate_attempts,
                         quality="PARTIAL",
+                        retrieval_decision=decision,
+                        privacy_level=self.privacy_level,
+                        pii_redactions=decision.pii_redactions if decision else 0,
+                        chunks_sent_to_cloud=decision.chunks_sent_to_cloud if decision else False,
                     )
 
         quality = "GOOD" if not stub_errors else "PARTIAL"

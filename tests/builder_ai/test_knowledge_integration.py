@@ -121,7 +121,7 @@ async def test_build_result_has_retrieval_decision_when_kb_present():
 
     assert result.retrieval_decision is not None
     assert result.retrieval_decision.strategy.value == "rag"
-    assert result.retrieval_decision.confidence == pytest.approx(0.65)
+    assert result.retrieval_decision.confidence == 0.65
 
 
 @pytest.mark.asyncio
