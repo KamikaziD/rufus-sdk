@@ -1,5 +1,11 @@
 # Lessons Learned
 
+## Pattern: WASM Binary for Sidecar Agent Requires External Toolchain — Cannot Be Auto-Built
+**Context:** `src/rufus_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
+**Anti-Pattern:** Assuming the binary can be compiled at test time or during a normal dev install. Neither `py2wasm` nor `wasi-sdk` are pip-installable; they require separate OS-level toolchain setup. Attempting `build_wasm.build()` without them raises `RuntimeError` and the binary is absent.
+**Correction:** The WASM path is a production-only opt-in. The default `deployment_monitor.yaml` workflow uses `type: STANDARD` (Python, zero deps). The WASM variant (`deployment_monitor_wasm.yaml`) requires running `rufus sidecar build-wasm` once after installing py2wasm or wasi-sdk. All tests guard with `pytest.mark.skipif(importlib.util.find_spec("wasmtime") is None, ...)` so CI is always green without the binary. The `.wasm` file should be committed to the repo after compilation so it travels with the source.
+**Verification:** `tests/edge/test_sidecar_wasm.py` passes (1 skipped for binary test) with no toolchain installed. `build_wasm.build(force=True)` raises `RuntimeError: No WASM toolchain found. Install py2wasm or wasi-sdk.` as expected.
+
 ## Pattern: Celery Task Signature Mismatch for Parallel Tasks
 **Context:** Celery parallel tasks (chord header) in `dispatch_parallel_tasks`
 **Anti-Pattern:** `async def verify_id_agent(state, context: StepContext, *args, **kwargs)` — Celery calls `check_arguments` eagerly when building chord signatures; `context` is required but not provided, crashes before queuing
