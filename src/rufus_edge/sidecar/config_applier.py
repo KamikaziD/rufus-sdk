@@ -17,9 +17,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ _RESTART_REQUIRED_KEYS = {
 }
 
 _CONFIG_PATH = os.environ.get("RUFUS_EDGE_CONFIG_PATH", "config/edge_device.yaml")
+_CONFIG_BACKUP_SUFFIX = ".pre_sidecar_backup"
 
 
 def apply_config_change(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
@@ -131,9 +134,12 @@ def _apply_drain_and_restart(key: str, value: Any) -> str:
 
 
 def _update_config_file(key: str, value: Any) -> None:
-    """Update the edge device config file with the new key=value."""
+    """Update the edge device config file with the new key=value.
+
+    Writes a backup alongside the config file before overwriting so
+    rollback_change() can restore it if ApplyChange fails.
+    """
     import yaml
-    from pathlib import Path
 
     config_path = Path(_CONFIG_PATH)
     if not config_path.exists():
@@ -141,6 +147,9 @@ def _update_config_file(key: str, value: Any) -> None:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config = {}
     else:
+        # Write backup before modifying
+        backup_path = str(config_path) + _CONFIG_BACKUP_SUFFIX
+        shutil.copy2(config_path, backup_path)
         config = yaml.safe_load(config_path.read_text()) or {}
 
     # Support nested keys with dot notation: "sync.interval" → config["sync"]["interval"]
@@ -180,6 +189,37 @@ def _count_active_workflows() -> int:
         return count
     except Exception:
         return 0
+
+
+# Public alias used by deployment_monitor.yaml step function reference
+apply_approved_change = apply_config_change
+
+
+# ---------------------------------------------------------------------------
+# Saga compensate function — restore config from backup if ApplyChange fails
+# ---------------------------------------------------------------------------
+
+def rollback_change(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
+    """Saga compensate function: restore config from backup if ApplyChange fails.
+
+    Called automatically by the Saga pattern when ApplyChange raises an exception.
+    Looks for a backup file written by _update_config_file before the change.
+    """
+    backup_path = getattr(state, "config_backup_path", None)
+    if not backup_path:
+        # Derive backup path from default config location
+        config_path = Path(os.environ.get("RUFUS_EDGE_CONFIG_PATH", "edge_config.yaml"))
+        backup_path = str(config_path) + _CONFIG_BACKUP_SUFFIX
+
+    backup = Path(backup_path)
+    if backup.exists():
+        config_path = Path(os.environ.get("RUFUS_EDGE_CONFIG_PATH", "edge_config.yaml"))
+        shutil.copy2(backup, config_path)
+        logger.info("[Sidecar:rollback] Config restored from backup: %s → %s", backup_path, config_path)
+        return {"rollback_applied": True, "rollback_source": backup_path}
+
+    logger.warning("[Sidecar:rollback] No backup found at %s; rollback skipped", backup_path)
+    return {"rollback_applied": False}
 
 
 # ---------------------------------------------------------------------------

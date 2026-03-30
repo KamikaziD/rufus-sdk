@@ -35,3 +35,10 @@ workflows:
     initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
     requires:
       - rufus-sdk-edge
+
+  - type: "DeploymentMonitorWasm"
+    description: "WASM-sandboxed deployment sidecar — same as DeploymentMonitor but ApplyChange runs in WASI isolation (requires compiled apply_config.wasm)"
+    config_file: "deployment_monitor_wasm.yaml"
+    initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
+    requires:
+      - rufus-sdk-edge

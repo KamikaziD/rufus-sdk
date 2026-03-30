@@ -130,6 +130,12 @@ from rufus_server.server_command_service import ServerCommandService
 from rufus_server.wasm_routes import router as wasm_router
 app.include_router(wasm_router)
 
+# --- Device Sidecar Routes ---
+from rufus_server.api.device_suggestions import router as device_suggestions_router
+from rufus_server.api.device_approvals import router as device_approvals_router
+app.include_router(device_suggestions_router)
+app.include_router(device_approvals_router)
+
 # --- Policy Engine ---
 from rufus_server.policy_engine import (
     Policy, PolicyRule, PolicyStatus, RolloutConfig, RolloutStrategy,

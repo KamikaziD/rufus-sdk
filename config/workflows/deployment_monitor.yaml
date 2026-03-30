@@ -139,7 +139,7 @@ steps:
     description: "Apply config change: hot-swap or drain+restart"
     automate_next: true
     timeout_seconds: 120
-    # compensate_function: rufus_edge.sidecar.config_applier:rollback_change
+    compensate_function: rufus_edge.sidecar.config_applier:rollback_change
 
   # -------------------------------------------------------------------------
   # Step 8: Report outcome to cloud control plane
