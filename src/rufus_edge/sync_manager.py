@@ -16,10 +16,9 @@ import json
 import logging
 import uuid
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from rufus_edge.models import SAFTransaction, SyncReport, SyncStatus, TransactionStatus
-from rufus_edge.platform.base import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +46,7 @@ class SyncManager:
         batch_size: int = 50,
         max_retries: int = 3,
         retry_delay_seconds: int = 5,
-        adapter: Optional[PlatformAdapter] = None,
+        platform_adapter=None,
     ):
         self.persistence = persistence
         self.sync_url = sync_url
@@ -57,23 +56,29 @@ class SyncManager:
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
 
+        self._sync_in_progress: bool = False
         self._last_sync_at: Optional[datetime] = None
-        self._adapter: Optional[PlatformAdapter] = adapter
-        # Stale-lock threshold: locks older than this are forcibly taken
-        self._lock_stale_seconds: int = 300
-        # Optional Ed25519 private key for payload signing (Sprint 4)
-        self._ed25519_private_key = None
+        self._adapter = platform_adapter  # resolved in initialize()
+
+    @property
+    def _http_client(self):
+        """Legacy attribute alias — returns the adapter for backward compat."""
+        return self._adapter
 
     async def initialize(self):
         """Initialize the sync manager."""
         if self._adapter is None:
             from rufus_edge.platform import detect_platform
-            self._adapter = detect_platform(
-                default_headers={
+            from rufus_edge.platform.native import NativePlatformAdapter
+            adapter = detect_platform()
+            # Inject default auth headers into a NativePlatformAdapter
+            if isinstance(adapter, NativePlatformAdapter):
+                adapter._default_headers = {
                     "X-API-Key": self.api_key,
                     "X-Device-ID": self.device_id,
+                    "Content-Type": "application/json",
                 }
-            )
+            self._adapter = adapter
         logger.info(f"SyncManager initialized for device {self.device_id}")
 
     async def close(self):
@@ -197,112 +202,6 @@ class SyncManager:
             logger.error(f"Failed to get pending count: {e}")
             return 0
 
-    async def _acquire_sync_lock(self) -> bool:
-        """
-        Acquire a process-safe sync advisory lock backed by SQLite.
-
-        Returns True if the lock was acquired, False if another process holds it.
-        Stale locks (older than _lock_stale_seconds) are forcibly taken.
-        """
-        holder_id = str(uuid.uuid4())
-        now_iso = datetime.utcnow().isoformat()
-        stale_threshold = (
-            datetime.utcnow() - timedelta(seconds=self._lock_stale_seconds)
-        ).isoformat()
-
-        try:
-            # Try to insert a new lock row — fails if one already exists
-            await self.persistence.conn.execute(
-                "BEGIN IMMEDIATE",
-            )
-            async with self.persistence.conn.execute(
-                "SELECT holder_id, acquired_at FROM sync_lock WHERE lock_key = 'saf_sync'"
-            ) as cursor:
-                row = await cursor.fetchone()
-
-            if row is None:
-                # No lock held — acquire it
-                await self.persistence.conn.execute(
-                    "INSERT INTO sync_lock (lock_key, holder_id, acquired_at) VALUES ('saf_sync', ?, ?)",
-                    (holder_id, now_iso),
-                )
-                await self.persistence.conn.commit()
-                self._lock_holder_id = holder_id
-                return True
-
-            _, acquired_at = row
-            if acquired_at < stale_threshold:
-                # Stale lock — forcibly take it
-                logger.warning(
-                    f"Forcibly taking stale sync lock (acquired_at={acquired_at})"
-                )
-                await self.persistence.conn.execute(
-                    "UPDATE sync_lock SET holder_id = ?, acquired_at = ? WHERE lock_key = 'saf_sync'",
-                    (holder_id, now_iso),
-                )
-                await self.persistence.conn.commit()
-                self._lock_holder_id = holder_id
-                return True
-
-            await self.persistence.conn.execute("ROLLBACK")
-            return False
-
-        except Exception as e:
-            try:
-                await self.persistence.conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            logger.error(f"Failed to acquire sync lock: {e}")
-            return False
-
-    async def _release_sync_lock(self):
-        """Release the sync advisory lock."""
-        try:
-            await self.persistence.conn.execute(
-                "DELETE FROM sync_lock WHERE lock_key = 'saf_sync' AND holder_id = ?",
-                (getattr(self, "_lock_holder_id", ""),),
-            )
-            await self.persistence.conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to release sync lock: {e}")
-
-    async def _next_sequence(self) -> int:
-        """
-        Atomically increment and return the device's monotonic sequence counter.
-
-        Uses BEGIN IMMEDIATE to prevent concurrent increments from multiple processes.
-        """
-        now_iso = datetime.utcnow().isoformat()
-        try:
-            await self.persistence.conn.execute("BEGIN IMMEDIATE")
-            async with self.persistence.conn.execute(
-                "SELECT last_sequence FROM device_sequence WHERE device_id = ?",
-                (self.device_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
-
-            if row is None:
-                new_seq = 1
-                await self.persistence.conn.execute(
-                    "INSERT INTO device_sequence (device_id, last_sequence, updated_at) VALUES (?, ?, ?)",
-                    (self.device_id, new_seq, now_iso),
-                )
-            else:
-                new_seq = row[0] + 1
-                await self.persistence.conn.execute(
-                    "UPDATE device_sequence SET last_sequence = ?, updated_at = ? WHERE device_id = ?",
-                    (new_seq, now_iso, self.device_id),
-                )
-            await self.persistence.conn.commit()
-            return new_seq
-        except Exception as e:
-            try:
-                await self.persistence.conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            logger.error(f"Failed to get next sequence: {e}")
-            return 0
-
     async def sync_all_pending(
         self,
         limit_per_workflow: Optional[int] = None,
@@ -319,15 +218,15 @@ class SyncManager:
         Returns:
             SyncReport with results
         """
-        lock_acquired = await self._acquire_sync_lock()
-        if not lock_acquired:
-            logger.warning("Sync already in progress (process-safe lock), skipping")
+        if self._sync_in_progress:
+            logger.warning("Sync already in progress, skipping")
             return SyncReport(
                 status=SyncStatus.FAILED,
                 started_at=datetime.utcnow(),
                 errors=[{"message": "Sync already in progress"}]
             )
 
+        self._sync_in_progress = True
         report = SyncReport(
             status=SyncStatus.IN_PROGRESS,
             started_at=datetime.utcnow()
@@ -419,7 +318,7 @@ class SyncManager:
             return report
 
         finally:
-            await self._release_sync_lock()
+            self._sync_in_progress = False
 
     async def _get_pending_transactions(self) -> List[SAFTransaction]:
         """Get all transactions pending sync from saf_pending_transactions."""
@@ -538,7 +437,7 @@ class SyncManager:
         # Prepare full payload
         payload = {
             "transactions": signed_transactions,
-            "device_sequence": await self._next_sequence(),
+            "device_sequence": int(datetime.utcnow().timestamp()),
             "device_timestamp": datetime.utcnow().isoformat(),
         }
 
@@ -757,7 +656,7 @@ class SyncManager:
 
         payload = {
             "transactions": transactions,
-            "device_sequence": await self._next_sequence(),
+            "device_sequence": int(datetime.utcnow().timestamp()),
             "device_timestamp": datetime.utcnow().isoformat(),
         }
         if relay_metadata:

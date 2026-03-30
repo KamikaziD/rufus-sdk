@@ -180,7 +180,7 @@ class RufusEdgeAgent:
             api_key=self.api_key,
             poll_interval_seconds=self.config_poll_interval,
             persistence=self.persistence,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.config_manager.initialize()
 
@@ -190,7 +190,7 @@ class RufusEdgeAgent:
             sync_url=self.cloud_url,
             device_id=self.device_id,
             api_key=self.api_key,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.sync_manager.initialize()
 

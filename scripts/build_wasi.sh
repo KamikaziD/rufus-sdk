@@ -1,102 +1,96 @@
 #!/usr/bin/env bash
-# build_wasi.sh — Compile rufus-sdk-edge to a WASI 0.3 WebAssembly binary.
+# build_wasi.sh — Build rufus-sdk-edge as a WASI 0.3 component.
 #
-# Output: dist/rufus_edge.wasm
+# Prerequisites:
+#   pip install py2wasm          # Nuitka-based CPython → wasm32-wasi compiler
+#   pip install rufus-sdk-edge[wasi]
 #
-# Requirements
-# ------------
-#   pip install py2wasm          (or: uvx py2wasm)
-#   wasmtime >= 20               (for local smoke-test)
+# Usage:
+#   bash scripts/build_wasi.sh [--output dist/rufus_edge.wasm]
 #
-# The resulting binary can be run with:
-#   wasmtime dist/rufus_edge.wasm
-#   wasmtime --env RUFUS_DEVICE_ID=pos-001 dist/rufus_edge.wasm
-#
-# Component Model note
-# --------------------
-# py2wasm produces a WASI 0.2 core module by default.  To upgrade to
-# a WASI 0.3 Component Model binary, wrap the output with wasm-tools:
-#   wasm-tools component new dist/rufus_edge.wasm \
-#       --adapt wasi_snapshot_preview1.reactor.wasm \
-#       -o dist/rufus_edge_component.wasm
-#
-# The WASM/Component Model execution path in ComponentStepRuntime supports
-# both formats automatically.
+# Output:
+#   dist/rufus_edge.wasm   (~15 MB before brotli compression)
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="${REPO_ROOT}/dist"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 ENTRY_POINT="${REPO_ROOT}/src/rufus_edge/wasi_main.py"
-OUTPUT="${DIST_DIR}/rufus_edge.wasm"
+OUTPUT_DIR="${REPO_ROOT}/dist"
+OUTPUT_FILE="${OUTPUT_DIR}/rufus_edge.wasm"
 
-echo "==> Building rufus_edge.wasm"
-echo "    Entry:  ${ENTRY_POINT}"
-echo "    Output: ${OUTPUT}"
+# Allow override via CLI argument
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      OUTPUT_FILE="$2"
+      OUTPUT_DIR="$(dirname "${OUTPUT_FILE}")"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
-mkdir -p "${DIST_DIR}"
+mkdir -p "${OUTPUT_DIR}"
 
-# Check that py2wasm is available
-if ! command -v py2wasm &>/dev/null; then
-    echo "ERROR: py2wasm not found. Install with: pip install py2wasm"
-    exit 1
-fi
+echo "==> Building WASI component from ${ENTRY_POINT}"
+echo "    Output: ${OUTPUT_FILE}"
 
-# Core build
-py2wasm \
-    "${ENTRY_POINT}" \
-    -o "${OUTPUT}" \
-    --target wasi \
-    --optimize 2 \
-    --include-dir "${REPO_ROOT}/src"
+# py2wasm compiles CPython + application to a self-contained .wasm binary
+# targeting wasm32-wasi.  The --wasi flag enables WASI 0.3 preview.
+#
+# --nofollow-import-to=psutil: psutil uses native extensions; exclude it.
+# --nofollow-import-to=httpx:  httpx uses OS sockets; exclude it.
+# WasiPlatformAdapter uses urllib / wasi:http instead.
 
-echo "==> Build succeeded: ${OUTPUT}"
-ls -lh "${OUTPUT}"
+py2wasm "${ENTRY_POINT}" \
+  --output "${OUTPUT_FILE}" \
+  --wasi \
+  --nofollow-import-to=psutil \
+  --nofollow-import-to=httpx \
+  --nofollow-import-to=websockets \
+  --nofollow-import-to=wasmtime \
+  --include-package=rufus \
+  --include-package=rufus_edge
+
+echo "==> Build complete: ${OUTPUT_FILE}"
+echo "    Size: $(du -sh "${OUTPUT_FILE}" | cut -f1)"
 
 # Phase 2: Pre-initialize with Wizer (cold-start killer)
-# Target: <5ms boot time instead of 300ms–2s
+# Target: <5ms boot time instead of 300ms-2s
 # Install: cargo install wizer --all-features
 if command -v wizer &>/dev/null; then
-    SNAPSHOT_OUT="${DIST_DIR}/rufus_edge_snapshotted.wasm"
+    SNAPSHOT_OUT="${OUTPUT_DIR}/rufus_edge_snapshotted.wasm"
     echo "==> Snapshotting Python runtime with Wizer..."
     wizer \
         --allow-wasi \
         --dir=. \
         --init-func=rufus_pre_init \
         -o "${SNAPSHOT_OUT}" \
-        "${OUTPUT}"
+        "${OUTPUT_FILE}"
     echo "==> Snapshot complete: ${SNAPSHOT_OUT}"
     ls -lh "${SNAPSHOT_OUT}"
 else
     echo "NOTE: Wizer not found — skipping snapshot (install: cargo install wizer --all-features)"
-    echo "      Without snapshot, cold-start is 300ms–2s instead of <5ms"
+    echo "      Without snapshot, cold-start is 300ms-2s instead of <5ms"
 fi
 
-# Smoke test (requires wasmtime)
+# Optional: validate with wasmtime
 if command -v wasmtime &>/dev/null; then
-    echo "==> Smoke test (wasmtime)…"
-    timeout 5 wasmtime \
-        --env RUFUS_CLOUD_URL="" \
-        --env RUFUS_LOG_LEVEL=INFO \
-        "${OUTPUT}" 2>&1 | head -5 || true
-    echo "==> Smoke test passed"
+  echo "==> Validating with wasmtime..."
+  wasmtime compile "${OUTPUT_FILE}" -o /dev/null
+  echo "    Validation passed."
 else
-    echo "NOTE: wasmtime not found — skipping smoke test"
+  echo "    (wasmtime not found; skipping validation)"
 fi
 
-# Optional: wrap as Component Model binary
-if command -v wasm-tools &>/dev/null; then
-    ADAPTER="${REPO_ROOT}/wasi_snapshot_preview1.reactor.wasm"
-    COMPONENT_OUT="${DIST_DIR}/rufus_edge_component.wasm"
-    if [[ -f "${ADAPTER}" ]]; then
-        echo "==> Wrapping as Component Model binary…"
-        wasm-tools component new "${OUTPUT}" \
-            --adapt "${ADAPTER}" \
-            -o "${COMPONENT_OUT}"
-        echo "==> Component binary: ${COMPONENT_OUT}"
-        ls -lh "${COMPONENT_OUT}"
-    else
-        echo "NOTE: wasi_snapshot_preview1.reactor.wasm not found — skipping component wrap"
-        echo "      Download from: https://github.com/bytecodealliance/wasmtime/releases"
-    fi
-fi
+echo ""
+echo "Deploy the component:"
+echo "  wasmtime run --env RUFUS_DEVICE_ID=pos-001 \\"
+echo "               --env RUFUS_CLOUD_URL=https://control.example.com \\"
+echo "               --env RUFUS_API_KEY=your-key \\"
+echo "               ${OUTPUT_FILE}"

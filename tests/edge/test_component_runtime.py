@@ -334,3 +334,31 @@ class TestComponentStepRuntimeBridgeIntegration:
 
         result = await runtime.execute(config, {})
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# ComponentStepRuntime — slow resolver triggers timeout (EBu8w)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_component_runtime_timeout_triggers_skip():
+    """A slow resolver that exceeds timeout_ms is treated as an error."""
+    import asyncio
+    import hashlib
+    binary = CORE_MAGIC_8
+    actual_hash = hashlib.sha256(binary).hexdigest()
+
+    class _SlowResolver:
+        async def resolve(self, binary_hash: str) -> bytes:
+            await asyncio.sleep(10)  # cancelled by timeout
+            return binary
+
+    runtime = ComponentStepRuntime(_SlowResolver())
+    config = make_config(
+        wasm_hash=actual_hash,
+        timeout_ms=50,
+        fallback_on_error="skip",
+    )
+
+    result = await runtime.execute(config, {})
+    assert result == {}

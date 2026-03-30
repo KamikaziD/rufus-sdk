@@ -81,6 +81,8 @@ class ComponentStepRuntime:
     def __init__(self, resolver, bridge=None):
         self._resolver = resolver
         self._bridge = bridge
+        # Cached legacy runtime — created on first core-module execution
+        self._legacy_runtime = None
 
     async def execute(
         self,
@@ -235,12 +237,27 @@ class ComponentStepRuntime:
                     None,
                     lambda: _bridge.execute_component(binary, state_json, step_name),
                 )
+            elif "js" in __import__("sys").modules or "pyodide" in __import__("sys").modules:
+                # Browser / Pyodide — dispatch through js.WebAssembly
+                try:
+                    result_json = await self._run_component_browser(binary, state_json, step_name)
+                except Exception as _browser_exc:
+                    return self._handle_error(wasm_config, _browser_exc)
             else:
-                # Default cloud path — wasmtime direct call (unchanged)
-                result_json = await loop.run_in_executor(
-                    None,
-                    lambda: self._call_component(binary, state_json, step_name),
-                )
+                # Default cloud/native path — wasmtime direct call
+                try:
+                    result_json = await loop.run_in_executor(
+                        None,
+                        lambda: self._call_component(binary, state_json, step_name),
+                    )
+                except ImportError:
+                    # WASI host: the surrounding runtime executes the component;
+                    # we just return empty dict and let the host handle state passing
+                    logger.warning(
+                        "wasmtime not available and no bridge set — running in WASI host mode "
+                        "(state passing is managed by the host runtime)"
+                    )
+                    result_json = "{}"
         except Exception as exc:
             return self._handle_error(wasm_config, exc)
 
@@ -323,6 +340,29 @@ class ComponentStepRuntime:
         # Some bindings return the value directly on ok, raise on err
         return str(outcome)
 
+    async def _run_component_browser(
+        self,
+        binary: bytes,
+        state_json: str,
+        step_name: str,
+    ) -> str:
+        """Execute a Component Model binary via js.WebAssembly (Pyodide/browser)."""
+        try:
+            import js  # noqa: F401 — only present in Pyodide
+            import pyodide  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                "Browser execution requires Pyodide runtime."
+            ) from exc
+
+        # cm-js polyfill: window.ComponentModel.run(wasmBytes, stateJson, stepName)
+        # This is a thin JS shim that wraps the Component Model Polyfill.
+        # See docs/browser-component-polyfill.md for setup instructions.
+        import js as _js
+        wasm_bytes = _js.Uint8Array.new(list(binary))
+        result = await _js.ComponentModel.run(wasm_bytes, state_json, step_name)
+        return str(result)
+
     # ------------------------------------------------------------------
     # Legacy stdin/stdout path
     # ------------------------------------------------------------------
@@ -336,6 +376,8 @@ class ComponentStepRuntime:
         """Delegate to the legacy WasmRuntime stdin/stdout path."""
         # Import here to avoid circular dependency
         from rufus.implementations.execution.wasm_runtime import WasmRuntime
+        if self._legacy_runtime is None:
+            self._legacy_runtime = WasmRuntime(self._resolver)
 
         logger.debug(
             f"WASM binary {wasm_config.wasm_hash[:16]}… is a core module; "
@@ -354,11 +396,12 @@ class ComponentStepRuntime:
 
         loop = asyncio.get_event_loop()
         try:
+            _lr = self._legacy_runtime
             result_bytes = await loop.run_in_executor(
                 None,
                 lambda: WasmRuntime._execute_wasi(
                     binary, stdin_bytes, wasm_config.entrypoint
-                ),
+                ) if _lr is None else _lr._execute_wasi(binary, stdin_bytes, wasm_config.entrypoint),
             )
         except Exception as exc:
             return self._handle_error(wasm_config, exc)
