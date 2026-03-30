@@ -1,263 +1,252 @@
 """
-Unit tests for ComponentStepRuntime and the is_component() detection helper.
+Unit tests for ComponentStepRuntime.
 
-All tests use mock binary data and a mock resolver — no wasmtime installation
-required.
+All tests use mock binary resolvers — no real WASM execution required.
 """
 
-from __future__ import annotations
-
+import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
+import struct
 import pytest
 
-from rufus.implementations.execution.wasm_runtime import WasmRuntime  # noqa: F401 (legacy compat)
-from rufus.implementations.execution.component_runtime import (
-    ComponentStepRuntime,
-    is_component,
-)
-
-# ---------------------------------------------------------------------------
-# Magic-byte helpers
-# ---------------------------------------------------------------------------
-
-# A valid Component Model header (first 8 bytes)
-CM_MAGIC_8 = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 100
-
-# A valid core-module header
-CORE_MAGIC_8 = b"\x00asm\x01\x00\x00\x00" + b"\x00" * 100
+from rufus.wasm_component import is_component, COMPONENT_MAGIC
 
 
-# ---------------------------------------------------------------------------
-# is_component()
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-class TestIsComponent:
-    def test_detects_component_magic(self):
-        assert is_component(CM_MAGIC_8) is True
-
-    def test_rejects_core_module(self):
-        assert is_component(CORE_MAGIC_8) is False
-
-    def test_rejects_empty(self):
-        assert is_component(b"") is False
-
-    def test_rejects_short(self):
-        assert is_component(b"\x00asm\x0e") is False
+def _make_core_binary() -> bytes:
+    """Minimal valid-looking WASM core module header."""
+    return b"\x00asm\x01\x00\x00\x00" + b"\x00" * 8
 
 
-# ---------------------------------------------------------------------------
-# Fake WasmConfig
-# ---------------------------------------------------------------------------
-
-def make_config(
-    wasm_hash: str = "a" * 64,
-    entrypoint: str = "execute",
-    state_mapping: dict = None,
-    timeout_ms: int = 5000,
-    fallback_on_error: str = "fail",
-    default_result: dict = None,
-):
-    cfg = MagicMock()
-    cfg.wasm_hash = wasm_hash
-    cfg.entrypoint = entrypoint
-    cfg.state_mapping = state_mapping
-    cfg.timeout_ms = timeout_ms
-    cfg.fallback_on_error = fallback_on_error
-    cfg.default_result = default_result
-    return cfg
+def _make_component_binary() -> bytes:
+    """Minimal WASM Component Model header."""
+    return b"\x00asm\x0d\x00\x01\x00" + b"\x00" * 8
 
 
-# ---------------------------------------------------------------------------
-# ComponentStepRuntime — Component Model path
-# ---------------------------------------------------------------------------
+class _MockResolver:
+    """Returns a pre-baked binary regardless of the hash."""
 
-class TestComponentStepRuntimeComponentPath:
-    def _make_runtime(self, binary: bytes, result_json: str = '{"score": 99}'):
-        """Build a ComponentStepRuntime with a mock resolver returning *binary*."""
-        import hashlib
+    def __init__(self, binary: bytes):
+        self._binary = binary
 
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-        # Patch _call_component so we don't need a real wasmtime build
-        runtime._call_component = MagicMock(return_value=result_json)
-        return runtime, wasm_hash
-
-    @pytest.mark.asyncio
-    async def test_component_binary_returns_merged_dict(self):
-        import hashlib
-        binary = CM_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-
-        # Patch the synchronous _call_component
-        with patch.object(
-            ComponentStepRuntime,
-            "_call_component",
-            return_value='{"risk_score": 42}',
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {"amount": 100})
-
-        assert result == {"risk_score": 42}
-
-    @pytest.mark.asyncio
-    async def test_state_mapping_filters_input(self):
-        import hashlib
-        binary = CM_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-
-        captured_state_json: list[str] = []
-
-        def fake_call(binary_arg, state_json, step_name):
-            captured_state_json.append(state_json)
-            return '{"ok": true}'
-
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(
-                wasm_hash=wasm_hash,
-                state_mapping={"amount": "txn_amount"},  # state_key → wasm_key
-            )
-            await runtime.execute(config, {"amount": 50, "card": "tok_xxx"})
-
-        sent = json.loads(captured_state_json[0])
-        assert "txn_amount" in sent
-        assert "card" not in sent
-
-    @pytest.mark.asyncio
-    async def test_fallback_skip_on_error(self):
-        import hashlib
-        binary = CM_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-
-        def fake_call(*a, **k):
-            raise RuntimeError("simulated error")
-
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(wasm_hash=wasm_hash, fallback_on_error="skip")
-            result = await runtime.execute(config, {})
-
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_fallback_default_on_error(self):
-        import hashlib
-        binary = CM_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-
-        def fake_call(*a, **k):
-            raise RuntimeError("simulated error")
-
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(
-                wasm_hash=wasm_hash,
-                fallback_on_error="default",
-                default_result={"risk_score": 0},
-            )
-            result = await runtime.execute(config, {})
-
-        assert result == {"risk_score": 0}
-
-    @pytest.mark.asyncio
-    async def test_hash_mismatch_raises(self):
-        import hashlib
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=CM_MAGIC_8)
-
-        runtime = ComponentStepRuntime(resolver)
-        config = make_config(wasm_hash="wrong_hash" * 4)  # won't match sha256(CM_MAGIC_8)
-        config.fallback_on_error = "fail"
-
-        with pytest.raises(RuntimeError, match="hash mismatch"):
-            await runtime.execute(config, {})
+    async def resolve(self, binary_hash: str) -> bytes:
+        return self._binary
 
 
-# ---------------------------------------------------------------------------
-# ComponentStepRuntime — legacy stdin/stdout path
-# ---------------------------------------------------------------------------
+class _MockWasmConfig:
+    """Minimal WasmConfig lookalike for tests."""
 
-class TestComponentStepRuntimeLegacyPath:
-    @pytest.mark.asyncio
-    async def test_core_module_uses_wasm_runtime(self):
-        import hashlib
-        binary = CORE_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
-
-        runtime = ComponentStepRuntime(resolver)
-
-        with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
-            return_value=b'{"legacy": true}',
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {})
-
-        assert result == {"legacy": True}
+    def __init__(
+        self,
+        wasm_hash: str = "a" * 64,
+        entrypoint: str = "execute",
+        timeout_ms: int = 5000,
+        fallback_on_error: str = "fail",
+        state_mapping: dict = None,
+        default_result: dict = None,
+    ):
+        self.wasm_hash = wasm_hash
+        self.entrypoint = entrypoint
+        self.timeout_ms = timeout_ms
+        self.fallback_on_error = fallback_on_error
+        self.state_mapping = state_mapping
+        self.default_result = default_result
 
 
-# ---------------------------------------------------------------------------
-# WasmRuntime CM delegation (backward-compat)
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# is_component
+# ─────────────────────────────────────────────────────────────────────────────
 
-class TestWasmRuntimeCMDelegation:
-    @pytest.mark.asyncio
-    async def test_wasm_runtime_delegates_component_to_component_runtime(self):
-        import hashlib
-        binary = CM_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
+def test_is_component_true_for_component_magic():
+    assert is_component(_make_component_binary()) is True
 
-        runtime = WasmRuntime(resolver)
 
-        with patch.object(
-            ComponentStepRuntime,
-            "_call_component",
-            return_value='{"delegated": true}',
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {})
+def test_is_component_false_for_core_magic():
+    assert is_component(_make_core_binary()) is False
 
-        assert result == {"delegated": True}
 
-    @pytest.mark.asyncio
-    async def test_wasm_runtime_uses_legacy_for_core_module(self):
-        import hashlib
-        binary = CORE_MAGIC_8
-        wasm_hash = hashlib.sha256(binary).hexdigest()
-        resolver = MagicMock()
-        resolver.resolve = AsyncMock(return_value=binary)
+def test_is_component_false_for_garbage():
+    assert is_component(b"garbage") is False
 
-        runtime = WasmRuntime(resolver)
 
-        # Patch both the wasmtime import guard and _execute_wasi so wasmtime
-        # doesn't need to be installed in the test environment
-        with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._run_with_binary",
-            new=AsyncMock(return_value={"legacy": True}),
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {})
+def test_is_component_false_for_empty():
+    assert is_component(b"") is False
 
-        assert result == {"legacy": True}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT_MAGIC constant
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_component_magic_length():
+    assert len(COMPONENT_MAGIC) == 8
+
+
+def test_component_magic_is_detected():
+    binary = COMPONENT_MAGIC + b"\x00" * 10
+    assert is_component(binary) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — hash mismatch
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_hash_mismatch_raises():
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_core_binary()
+    resolver = _MockResolver(binary)
+    runtime = ComponentStepRuntime(resolver)
+
+    config = _MockWasmConfig(wasm_hash="0" * 64)  # wrong hash
+    with pytest.raises(RuntimeError, match="hash mismatch"):
+        await runtime.execute(config, {})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — fallback_on_error='skip'
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_skip_on_error():
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_core_binary()
+    actual_hash = hashlib.sha256(binary).hexdigest()
+
+    resolver = _MockResolver(binary)
+    runtime = ComponentStepRuntime(resolver)
+
+    config = _MockWasmConfig(wasm_hash=actual_hash, fallback_on_error="skip")
+
+    # Core binary without wasmtime installed will raise ImportError → skip → {}
+    # Or with wasmtime, it will fail at instantiation → skip → {}
+    result = await runtime.execute(config, {"amount": 100})
+    assert result == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — fallback_on_error='default'
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_default_on_error():
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_core_binary()
+    actual_hash = hashlib.sha256(binary).hexdigest()
+
+    resolver = _MockResolver(binary)
+    runtime = ComponentStepRuntime(resolver)
+
+    default_result = {"status": "fallback"}
+    config = _MockWasmConfig(
+        wasm_hash=actual_hash,
+        fallback_on_error="default",
+        default_result=default_result,
+    )
+
+    result = await runtime.execute(config, {})
+    assert result == default_result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — timeout
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_timeout_triggers_skip():
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_core_binary()
+    actual_hash = hashlib.sha256(binary).hexdigest()
+
+    class _SlowResolver:
+        async def resolve(self, binary_hash: str) -> bytes:
+            await asyncio.sleep(10)  # will be cancelled by timeout
+            return binary
+
+    runtime = ComponentStepRuntime(_SlowResolver())
+    config = _MockWasmConfig(
+        wasm_hash=actual_hash,
+        timeout_ms=50,  # 50 ms timeout
+        fallback_on_error="skip",
+    )
+
+    result = await runtime.execute(config, {})
+    assert result == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — delegates to WasmRuntime for core modules
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_delegates_core_to_legacy(monkeypatch):
+    """When binary is a core module, _run_legacy_wasi is called."""
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_core_binary()
+    actual_hash = hashlib.sha256(binary).hexdigest()
+    resolver = _MockResolver(binary)
+
+    called = {}
+
+    async def _mock_legacy(self_inner, wasm_config, state_data):
+        called["invoked"] = True
+        return {"legacy": True}
+
+    monkeypatch.setattr(
+        ComponentStepRuntime,
+        "_run_legacy_wasi",
+        _mock_legacy,
+    )
+
+    runtime = ComponentStepRuntime(resolver)
+    config = _MockWasmConfig(wasm_hash=actual_hash, fallback_on_error="fail")
+    result = await runtime.execute(config, {})
+
+    assert called.get("invoked") is True
+    assert result == {"legacy": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComponentStepRuntime — component path is dispatched (not legacy)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_component_runtime_dispatches_component_path(monkeypatch):
+    """When binary is a Component Model binary, _run_component is called."""
+    import hashlib
+    from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+
+    binary = _make_component_binary()
+    actual_hash = hashlib.sha256(binary).hexdigest()
+    resolver = _MockResolver(binary)
+
+    called = {}
+
+    async def _mock_component(self_inner, bin_bytes, wasm_config, state_data):
+        called["invoked"] = True
+        return {"component": True}
+
+    monkeypatch.setattr(
+        ComponentStepRuntime,
+        "_run_component",
+        _mock_component,
+    )
+
+    runtime = ComponentStepRuntime(resolver)
+    config = _MockWasmConfig(wasm_hash=actual_hash, fallback_on_error="fail")
+    result = await runtime.execute(config, {})
+
+    assert called.get("invoked") is True
+    assert result == {"component": True}

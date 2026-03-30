@@ -16,7 +16,6 @@ from datetime import datetime
 import hashlib
 
 from rufus_edge.models import DeviceConfig
-from rufus_edge.platform.base import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class ConfigManager:
         api_key: str,
         poll_interval_seconds: int = 60,
         persistence=None,
-        adapter: Optional[PlatformAdapter] = None,
+        platform_adapter=None,
     ):
         self.config_url = config_url
         self.device_id = device_id
@@ -88,9 +87,14 @@ class ConfigManager:
         self._current_config: Optional[DeviceConfig] = None
         self._current_etag: Optional[str] = None
         self._last_poll_at: Optional[datetime] = None
-        self._adapter: Optional[PlatformAdapter] = adapter
+        self._adapter = platform_adapter  # resolved in initialize()
         self._polling_task: Optional[asyncio.Task] = None
         self._on_config_change_callbacks: list[Callable[[DeviceConfig], None]] = []
+
+    @property
+    def _http_client(self):
+        """Legacy alias — returns the adapter for backward compat."""
+        return self._adapter
 
     @property
     def config(self) -> Optional[DeviceConfig]:
@@ -101,12 +105,7 @@ class ConfigManager:
         """Initialize the config manager."""
         if self._adapter is None:
             from rufus_edge.platform import detect_platform
-            self._adapter = detect_platform(
-                default_headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                }
-            )
+            self._adapter = detect_platform()
 
         # Load cached config if available
         await self._load_cached_config()
@@ -125,8 +124,10 @@ class ConfigManager:
             except asyncio.CancelledError:
                 pass
 
-        if self._adapter is not None and hasattr(self._adapter, "aclose"):
-            await self._adapter.aclose()
+        if self._adapter is not None:
+            close = getattr(self._adapter, "close", None)
+            if close is not None:
+                await close()
 
     def on_config_change(self, callback: Callable[[DeviceConfig], None]):
         """Register a callback for config changes."""
@@ -174,7 +175,7 @@ class ConfigManager:
             logger.error("Platform adapter not initialized")
             return False
 
-        req_headers: Dict[str, str] = {
+        req_headers = {
             "X-API-Key": self.api_key,
             "X-Device-ID": self.device_id,
         }
@@ -183,7 +184,7 @@ class ConfigManager:
 
         try:
             response = await self._adapter.http_get(
-                f"{self.config_url}/api/v1/devices/{self.device_id}/config",
+                url=f"{self.config_url}/api/v1/devices/{self.device_id}/config",
                 headers=req_headers,
             )
 
@@ -469,24 +470,20 @@ class ConfigManager:
             logger.info(f"Downloading model {model_name} from {url}")
 
             response = await self._adapter.http_get(
-                url,
-                headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                },
+                url=url,
+                headers={"X-API-Key": self.api_key, "X-Device-ID": self.device_id},
             )
+
             if response.status_code != 200:
                 logger.error(f"Model download failed: HTTP {response.status_code}")
                 return False
 
-            content = response.content
+            model_bytes = response.content
             hasher = hashlib.sha256()
-            hasher.update(content)
-            if progress_callback:
-                progress_callback(len(content), len(content))
+            hasher.update(model_bytes)
 
-            with open(destination_path, "wb") as f:
-                f.write(content)
+            if progress_callback:
+                progress_callback(len(model_bytes), len(model_bytes))
 
             # Verify hash if provided
             if expected_hash:
@@ -496,8 +493,10 @@ class ConfigManager:
                     logger.error(
                         f"Model hash mismatch: expected {expected_hash}, got {actual_hash}"
                     )
-                    os.remove(destination_path)
                     return False
+
+            with open(destination_path, "wb") as f:
+                f.write(model_bytes)
 
             logger.info(f"Model {model_name} downloaded successfully to {destination_path}")
             return True
@@ -605,7 +604,6 @@ class ConfigManager:
             return UpdateInstruction(needs_update=False, message="Platform adapter not initialized")
 
         try:
-            import json as _json
             # Build hardware identity
             hw_identity = await self._get_hardware_identity()
             hw_identity["current_artifact"] = current_artifact
@@ -613,12 +611,9 @@ class ConfigManager:
 
             # Call update-check endpoint
             response = await self._adapter.http_post(
-                f"{self.config_url}/api/v1/update-check",
-                body=_json.dumps(hw_identity).encode("utf-8"),
-                headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                },
+                url=f"{self.config_url}/api/v1/update-check",
+                json=hw_identity,
+                headers={"X-API-Key": self.api_key, "X-Device-ID": self.device_id},
             )
 
             if response.status_code == 200:
@@ -722,24 +717,20 @@ class ConfigManager:
             logger.info(f"Downloading artifact {instruction.artifact}")
 
             response = await self._adapter.http_get(
-                instruction.artifact_url,
-                headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                },
+                url=instruction.artifact_url,
+                headers={"X-API-Key": self.api_key, "X-Device-ID": self.device_id},
             )
+
             if response.status_code != 200:
                 logger.error(f"Artifact download failed: HTTP {response.status_code}")
                 return None
 
-            content = response.content
+            artifact_bytes = response.content
             hasher = hashlib.sha256()
-            hasher.update(content)
-            if progress_callback:
-                progress_callback(len(content), len(content))
+            hasher.update(artifact_bytes)
 
-            with open(destination_path, "wb") as f:
-                f.write(content)
+            if progress_callback:
+                progress_callback(len(artifact_bytes), len(artifact_bytes))
 
             # Verify hash if provided
             if instruction.artifact_hash:
@@ -749,8 +740,10 @@ class ConfigManager:
                     logger.error(
                         f"Artifact hash mismatch: expected {expected}, got {actual_hash}"
                     )
-                    os.remove(destination_path)
                     return None
+
+            with open(destination_path, "wb") as f:
+                f.write(artifact_bytes)
 
             logger.info(f"Artifact downloaded successfully: {destination_path}")
 
@@ -774,17 +767,13 @@ class ConfigManager:
             return
 
         try:
-            import json as _json
-            body_data: Dict[str, Any] = {"status": status}
+            body = {"status": status}
             if error_message:
-                body_data["error_message"] = error_message
+                body["error_message"] = error_message
             await self._adapter.http_post(
-                f"{self.config_url}/api/v1/devices/{self.device_id}/update-status",
-                body=_json.dumps(body_data).encode("utf-8"),
-                headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                },
+                url=f"{self.config_url}/api/v1/devices/{self.device_id}/update-status",
+                json=body,
+                headers={"X-API-Key": self.api_key, "X-Device-ID": self.device_id},
             )
         except Exception as e:
             logger.warning(f"Failed to report update status: {e}")
@@ -890,7 +879,7 @@ class ConfigManager:
                         f"Loaded local workflow definition '{workflow_type}' v{version}"
                     )
                     # Prefetch any WASM binaries referenced by this workflow
-                    if self.persistence and self._adapter:
+                    if self.persistence and self._http_client:
                         await self._prefetch_missing_wasm_binaries(yaml_content)
                 except Exception as e:
                     logger.warning(
@@ -928,7 +917,7 @@ class ConfigManager:
             return False
 
         if not self._adapter:
-            logger.error("sync_wasm: Platform adapter not initialized")
+            logger.error("sync_wasm: platform adapter not initialized")
             return False
 
         # Idempotency check
@@ -949,13 +938,10 @@ class ConfigManager:
         logger.info(f"sync_wasm: downloading {binary_hash[:16]}… from {download_url}")
         try:
             response = await self._adapter.http_get(
-                download_url,
-                headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                },
+                url=download_url,
+                headers={"X-API-Key": self.api_key, "X-Device-ID": self.device_id},
             )
-            if response.status_code != 200:
+            if response.status_code >= 400:
                 raise RuntimeError(f"HTTP {response.status_code}")
             binary_data = response.content
         except Exception as e:

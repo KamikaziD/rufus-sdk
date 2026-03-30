@@ -157,15 +157,16 @@ def has_edge_tpu() -> bool:
             return True
 
         # Check for Coral USB device
-        result = subprocess.run(
-            ["lsusb"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            if "18d1:9302" in result.stdout or "Google" in result.stdout:
-                return True
+        if sys.platform != "wasm32":
+            result = subprocess.run(
+                ["lsusb"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                if "18d1:9302" in result.stdout or "Google" in result.stdout:
+                    return True
     except Exception:
         pass
 

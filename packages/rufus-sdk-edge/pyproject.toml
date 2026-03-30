@@ -1,6 +1,6 @@
 [project]
 name = "rufus-sdk-edge"
-version = "1.0.0rc1"
+version = "0.7.9"
 description = "Rufus edge agent for offline-first fintech devices (POS, ATM, kiosks)"
 authors = [{name = "Rufus Team", email = "team@rufus.dev"}]
 license = {text = "MIT"}
@@ -19,28 +19,23 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["rufus-sdk>=1.0.0rc1"]
+dependencies = ["rufus-sdk>=0.6.0"]
 
 [project.urls]
 Homepage = "https://github.com/KamikaziD/rufus-sdk"
 Repository = "https://github.com/KamikaziD/rufus-sdk"
 
 [project.optional-dependencies]
-# Full-featured native install (POS terminals, ATMs, dev machines)
-edge = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "httpx>=0.27"]
-all  = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "httpx>=0.27"]
-
-# Browser / Pyodide — no native extensions; js.fetch replaces httpx
-# Install with: pip install 'rufus-sdk-edge[browser]'
-browser = []
-
-# WASI 0.3 compiled target — zero extra deps (wasi:http used for HTTP)
-# Install with: pip install 'rufus-sdk-edge[wasi]'
-wasi = []
-
-# wasmtime Component Model support on native Python
-# Install with: pip install 'rufus-sdk-edge[native-wasm]'
-native-wasm = ["wasmtime>=20"]
+# Default edge install (native CPython on POS/ATM/kiosk)
+edge    = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24"]
+# Browser target (Pyodide) — no psutil, no websockets, no httpx
+browser = ["numpy>=1.24"]
+# WASI 0.3 target — zero extra runtime deps (pure Python + stdlib)
+wasi    = []
+# Native CPython with Component Model support
+native  = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
+# Everything
+all     = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
 
 [build-system]
 requires = ["hatchling"]

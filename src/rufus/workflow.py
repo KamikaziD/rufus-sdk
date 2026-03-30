@@ -16,6 +16,23 @@ from rufus.models import (
 )
 
 
+class _MissingWasmResolver:
+    """Sentinel resolver used when no persistence connection is available.
+
+    Raises a helpful error rather than silently failing at resolve time.
+    """
+
+    def __init__(self, step_name: str) -> None:
+        self._step_name = step_name
+
+    async def resolve(self, binary_hash: str) -> bytes:
+        raise RuntimeError(
+            f"WASM step '{self._step_name}' requires a WasmBinaryResolver. "
+            "Pass a WasmRuntime or ComponentStepRuntime instance via wasm_runtime= "
+            "when creating the Workflow, or ensure the persistence provider exposes a .conn attribute."
+        )
+
+
 def _resolve_state_path(state_dict: dict, path: str):
     """Resolve a dot-notation path against a state dict.
 
@@ -831,15 +848,28 @@ class Workflow:
                         self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
 
             elif isinstance(step, WasmWorkflowStep):
-                if self.wasm_runtime is None:
-                    raise RuntimeError(
-                        f"WasmRuntime (or ComponentStepRuntime) is not configured but step '{step.name}' requires it. "
-                        "Pass a runtime instance via wasm_runtime= when creating the Workflow, "
-                        "or use WorkflowBuilder which auto-wires ComponentStepRuntime when a resolver is available."
-                    )
-                # ComponentStepRuntime and WasmRuntime share the same execute() signature.
-                # ComponentStepRuntime auto-detects Component Model vs legacy core modules.
-                result = await self.wasm_runtime.execute(step.wasm_config, self.state.model_dump())
+                # Use ComponentStepRuntime (auto-detects Component Model vs legacy core module).
+                # Fall back to the explicitly supplied wasm_runtime if provided (backward compat).
+                if self.wasm_runtime is not None:
+                    _wasm_executor = self.wasm_runtime
+                else:
+                    # Auto-build a ComponentStepRuntime backed by an in-memory resolver if
+                    # no resolver is available (edge: SqliteWasmBinaryResolver is wired by
+                    # the EdgeAgent; cloud: DiskWasmBinaryResolver is wired by WorkflowBuilder).
+                    try:
+                        from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+                        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+                        _wasm_executor = ComponentStepRuntime(
+                            SqliteWasmBinaryResolver(self.persistence.conn)
+                            if hasattr(self.persistence, "conn")
+                            else _MissingWasmResolver(step.name)
+                        )
+                    except Exception as _e:
+                        raise RuntimeError(
+                            f"No WasmRuntime configured for step '{step.name}' and "
+                            f"ComponentStepRuntime could not be initialised: {_e}"
+                        )
+                result = await _wasm_executor.execute(step.wasm_config, self.state.model_dump())
                 if isinstance(result, dict):
                     self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
                     await self.persistence.save_workflow(self.id, self.to_dict())

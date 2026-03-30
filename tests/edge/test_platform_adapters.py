@@ -1,237 +1,309 @@
 """
 Unit tests for rufus_edge.platform adapters.
 
-All three adapters (Native, Pyodide, WASI) are tested with mocked HTTP so
-the tests run on native CPython without a browser or WASI runtime.
+Tests all three adapters (native, wasi, pyodide) using mock HTTP to avoid
+real network calls.
 """
-
-from __future__ import annotations
 
 import asyncio
 import json
-from typing import Dict, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
-from rufus_edge.platform.base import HttpResponse, PlatformAdapter, SystemMetrics
+from rufus_edge.platform import detect_platform, get_adapter
+from rufus_edge.platform.base import NullSystemMetrics
+from rufus.wasm_component import is_component as _is_component
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
-def make_response(status: int, body: dict | bytes | str, headers: dict = None) -> HttpResponse:
-    if isinstance(body, dict):
-        raw = json.dumps(body).encode()
-    elif isinstance(body, str):
-        raw = body.encode()
-    else:
-        raw = body
-    return HttpResponse(status_code=status, body=raw, headers=headers or {})
+class _MockHttpResponse:
+    def __init__(self, status: int, body: dict, hdrs: dict = None):
+        self.status_code = status
+        self._body = body
+        self.headers = hdrs or {}
+        self.content = json.dumps(body).encode()
 
+    def json(self):
+        return self._body
 
-# ---------------------------------------------------------------------------
-# NativePlatformAdapter
-# ---------------------------------------------------------------------------
-
-class TestNativePlatformAdapter:
-    def _make_adapter(self):
-        from rufus_edge.platform.native import NativePlatformAdapter
-        return NativePlatformAdapter(default_headers={"X-App": "test"})
-
-    @pytest.mark.asyncio
-    async def test_http_get_success(self):
-        adapter = self._make_adapter()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = json.dumps({"ok": True}).encode()
-        mock_resp.headers = {"content-type": "application/json"}
-
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
-            resp = await adapter.http_get("http://example.com/health")
-
-        assert resp.status_code == 200
-        assert resp.json() == {"ok": True}
-
-    @pytest.mark.asyncio
-    async def test_http_post_success(self):
-        adapter = self._make_adapter()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.content = json.dumps({"id": "abc"}).encode()
-        mock_resp.headers = {}
-
-        with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_resp)):
-            resp = await adapter.http_post(
-                "http://example.com/sync",
-                body=json.dumps({"txn": 1}).encode(),
-            )
-
-        assert resp.status_code == 201
-        assert resp.json()["id"] == "abc"
-
-    def test_get_system_metrics_returns_metrics_object(self):
-        adapter = self._make_adapter()
-        # psutil may or may not be installed in CI — either way we get a SystemMetrics
-        metrics = adapter.get_system_metrics()
-        assert isinstance(metrics, SystemMetrics)
-        assert metrics.cpu_percent >= 0.0
-
-    @pytest.mark.asyncio
-    async def test_default_headers_merged(self):
-        """default_headers must be merged into every outgoing request."""
-        from rufus_edge.platform.native import NativePlatformAdapter
-        adapter = NativePlatformAdapter(default_headers={"Authorization": "Bearer tok"})
-
-        captured: Dict = {}
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"{}"
-        mock_resp.headers = {}
-
-        async def fake_client_get(url, headers=None, timeout=30.0):
-            captured.update(headers or {})
-            return mock_resp
-
-        # Patch the underlying httpx client .get method
-        client = await adapter._get_client()
-        with patch.object(client, "get", side_effect=fake_client_get):
-            await adapter.http_get("http://example.com")
-
-        assert captured.get("Authorization") == "Bearer tok"
-
-    @pytest.mark.asyncio
-    async def test_aclose_is_idempotent(self):
-        from rufus_edge.platform.native import NativePlatformAdapter
-        adapter = NativePlatformAdapter()
-        # Should not raise even if client was never created
-        await adapter.aclose()
-        await adapter.aclose()
+    def text(self):
+        return json.dumps(self._body)
 
 
-# ---------------------------------------------------------------------------
-# WasiPlatformAdapter (native fallback path)
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# NullSystemMetrics
+# ─────────────────────────────────────────────────────────────────────────────
 
-class TestWasiPlatformAdapter:
-    def _make_adapter(self):
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
-        adapter = WasiPlatformAdapter()
-        # Force native (httpx) path regardless of sys.platform
-        adapter._in_wasi = False
-        return adapter
-
-    @pytest.mark.asyncio
-    async def test_http_get_uses_httpx_fallback(self):
-        adapter = self._make_adapter()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b'{"status":"ok"}'
-        mock_resp.headers = {}
-
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
-            resp = await adapter.http_get("http://example.com/health")
-
-        assert resp.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_http_post_uses_httpx_fallback(self):
-        adapter = self._make_adapter()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b'{"accepted":[]}'
-        mock_resp.headers = {}
-
-        with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_resp)):
-            resp = await adapter.http_post("http://example.com/sync", body=b"{}")
-
-        assert resp.status_code == 200
-
-    def test_system_metrics_are_zeros_in_wasi(self):
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
-        adapter = WasiPlatformAdapter()
-        adapter._in_wasi = True
-        m = adapter.get_system_metrics()
-        assert m.cpu_percent == 0.0
-        assert m.memory_used_mb == 0.0
+def test_null_system_metrics_returns_empty_dict():
+    metrics = NullSystemMetrics()
+    result = metrics.collect()
+    assert isinstance(result, dict)
+    assert result == {}
 
 
-# ---------------------------------------------------------------------------
-# PyodidePlatformAdapter (mocked js.fetch)
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# wasm_component.is_component
+# ─────────────────────────────────────────────────────────────────────────────
 
-class TestPyodidePlatformAdapter:
-    """
-    PyodidePlatformAdapter requires ``js`` and ``pyodide`` modules which only
-    exist inside Pyodide.  We stub them out here.
-    """
-
-    def _make_adapter(self):
-        # Stub the pyodide modules before importing the adapter
-        import sys
-        import types
-
-        # Create fake js module
-        js_mod = types.ModuleType("js")
-        pyodide_mod = types.ModuleType("pyodide")
-        pyodide_ffi = types.ModuleType("pyodide.ffi")
-        pyodide_ffi.to_js = lambda x, **kw: x  # identity
-        pyodide_mod.ffi = pyodide_ffi
-
-        sys.modules.setdefault("js", js_mod)
-        sys.modules.setdefault("pyodide", pyodide_mod)
-        sys.modules.setdefault("pyodide.ffi", pyodide_ffi)
-
-        from rufus_edge.platform.pyodide import PyodidePlatformAdapter
-        return PyodidePlatformAdapter(default_headers={"X-Test": "1"})
-
-    def test_system_metrics_are_zeros(self):
-        adapter = self._make_adapter()
-        m = adapter.get_system_metrics()
-        assert m.cpu_percent == 0.0
-
-    def test_conforms_to_protocol(self):
-        adapter = self._make_adapter()
-        assert isinstance(adapter, PlatformAdapter)
+def test_is_component_detects_component_magic():
+    component_binary = b"\x00asm\x0d\x00\x01\x00" + b"\x00" * 100
+    assert _is_component(component_binary) is True
 
 
-# ---------------------------------------------------------------------------
-# detect_platform() auto-selector
-# ---------------------------------------------------------------------------
+def test_is_component_rejects_core_module():
+    core_binary = b"\x00asm\x01\x00\x00\x00" + b"\x00" * 100
+    assert _is_component(core_binary) is False
 
-class TestDetectPlatform:
-    def test_returns_native_on_cpython(self, monkeypatch):
-        import sys
-        import importlib
-        from rufus_edge.platform.native import NativePlatformAdapter
 
-        if sys.platform == "wasm32":
-            pytest.skip("Running inside WASM")
+def test_is_component_rejects_short_binary():
+    assert _is_component(b"\x00asm") is False
+    assert _is_component(b"") is False
 
-        # Remove any stub 'js' module that earlier tests may have injected
-        monkeypatch.delitem(sys.modules, "js", raising=False)
 
-        # Reload the platform package so detect_platform() re-evaluates
-        import rufus_edge.platform as platform_pkg
-        importlib.reload(platform_pkg)
+def test_is_component_rejects_non_wasm():
+    assert _is_component(b"PK\x03\x04") is False  # ZIP magic
+    assert _is_component(b"\x7fELF") is False      # ELF magic
 
-        adapter = platform_pkg.detect_platform()
-        assert isinstance(adapter, NativePlatformAdapter)
 
-    def test_returns_wasi_on_wasm32(self, monkeypatch):
-        import sys
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
+# ─────────────────────────────────────────────────────────────────────────────
+# detect_platform
+# ─────────────────────────────────────────────────────────────────────────────
 
-        monkeypatch.setattr(sys, "platform", "wasm32")
-        from importlib import reload
-        import rufus_edge.platform as platform_pkg
-        reload(platform_pkg)
-        adapter = platform_pkg.detect_platform()
-        assert isinstance(adapter, WasiPlatformAdapter)
+def test_detect_platform_returns_native_on_cpython():
+    """On native CPython, detect_platform() must return NativePlatformAdapter."""
+    import sys
+    # Guard: only run if not inside a WASI or Pyodide environment
+    if sys.platform == "wasm32" or "pyodide" in sys.modules:
+        pytest.skip("Not running on native CPython")
 
-    def test_http_response_json(self):
-        resp = HttpResponse(status_code=200, body=b'{"key": "value"}')
-        assert resp.json() == {"key": "value"}
-        assert resp.text == '{"key": "value"}'
-        assert resp.content == b'{"key": "value"}'
+    from rufus_edge.platform.native import NativePlatformAdapter
+    adapter = detect_platform()
+    assert isinstance(adapter, NativePlatformAdapter)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NativePlatformAdapter (using monkey-patched httpx)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_native_http_get_success(monkeypatch):
+    from rufus_edge.platform.native import NativePlatformAdapter
+
+    expected = {"status": "ok"}
+
+    class _FakeClient:
+        async def get(self, url, **kwargs):
+            return type("R", (), {
+                "status_code": 200,
+                "json": lambda self: expected,
+                "text": "ok",
+                "headers": {},
+                "content": json.dumps(expected).encode(),
+            })()
+
+        async def aclose(self):
+            pass
+
+    adapter = NativePlatformAdapter()
+    adapter._client = _FakeClient()
+
+    resp = await adapter.http_get("http://test/health", headers={})
+    assert resp.status_code == 200
+    assert resp.json() == expected
+
+
+@pytest.mark.asyncio
+async def test_native_http_post_success(monkeypatch):
+    from rufus_edge.platform.native import NativePlatformAdapter
+
+    captured = {}
+    expected = {"accepted": []}
+
+    class _FakeClient:
+        async def post(self, url, json=None, **kwargs):
+            captured["url"] = url
+            captured["json"] = json
+            return type("R", (), {
+                "status_code": 200,
+                "json": lambda self: expected,
+                "text": "{}",
+                "headers": {},
+                "content": b"{}",
+            })()
+
+        async def aclose(self):
+            pass
+
+    adapter = NativePlatformAdapter()
+    adapter._client = _FakeClient()
+
+    payload = {"transactions": []}
+    resp = await adapter.http_post("http://test/sync", json=payload, headers={})
+    assert resp.status_code == 200
+    assert captured["json"] == payload
+
+
+def test_native_system_metrics_returns_dict():
+    from rufus_edge.platform.native import NativePlatformAdapter
+
+    adapter = NativePlatformAdapter()
+    metrics = adapter.system_metrics()
+    assert isinstance(metrics, dict)
+    # Either has psutil keys or is empty — both are valid
+    for key in metrics:
+        assert key in ("cpu_percent", "mem_percent", "disk_percent")
+
+
+def test_native_is_wasm_capable_returns_bool():
+    from rufus_edge.platform.native import NativePlatformAdapter
+
+    adapter = NativePlatformAdapter()
+    result = adapter.is_wasm_capable()
+    assert isinstance(result, bool)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WasiPlatformAdapter (urllib fallback, no actual WASI host needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_wasi_system_metrics_returns_empty():
+    from rufus_edge.platform.wasi import WasiPlatformAdapter
+
+    adapter = WasiPlatformAdapter()
+    assert adapter.system_metrics() == {}
+
+
+def test_wasi_is_wasm_capable():
+    from rufus_edge.platform.wasi import WasiPlatformAdapter
+
+    adapter = WasiPlatformAdapter()
+    assert adapter.is_wasm_capable() is True
+
+
+@pytest.mark.asyncio
+async def test_wasi_http_get_via_urllib(monkeypatch):
+    """WasiPlatformAdapter._urllib_request works when mocked."""
+    from rufus_edge.platform.wasi import WasiPlatformAdapter, _WasiHttpResponse
+
+    async def _fake_request(method, url, headers, body):
+        return _WasiHttpResponse(200, b'{"status":"ok"}', {})
+
+    adapter = WasiPlatformAdapter()
+    monkeypatch.setattr(adapter, "_urllib_request", _fake_request)
+
+    resp = await adapter.http_get("http://fake/health", headers={})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PyodidePlatformAdapter (urllib fallback when js module absent)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_pyodide_system_metrics_returns_empty():
+    from rufus_edge.platform.pyodide import PyodidePlatformAdapter
+
+    adapter = PyodidePlatformAdapter()
+    assert adapter.system_metrics() == {}
+
+
+def test_pyodide_is_wasm_capable_false_outside_browser():
+    from rufus_edge.platform.pyodide import PyodidePlatformAdapter
+
+    adapter = PyodidePlatformAdapter()
+    # Outside Pyodide, js module not importable → False
+    assert adapter.is_wasm_capable() is False
+
+
+@pytest.mark.asyncio
+async def test_pyodide_http_get_via_urllib(monkeypatch):
+    """PyodidePlatformAdapter falls back to urllib when js is absent."""
+    from rufus_edge.platform.pyodide import PyodidePlatformAdapter, _PyodideHttpResponse
+
+    async def _fake_fetch(method, url, headers, body):
+        return _PyodideHttpResponse(200, b'{"pong":true}', {})
+
+    adapter = PyodidePlatformAdapter()
+    monkeypatch.setattr(adapter, "_urllib_fetch", _fake_fetch)
+    # Also prevent js import path from being tried
+    monkeypatch.setattr(adapter, "_js_fetch", _fake_fetch)
+
+    resp = await adapter.http_get("http://fake/ping", headers={})
+    assert resp.status_code == 200
+    assert resp.json()["pong"] is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SyncManager adapter wiring
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sync_manager_uses_injected_adapter():
+    """SyncManager.check_connectivity() uses the injected adapter."""
+    from rufus_edge.sync_manager import SyncManager
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+
+    mock_adapter = MagicMock()
+    mock_adapter.http_get = AsyncMock(return_value=mock_response)
+
+    mock_persistence = MagicMock()
+
+    sm = SyncManager(
+        persistence=mock_persistence,
+        sync_url="http://fake",
+        device_id="dev-001",
+        api_key="key",
+        platform_adapter=mock_adapter,
+    )
+    sm._adapter = mock_adapter  # skip initialize()
+
+    result = await sm.check_connectivity()
+    assert result is True
+    mock_adapter.http_get.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigManager adapter wiring
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_config_manager_uses_injected_adapter():
+    """ConfigManager.pull_config() uses the injected adapter."""
+    from rufus_edge.config_manager import ConfigManager
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_config = {
+        "device_id": "dev-001",
+        "version": "1.0",
+        "floor_limit": "25.00",
+        "fraud_rules": [],
+        "features": {},
+        "workflows": {},
+        "models": {},
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_config
+    mock_response.headers = {}
+
+    mock_adapter = MagicMock()
+    mock_adapter.http_get = AsyncMock(return_value=mock_response)
+
+    cm = ConfigManager(
+        config_url="http://fake",
+        device_id="dev-001",
+        api_key="key",
+        platform_adapter=mock_adapter,
+    )
+    cm._adapter = mock_adapter  # skip auto-detect in initialize()
+
+    updated = await cm.pull_config()
+    assert updated is True
+    assert cm.config is not None
+    mock_adapter.http_get.assert_called_once()

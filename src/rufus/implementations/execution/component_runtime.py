@@ -1,24 +1,18 @@
 """
-ComponentStepRuntime — Component Model WASM executor for Rufus.
+ComponentStepRuntime — WASM Component Model executor for Rufus workflow steps.
 
-Supersedes the stdin/stdout WasmRuntime for modules compiled with the
-WASI 0.3 / Component Model toolchain.
+Replaces the stdin/stdout-based WasmRuntime for binaries that implement the
+rufus:step@0.1.0 WIT interface.  Maintains full backward compatibility: if the
+binary is a legacy core WASM module it delegates to WasmRuntime._execute_wasi().
 
-Detection logic
----------------
-* Component Model magic: ``\\x00asm`` at offset 0 **and** version bytes ``\\x0e\\x00``
-  at offset 4 (core modules use ``\\x01\\x00\\x00\\x00``).
-* Anything else is treated as a core WASM module and routed to the legacy
-  ``WasmRuntime`` stdin/stdout path (full backward compat).
+Detection logic (per spec §8):
+  - binary[:8] == b'\\x00asm\\x0d\\x00\\x01\\x00'  → Component Model → _run_component()
+  - binary[:8] == b'\\x00asm\\x01\\x00\\x00\\x00'  → Core module   → _run_legacy_wasi()
 
-Component contract
-------------------
-The component must export ``rufus:step/runner#execute`` as defined in
-``src/rufus/wasm_component/step.wit``::
-
-    execute: func(state-json: string, step-name: string) -> result<string, step-error>
-
-Native execution uses ``wasmtime.component`` (``pip install wasmtime``).
+Platform dispatch:
+  - Native CPython: wasmtime.component Python bindings
+  - Browser (Pyodide): js.WebAssembly + Component Model polyfill (cm-js)
+  - WASI host: component is executed by the surrounding host runtime
 """
 
 from __future__ import annotations
@@ -27,45 +21,46 @@ import asyncio
 import hashlib
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
+
+from rufus.wasm_component import is_component
+from rufus.implementations.execution.wasm_runtime import WasmBinaryResolver, WasmRuntime
 
 logger = logging.getLogger(__name__)
-
-# Component Model magic: first 8 bytes of a .wasm Component
-# Core module:  \x00asm\x01\x00\x00\x00
-# Component:    \x00asm\x0e\x00\x01\x00
-_CM_MAGIC = b"\x00asm\x0e\x00"
-
-
-def is_component(binary: bytes) -> bool:
-    """Return True if *binary* looks like a Component Model module."""
-    return len(binary) >= 6 and binary[:6] == _CM_MAGIC
 
 
 class ComponentStepRuntime:
     """
-    Execute WASM step components via the Component Model typed interface.
+    Executes WASM Component Model steps (rufus:step@0.1.0 world).
 
-    Falls back transparently to the legacy stdin/stdout ``WasmRuntime`` for
-    old core-module binaries so that existing deployments keep working.
+    Falls back to the legacy WasmRuntime for core WASM modules so that
+    existing binaries continue to work without recompilation.
 
     Args:
-        resolver: A ``WasmBinaryResolver`` that provides raw ``.wasm`` bytes.
+        resolver: WasmBinaryResolver that supplies raw .wasm bytes.
     """
 
-    def __init__(self, resolver):
+    def __init__(self, resolver: WasmBinaryResolver) -> None:
         self._resolver = resolver
+        self._legacy_runtime = WasmRuntime(resolver)
 
     async def execute(
         self,
-        wasm_config,  # WasmConfig
+        wasm_config,  # WasmConfig — imported at call site to avoid circular imports
         state_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Execute a WASM step and return a dict to merge into workflow state.
+        """Execute a WASM step, auto-detecting Component Model vs legacy core module.
 
-        Routing:
-        - Component Model binary → ``_run_component``
-        - Core module binary    → legacy ``WasmRuntime._execute_wasi`` path
+        Args:
+            wasm_config: WasmConfig instance (hash, entrypoint, mapping, timeout).
+            state_data:  Current workflow state as a plain dict.
+
+        Returns:
+            Dict to be merged into workflow state.
+
+        Raises:
+            RuntimeError: On execution error (when fallback_on_error='fail').
+            FileNotFoundError: If the binary cannot be resolved.
         """
         try:
             return await asyncio.wait_for(
@@ -78,11 +73,17 @@ class ComponentStepRuntime:
                 f"(hash={wasm_config.wasm_hash})"
             )
             return self._handle_error(wasm_config, RuntimeError(msg))
+        except Exception as exc:
+            return self._handle_error(wasm_config, exc)
 
-    async def _dispatch(self, wasm_config, state_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _dispatch(
+        self,
+        wasm_config,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
         binary = await self._resolver.resolve(wasm_config.wasm_hash)
 
-        # Verify integrity
+        # Integrity check
         actual_hash = hashlib.sha256(binary).hexdigest()
         if actual_hash != wasm_config.wasm_hash:
             raise RuntimeError(
@@ -93,10 +94,10 @@ class ComponentStepRuntime:
         if is_component(binary):
             return await self._run_component(binary, wasm_config, state_data)
         else:
-            return await self._run_legacy(binary, wasm_config, state_data)
+            return await self._run_legacy_wasi(wasm_config, state_data)
 
     # ------------------------------------------------------------------
-    # Component Model path (wasmtime.component)
+    # Component Model path
     # ------------------------------------------------------------------
 
     async def _run_component(
@@ -105,173 +106,175 @@ class ComponentStepRuntime:
         wasm_config,
         state_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Execute a Component Model binary via wasmtime.component."""
-        if wasm_config.state_mapping:
-            input_data = {
-                wasm_key: state_data.get(state_key)
-                for state_key, wasm_key in wasm_config.state_mapping.items()
-            }
-        else:
-            input_data = state_data
-
-        state_json = json.dumps(input_data)
-        step_name = getattr(wasm_config, "entrypoint", "execute")
-
-        loop = asyncio.get_event_loop()
+        """Execute a Component Model binary via wasmtime.component (native)
+        or js.WebAssembly (browser/Pyodide)."""
         try:
-            result_json = await loop.run_in_executor(
-                None,
-                lambda: self._call_component(binary, state_json, step_name),
-            )
-        except Exception as exc:
-            return self._handle_error(wasm_config, exc)
+            import js  # noqa: F401  — Pyodide environment
+            return await self._run_component_browser(binary, wasm_config, state_data)
+        except ImportError:
+            pass
 
+        # Native CPython — try wasmtime.component
         try:
-            result = json.loads(result_json)
-        except json.JSONDecodeError as exc:
-            return self._handle_error(
-                wasm_config,
-                RuntimeError(f"Component returned non-JSON: {result_json[:200]!r}"),
+            return await self._run_component_native(binary, wasm_config, state_data)
+        except ImportError:
+            raise ImportError(
+                "wasmtime is required for Component Model WASM steps on native CPython. "
+                "Install it with: pip install wasmtime  (or use the 'native' extra)"
             )
-
-        if not isinstance(result, dict):
-            return self._handle_error(
-                wasm_config,
-                RuntimeError(
-                    f"Component result must be a JSON object, got {type(result).__name__}"
-                ),
-            )
-        return result
 
     @staticmethod
-    def _call_component(binary: bytes, state_json: str, step_name: str) -> str:
-        """Synchronous Component Model call — runs in thread-pool executor."""
-        try:
-            from wasmtime import Engine, Store, Config  # type: ignore[import]
-            from wasmtime.component import Component, Linker  # type: ignore[import]
-        except ImportError as exc:
-            raise ImportError(
-                "wasmtime ≥ 20 with Component Model support is required. "
-                "Install it with: pip install wasmtime"
-            ) from exc
-
-        config = Config()
-        config.async_support = False
-        engine = Engine(config)
-        store = Store(engine)
-        component = Component(engine, binary)
-        linker = Linker(engine)
-
-        # Add WASI preview2 to the linker (needed by most components)
-        try:
-            from wasmtime.component import add_to_linker as add_wasi  # type: ignore[import]
-            add_wasi(linker)
-        except Exception:
-            pass  # Component may not need WASI
-
-        instance = linker.instantiate(store, component)
-
-        # Resolve the exported function: rufus:step/runner#execute
-        try:
-            # Try canonical interface path first
-            runner = instance.exports(store).get("rufus:step/runner")
-            if runner is not None:
-                execute_fn = runner.get("execute")
-            else:
-                # Fallback: flat export named "execute"
-                execute_fn = instance.exports(store).get("execute")
-        except Exception:
-            execute_fn = instance.exports(store).get("execute")
-
-        if execute_fn is None:
-            raise RuntimeError(
-                "Component does not export 'rufus:step/runner#execute' or 'execute'. "
-                "Ensure the component implements the rufus:step/runner interface."
-            )
-
-        # Call: execute(state_json: string, step_name: string) -> result<string, step-error>
-        outcome = execute_fn(store, state_json, step_name)
-
-        # wasmtime returns a Python Result-like value (ok/err variant)
-        if hasattr(outcome, "value"):
-            # Variant: outcome.tag == 0 (ok) or 1 (err)
-            if outcome.tag == 0:
-                return outcome.value
-            else:
-                err = outcome.value
-                code = getattr(err, "code", "UNKNOWN")
-                message = getattr(err, "message", str(err))
-                raise RuntimeError(f"Component step error [{code}]: {message}")
-        # Some bindings return the value directly on ok, raise on err
-        return str(outcome)
-
-    # ------------------------------------------------------------------
-    # Legacy stdin/stdout path
-    # ------------------------------------------------------------------
-
-    async def _run_legacy(
-        self,
+    async def _run_component_native(
         binary: bytes,
         wasm_config,
         state_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Delegate to the legacy WasmRuntime stdin/stdout path."""
-        # Import here to avoid circular dependency
-        from rufus.implementations.execution.wasm_runtime import WasmRuntime
+        """Invoke the rufus:step execute() export via wasmtime.component."""
+        from wasmtime import Engine, Store
+        from wasmtime.component import Component, Linker
 
-        logger.debug(
-            f"WASM binary {wasm_config.wasm_hash[:16]}… is a core module; "
-            "using legacy stdin/stdout path"
-        )
-
+        # Build state JSON input
         if wasm_config.state_mapping:
-            input_data = {
+            input_state = {
                 wasm_key: state_data.get(state_key)
                 for state_key, wasm_key in wasm_config.state_mapping.items()
             }
         else:
-            input_data = state_data
+            input_state = state_data
 
-        stdin_bytes = json.dumps(input_data).encode("utf-8")
+        state_json = json.dumps(input_state)
 
         loop = asyncio.get_event_loop()
-        try:
-            result_bytes = await loop.run_in_executor(
-                None,
-                lambda: WasmRuntime._execute_wasi(
-                    binary, stdin_bytes, wasm_config.entrypoint
-                ),
-            )
-        except Exception as exc:
-            return self._handle_error(wasm_config, exc)
+
+        def _sync_execute():
+            engine = Engine()
+            store = Store(engine)
+            component = Component(engine, binary)
+            linker = Linker(engine)
+            # Basic WASI imports needed by many components
+            try:
+                linker.define_wasi()
+            except Exception:
+                pass  # Component may not import WASI
+
+            instance = linker.instantiate(store, component)
+            # Call the exported execute function
+            # Interface: execute(state: string, step-name: string) -> result<string, step-error>
+            execute_fn = instance.exports(store).get("execute")
+            if execute_fn is None:
+                # Try kebab-case export name
+                execute_fn = instance.exports(store).get("rufus:step/step-component#execute")
+            if execute_fn is None:
+                raise RuntimeError(
+                    "Component does not export 'execute'. "
+                    "Ensure it implements the rufus:step@0.1.0 world."
+                )
+            result = execute_fn(store, state_json, wasm_config.entrypoint)
+            # wasmtime.component returns a Python tuple/variant for result<T, E>
+            # Convention: (True, value) = ok, (False, error) = err
+            if isinstance(result, tuple) and len(result) == 2:
+                ok, payload = result
+                if ok:
+                    return payload
+                else:
+                    raise RuntimeError(
+                        f"Component step error (code={getattr(payload, 'code', '?')}): "
+                        f"{getattr(payload, 'message', str(payload))}"
+                    )
+            # Flat string return (simplified binding)
+            return result
+
+        result_json = await loop.run_in_executor(None, _sync_execute)
 
         try:
-            result = json.loads(result_bytes)
-        except json.JSONDecodeError:
-            return self._handle_error(
-                wasm_config,
-                RuntimeError(f"WASM stdout is not valid JSON: {result_bytes[:200]!r}"),
+            result = json.loads(result_json)
+        except (json.JSONDecodeError, TypeError):
+            raise RuntimeError(
+                f"Component execute() did not return valid JSON: {result_json!r}"
             )
 
         if not isinstance(result, dict):
-            return self._handle_error(
-                wasm_config,
-                RuntimeError(
-                    f"WASM result must be a JSON object, got {type(result).__name__}"
-                ),
+            raise RuntimeError(
+                f"Component execute() result must be a JSON object, got {type(result).__name__}"
             )
+
+        return result
+
+    @staticmethod
+    async def _run_component_browser(
+        binary: bytes,
+        wasm_config,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Invoke the component via js.WebAssembly (Pyodide / browser)."""
+        import js
+        from pyodide.ffi import to_js
+
+        if wasm_config.state_mapping:
+            input_state = {
+                wasm_key: state_data.get(state_key)
+                for state_key, wasm_key in wasm_config.state_mapping.items()
+            }
+        else:
+            input_state = state_data
+
+        state_json = json.dumps(input_state)
+
+        # Compile and instantiate via js.WebAssembly
+        bytes_js = to_js(binary)
+        module = await js.WebAssembly.compile(bytes_js)
+        instance = await js.WebAssembly.instantiate(module, to_js({}))
+        exports = instance.exports
+
+        execute_fn = getattr(exports, "execute", None)
+        if execute_fn is None:
+            raise RuntimeError(
+                "Component does not export 'execute'. "
+                "Ensure it implements the rufus:step@0.1.0 world."
+            )
+
+        result_json = execute_fn(state_json, wasm_config.entrypoint)
+
+        try:
+            result = json.loads(str(result_json))
+        except (json.JSONDecodeError, TypeError):
+            raise RuntimeError(
+                f"Component execute() did not return valid JSON: {result_json!r}"
+            )
+
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"Component execute() result must be a JSON object, got {type(result).__name__}"
+            )
+
         return result
 
     # ------------------------------------------------------------------
-    # Error policy
+    # Legacy WASI path
+    # ------------------------------------------------------------------
+
+    async def _run_legacy_wasi(
+        self,
+        wasm_config,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Delegate to the original WasmRuntime for core WASM modules."""
+        logger.debug(
+            f"WASM step '{wasm_config.entrypoint}': legacy core module detected, "
+            "falling back to stdin/stdout interface"
+        )
+        return await self._legacy_runtime.execute(wasm_config, state_data)
+
+    # ------------------------------------------------------------------
+    # Error handling
     # ------------------------------------------------------------------
 
     def _handle_error(self, wasm_config, exc: Exception) -> Dict[str, Any]:
         mode = wasm_config.fallback_on_error
         if mode == "skip":
-            logger.warning(f"WASM/Component step error (skip): {exc}")
+            logger.warning(f"WASM component step error (skip): {exc}")
             return {}
         if mode == "default":
-            logger.warning(f"WASM/Component step error (default): {exc}")
+            logger.warning(f"WASM component step error (default): {exc}")
             return wasm_config.default_result or {}
         raise RuntimeError(str(exc)) from exc

@@ -929,97 +929,6 @@ def test_workflow_executor_portable(executor):
     ...
 ```
 
-### Direct `Workflow()` Instantiation in Tests
-
-`Workflow.__init__` requires **all 6 providers** — it raises `ValueError` if any is `None`:
-`persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, `template_engine_cls`.
-
-The recommended approach is `WorkflowBuilder.create_workflow()` which handles wiring. For tests that need direct `Workflow` access:
-
-```python
-from unittest.mock import MagicMock
-from rufus.workflow import Workflow
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-
-wf = Workflow(
-    workflow_id="test-wf",
-    workflow_steps=[step],
-    initial_state_model=MyState(),
-    workflow_type="MyType",
-    persistence_provider=InMemoryPersistence(),
-    execution_provider=SyncExecutor(),
-    workflow_observer=observer,            # MagicMock() if not under test
-    workflow_builder=MagicMock(),          # MagicMock() is fine for most tests
-    expression_evaluator_cls=SimpleExpressionEvaluator,
-    template_engine_cls=Jinja2TemplateEngine,
-)
-```
-
-### SAFTransaction Required Fields
-
-When writing test data that exercises the `SyncManager._get_pending_transactions()` path, the `task_data` stored in the tasks table **must** contain a `"transaction"` key with all required `SAFTransaction` fields:
-
-```python
-task_data = {
-    "transaction": {
-        "transaction_id": "txn-001",
-        "idempotency_key": "key-001",
-        "device_id": "device-001",       # required
-        "merchant_id": "merch-001",      # required
-        "amount": "9.99",                # required (Decimal-compatible string)
-        "currency": "USD",               # optional, defaults to "USD"
-        "card_token": "tok_test",        # required
-        "card_last_four": "4242",        # required
-    }
-}
-```
-
-Malformed transactions are silently skipped (logged as WARNING), so tests that assert on pending transaction counts will silently get 0 if required fields are missing.
-
-### `get_edge_sync_state` Return Value
-
-`get_edge_sync_state(key: str) -> Optional[str]` returns a **plain string** (or `None`), not a `SyncStateRecord`. Access the result directly:
-
-```python
-stored = await persistence.get_edge_sync_state("api_key")
-if stored:
-    api_key = stored  # already a str, no .value attribute
-```
-
-### FastAPI Import Guard in Test Files
-
-The dev venv has a `pydantic`/`fastapi` version mismatch (`annotated_types.Not` AttributeError). Any test file that imports FastAPI at module level must be guarded:
-
-```python
-try:
-    from fastapi.testclient import TestClient
-    from rufus_server.main import app
-    _FASTAPI_AVAILABLE = True
-except Exception:
-    TestClient = None
-    app = None
-    _FASTAPI_AVAILABLE = False
-
-pytestmark = pytest.mark.skipif(
-    not _FASTAPI_AVAILABLE,
-    reason="FastAPI/server dependencies not available in this environment",
-)
-```
-
-### `AsyncWorkflowStep` Hierarchy
-
-`AsyncWorkflowStep` **inherits** from `WorkflowStep` — `isinstance(step, WorkflowStep)` is `True` for it. Whether a step uses sync timing in `workflow.py` is determined by:
-
-```python
-is_sync_step = not isinstance(step, (
-    AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
-    FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, WasmWorkflowStep
-))
-```
-
 ---
 
 ## §8 Performance Optimizations (Code)
@@ -2457,145 +2366,162 @@ async def test_wasm_real_execution():
 
 ---
 
-## §20 — Browser + WASI 0.3 Deployment (v0.8.0)
+## §20 Browser (Pyodide) + WASI 0.3 Deployment
 
-`rufus-sdk-edge` can now run in three environments without code changes:
+### Overview
 
-| Environment | HTTP transport | SQLite | Metrics | Install extra |
-|-------------|---------------|--------|---------|---------------|
-| Native CPython | `httpx` | `aiosqlite` | `psutil` | `[edge]` |
-| Browser (Pyodide + JSPI) | `js.fetch` | `wa-sqlite` | stub | `[browser]` |
-| WASI 0.3 compiled | `wasi:http` | `aiosqlite` + `wasi:filesystem` | stub | `[wasi]` |
+rufus-sdk-edge supports three deployment targets beyond native CPython:
 
-### Platform Adapter
+| Target | Install extra | HTTP layer | SQLite | WASM steps |
+|--------|---------------|------------|--------|------------|
+| **Native** (default) | `edge` | httpx | aiosqlite | wasmtime (optional) |
+| **Native + CM** | `native` | httpx | aiosqlite | wasmtime Component Model |
+| **Browser** | `browser` | js.fetch (Pyodide) | wa-sqlite JS bridge | js.WebAssembly |
+| **WASI 0.3** | `wasi` | wasi:http shim | aiosqlite | host component runtime |
 
-All HTTP and metrics access is routed through `PlatformAdapter` (Protocol in `rufus_edge.platform.base`):
+All four targets share the same Python source. Platform-specific I/O is
+abstracted by `rufus_edge.platform.PlatformAdapter`.
+
+---
+
+### Platform Adapter Architecture
+
+```
+RufusEdgeAgent
+    │  platform_adapter= (optional; auto-detected if None)
+    ▼
+PlatformAdapter (Protocol)
+    ├── http_get(url, headers, timeout) → HttpResponse
+    ├── http_post(url, json, headers, timeout) → HttpResponse
+    ├── system_metrics() → dict   # empty on WASI/browser
+    └── is_wasm_capable() → bool
+
+Implementations:
+    NativePlatformAdapter   — httpx + psutil  (default on CPython)
+    WasiPlatformAdapter     — urllib fallback / wasi:http shim
+    PyodidePlatformAdapter  — js.fetch + stub metrics
+```
+
+`detect_platform()` auto-selects the right adapter:
 
 ```python
-from rufus_edge.platform import detect_platform  # auto-selects correct adapter
-
+from rufus_edge.platform import detect_platform
 adapter = detect_platform()   # NativePlatformAdapter on CPython
-                               # PyodidePlatformAdapter inside Pyodide
-                               # WasiPlatformAdapter on wasm32
-
-# Pass to agent for full portability
-agent = RufusEdgeAgent(
-    device_id="pos-001",
-    cloud_url="https://control.example.com",
-    platform_adapter=adapter,
-)
 ```
 
-Detection order: `sys.platform == 'wasm32'` → WASI; `js` importable → Pyodide; else → Native.
+---
 
-### Component Model WASM Steps (v0.8.0)
+### Browser Deployment
 
-WASM steps now use `ComponentStepRuntime` by default. It auto-detects the binary type:
+#### Requirements
 
-| Binary type | Detection | Execution |
-|-------------|-----------|-----------|
-| Component Model (WASI 0.3) | magic bytes `\x00asm\x0e\x00` | `wasmtime.component` — typed `execute(state, step_name) → result` |
-| Legacy core module | magic bytes `\x00asm\x01\x00` | stdin/stdout JSON (unchanged) |
+- Pyodide >= 0.26 with JSPI enabled (Chrome 123+ / Firefox Nightly)
+- `wa-sqlite` (SQLite compiled to WASM, OPFS VFS for persistence)
+- rufus-sdk-edge installed with `browser` extra (no psutil/websockets/httpx)
 
-**WIT interface** (`src/rufus/wasm_component/step.wit`):
-```wit
-package rufus:step@0.1.0;
+#### Quick Start
 
-interface runner {
-    execute: func(state-json: string, step-name: string) -> result<string, step-error>;
-}
-
-world rufus-step { export runner; }
+```html
+<!-- index.html -->
+<script type="module">
+  const worker = new Worker('/static/browser_loader.js');
+  worker.postMessage({
+    type: 'init',
+    config: {
+      device_id: 'kiosk-browser-001',
+      cloud_url: 'https://control.example.com',
+      api_key: 'your-api-key',
+    }
+  });
+  worker.onmessage = ({ data }) => {
+    if (data.type === 'ready') console.log('Edge agent ready in browser!');
+  };
+</script>
 ```
 
-**Wiring via WorkflowBuilder** (cloud or edge):
+#### Constraints
+
+| Feature | Native | Browser |
+|---------|--------|---------|
+| psutil metrics | ✅ | ❌ stub |
+| websockets | ✅ | ❌ use JS WebSocket |
+| httpx | ✅ | ❌ replaced by js.fetch |
+| aiosqlite | ✅ | ❌ replaced by wa-sqlite JS bridge |
+| asyncio | ✅ | ✅ via JSPI |
+| numpy | ✅ | ✅ bundled in Pyodide |
+| Background tasks | ✅ | ⚠️  JSPI required for await in Workers |
+
+#### wa-sqlite Bridge
+
+The `browser_loader.js` script opens a wa-sqlite database and exposes it to
+Python via `globalThis._rufus_wa_sqlite3` / `globalThis._rufus_wa_sqlite_db`.
+Python code that needs SQLite in the browser should access these handles via
+Pyodide's `js` module rather than importing `aiosqlite`.
+
+---
+
+### WASI 0.3 Deployment
+
+#### Build
+
+```bash
+# Install py2wasm (Nuitka-based CPython → WASM compiler)
+pip install py2wasm
+
+# Build the edge agent as a standalone WASI component
+bash scripts/build_wasi.sh
+
+# Output: dist/rufus_edge.wasm  (~15 MB before compression)
+```
+
+#### WASI Constraints
+
+- `subprocess` calls are guarded behind `sys.platform != 'wasm32'`
+- `psutil` is unavailable; system_metrics() returns `{}`
+- HTTP uses `wasi:http/outgoing-handler` (wasi:http 0.3 host required)
+- SQLite uses `aiosqlite` + `wasi:filesystem` (unchanged)
+- No `asyncio.run()` — use the WASI event loop provided by the host
+
+#### Entrypoint
+
 ```python
+# src/rufus_edge/wasi_main.py
+from rufus_edge.agent import RufusEdgeAgent
+# ... see wasi_main.py for full implementation
+```
+
+---
+
+### Component Model WASM Steps
+
+`ComponentStepRuntime` replaces the legacy `WasmRuntime` for WASM steps:
+
+```python
+from rufus.implementations.execution.component_runtime import ComponentStepRuntime
 from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
 
-resolver = SqliteWasmBinaryResolver(conn)   # or DiskWasmBinaryResolver(pool)
+resolver = SqliteWasmBinaryResolver(conn)
+runtime = ComponentStepRuntime(resolver)
 
-workflow = await builder.create_workflow(
-    "PaymentAuthorization",
-    ...,
-    wasm_binary_resolver=resolver,   # auto-creates ComponentStepRuntime
-)
+# Auto-detects Component Model (new) vs core module (legacy)
+result = await runtime.execute(wasm_config, state_data)
 ```
 
-Legacy `WasmRuntime` is **not removed** — it now delegates CM binaries to `ComponentStepRuntime` automatically.
+Detection is based on the 8-byte WASM preamble:
 
-### Browser Target (Pyodide + JSPI)
+| Bytes 4–7 | Format | Executor |
+|-----------|--------|----------|
+| `\x01\x00\x00\x00` | Core module | `_run_legacy_wasi()` (stdin/stdout) |
+| `\x0d\x00\x01\x00` | Component Model | `_run_component()` (WIT interface) |
 
-**Requirements:** Chrome 126+ (JSPI on by default) or Chrome 117+ with `--enable-features=WebAssemblyJSPI`.
+The WIT interface is defined in `src/rufus/wasm_component/step.wit`:
 
-**Bootstrap** (`src/rufus_edge/browser_loader.js`):
-```js
-const worker = new Worker("/browser_loader.js", { type: "module" });
-worker.postMessage({
-    type: "start",
-    deviceId: "browser-pos-001",
-    cloudUrl: "https://control.example.com",
-    apiKey: "your-key",
-    wheelUrl: "https://your-cdn/rufus_sdk_edge-latest-py3-none-any.whl",
-});
-
-worker.onmessage = ({ data }) => {
-    if (data.type === "ready") {
-        // agent is running
-        worker.postMessage({ type: "execute", workflowType: "PaymentAuthorization", inputData: {} });
-    }
-};
+```wit
+world step-component {
+  export execute: func(
+    state: state-json,
+    step-name: string,
+  ) -> result<result-json, step-error>;
+}
 ```
 
-**SQLite in the browser:** `PyodideSQLiteProvider` wraps [wa-sqlite](https://github.com/rhashimoto/wa-sqlite) (WebAssembly SQLite, data persisted in OPFS). The host page must load wa-sqlite before Pyodide starts — `browser_loader.js` handles this automatically.
-
-**Install:**
-```bash
-pip install 'rufus-sdk-edge[browser]'   # no psutil, no websockets, no httpx
-```
-
-**Constraints:**
-- No `subprocess`, no raw sockets, no `/proc` filesystem
-- Fetch is subject to CORS policy of the host origin
-- `psutil` metrics unavailable — `SystemMetrics` returns zeros
-- `asyncio` works via JSPI; all `await` points map to browser microtasks
-
-### WASI 0.3 Native Target
-
-**Build:**
-```bash
-pip install py2wasm
-bash scripts/build_wasi.sh          # → dist/rufus_edge.wasm
-
-# Optional: wrap as Component Model binary (requires wasm-tools)
-wasm-tools component new dist/rufus_edge.wasm \
-    --adapt wasi_snapshot_preview1.reactor.wasm \
-    -o dist/rufus_edge_component.wasm
-```
-
-**Run:**
-```bash
-wasmtime \
-  --env RUFUS_DEVICE_ID=wasi-001 \
-  --env RUFUS_CLOUD_URL=https://control.example.com \
-  --env RUFUS_API_KEY=your-key \
-  dist/rufus_edge.wasm
-```
-
-**Environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RUFUS_DEVICE_ID` | `wasi-device` | Unique device identifier |
-| `RUFUS_CLOUD_URL` | `""` | Cloud control plane URL |
-| `RUFUS_API_KEY` | `""` | API key for authentication |
-| `RUFUS_DB_PATH` | `rufus_edge.db` | SQLite database path (via `wasi:filesystem`) |
-| `RUFUS_SYNC_INTERVAL` | `30` | Seconds between SAF sync attempts |
-| `RUFUS_LOG_LEVEL` | `INFO` | Python logging level |
-
-**HTTP:** routed through `wasi:http/outgoing-handler` — the host (wasmtime) must be started with `--wasi http` capability grant.
-
-**Install:**
-```bash
-pip install 'rufus-sdk-edge[wasi]'    # zero extra deps
-pip install 'rufus-sdk-edge[native-wasm]'  # adds wasmtime for CM on native Python
-```

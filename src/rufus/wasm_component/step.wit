@@ -1,41 +1,46 @@
-/// WIT interface for Rufus WASM step components.
-///
-/// A step component must export the `execute` function defined in the
-/// `rufus:step/runner` interface.  The host passes the current workflow
-/// state as a JSON string and the step name; the component returns a
-/// JSON string (dict) to be merged into the state, or a `step-error` on
-/// failure.
-///
-/// Build target: `wasm32-wasip2` (WASI 0.3 / Component Model)
-/// Toolchain:    `componentize-py` or `cargo-component` + `wit-bindgen`
+// WIT interface for Rufus workflow step components.
+//
+// Components that implement this interface can be used as WASM steps in
+// a Rufus workflow.  The host calls `execute` with the current workflow
+// state (serialised as JSON) and the step name; the component returns
+// either a JSON-encoded result dict or a structured error.
+//
+// Backward compatibility: Core WASM modules that use the legacy stdin/stdout
+// contract are still supported by WasmRuntime._execute_wasi().  The new
+// ComponentStepRuntime detects which format a binary uses and dispatches
+// accordingly.
 
 package rufus:step@0.1.0;
 
-/// Errors that a step component can return.
-record step-error {
-    /// Machine-readable code (e.g. "VALIDATION_FAILED", "TIMEOUT").
-    code: string,
-    /// Human-readable description for logs.
+interface step-types {
+  /// JSON-encoded workflow state dict passed to the component.
+  type state-json = string;
+
+  /// JSON-encoded result dict returned by the component.
+  /// Keys are merged into workflow state using the configured merge strategy.
+  type result-json = string;
+
+  /// Structured error returned when the step fails.
+  record step-error {
+    /// Numeric error code (0 = generic, 1 = validation, 2 = timeout, 3 = business-logic).
+    code: u32,
+    /// Human-readable error message.
     message: string,
+  }
 }
 
-/// Core runner interface — every Rufus step component must export this.
-interface runner {
-    /// Execute one workflow step.
-    ///
-    /// Parameters
-    /// ----------
-    /// state-json : serialized current workflow state (JSON object string)
-    /// step-name  : the name of the step being executed
-    ///
-    /// Returns
-    /// -------
-    /// ok(string)  : JSON object string to be merged into workflow state
-    /// err(step-error) : structured failure; handled by fallback_on_error policy
-    execute: func(state-json: string, step-name: string) -> result<string, step-error>;
-}
+/// The world exported by each workflow step component.
+world step-component {
+  use step-types.{state-json, result-json, step-error};
 
-/// The world that a Rufus step component must implement.
-world rufus-step {
-    export runner;
+  /// Execute the workflow step.
+  ///
+  /// @param state     JSON-encoded current workflow state dict.
+  /// @param step-name Name of the step being executed (for logging / routing).
+  /// @returns         ok(result-json)  — dict to merge into state on success.
+  ///                  err(step-error) — structured error on failure.
+  export execute: func(
+    state: state-json,
+    step-name: string,
+  ) -> result<result-json, step-error>;
 }

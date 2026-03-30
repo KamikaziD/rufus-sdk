@@ -31,7 +31,6 @@ from rufus_edge.models import (
 from rufus_edge.sync_manager import SyncManager
 from rufus_edge.config_manager import ConfigManager
 from rufus_edge.workflow_sync import EdgeWorkflowSyncer
-from rufus_edge.platform.base import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ class RufusEdgeAgent:
         sync_interval: int = 30,
         heartbeat_interval: int = 60,
         workflow_sync_enabled: bool = True,
-        platform_adapter: Optional[PlatformAdapter] = None,
+        platform_adapter=None,
     ):
         """
         Initialize the edge agent.
@@ -96,7 +95,7 @@ class RufusEdgeAgent:
         self.sync_interval = sync_interval
         self.heartbeat_interval = heartbeat_interval
         self.workflow_sync_enabled = workflow_sync_enabled
-        self._platform_adapter: Optional[PlatformAdapter] = platform_adapter
+        self._platform_adapter = platform_adapter  # None = auto-detect in start()
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -111,8 +110,6 @@ class RufusEdgeAgent:
         self._is_running = False
         self._is_online = False
         self._background_tasks: list[asyncio.Task] = []
-        # Heartbeat failure counting (4.3)
-        self._heartbeat_consecutive_failures: int = 0
 
     async def start(self):
         """Start the edge agent."""
@@ -126,15 +123,16 @@ class RufusEdgeAgent:
         self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
         await self.persistence.initialize()
 
-        # Auto-bootstrap factory-fresh devices (no pre-configured API key)
-        if not self.api_key and self.cloud_url:
-            await self.bootstrap()
-
         # Initialize executor
         self.executor = SyncExecutor()
 
         # Initialize observer
         self.observer = LoggingObserver()
+
+        # Resolve platform adapter once; shared by both managers
+        if self._platform_adapter is None:
+            from rufus_edge.platform import detect_platform
+            self._platform_adapter = detect_platform()
 
         # Initialize config manager
         self.config_manager = ConfigManager(
@@ -143,7 +141,7 @@ class RufusEdgeAgent:
             api_key=self.api_key,
             poll_interval_seconds=self.config_poll_interval,
             persistence=self.persistence,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.config_manager.initialize()
 
@@ -153,7 +151,7 @@ class RufusEdgeAgent:
             sync_url=self.cloud_url,
             device_id=self.device_id,
             api_key=self.api_key,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.sync_manager.initialize()
 
@@ -196,79 +194,6 @@ class RufusEdgeAgent:
 
         self._is_running = True
         logger.info(f"Rufus Edge Agent started: {self.device_id}")
-
-    async def bootstrap(
-        self,
-        device_type: str = "unknown",
-        merchant_id: str = "",
-        firmware_version: str = "0.0.0",
-    ) -> bool:
-        """
-        Bootstrap a factory-fresh device: check for a stored API key, and if
-        absent, register with the cloud and persist the returned key.
-
-        Called automatically by start() when api_key is empty and cloud_url is set.
-
-        Returns True if the device is ready (key present or successfully registered).
-        """
-        # Ensure persistence is open (may be called before start())
-        if self.persistence is None:
-            from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-            from pathlib import Path
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
-            await self.persistence.initialize()
-
-        # Check for a stored API key
-        try:
-            stored = await self.persistence.get_edge_sync_state("api_key")
-            # get_edge_sync_state returns a plain str (or None)
-            stored_value = stored.value if hasattr(stored, "value") else stored
-            if stored_value:
-                self.api_key = stored_value
-                logger.info(f"bootstrap: loaded stored API key for device {self.device_id}")
-                return True
-        except Exception as e:
-            logger.debug(f"bootstrap: no stored key ({e})")
-
-        # No stored key — register with cloud
-        if not self.cloud_url:
-            logger.warning("bootstrap: no cloud_url set, cannot auto-register")
-            return False
-
-        import httpx as _httpx
-        try:
-            async with _httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{self.cloud_url}/api/v1/devices/register",
-                    json={
-                        "device_id": self.device_id,
-                        "device_type": device_type,
-                        "merchant_id": merchant_id,
-                        "firmware_version": firmware_version,
-                    },
-                )
-            if resp.status_code not in (200, 201):
-                logger.error(
-                    f"bootstrap: registration failed with status {resp.status_code}"
-                )
-                return False
-
-            data = resp.json()
-            new_api_key = data.get("api_key") or data.get("new_api_key")
-            if not new_api_key:
-                logger.error("bootstrap: registration response missing api_key field")
-                return False
-
-            # Persist the key to SQLite so subsequent starts skip registration
-            await self.persistence.set_edge_sync_state("api_key", new_api_key)
-            self.api_key = new_api_key
-            logger.info(f"bootstrap: registered device {self.device_id}, API key stored")
-            return True
-
-        except Exception as e:
-            logger.error(f"bootstrap: registration request failed: {e}")
-            return False
 
     async def stop(self):
         """Stop the edge agent."""
@@ -594,33 +519,13 @@ class RufusEdgeAgent:
                 timeout=10.0,
             )
             if response.status_code == 200:
-                self._heartbeat_consecutive_failures = 0
                 data = response.json()
                 # Process any pending commands from cloud
                 commands = data.get("commands", [])
                 for cmd in commands:
                     await self._handle_cloud_command(cmd)
-            else:
-                self._heartbeat_consecutive_failures += 1
-                self._log_heartbeat_failure(
-                    f"unexpected status {response.status_code}"
-                )
         except Exception as e:
-            self._heartbeat_consecutive_failures += 1
-            self._log_heartbeat_failure(str(e))
-
-    def _log_heartbeat_failure(self, reason: str):
-        """Graduated heartbeat failure logging."""
-        n = self._heartbeat_consecutive_failures
-        if n == 1:
-            logger.warning(
-                f"Heartbeat failed for device {self.device_id}: {reason}"
-            )
-        elif n % 10 == 0:
-            logger.error(
-                f"Device {self.device_id} is invisible to cloud control plane "
-                f"({n} consecutive heartbeat failures). Last error: {reason}"
-            )
+            logger.debug(f"Heartbeat send failed (device may be offline): {e}")
 
     async def _handle_cloud_command(self, command: Dict[str, Any]):
         """Handle a command received from cloud via heartbeat response."""

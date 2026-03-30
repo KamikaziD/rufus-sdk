@@ -1,87 +1,177 @@
 """
-PyodidePlatformAdapter — Browser implementation using js.fetch + JSPI.
+PyodidePlatformAdapter — platform adapter for browser (Pyodide + JSPI).
 
-Used when rufus-sdk-edge is loaded inside a Pyodide Web Worker.  All asyncio
-awaits are handled by the browser event loop via JSPI (JS-Promise Integration).
+HTTP:    js.fetch via Pyodide's JS bridge
+Metrics: stub (no psutil / /proc in browser sandbox)
+SQLite:  wa-sqlite JS API (see PyodideSQLiteProvider note below)
+WASM:    js.WebAssembly + cm-js Component Model polyfill
 
-SQLite is provided by wa-sqlite (WebAssembly SQLite) via PyodideSQLiteProvider
-(see rufus_edge/implementations/persistence/pyodide_sqlite.py).
+This module is safe to import on native CPython; the js module is only
+available inside a Pyodide runtime. Importing the adapter outside Pyodide
+is allowed for type-checking and testing purposes.
 
-Limitations in the browser sandbox:
-  - psutil is unavailable → SystemMetrics always returns zeros
-  - No subprocess, no raw sockets
-  - Fetch is subject to CORS rules of the host page
+## PyodideSQLiteProvider
+
+SQLite in the browser is provided by wa-sqlite (SQLite compiled to WASM,
+exposed via a JavaScript API). The Python-side shim wraps the JS API using
+Pyodide's `js` module and `pyodide.ffi.to_js` / `from_js` helpers.
+
+Usage (browser_loader.js orchestrates this before importing rufus_edge):
+
+    // 1. Load wa-sqlite
+    const { default: SQLiteESMFactory } = await import('./wa-sqlite.mjs');
+    const sqlite3 = await SQLiteESMFactory();
+    const db = await sqlite3.open_v2('rufus_edge', sqlite3.SQLITE_OPEN_CREATE | sqlite3.SQLITE_OPEN_READWRITE);
+
+    // 2. Expose the db handle to Python
+    window._rufus_wa_sqlite_db = db;
+    window._rufus_wa_sqlite3   = sqlite3;
+
+    // 3. Python code uses PyodidePlatformAdapter which reads window._rufus_wa_sqlite_db
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Optional
-
-from rufus_edge.platform.base import HttpResponse, SystemMetrics
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 
+class _PyodideHttpResponse:
+    """Wraps a Pyodide js.fetch Response to satisfy HttpResponse."""
+
+    def __init__(self, status: int, body: bytes, hdrs: Dict[str, str]) -> None:
+        self._status = status
+        self._body = body
+        self._headers = hdrs
+
+    @property
+    def status_code(self) -> int:
+        return self._status
+
+    def json(self) -> dict:
+        return json.loads(self._body.decode("utf-8"))
+
+    def text(self) -> str:
+        return self._body.decode("utf-8")
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        return self._headers
+
+    @property
+    def content(self) -> bytes:
+        return self._body
+
+
 class PyodidePlatformAdapter:
     """
-    PlatformAdapter backed by js.fetch (Pyodide browser environment).
+    Platform adapter for Pyodide (browser target).
 
-    Requires Pyodide ≥ 0.25 and a browser that supports JSPI (Chrome 117+ or
-    any environment with JSPI enabled via flag).
+    Requires Pyodide runtime with js module available.
+    Falls back to urllib on native CPython for testing.
     """
-
-    def __init__(self, default_headers: Optional[Dict[str, str]] = None):
-        self._default_headers: Dict[str, str] = default_headers or {}
 
     async def http_get(
         self,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: Dict[str, str],
         timeout: float = 30.0,
-    ) -> HttpResponse:
-        from js import fetch, Object  # type: ignore[import]
-        from pyodide.ffi import to_js  # type: ignore[import]
-
-        merged = {**self._default_headers, **(headers or {})}
-        opts = to_js({"method": "GET", "headers": merged}, dict_converter=Object.fromEntries)
-        resp = await fetch(url, opts)
-        body = bytes(await resp.arrayBuffer().then(lambda b: b))
-        return HttpResponse(
-            status_code=resp.status,
-            body=body,
-            headers={k: v for k, v in resp.headers},
-        )
+    ) -> _PyodideHttpResponse:
+        return await self._fetch("GET", url, headers=headers, body=None)
 
     async def http_post(
         self,
         url: str,
-        body: bytes,
-        headers: Optional[Dict[str, str]] = None,
+        json: dict,
+        headers: Dict[str, str],
         timeout: float = 30.0,
-    ) -> HttpResponse:
-        from js import fetch, Object, Uint8Array  # type: ignore[import]
-        from pyodide.ffi import to_js  # type: ignore[import]
+    ) -> _PyodideHttpResponse:
+        body = json.dumps(json).encode("utf-8")  # type: ignore[arg-type]
+        import json as _json
+        body = _json.dumps(json).encode("utf-8")
+        merged = {"Content-Type": "application/json", **headers}
+        return await self._fetch("POST", url, headers=merged, body=body)
 
-        merged = {
-            "Content-Type": "application/json",
-            **self._default_headers,
-            **(headers or {}),
-        }
-        js_body = Uint8Array.new(body)
-        opts = to_js(
-            {"method": "POST", "headers": merged, "body": js_body},
-            dict_converter=Object.fromEntries,
-        )
-        resp = await fetch(url, opts)
-        resp_body = bytes(await resp.arrayBuffer().then(lambda b: b))
-        return HttpResponse(
-            status_code=resp.status,
-            body=resp_body,
-            headers={k: v for k, v in resp.headers},
+    async def _fetch(
+        self,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        body: bytes | None,
+    ) -> _PyodideHttpResponse:
+        try:
+            import js  # only available inside Pyodide  # noqa: F401
+            return await self._js_fetch(method, url, headers, body)
+        except ImportError:
+            # Native CPython fallback for tests
+            return await self._urllib_fetch(method, url, headers, body)
+
+    @staticmethod
+    async def _js_fetch(
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        body: bytes | None,
+    ) -> _PyodideHttpResponse:
+        import js
+        from pyodide.ffi import to_js
+
+        init = {"method": method, "headers": to_js(headers)}
+        if body is not None:
+            init["body"] = to_js(body)
+
+        response = await js.fetch(url, to_js(init))
+        array_buf = await response.arrayBuffer()
+        body_bytes = bytes(js.Uint8Array.new(array_buf))
+
+        hdrs = {}
+        try:
+            for k in js.Object.keys(response.headers):
+                hdrs[k] = response.headers.get(k)
+        except Exception:
+            pass
+
+        return _PyodideHttpResponse(
+            status=response.status,
+            body=body_bytes,
+            hdrs=hdrs,
         )
 
-    def get_system_metrics(self) -> SystemMetrics:
-        # psutil is not available in the browser sandbox
-        return SystemMetrics()
+    @staticmethod
+    async def _urllib_fetch(
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        body: bytes | None,
+    ) -> _PyodideHttpResponse:
+        import asyncio
+        import urllib.request
+
+        def _sync():
+            req = urllib.request.Request(url, data=body, method=method)
+            for k, v in headers.items():
+                req.add_header(k, v)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return _PyodideHttpResponse(
+                    status=resp.status,
+                    body=resp.read(),
+                    hdrs=dict(resp.headers),
+                )
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _sync)
+
+    def system_metrics(self) -> Dict[str, Any]:
+        # psutil unavailable in browser
+        return {}
+
+    def is_wasm_capable(self) -> bool:
+        # Browser can execute CM components via js.WebAssembly
+        try:
+            import js  # noqa: F401
+            return True
+        except ImportError:
+            return False

@@ -1,55 +1,68 @@
 """
 wasi_main.py — WASI 0.3 entrypoint for rufus-sdk-edge.
 
-Compiled to ``dist/rufus_edge.wasm`` via::
+This module is the entry point when the edge agent is compiled to a WASI
+component via py2wasm / wasi-python.
 
-    bash scripts/build_wasi.sh
+Key differences from native CPython startup:
 
-The WASI event loop does not use ``asyncio.run()`` — instead we use
-``asyncio.get_event_loop().run_until_complete()`` which py2wasm maps to the
-WASI async executor provided by the host.
+  1. No asyncio.run() — the WASI event loop is provided by the surrounding
+     host runtime (wasmtime, WasmEdge, wasm-micro-runtime, etc.).
+     We use asyncio.get_event_loop().run_until_complete() which is patched
+     by the WASI Python runtime to use the host-provided loop.
 
-Environment variables consumed (all optional):
-    RUFUS_DEVICE_ID      — unique device identifier (default: "wasi-device")
-    RUFUS_CLOUD_URL      — cloud control plane URL   (default: "")
-    RUFUS_API_KEY        — API key for authentication
-    RUFUS_DB_PATH        — SQLite database path       (default: "rufus_edge.db")
-    RUFUS_SYNC_INTERVAL  — seconds between SAF syncs  (default: 30)
-    RUFUS_LOG_LEVEL      — Python logging level        (default: "INFO")
+  2. No subprocess — sys.platform == 'wasm32'; all subprocess.run() calls
+     in rufus.utils.platform are guarded behind this check.
+
+  3. HTTP via wasi:http — WasiPlatformAdapter is selected automatically by
+     detect_platform() when sys.platform == 'wasm32'.
+
+  4. SQLite via wasi:filesystem — aiosqlite works unchanged because the WASI
+     host maps wasi:filesystem to a directory on the host OS.
+
+  5. Configuration is passed via environment variables (WASI component model
+     env-inherit proposal or host-side env injection):
+       RUFUS_DEVICE_ID       — required
+       RUFUS_CLOUD_URL       — required
+       RUFUS_API_KEY         — required
+       RUFUS_DB_PATH         — optional, default "rufus_edge.db"
+       RUFUS_SYNC_INTERVAL   — optional, default "30"
+       RUFUS_CONFIG_INTERVAL — optional, default "60"
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import os
 import sys
 
-
-def _configure_logging():
-    level_name = os.environ.get("RUFUS_LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+logger = logging.getLogger(__name__)
 
 
-async def _main():
+def _get_env(key: str, default: str = "") -> str:
+    value = os.environ.get(key, default)
+    if not value:
+        logger.warning(f"Environment variable {key} is not set")
+    return value
+
+
+async def _run_agent() -> None:
     from rufus_edge.agent import RufusEdgeAgent
     from rufus_edge.platform.wasi import WasiPlatformAdapter
 
-    device_id = os.environ.get("RUFUS_DEVICE_ID", "wasi-device")
-    cloud_url = os.environ.get("RUFUS_CLOUD_URL", "")
-    api_key = os.environ.get("RUFUS_API_KEY", "")
-    db_path = os.environ.get("RUFUS_DB_PATH", "rufus_edge.db")
-    sync_interval = int(os.environ.get("RUFUS_SYNC_INTERVAL", "30"))
+    device_id = _get_env("RUFUS_DEVICE_ID")
+    cloud_url = _get_env("RUFUS_CLOUD_URL")
+    api_key = _get_env("RUFUS_API_KEY")
+    db_path = _get_env("RUFUS_DB_PATH", "rufus_edge.db")
+    sync_interval = int(_get_env("RUFUS_SYNC_INTERVAL", "30"))
+    config_interval = int(_get_env("RUFUS_CONFIG_INTERVAL", "60"))
 
-    adapter = WasiPlatformAdapter(
-        default_headers={
-            "X-API-Key": api_key,
-            "X-Device-ID": device_id,
-        }
-    )
+    if not device_id or not cloud_url:
+        logger.error("RUFUS_DEVICE_ID and RUFUS_CLOUD_URL must be set")
+        sys.exit(1)
+
+    adapter = WasiPlatformAdapter()
 
     agent = RufusEdgeAgent(
         device_id=device_id,
@@ -57,24 +70,37 @@ async def _main():
         api_key=api_key,
         db_path=db_path,
         sync_interval=sync_interval,
+        config_poll_interval=config_interval,
         platform_adapter=adapter,
     )
 
-    logging.getLogger(__name__).info(
-        f"Rufus Edge Agent (WASI) starting — device={device_id}"
-    )
+    logger.info(f"Starting Rufus Edge Agent (WASI): device={device_id}")
     await agent.start()
 
-    # In a WASI context the process runs until the host sends a signal or
-    # the event loop is drained.  Keep alive by waiting forever.
+    # In WASI the process runs until the host terminates it.
+    # We keep the event loop alive by waiting on a never-resolving future.
     try:
-        await asyncio.Event().wait()
-    except (KeyboardInterrupt, SystemExit):
+        await asyncio.get_event_loop().create_future()
+    except (asyncio.CancelledError, KeyboardInterrupt):
         pass
     finally:
         await agent.stop()
 
 
+def main() -> None:
+    """WASI entrypoint — called by the host runtime."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(_run_agent())
+    except KeyboardInterrupt:
+        pass
+
+
 if __name__ == "__main__":
-    _configure_logging()
-    asyncio.get_event_loop().run_until_complete(_main())
+    main()

@@ -1,84 +1,92 @@
 """
-PlatformAdapter — Abstract I/O interface for rufus-sdk-edge.
+Platform Adapter Protocol — shared I/O abstraction for native, WASI, and browser targets.
 
-Abstracts HTTP and system-metrics access so the edge agent can run in three
-environments without code changes:
-  - Native CPython  (NativePlatformAdapter)
-  - Browser/Pyodide (PyodidePlatformAdapter)
-  - WASI 0.3        (WasiPlatformAdapter)
+All network I/O and system metrics in rufus_edge go through a PlatformAdapter so that
+the same Python code can run on:
+
+  - Native CPython  (NativePlatformAdapter  — httpx + psutil)
+  - WASI 0.3        (WasiPlatformAdapter    — wasi:http shim + stubs)
+  - Pyodide/browser (PyodidePlatformAdapter — js.fetch + wa-sqlite + stub metrics)
 """
 
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
-# Shared data structures
+# HTTP response wrapper
 # ---------------------------------------------------------------------------
 
-@dataclass
-class HttpResponse:
-    """Minimal HTTP response carrier."""
-    status_code: int
-    body: bytes
-    headers: Dict[str, str] = field(default_factory=dict)
-
-    def json(self) -> Any:
-        import json
-        return json.loads(self.body)
+class HttpResponse(Protocol):
+    """Minimal HTTP response surface used by SyncManager / ConfigManager."""
 
     @property
-    def text(self) -> str:
-        return self.body.decode("utf-8", errors="replace")
+    def status_code(self) -> int: ...
+
+    def json(self) -> dict: ...
+
+    def text(self) -> str: ...
 
     @property
-    def content(self) -> bytes:
-        return self.body
+    def headers(self) -> Dict[str, str]: ...
 
-
-@dataclass
-class SystemMetrics:
-    """Lightweight system-metrics snapshot."""
-    cpu_percent: float = 0.0
-    memory_used_mb: float = 0.0
-    memory_total_mb: float = 0.0
-    disk_free_mb: float = 0.0
+    @property
+    def content(self) -> bytes: ...
 
 
 # ---------------------------------------------------------------------------
-# Protocol
+# Null / stub metrics (used by WASI + Pyodide where psutil is unavailable)
+# ---------------------------------------------------------------------------
+
+class NullSystemMetrics:
+    """Returns empty metrics dict; used when psutil is not available."""
+
+    def collect(self) -> Dict[str, Any]:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# PlatformAdapter Protocol
 # ---------------------------------------------------------------------------
 
 @runtime_checkable
 class PlatformAdapter(Protocol):
     """
-    Minimal I/O surface required by SyncManager and ConfigManager.
+    Abstraction layer for platform-specific I/O operations.
 
-    Implementations must be safe to call from inside an asyncio event loop.
+    Implementations:
+      NativePlatformAdapter  — uses httpx + psutil (default on CPython)
+      WasiPlatformAdapter    — uses wasi:http + stubs (WASI 0.3 target)
+      PyodidePlatformAdapter — uses js.fetch + stub metrics (browser/Pyodide)
     """
 
     async def http_get(
         self,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: Dict[str, str],
         timeout: float = 30.0,
     ) -> HttpResponse:
-        """Perform an async HTTP GET."""
+        """Perform an HTTP GET request."""
         ...
 
     async def http_post(
         self,
         url: str,
-        body: bytes,
-        headers: Optional[Dict[str, str]] = None,
+        json: dict,
+        headers: Dict[str, str],
         timeout: float = 30.0,
     ) -> HttpResponse:
-        """Perform an async HTTP POST with a raw bytes body."""
+        """Perform an HTTP POST request with a JSON body."""
         ...
 
-    def get_system_metrics(self) -> SystemMetrics:
-        """Return current system metrics.  Stubs return all-zeros."""
+    def system_metrics(self) -> Dict[str, Any]:
+        """
+        Return a dict with cpu_percent, mem_percent, disk_percent (0–100).
+        Return an empty dict if metrics are unavailable on this platform.
+        """
+        ...
+
+    def is_wasm_capable(self) -> bool:
+        """Return True if this platform can execute WASM Component steps inline."""
         ...
