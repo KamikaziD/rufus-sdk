@@ -105,7 +105,7 @@ steps:
         result = cli_runner.invoke(app, ["validate", "nonexistent.yaml"])
 
         assert result.exit_code == 1
-        assert "not found" in result.stdout.lower()
+        assert "not found" in result.output.lower()
 
     def test_validate_valid_workflow(self, cli_runner, valid_workflow_yaml):
         """Test validate with valid workflow."""
@@ -142,8 +142,8 @@ steps:
         result = cli_runner.invoke(app, ["validate", str(circular_dependency_yaml)])
 
         assert result.exit_code == 1
-        # Circular dependency error should be in stdout
-        output = result.stdout.lower()
+        # Circular dependency error should be in output (may go to stderr)
+        output = result.output.lower()
         assert "circular" in output
 
     def test_validate_with_graph_mermaid(self, cli_runner, complex_workflow_yaml):

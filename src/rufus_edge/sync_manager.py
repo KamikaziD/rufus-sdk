@@ -59,6 +59,9 @@ class SyncManager:
         self._sync_in_progress: bool = False
         self._last_sync_at: Optional[datetime] = None
         self._adapter = platform_adapter  # resolved in initialize()
+        # Stale lock threshold: a sync_lock entry older than this many seconds
+        # is considered abandoned and can be forcibly acquired.
+        self._lock_stale_seconds: int = 300
 
     @property
     def _http_client(self):
@@ -85,6 +88,72 @@ class SyncManager:
         """Close the sync manager."""
         if self._adapter is not None and hasattr(self._adapter, "aclose"):
             await self._adapter.aclose()
+
+    # ------------------------------------------------------------------
+    # Monotonic sequence counter (persisted in SQLite device_sequence table)
+    # ------------------------------------------------------------------
+
+    async def _next_sequence(self) -> int:
+        """Return the next monotonically increasing sequence number for this device.
+
+        The counter is stored in the ``device_sequence`` table so it survives
+        process restarts.  Each call atomically increments and returns the new value.
+        """
+        async with self.persistence.conn.execute(
+            """
+            INSERT INTO device_sequence (device_id, last_sequence, updated_at)
+            VALUES (?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(device_id) DO UPDATE
+              SET last_sequence = last_sequence + 1,
+                  updated_at    = CURRENT_TIMESTAMP
+            RETURNING last_sequence
+            """,
+            (self.device_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        await self.persistence.conn.commit()
+        return row[0]
+
+    # ------------------------------------------------------------------
+    # SQLite advisory sync lock (process-safe, replaces in-memory flag)
+    # ------------------------------------------------------------------
+
+    async def _acquire_sync_lock(self) -> bool:
+        """Attempt to acquire the SAF sync advisory lock.
+
+        Returns True if the lock was acquired, False if another holder already
+        owns a fresh lock.  Stale locks (older than ``_lock_stale_seconds``)
+        are forcibly taken.
+        """
+        now_iso = datetime.utcnow().isoformat()
+        try:
+            # Remove any stale lock first (acquired_at older than threshold)
+            await self.persistence.conn.execute(
+                """
+                DELETE FROM sync_lock
+                WHERE lock_key = 'saf_sync'
+                  AND (julianday('now') - julianday(acquired_at)) * 86400 > ?
+                """,
+                (self._lock_stale_seconds,),
+            )
+            # Attempt to insert — fails if a fresh lock already exists
+            await self.persistence.conn.execute(
+                "INSERT INTO sync_lock (lock_key, holder_id, acquired_at) VALUES ('saf_sync', ?, ?)",
+                (self.device_id, now_iso),
+            )
+            await self.persistence.conn.commit()
+            return True
+        except Exception:
+            await self.persistence.conn.rollback()
+            return False
+
+    async def _release_sync_lock(self) -> None:
+        """Release the SAF sync advisory lock held by this device."""
+        await self.persistence.conn.execute(
+            "DELETE FROM sync_lock WHERE lock_key = 'saf_sync' AND holder_id = ?",
+            (self.device_id,),
+        )
+        await self.persistence.conn.commit()
 
     async def queue_for_sync(self, transaction: SAFTransaction) -> str:
         """
@@ -226,6 +295,18 @@ class SyncManager:
                 errors=[{"message": "Sync already in progress"}]
             )
 
+        # Also check the durable SQLite advisory lock so concurrent processes
+        # (or a restarted process that didn't release the in-memory flag) are
+        # correctly serialised.
+        lock_acquired = await self._acquire_sync_lock()
+        if not lock_acquired:
+            logger.warning("Sync lock held by another process, skipping")
+            return SyncReport(
+                status=SyncStatus.FAILED,
+                started_at=datetime.utcnow(),
+                errors=[{"message": "Sync already in progress"}]
+            )
+
         self._sync_in_progress = True
         report = SyncReport(
             status=SyncStatus.IN_PROGRESS,
@@ -319,6 +400,7 @@ class SyncManager:
 
         finally:
             self._sync_in_progress = False
+            await self._release_sync_lock()
 
     async def _get_pending_transactions(self) -> List[SAFTransaction]:
         """Get all transactions pending sync from saf_pending_transactions."""
