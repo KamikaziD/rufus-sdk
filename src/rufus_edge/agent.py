@@ -36,8 +36,19 @@ from rufus_edge.sync_manager import SyncManager
 from rufus_edge.config_manager import ConfigManager
 from rufus_edge.workflow_sync import EdgeWorkflowSyncer
 from rufus_edge.platform.base import PlatformAdapter
+from rufus_edge.nkey_verifier import NKeyPatchVerifier
+from rufus_edge.capability_gossip import (
+    CapabilityGossipManager,
+    NodeTier,
+    classify_node_tier,
+)
 
 logger = logging.getLogger(__name__)
+
+# Minimum available RAM (MB) required to safely load a WASM binary into the
+# wasmtime JIT engine.  Below this threshold the node delegates via
+# ruvon.mesh.build.request instead of attempting the hot-swap locally.
+_MIN_WASM_LOAD_RAM_MB = 128
 
 
 class RufusEdgeAgent:
@@ -147,6 +158,14 @@ class RufusEdgeAgent:
         self._election_threshold: int = 300      # seconds before election triggers (5 min)
         self._agent_start_time: float = 0.0     # set in start() for uptime-based scoring
 
+        # RUVON security — Ed25519 patch signature verification
+        # Populated from RUFUS_NKEY_PUBLIC_KEY env var in start(); None = verification skipped.
+        self._nkey_verifier: Optional[NKeyPatchVerifier] = None
+
+        # RUVON capability gossip
+        self._gossip_manager: Optional[CapabilityGossipManager] = None
+        self._local_node_tier: NodeTier = NodeTier.TIER_1  # refined in start()
+
     async def start(self):
         """Start the edge agent."""
         if self._is_running:
@@ -221,11 +240,38 @@ class RufusEdgeAgent:
         )
         await self._transport.connect()
 
+        # Classify hardware tier and wire NKey verifier
+        self._local_node_tier = self._detect_node_tier()
+        self._nkey_verifier = NKeyPatchVerifier.from_env()
+        if self._nkey_verifier:
+            logger.info("[Agent] NKey patch signature verification ENABLED (tier=%s)", self._local_node_tier.value)
+        else:
+            logger.warning("[Agent] RUFUS_NKEY_PUBLIC_KEY not set — WASM patch signatures will NOT be verified")
+
         # If NATS is active, subscribe to command, config push, and WASM patch channels
         if self._nats_url:
             await self._transport.subscribe_commands(self._handle_cloud_command)
             await self._transport.subscribe_config_push(self._on_config_push)
             await self._transport.subscribe_patch_broadcast(self._on_patch_broadcast)
+
+            # Capability gossip: broadcast this node's vector, receive peer vectors
+            self._gossip_manager = CapabilityGossipManager(
+                device_id=self.device_id,
+                transport=self._transport,
+                persistence=self.persistence,
+            )
+            await self._gossip_manager.start()
+            await self._transport.subscribe_capability_gossip(
+                self._gossip_manager._on_capability_received
+            )
+
+            # Tier 2+ nodes act as build delegates for constrained peers
+            if self._local_node_tier >= NodeTier.TIER_2:
+                await self._transport.subscribe_build_requests(self._on_build_request)
+                logger.info(
+                    "[Agent] Build delegation handler registered (tier=%s)",
+                    self._local_node_tier.value,
+                )
 
         # Register config change callback to reload workflows
         self.config_manager.on_config_change(self._on_config_change)
@@ -254,6 +300,7 @@ class RufusEdgeAgent:
             self._mesh_router = MeshRouter(
                 device_id=self.device_id,
                 sync_manager=self.sync_manager,
+                gossip_manager=self._gossip_manager,
             )
 
         if self._peer_listen_port > 0:
@@ -265,6 +312,7 @@ class RufusEdgeAgent:
                 is_online_fn=lambda: self._is_online,
                 leadership_score_fn=self._compute_leadership_score,
                 is_master_fn=lambda: self._is_local_master,
+                node_tier_fn=lambda: self._local_node_tier.value,
             )
             relay_server = PeerRelayServer(relay_app, self._peer_listen_port)
             self._background_tasks.append(
@@ -790,29 +838,59 @@ class RufusEdgeAgent:
         except Exception as e:
             logger.error(f"[Config] Failed to apply NATS config push: {e}")
 
-    async def _on_patch_broadcast(self, binary: bytes, wasm_hash: str, step_name: str) -> None:
+    async def _on_patch_broadcast(
+        self,
+        binary: bytes,
+        wasm_hash: str,
+        step_name: str,
+        signature_b64: str = "",
+    ) -> None:
         """Handle a fleet-wide WASM binary patch delivered via ruvon.node.patch.
 
         Hash integrity has already been verified by NATSEdgeTransport before
-        this handler is called.  If NKeyPatchVerifier is configured, it performs
-        an additional Ed25519 signature check before accepting the binary.
+        this handler is called.
 
-        The compiled Component is hot-swapped into WasmComponentPool.  In-flight
-        calls using the old component complete normally; the next execute() call
-        for this hash gets the updated component.
+        Steps:
+        1. Ed25519 signature check (when RUFUS_NKEY_PUBLIC_KEY is configured).
+        2. WASM load-safety gate: if available RAM < _MIN_WASM_LOAD_RAM_MB,
+           delegate to a Tier 2 peer via ruvon.mesh.build.request instead of
+           attempting a hot-swap that could OOM the device.
+        3. Hot-swap the compiled Component into WasmComponentPool.
         """
         try:
-            # Optional signature verification (wired if NKeyPatchVerifier is available)
-            if hasattr(self, "_nkey_verifier") and self._nkey_verifier is not None:
-                # Signature is embedded in the NATS message subject header or
-                # passed as a separate field.  The verifier receives raw binary.
-                if not self._nkey_verifier.verify(binary, ""):
+            # 1. Signature verification (now properly wired — previously a dead stub)
+            if self._nkey_verifier is not None:
+                if not self._nkey_verifier.verify(binary, signature_b64):
                     logger.warning(
-                        "[Agent:patch] NKey signature verification failed for "
+                        "[Agent:patch] Ed25519 verification failed for "
                         "step=%s hash=%s… — discarding", step_name, wasm_hash[:16]
                     )
                     return
 
+            # 2. WASM load-safety gate: check available RAM before loading into JIT
+            try:
+                import psutil
+                available_mb = psutil.virtual_memory().available / (1024 * 1024)
+                if available_mb < _MIN_WASM_LOAD_RAM_MB:
+                    logger.warning(
+                        "[Agent:patch] Insufficient RAM (%.0f MB available, need %d MB) "
+                        "for WASM hot-swap — delegating via ruvon.mesh.build.request",
+                        available_mb, _MIN_WASM_LOAD_RAM_MB,
+                    )
+                    if self._transport and self._nats_url:
+                        await self._transport.publish_build_request(
+                            wasm_hash,
+                            {
+                                "step_name": step_name,
+                                "reason": "insufficient_ram",
+                                "available_ram_mb": round(available_mb, 1),
+                            },
+                        )
+                    return
+            except ImportError:
+                pass  # psutil unavailable — proceed without gate
+
+            # 3. Hot-swap (in-flight calls using the old component complete normally)
             from rufus.implementations.execution.component_runtime import _get_wasm_pool
             pool = _get_wasm_pool()
             await pool.swap_module(wasm_hash, binary)
@@ -822,6 +900,104 @@ class RufusEdgeAgent:
             )
         except Exception as e:
             logger.error("[Agent:patch] Failed to apply WASM patch: %s", e)
+
+    async def _on_build_request(self, data: bytes) -> None:
+        """Handle a WASM build delegation request (Tier 2+ nodes only).
+
+        When a Tier 1 node lacks RAM to load a WASM binary, it publishes its
+        request here.  This node fetches the binary from the cloud (via the
+        normal ConfigManager download path), then re-broadcasts it on
+        ruvon.node.patch so the requesting peer (and the whole fleet) gets it.
+        """
+        try:
+            payload = json.loads(data)
+        except Exception as e:
+            logger.debug("[Agent:build] Malformed build request: %s", e)
+            return
+
+        wasm_hash = payload.get("wasm_hash", "")
+        step_name = payload.get("step_name", "unknown")
+        requester = payload.get("requesting_device_id", "unknown")
+
+        if not wasm_hash:
+            return
+
+        logger.info(
+            "[Agent:build] Build delegation request from %s for hash=%s… step=%s",
+            requester, wasm_hash[:16], step_name,
+        )
+
+        if self.config_manager is None:
+            return
+
+        # Download and cache binary (idempotent — skips if already cached)
+        success = await self.config_manager.handle_sync_wasm_command(
+            {"binary_hash": wasm_hash}
+        )
+        if not success:
+            # Already cached — still re-broadcast so requester gets it
+            pass
+
+        binary = await self._load_wasm_from_cache(wasm_hash)
+        if binary is None:
+            logger.warning(
+                "[Agent:build] Could not load binary for hash=%s… — cannot relay",
+                wasm_hash[:16],
+            )
+            return
+
+        if self._transport and self._nats_url:
+            import base64
+            payload_out = json.dumps({
+                "wasm_hash": wasm_hash,
+                "binary_b64": base64.b64encode(binary).decode(),
+                "step_name": step_name,
+                "signature_b64": "",  # Signing by build node out-of-scope here
+            }).encode()
+            try:
+                await self._transport._nc.publish("ruvon.node.patch", payload_out)
+                logger.info(
+                    "[Agent:build] Re-broadcast compiled binary for hash=%s… (%d bytes)",
+                    wasm_hash[:16], len(binary),
+                )
+            except Exception as e:
+                logger.error("[Agent:build] Re-broadcast failed: %s", e)
+
+    async def _load_wasm_from_cache(self, wasm_hash: str) -> Optional[bytes]:
+        """Read a cached WASM binary from device_wasm_cache. Returns None if absent."""
+        if self.persistence is None:
+            return None
+        try:
+            cursor = await self.persistence.conn.execute(
+                "SELECT binary_data FROM device_wasm_cache WHERE binary_hash = ?",
+                (wasm_hash,),
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.debug("[Agent] wasm cache read failed: %s", e)
+            return None
+
+    def _detect_node_tier(self) -> NodeTier:
+        """Classify this device's NodeTier from live hardware metrics."""
+        ram_total_mb = 0.0
+        accelerators = []
+        try:
+            import psutil
+            ram_total_mb = psutil.virtual_memory().total / (1024 * 1024)
+        except Exception:
+            pass
+        try:
+            from rufus.utils.platform import detect_accelerators
+            accelerators = detect_accelerators()
+        except Exception:
+            pass
+        tier = classify_node_tier(ram_total_mb, accelerators)
+        logger.info(
+            "[Agent] Hardware tier: %s (RAM=%.0f MB accelerators=%s)",
+            tier.value, ram_total_mb, [a if isinstance(a, str) else a.value for a in accelerators],
+        )
+        return tier
 
     async def _get_effective_peer_urls(self) -> list:
         """

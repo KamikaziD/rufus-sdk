@@ -371,10 +371,12 @@ class NATSEdgeTransport:
                     await msg.nak()
                     return
 
+                signature_b64 = payload.get("signature_b64", "")
+
                 if asyncio.iscoroutinefunction(handler):
-                    await handler(binary, wasm_hash, step_name)
+                    await handler(binary, wasm_hash, step_name, signature_b64)
                 else:
-                    handler(binary, wasm_hash, step_name)
+                    handler(binary, wasm_hash, step_name, signature_b64)
 
                 await msg.ack()
                 logger.info(
@@ -398,6 +400,132 @@ class NATSEdgeTransport:
             )
         except Exception as e:
             logger.error("[NATSTransport] Patch broadcast subscription failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # Capability gossip (ruvon.mesh.capabilities)
+    # ------------------------------------------------------------------
+
+    async def publish_capability_vector(self, payload: bytes) -> None:
+        """Publish a serialised CapabilityVector to ``ruvon.mesh.capabilities``.
+
+        Uses core NATS publish (NOT JetStream) for ephemeral fan-out.  Loss is
+        acceptable — the next broadcast arrives within 30 s.
+
+        Args:
+            payload: JSON-encoded CapabilityVector bytes.
+        """
+        if not self._connected:
+            return
+        try:
+            await self._nc.publish("ruvon.mesh.capabilities", payload)
+        except Exception as e:
+            logger.debug("[NATSTransport] capability vector publish failed: %s", e)
+
+    async def subscribe_capability_gossip(
+        self,
+        handler: "Callable[[bytes], Any]",
+    ) -> None:
+        """Subscribe to ``ruvon.mesh.capabilities`` for peer capability vectors.
+
+        Non-durable core NATS subscribe (ephemeral).  Incoming messages are
+        passed raw (bytes) to ``handler``.
+
+        Args:
+            handler: Async or sync callable accepting ``bytes``.
+        """
+        if not self._connected:
+            return
+
+        async def _handler(msg):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(msg.data)
+                else:
+                    handler(msg.data)
+            except Exception as e:
+                logger.debug("[NATSTransport] capability gossip handler error: %s", e)
+
+        try:
+            sub = await self._nc.subscribe("ruvon.mesh.capabilities", cb=_handler)
+            self._subscriptions.append(sub)
+            logger.info("[NATSTransport] Subscribed to capability gossip on ruvon.mesh.capabilities")
+        except Exception as e:
+            logger.error("[NATSTransport] Capability gossip subscription failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # WASM build delegation (ruvon.mesh.build.request)
+    # ------------------------------------------------------------------
+
+    async def publish_build_request(self, wasm_hash: str, build_spec: dict) -> None:
+        """Publish a WASM build delegation request to ``ruvon.mesh.build.request``.
+
+        Uses JetStream for durability — the request must not be lost since Tier 1
+        nodes are unable to proceed without a compiled binary.
+
+        Args:
+            wasm_hash:  SHA-256 hex digest of the target WASM binary.
+            build_spec: Context dict, e.g. ``{"step_name": ..., "reason": ...,
+                        "available_ram_mb": ...}``.
+        """
+        if not self._connected:
+            return
+        import json as _json
+        payload = _json.dumps({
+            "requesting_device_id": self.device_id,
+            "wasm_hash": wasm_hash,
+            **build_spec,
+        }).encode()
+        try:
+            await self._js.publish("ruvon.mesh.build.request", payload)
+            logger.info(
+                "[NATSTransport] Build delegation request published for hash=%s…",
+                wasm_hash[:16],
+            )
+        except Exception as e:
+            logger.warning("[NATSTransport] Build request publish failed: %s", e)
+
+    async def subscribe_build_requests(
+        self,
+        handler: "Callable[[bytes], Any]",
+    ) -> None:
+        """Subscribe to ``ruvon.mesh.build.request`` (Tier 2+ nodes only).
+
+        Durable JetStream consumer so requests survive transient disconnects.
+        Messages are ACKed after the handler returns without raising.
+
+        Args:
+            handler: Async or sync callable accepting raw ``bytes`` payload.
+        """
+        if not self._connected:
+            return
+
+        consumer_name = f"rufus-build-worker-{self.device_id}"
+
+        async def _handler(msg):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(msg.data)
+                else:
+                    handler(msg.data)
+                await msg.ack()
+            except Exception as e:
+                logger.error("[NATSTransport] Build request handler error: %s", e)
+                await msg.nak()
+
+        try:
+            sub = await self._js.subscribe(
+                "ruvon.mesh.build.request",
+                durable=consumer_name,
+                cb=_handler,
+                manual_ack=True,
+            )
+            self._subscriptions.append(sub)
+            logger.info(
+                "[NATSTransport] Subscribed to build requests (consumer=%s)",
+                consumer_name,
+            )
+        except Exception as e:
+            logger.error("[NATSTransport] Build request subscription failed: %s", e)
 
     # ------------------------------------------------------------------
     # Workflow sync
