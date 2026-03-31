@@ -683,7 +683,7 @@ class WorkflowBuilder:
                     from rufus.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
                     inference_provider = LlamaCppPagedProvider()
 
-        return Workflow(
+        workflow = Workflow(
             workflow_type=workflow_type,
             workflow_version=workflow_version,
             definition_snapshot=definition_snapshot,
@@ -707,6 +707,12 @@ class WorkflowBuilder:
             wasm_runtime=wasm_runtime,
             inference_provider=inference_provider
         )
+
+        # Activate saga mode if declared in the workflow YAML definition.
+        if workflow_config.get("saga_mode"):
+            await workflow.enable_saga_mode()
+
+        return workflow
 
     def get_all_task_modules(self) -> List[str]:
         modules = set()

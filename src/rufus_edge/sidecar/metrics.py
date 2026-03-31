@@ -41,6 +41,29 @@ class DeviceMetrics(BaseModel):
     collected_at: float = Field(default_factory=time.time)
 
 
+class SidecarState(BaseModel):
+    """Workflow state for the DeploymentMonitor sidecar workflow."""
+    # Collected by CollectMetrics
+    metrics: Optional[Dict[str, Any]] = Field(default=None)
+    current_config: Optional[Dict[str, Any]] = Field(default=None)
+
+    # Set by ScoreHealth
+    health_score: float = Field(0.0, description="Device health 0.0–1.0")
+
+    # Set by GenerateSuggestions — the improvement proposal
+    suggestion: Optional[Dict[str, Any]] = Field(default=None)
+
+    # Set by ApprovalGate HUMAN_IN_LOOP resume input
+    approved: bool = Field(False)
+    operator_notes: Optional[str] = Field(default=None)
+
+    # Set by ApplyChange
+    apply_outcome: Optional[str] = Field(default=None)
+
+    # Set by RiskTierGate (added in Part E)
+    risk_tier: int = Field(1, description="Risk tier 1/2/3 for the suggested change")
+
+
 def collect_device_metrics(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
     """Rufus step function: collect device metrics and return as state update.
 
