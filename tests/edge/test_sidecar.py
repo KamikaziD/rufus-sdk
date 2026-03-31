@@ -159,3 +159,128 @@ def test_hot_swap_key_classification():
     assert "floor_limit" in _HOT_SWAP_KEYS
     assert "execution_provider" in _RESTART_REQUIRED_KEYS
     assert "fraud_threshold" not in _RESTART_REQUIRED_KEYS
+
+
+# ---------------------------------------------------------------------------
+# Risk tier governance
+# ---------------------------------------------------------------------------
+
+_decisions_mod = _import_sidecar("decisions")
+
+
+def _make_state(change_key: str, risk_tier: int = 1):
+    """Build a minimal state object with suggestion + risk_tier."""
+    state = MagicMock()
+    state.suggestion = {"change": {"key": change_key, "value": 500}}
+    state.risk_tier = risk_tier
+    return state
+
+
+def _make_context():
+    ctx = MagicMock()
+    ctx.workflow_id = "wf-test-001"
+    return ctx
+
+
+def test_risk_tier_gate_level1_jumps_to_apply_change():
+    """Level 1 key → WorkflowJumpDirective to ApplyChange."""
+    from rufus.models import WorkflowJumpDirective as _WJD
+
+    state = _make_state("fraud_threshold")
+    ctx = _make_context()
+
+    with pytest.raises(_WJD) as exc_info:
+        _decisions_mod.risk_tier_gate(state, ctx)
+
+    assert exc_info.value.target_step_name == "ApplyChange"
+
+
+def test_risk_tier_gate_level2_falls_through():
+    """Level 2 key → returns dict with risk_tier=2 (falls through to ApprovalGate)."""
+    state = _make_state("execution_provider")
+    ctx = _make_context()
+
+    result = _decisions_mod.risk_tier_gate(state, ctx)
+
+    assert result == {"risk_tier": 2}
+
+
+def test_risk_tier_gate_level3_falls_through():
+    """Level 3 key → returns dict with risk_tier=3 (falls through to DraftPROnly)."""
+    state = _make_state("encryption_key")
+    ctx = _make_context()
+
+    result = _decisions_mod.risk_tier_gate(state, ctx)
+
+    assert result == {"risk_tier": 3}
+
+
+def test_risk_tier_gate_unknown_key_defaults_to_level2():
+    """Unknown config key defaults to Level 2 (safe fallback)."""
+    state = _make_state("totally_unknown_key_xyz")
+    ctx = _make_context()
+
+    result = _decisions_mod.risk_tier_gate(state, ctx)
+
+    assert result.get("risk_tier") == 2
+
+
+def test_draft_pr_only_noop_for_level1():
+    """draft_pr_only is a no-op for Level 1 changes (falls through to ApprovalGate)."""
+    state = _make_state("fraud_threshold", risk_tier=1)
+    ctx = _make_context()
+
+    result = _decisions_mod.draft_pr_only(state, ctx)
+    assert result == {}
+
+
+def test_draft_pr_only_noop_for_level2():
+    """draft_pr_only is a no-op for Level 2 changes."""
+    state = _make_state("execution_provider", risk_tier=2)
+    ctx = _make_context()
+
+    result = _decisions_mod.draft_pr_only(state, ctx)
+    assert result == {}
+
+
+def test_draft_pr_only_jumps_to_report_outcome_for_level3(monkeypatch):
+    """draft_pr_only raises WorkflowJumpDirective to ReportOutcome for Level 3."""
+    from rufus.models import WorkflowJumpDirective as _WJD
+    import urllib.request
+
+    state = _make_state("encryption_key", risk_tier=3)
+    ctx = _make_context()
+
+    # Mock the HTTP call so no real request is made
+    mock_response = MagicMock()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_response.read = MagicMock(return_value=b'{"pr_url": "https://github.com/org/repo/pull/42"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: mock_response)
+
+    with pytest.raises(_WJD) as exc_info:
+        _decisions_mod.draft_pr_only(state, ctx)
+
+    assert exc_info.value.target_step_name == "ReportOutcome"
+
+
+def test_deployment_monitor_yaml_has_risk_tier_gate():
+    """deployment_monitor.yaml must contain RiskTierGate and DraftPROnly steps."""
+    import yaml
+    from pathlib import Path
+
+    yaml_path = Path("config/workflows/deployment_monitor.yaml")
+    if not yaml_path.exists():
+        pytest.skip("deployment_monitor.yaml not found")
+
+    config = yaml.safe_load(yaml_path.read_text())
+    step_names = [s["name"] for s in config.get("steps", [])]
+
+    assert "RiskTierGate" in step_names, "RiskTierGate step missing from deployment_monitor.yaml"
+    assert "DraftPROnly" in step_names, "DraftPROnly step missing from deployment_monitor.yaml"
+
+    # RiskTierGate must appear BEFORE ApprovalGate
+    assert step_names.index("RiskTierGate") < step_names.index("ApprovalGate")
+    # DraftPROnly must appear BEFORE ApprovalGate
+    assert step_names.index("DraftPROnly") < step_names.index("ApprovalGate")

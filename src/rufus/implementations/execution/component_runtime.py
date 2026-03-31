@@ -52,6 +52,125 @@ def _get_batch_executor() -> concurrent.futures.ThreadPoolExecutor:
         )
     return _BATCH_EXECUTOR
 
+
+# ---------------------------------------------------------------------------
+# WasmComponentPool — singleton cache of pre-compiled wasmtime Components.
+#
+# Rationale: compiling a Component (Cranelift codegen) takes ~50 ms.  Caching
+# the compiled Component objects eliminates that overhead on every call.
+#
+# Hot-swap: swap_module() replaces a cached Component under asyncio.Lock.
+# Python's GIL makes the dict assignment atomic, but the lock ensures the
+# resolve → compile → assign sequence is a single coherent operation with no
+# torn state visible to concurrent callers.
+#
+# Thread-safety note: get_or_compile() and swap_module() must be called from
+# the event loop (async context).  The resolved Component object is then
+# passed as a plain argument into run_in_executor — never await inside the
+# thread-pool worker.
+# ---------------------------------------------------------------------------
+_WASM_COMPONENT_POOL: Optional["WasmComponentPool"] = None
+
+
+def _get_wasm_pool() -> "WasmComponentPool":
+    global _WASM_COMPONENT_POOL
+    if _WASM_COMPONENT_POOL is None:
+        _WASM_COMPONENT_POOL = WasmComponentPool()
+    return _WASM_COMPONENT_POOL
+
+
+class WasmComponentPool:
+    """Singleton cache of pre-compiled wasmtime Component objects.
+
+    Usage::
+
+        pool = _get_wasm_pool()
+        component = await pool.get_or_compile(binary, wasm_hash)
+        # pass component to thread-pool executor ...
+
+        # Hot-swap (called by NATS patch handler):
+        await pool.swap_module(wasm_hash, new_binary)
+    """
+
+    def __init__(self) -> None:
+        # wasm_hash -> compiled Component object (opaque, engine-specific)
+        self._cache: Dict[str, Any] = {}
+        self._lock = asyncio.Lock()
+        # Shared Engine — compiled once, thread-safe for reads.
+        # Created lazily on first use so tests without wasmtime don't fail at
+        # import time.
+        self._engine: Optional[Any] = None
+
+    def _get_engine(self) -> Any:
+        """Return (or lazily create) the shared wasmtime Engine."""
+        if self._engine is None:
+            try:
+                from wasmtime import Engine, Config  # type: ignore[import]
+                config = Config()
+                config.async_support = False
+                self._engine = Engine(config)
+            except ImportError as exc:
+                raise ImportError(
+                    "wasmtime ≥ 20 with Component Model support is required. "
+                    "Install it with: pip install wasmtime"
+                ) from exc
+        return self._engine
+
+    async def get_or_compile(self, binary: bytes, wasm_hash: str) -> Any:
+        """Return cached Component for *wasm_hash*, compiling it if needed.
+
+        Thread-safe: the lock prevents two callers from compiling the same
+        binary concurrently — the second caller waits and receives the cached
+        result.
+        """
+        if wasm_hash in self._cache:
+            return self._cache[wasm_hash]
+
+        async with self._lock:
+            # Double-checked locking: re-check after acquiring lock.
+            if wasm_hash in self._cache:
+                return self._cache[wasm_hash]
+
+            loop = asyncio.get_event_loop()
+            engine = self._get_engine()
+            try:
+                from wasmtime.component import Component  # type: ignore[import]
+            except ImportError as exc:
+                raise ImportError("wasmtime Component Model support required") from exc
+
+            component = await loop.run_in_executor(
+                _get_batch_executor(),
+                lambda: Component(engine, binary),
+            )
+            self._cache[wasm_hash] = component
+            logger.debug("WasmComponentPool: compiled and cached %s…", wasm_hash[:16])
+            return component
+
+    async def swap_module(self, wasm_hash: str, new_binary: bytes) -> None:
+        """Atomically replace the compiled Component for *wasm_hash*.
+
+        Designed for zero-downtime hot-swap: in-flight calls that already
+        retrieved the old Component will finish normally.  The next call to
+        get_or_compile() for this hash returns the new Component.
+        """
+        loop = asyncio.get_event_loop()
+        engine = self._get_engine()
+        try:
+            from wasmtime.component import Component  # type: ignore[import]
+        except ImportError as exc:
+            raise ImportError("wasmtime Component Model support required") from exc
+
+        new_component = await loop.run_in_executor(
+            _get_batch_executor(),
+            lambda: Component(engine, new_binary),
+        )
+
+        async with self._lock:
+            self._cache[wasm_hash] = new_component
+            logger.info(
+                "WasmComponentPool: hot-swapped component for hash %s…", wasm_hash[:16]
+            )
+
 # Component Model magic: first 8 bytes of a .wasm Component
 # Core module:  \x00asm\x01\x00\x00\x00
 # Component:    \x00asm\x0e\x00\x01\x00
@@ -164,10 +283,16 @@ class ComponentStepRuntime:
                     ),
                 )
             else:
-                # Cloud path — wasmtime direct, parallelised in the batch executor
+                # Cloud path — use pool-cached Component to avoid re-compilation.
+                pool = _get_wasm_pool()
+                component = await pool.get_or_compile(binary, wasm_config.wasm_hash)
+                engine = pool._get_engine()
                 results_json = await loop.run_in_executor(
                     _get_batch_executor(),
-                    lambda: [self._call_component(binary, s, step_name) for s in states_json],
+                    lambda: [
+                        self._call_component_cached(component, engine, s, step_name)
+                        for s in states_json
+                    ],
                 )
         except Exception as exc:
             return [self._handle_error(wasm_config, exc)] * len(states)
@@ -244,20 +369,35 @@ class ComponentStepRuntime:
                 except Exception as _browser_exc:
                     return self._handle_error(wasm_config, _browser_exc)
             else:
-                # Default cloud/native path — wasmtime direct call
+                # Default cloud/native path — wasmtime direct call.
+                # Use WasmComponentPool to avoid recompiling on every call.
+                # Falls back to _call_component(binary, ...) if pool compilation
+                # fails (e.g. wasmtime not installed), which preserves the legacy
+                # behaviour and keeps unit tests that patch _call_component working.
                 try:
+                    pool = _get_wasm_pool()
+                    component = await pool.get_or_compile(binary, wasm_config.wasm_hash)
+                    engine = pool._get_engine()
                     result_json = await loop.run_in_executor(
-                        None,
-                        lambda: self._call_component(binary, state_json, step_name),
+                        _get_batch_executor(),
+                        lambda: self._call_component_cached(component, engine, state_json, step_name),
                     )
                 except ImportError:
-                    # WASI host: the surrounding runtime executes the component;
-                    # we just return empty dict and let the host handle state passing
-                    logger.warning(
-                        "wasmtime not available and no bridge set — running in WASI host mode "
-                        "(state passing is managed by the host runtime)"
-                    )
-                    result_json = "{}"
+                    # wasmtime not installed — try the un-pooled path which may
+                    # have been patched in tests, or fall through to WASI host mode.
+                    try:
+                        result_json = await loop.run_in_executor(
+                            None,
+                            lambda: self._call_component(binary, state_json, step_name),
+                        )
+                    except ImportError:
+                        # WASI host: the surrounding runtime executes the component;
+                        # we just return empty dict and let the host handle state passing
+                        logger.warning(
+                            "wasmtime not available and no bridge set — running in WASI host mode "
+                            "(state passing is managed by the host runtime)"
+                        )
+                        result_json = "{}"
         except Exception as exc:
             return self._handle_error(wasm_config, exc)
 
@@ -280,7 +420,11 @@ class ComponentStepRuntime:
 
     @staticmethod
     def _call_component(binary: bytes, state_json: str, step_name: str) -> str:
-        """Synchronous Component Model call — runs in thread-pool executor."""
+        """Synchronous Component Model call — runs in thread-pool executor.
+
+        Prefer _call_component_cached() when a pre-compiled Component is
+        available from WasmComponentPool to avoid repeated Cranelift codegen.
+        """
         try:
             from wasmtime import Engine, Store, Config  # type: ignore[import]
             from wasmtime.component import Component, Linker  # type: ignore[import]
@@ -338,6 +482,57 @@ class ComponentStepRuntime:
                 message = getattr(err, "message", str(err))
                 raise RuntimeError(f"Component step error [{code}]: {message}")
         # Some bindings return the value directly on ok, raise on err
+        return str(outcome)
+
+    @staticmethod
+    def _call_component_cached(component: Any, engine: Any, state_json: str, step_name: str) -> str:
+        """Synchronous Component Model call using a pre-compiled Component.
+
+        Skips Cranelift codegen (~50 ms) by reusing the engine and Component
+        from WasmComponentPool.  Each call creates a fresh Store + Instance.
+        Runs in the thread-pool executor.
+        """
+        try:
+            from wasmtime import Store  # type: ignore[import]
+            from wasmtime.component import Linker  # type: ignore[import]
+        except ImportError as exc:
+            raise ImportError("wasmtime ≥ 20 with Component Model support is required") from exc
+
+        store = Store(engine)
+        linker = Linker(engine)
+
+        try:
+            from wasmtime.component import add_to_linker as add_wasi  # type: ignore[import]
+            add_wasi(linker)
+        except Exception:
+            pass
+
+        instance = linker.instantiate(store, component)
+
+        try:
+            runner = instance.exports(store).get("rufus:step/runner")
+            if runner is not None:
+                execute_fn = runner.get("execute")
+            else:
+                execute_fn = instance.exports(store).get("execute")
+        except Exception:
+            execute_fn = instance.exports(store).get("execute")
+
+        if execute_fn is None:
+            raise RuntimeError(
+                "Component does not export 'rufus:step/runner#execute' or 'execute'."
+            )
+
+        outcome = execute_fn(store, state_json, step_name)
+
+        if hasattr(outcome, "value"):
+            if outcome.tag == 0:
+                return outcome.value
+            else:
+                err = outcome.value
+                code = getattr(err, "code", "UNKNOWN")
+                message = getattr(err, "message", str(err))
+                raise RuntimeError(f"Component step error [{code}]: {message}")
         return str(outcome)
 
     async def _run_component_browser(

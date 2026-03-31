@@ -29,11 +29,16 @@ Example usage:
 from rufus_edge.agent import RufusEdgeAgent
 from rufus_edge.sync_manager import SyncManager
 from rufus_edge.config_manager import ConfigManager, UpdateInstruction
-from rufus_edge.inference_executor import (
-    InferenceExecutor,
-    get_inference_executor,
-    initialize_inference_executor,
-)
+try:
+    from rufus_edge.inference_executor import (
+        InferenceExecutor,
+        get_inference_executor,
+        initialize_inference_executor,
+    )
+except ImportError:
+    InferenceExecutor = None  # type: ignore[assignment,misc]
+    get_inference_executor = None  # type: ignore[assignment]
+    initialize_inference_executor = None  # type: ignore[assignment]
 from rufus_edge.models import (
     PaymentState,
     SAFTransaction,

@@ -308,6 +308,98 @@ class NATSEdgeTransport:
             logger.error(f"[NATSTransport] Config push subscription failed: {e}")
 
     # ------------------------------------------------------------------
+    # Fleet WASM patch broadcast
+    # ------------------------------------------------------------------
+
+    async def subscribe_patch_broadcast(
+        self,
+        handler: Callable[[bytes, str, str], Any],
+    ) -> None:
+        """Subscribe to ruvon.node.patch for fleet-wide WASM binary delivery.
+
+        Every node in the fleet subscribes to the same subject.  The AI
+        publisher broadcasts a compiled .wasm binary; all nodes simultaneously
+        shadow-verify and cache it so the next workflow step using that hash
+        gets the updated component without a restart.
+
+        Message JSON payload::
+
+            {
+                "wasm_hash": "<sha256hex>",
+                "binary_b64": "<base64-encoded .wasm bytes>",
+                "step_name": "<step identifier this patch targets>"
+            }
+
+        The handler signature is::
+
+            async def on_patch(binary: bytes, wasm_hash: str, step_name: str) -> None
+
+        Hash integrity is verified before the handler is called.  A mismatch
+        is logged and the message is nack-ed so the broker can redeliver or
+        route to a dead-letter subject.
+
+        Args:
+            handler: Coroutine (or sync) callable invoked with
+                     ``(binary, wasm_hash, step_name)`` after integrity check.
+        """
+        if not self._connected:
+            return
+
+        import base64
+        import hashlib
+
+        subject = "ruvon.node.patch"
+        # Unique cursor per device — each node tracks its own replay position.
+        consumer_name = f"rufus-patch-{self.device_id}"
+
+        async def _handler(msg):
+            try:
+                payload = json.loads(msg.data)
+                wasm_hash = payload.get("wasm_hash", "")
+                binary_b64 = payload.get("binary_b64", "")
+                step_name = payload.get("step_name", "unknown")
+
+                binary = base64.b64decode(binary_b64)
+                actual_hash = hashlib.sha256(binary).hexdigest()
+
+                if actual_hash != wasm_hash:
+                    logger.error(
+                        "[NATSTransport:patch] Hash mismatch for step=%s: "
+                        "expected=%s actual=%s — discarding",
+                        step_name, wasm_hash[:16], actual_hash[:16],
+                    )
+                    await msg.nak()
+                    return
+
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(binary, wasm_hash, step_name)
+                else:
+                    handler(binary, wasm_hash, step_name)
+
+                await msg.ack()
+                logger.info(
+                    "[NATSTransport:patch] Applied WASM patch for step=%s hash=%s…",
+                    step_name, wasm_hash[:16],
+                )
+            except Exception as e:
+                logger.error("[NATSTransport:patch] Patch handler error: %s", e)
+
+        try:
+            sub = await self._js.subscribe(
+                subject,
+                durable=consumer_name,
+                cb=_handler,
+                manual_ack=True,
+            )
+            self._subscriptions.append(sub)
+            logger.info(
+                "[NATSTransport] Subscribed to patch broadcast on %s (consumer=%s)",
+                subject, consumer_name,
+            )
+        except Exception as e:
+            logger.error("[NATSTransport] Patch broadcast subscription failed: %s", e)
+
+    # ------------------------------------------------------------------
     # Workflow sync
     # ------------------------------------------------------------------
 

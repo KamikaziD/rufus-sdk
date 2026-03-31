@@ -70,6 +70,15 @@ class CompensatableStep(WorkflowStep):
     """Workflow step that includes a compensation function for saga patterns."""
     compensate_func: Callable
 
+    async def compensate(self, state: Any, context: Any = None, **kwargs) -> dict:
+        """Invoke the compensation function, handling both sync and async callables."""
+        import asyncio
+        if asyncio.iscoroutinefunction(self.compensate_func):
+            result = await self.compensate_func(state, context, **kwargs)
+        else:
+            result = self.compensate_func(state, context, **kwargs)
+        return result if isinstance(result, dict) else {}
+
 
 class AsyncWorkflowStep(WorkflowStep):
     """Workflow step that executes asynchronously, allowing the workflow to pause and wait for an external event or callback."""

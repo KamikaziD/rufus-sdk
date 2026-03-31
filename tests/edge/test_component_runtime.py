@@ -15,6 +15,7 @@ import pytest
 from rufus.implementations.execution.wasm_runtime import WasmRuntime  # noqa: F401 (legacy compat)
 from rufus.implementations.execution.component_runtime import (
     ComponentStepRuntime,
+    WasmComponentPool,
     is_component,
 )
 
@@ -362,3 +363,75 @@ async def test_component_runtime_timeout_triggers_skip():
 
     result = await runtime.execute(config, {})
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# WasmComponentPool — hot-swap and caching
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_wasm_component_pool_caches_compiled_component():
+    """get_or_compile returns the same object on repeated calls (no recompile)."""
+    import sys
+    import hashlib
+
+    binary = CM_MAGIC_8
+    wasm_hash = hashlib.sha256(binary).hexdigest()
+
+    # Create a fake wasmtime.component module so the import inside get_or_compile succeeds.
+    fake_component_cls = MagicMock()
+    fake_component_instance = object()
+    fake_component_cls.return_value = fake_component_instance
+
+    fake_wt_component = MagicMock()
+    fake_wt_component.Component = fake_component_cls
+
+    pool = WasmComponentPool()
+    pool._engine = MagicMock()  # skip real Engine creation
+
+    with patch.dict(sys.modules, {"wasmtime.component": fake_wt_component}):
+        result1 = await pool.get_or_compile(binary, wasm_hash)
+        result2 = await pool.get_or_compile(binary, wasm_hash)
+
+    assert result1 is fake_component_instance
+    assert result2 is fake_component_instance  # second call returns cached — no recompile
+    # Component() was only called once (cache hit on second call)
+    assert fake_component_cls.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wasm_component_pool_swap_module_replaces_cache():
+    """swap_module atomically replaces the cached component for a given hash."""
+    import sys
+    import hashlib
+
+    binary_v1 = CM_MAGIC_8
+    binary_v2 = b"\x00asm\x0e\x00\x01\x00" + b"\xff" * 100
+    wasm_hash = hashlib.sha256(binary_v1).hexdigest()
+
+    fake_v1 = object()
+    fake_v2 = object()
+
+    call_count = 0
+
+    def _fake_component_cls(engine, binary):
+        nonlocal call_count
+        call_count += 1
+        return fake_v1 if call_count == 1 else fake_v2
+
+    fake_wt_component = MagicMock()
+    fake_wt_component.Component = _fake_component_cls
+
+    pool = WasmComponentPool()
+    pool._engine = MagicMock()  # skip real Engine creation
+
+    with patch.dict(sys.modules, {"wasmtime.component": fake_wt_component}):
+        # Prime the cache with v1
+        first = await pool.get_or_compile(binary_v1, wasm_hash)
+        assert first is fake_v1
+
+        # Hot-swap to v2
+        await pool.swap_module(wasm_hash, binary_v2)
+
+    # After swap, cache holds v2
+    assert pool._cache[wasm_hash] is fake_v2

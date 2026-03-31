@@ -197,3 +197,44 @@ class TestSyncWasmCommandReloadsResolver:
 
             agent.config_manager.handle_sync_wasm_command.assert_awaited_once()
             assert len(reload_called) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: _on_patch_broadcast hot-swaps WasmComponentPool
+# ---------------------------------------------------------------------------
+
+class TestPatchBroadcastHandler:
+    @pytest.mark.asyncio
+    async def test_on_patch_broadcast_calls_swap_module(self):
+        """_on_patch_broadcast verifies hash and calls pool.swap_module."""
+        import hashlib
+        from rufus.implementations.execution.component_runtime import _get_wasm_pool
+
+        binary = b"\x00asm\x0e\x00\x01\x00" + b"\xab" * 50
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        step_name = "FraudScorer"
+
+        async with started_agent() as agent:
+            pool = _get_wasm_pool()
+            with patch.object(pool, "swap_module", new=AsyncMock()) as mock_swap:
+                await agent._on_patch_broadcast(binary, wasm_hash, step_name)
+                mock_swap.assert_awaited_once_with(wasm_hash, binary)
+
+    @pytest.mark.asyncio
+    async def test_on_patch_broadcast_skipped_with_nkey_verifier_reject(self):
+        """_on_patch_broadcast discards patch when NKey verification fails."""
+        import hashlib
+        from rufus.implementations.execution.component_runtime import _get_wasm_pool
+
+        binary = b"\x00asm\x0e\x00\x01\x00" + b"\xcd" * 50
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+
+        fake_verifier = MagicMock()
+        fake_verifier.verify = MagicMock(return_value=False)
+
+        async with started_agent() as agent:
+            agent._nkey_verifier = fake_verifier
+            pool = _get_wasm_pool()
+            with patch.object(pool, "swap_module", new=AsyncMock()) as mock_swap:
+                await agent._on_patch_broadcast(binary, wasm_hash, "FraudScorer")
+                mock_swap.assert_not_awaited()

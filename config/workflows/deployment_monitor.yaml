@@ -9,7 +9,8 @@
 #
 # Self-healing loop:
 #   CollectMetrics → ScoreHealth → [healthy: loop] / [degraded:]
-#   GenerateSuggestions → ApprovalGate → ApplyChange → ReportOutcome → loop
+#   GenerateSuggestions → RiskTierGate → [L1: ApplyChange] / [L2: ApprovalGate → ApplyChange]
+#                      → [L3: DraftPROnly → ReportOutcome] → loop
 #
 # Deployment paths:
 #   - HOT-SWAP:      config-only changes (fraud thresholds, floor limits)
@@ -27,6 +28,10 @@ cron_expression: "*/15 * * * *"
 timezone: "UTC"
 
 initial_state_model: rufus_edge.sidecar.metrics:SidecarState
+
+# Saga mode: if ApplyChange fails, rollback_change is called automatically to
+# restore the config backup.  Without saga_mode: true this compensation never fires.
+saga_mode: true
 
 steps:
   # -------------------------------------------------------------------------
@@ -100,7 +105,28 @@ steps:
     timeout_seconds: 60
 
   # -------------------------------------------------------------------------
-  # Step 5: Human-in-the-loop approval gate
+  # Step 5: Classify the suggested change by risk tier
+  # Level 1 (config tweaks)  → auto-deploy: jump to ApplyChange
+  # Level 2 (logic changes)  → operator approval: fall through to ApprovalGate
+  # Level 3 (security keys)  → draft PR only: fall through to DraftPROnly
+  # -------------------------------------------------------------------------
+  - name: RiskTierGate
+    type: DECISION
+    function: rufus_edge.sidecar.decisions:risk_tier_gate
+    description: "Classify change risk tier and route: Level 1 auto-deploy, Level 2 approval, Level 3 draft-PR"
+
+  # -------------------------------------------------------------------------
+  # Step 6: Level 3 — security-critical change handling
+  # Creates a draft PR on the cloud control plane then jumps to ReportOutcome.
+  # For Level 1/2 this step is a no-op and falls through to ApprovalGate.
+  # -------------------------------------------------------------------------
+  - name: DraftPROnly
+    type: DECISION
+    function: rufus_edge.sidecar.decisions:draft_pr_only
+    description: "For Level 3 changes: create draft PR only (never auto-apply); jump to ReportOutcome"
+
+  # -------------------------------------------------------------------------
+  # Step 7: Human-in-the-loop approval gate (Level 2 only)
   # Stores approval request in SAF queue so it survives offline periods.
   # Operator approves via cloud control plane dashboard.
   # Resume input: {"approved": true/false, "operator_notes": "..."}
@@ -120,7 +146,7 @@ steps:
     # SAF: if offline, the HITL request is queued and sent when connectivity resumes
 
   # -------------------------------------------------------------------------
-  # Step 6: Check approval outcome — skip apply if rejected
+  # Step 8: Check approval outcome — skip apply if rejected
   # -------------------------------------------------------------------------
   - name: ApprovalDecision
     type: DECISION
@@ -129,7 +155,7 @@ steps:
     # approval_gate raises WorkflowJumpDirective("ReportOutcome") on rejection
 
   # -------------------------------------------------------------------------
-  # Step 7: Apply the approved change
+  # Step 9: Apply the approved change
   # Hot-swap reloads config without stopping the agent.
   # Drain+restart waits for in-flight transactions to complete first.
   # -------------------------------------------------------------------------
@@ -142,7 +168,7 @@ steps:
     compensate_function: rufus_edge.sidecar.config_applier:rollback_change
 
   # -------------------------------------------------------------------------
-  # Step 8: Report outcome to cloud control plane
+  # Step 10: Report outcome to cloud control plane
   # Sends aggregate outcome (applied/failed, metrics delta) via HTTP.
   # Never sends raw transaction data.
   # SAF: queued if offline, delivered on next sync.

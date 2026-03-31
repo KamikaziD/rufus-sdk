@@ -38,7 +38,7 @@ native  = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
 all     = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
 # NATS JetStream transport for edge mesh networking
 # Install with: pip install 'rufus-sdk-edge[nats]'
-nats    = ["nats-py>=2.3", "betterproto>=0.9.0", "protobuf>=4.21"]
+nats    = ["nats-py>=2.3", "betterproto>=0.9.0", "protobuf>=4.21", "nkeys>=0.1"]
 
 [build-system]
 requires = ["hatchling"]
