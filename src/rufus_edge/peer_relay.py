@@ -57,6 +57,8 @@ class PeerStatus:
     relay_load: int = 0                 # current active relay sessions
     relay_load_max: int = 10            # relay capacity ceiling
     relay_success_rate: float = 1.0    # self-reported historical success rate
+    # Tier classification (populated from capability gossip when available)
+    node_tier: Optional[str] = None     # "tier_1" / "tier_2" / "tier_3"
 
 
 @dataclass
@@ -88,6 +90,7 @@ class PeerRelayClient:
                     relay_load=int(data.get("relay_load", 0)),
                     relay_load_max=int(data.get("relay_load_max", 10)),
                     relay_success_rate=float(data.get("relay_success_rate", 1.0)),
+                    node_tier=data.get("node_tier"),
                 )
         except Exception as e:
             logger.debug(f"[Mesh] Probe failed for {peer_url}: {e}")
@@ -179,10 +182,13 @@ class MeshRouter:
     breaker (≥3 consecutive failures) skips persistently unreliable peers.
     """
 
-    def __init__(self, device_id: str, sync_manager):
+    def __init__(self, device_id: str, sync_manager, gossip_manager=None):
         self._device_id = device_id
         self._sync_manager = sync_manager
         self._client = PeerRelayClient()
+        # Optional CapabilityGossipManager — when present its cached peer data
+        # supplements the RUVON P-dimension for peers with no local relay history.
+        self._gossip_manager = gossip_manager
 
     # ------------------------------------------------------------------
     # Per-peer failure tracking (stored in edge_sync_state)
@@ -294,6 +300,18 @@ class MeshRouter:
             U = status.relay_success_rate  # fall back to peer self-report
         load_max = max(status.relay_load_max, 1)
         P = 1.0 - min(status.relay_load / load_max, 1.0)
+
+        # Supplement P with gossip-reported capacity when no local relay history
+        # exists.  Gossip data is more accurate than self-reported relay_load for
+        # peers this node has never actually relayed through.
+        if total == 0 and self._gossip_manager is not None:
+            peer_caps = self._gossip_manager._peer_cache.get(status.device_id)
+            if peer_caps is not None and not peer_caps.is_stale():
+                # Blend CPU slack and RAM headroom (both 0.0–1.0) into P
+                cpu_slack = max(0.0, 1.0 - peer_caps.cpu_load)
+                ram_headroom = min(peer_caps.available_ram_mb / 1024.0, 1.0)
+                P = (cpu_slack + ram_headroom) / 2.0
+
         score = _WC * C + _WH * (1.0 / H) + _WU * U + _WP * P
         logger.debug(
             f"[RUVON] {peer_url} hop={hop} C={C:.2f} U={U:.2f} P={P:.2f} → score={score:.3f}"
@@ -402,6 +420,7 @@ def create_relay_app(
     is_online_fn: Callable[[], bool],
     leadership_score_fn: Optional[Callable[[], float]] = None,
     is_master_fn: Optional[Callable[[], bool]] = None,
+    node_tier_fn: Optional[Callable[[], Optional[str]]] = None,
 ):
     """
     Create the FastAPI app for the peer relay server.
@@ -440,6 +459,7 @@ def create_relay_app(
             "relay_success_rate": 1.0,  # self-reported; remotes use local stats
             "leader_score": leadership_score_fn() if leadership_score_fn else 0.0,
             "is_local_master": is_master_fn() if is_master_fn else False,
+            "node_tier": node_tier_fn() if node_tier_fn else None,
         }
 
     @app.get("/peer/peers")
