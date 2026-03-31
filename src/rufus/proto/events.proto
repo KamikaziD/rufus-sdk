@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package rufus.events;
+
+// Workflow lifecycle event published to NATS stream.
+// event_type strings match those used in events.py exactly so existing
+// dashboard subscribers (Redis pub/sub → NATS migration) stay compatible.
+message WorkflowEvent {
+  string event_type = 1;    // e.g. "workflow.started", "step.executed", "workflow.completed"
+  string workflow_id = 2;
+  string workflow_type = 3;
+  double timestamp = 4;     // Unix epoch float (matches Redis events.py)
+  bytes payload_json = 5;   // JSON-encoded full event payload dict
+  string stream_key = 6;    // original Redis stream key for routing compat
+}

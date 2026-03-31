@@ -8,9 +8,61 @@ Tests:
 4. croniter computes next run correctly for a basic cron expression.
 """
 import json
+import sys
+import types
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+
+# ---------------------------------------------------------------------------
+# Stub out optional heavy dependencies before any rufus module is imported.
+# rufus.tasks → rufus.events → redis.asyncio (not installed in test env)
+# ---------------------------------------------------------------------------
+if "redis" not in sys.modules:
+    _redis_stub = types.ModuleType("redis")
+    _redis_asyncio_stub = types.ModuleType("redis.asyncio")
+    _redis_asyncio_stub.Redis = MagicMock
+    _redis_asyncio_stub.from_url = MagicMock(return_value=MagicMock())
+    _redis_stub.asyncio = _redis_asyncio_stub
+    sys.modules["redis"] = _redis_stub
+    sys.modules["redis.asyncio"] = _redis_asyncio_stub
+
+if "celery" not in sys.modules:
+    _celery_stub = types.ModuleType("celery")
+
+    class _FakeCelery:
+        def __init__(self, *a, **kw): pass
+        def task(self, fn=None, *a, **kw):
+            # Handles both @celery_app.task and @celery_app.task(bind=True, ...)
+            def decorator(f):
+                f.delay = MagicMock(side_effect=lambda *a, **kw: None)
+                f.apply_async = MagicMock()
+                return f
+            if fn is not None:
+                return decorator(fn)
+            return decorator
+        conf = MagicMock()
+        config_from_object = MagicMock()
+
+    _celery_stub.Celery = _FakeCelery
+
+    # Stub out celery sub-modules accessed at import time
+    for _sub in ("signals", "utils", "utils.log", "app", "app.base",
+                 "schedules", "beat", "contrib", "contrib.django"):
+        sys.modules[f"celery.{_sub}"] = types.ModuleType(f"celery.{_sub}")
+
+    # signals module needs specific attributes
+    _signals_stub = sys.modules["celery.signals"]
+    for _sig in ("worker_process_init", "worker_ready", "worker_shutdown",
+                 "task_prerun", "task_postrun", "task_failure", "task_success"):
+        setattr(_signals_stub, _sig, MagicMock())
+
+    # schedules module — crontab and others
+    _sched_stub = sys.modules["celery.schedules"]
+    _sched_stub.crontab = MagicMock
+    _sched_stub.schedule = MagicMock
+
+    sys.modules["celery"] = _celery_stub
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +121,7 @@ def test_register_schedule_inserts_row():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 
@@ -129,7 +181,7 @@ def test_poll_triggers_due_workflows():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 
@@ -176,7 +228,7 @@ def test_poll_skips_future_workflows():
 
         def run_sync(coro):
             import asyncio
-            return asyncio.get_event_loop().run_until_complete(coro)
+            return asyncio.run(coro)
 
         mock_pg_exec.run_coroutine_sync = run_sync
 

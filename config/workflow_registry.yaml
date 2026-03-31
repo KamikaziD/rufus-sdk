@@ -28,3 +28,17 @@ workflows:
     config_file: "void_workflow.yaml"
     initial_state_model: "rufus_edge.models.PaymentState"
     # Not yet implemented
+
+  - type: "DeploymentMonitor"
+    description: "Autonomous deployment sidecar — monitors device health, surfaces HITL improvement proposals, applies approved changes via WASM sandbox"
+    config_file: "deployment_monitor.yaml"
+    initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
+    requires:
+      - rufus-sdk-edge
+
+  - type: "DeploymentMonitorWasm"
+    description: "WASM-sandboxed deployment sidecar — same as DeploymentMonitor but ApplyChange runs in WASI isolation (requires compiled apply_config.wasm)"
+    config_file: "deployment_monitor_wasm.yaml"
+    initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
+    requires:
+      - rufus-sdk-edge

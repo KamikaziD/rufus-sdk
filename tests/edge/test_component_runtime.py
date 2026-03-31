@@ -15,6 +15,7 @@ import pytest
 from rufus.implementations.execution.wasm_runtime import WasmRuntime  # noqa: F401 (legacy compat)
 from rufus.implementations.execution.component_runtime import (
     ComponentStepRuntime,
+    WasmComponentPool,
     is_component,
 )
 
@@ -261,3 +262,176 @@ class TestWasmRuntimeCMDelegation:
             result = await runtime.execute(config, {})
 
         assert result == {"legacy": True}
+
+
+# ---------------------------------------------------------------------------
+# ComponentStepRuntime — bridge integration
+# ---------------------------------------------------------------------------
+
+class TestComponentStepRuntimeBridgeIntegration:
+    """Verify that the optional bridge param routes correctly."""
+
+    @pytest.mark.asyncio
+    async def test_bridge_used_when_set_call_component_skipped(self):
+        """When bridge is provided, _call_component must NOT be called."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        fake_bridge = MagicMock()
+        fake_bridge.execute_component = MagicMock(return_value='{"bridge_result": true}')
+
+        runtime = ComponentStepRuntime(resolver, bridge=fake_bridge)
+
+        with patch.object(ComponentStepRuntime, "_call_component") as mock_native:
+            config = make_config(wasm_hash=wasm_hash)
+            result = await runtime.execute(config, {"x": 1})
+
+        # Bridge was called; native path was not
+        fake_bridge.execute_component.assert_called_once()
+        mock_native.assert_not_called()
+        assert result == {"bridge_result": True}
+
+    @pytest.mark.asyncio
+    async def test_cloud_path_unchanged_when_bridge_is_none(self):
+        """Without a bridge, the default _call_component (wasmtime) path runs."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        runtime = ComponentStepRuntime(resolver, bridge=None)
+
+        with patch.object(
+            ComponentStepRuntime,
+            "_call_component",
+            return_value='{"cloud": true}',
+        ) as mock_native:
+            config = make_config(wasm_hash=wasm_hash)
+            result = await runtime.execute(config, {})
+
+        mock_native.assert_called_once()
+        assert result == {"cloud": True}
+
+    @pytest.mark.asyncio
+    async def test_bridge_error_respects_fallback_on_error_skip(self):
+        """Bridge RuntimeError must be caught and handled by _handle_error policy."""
+        import hashlib
+        binary = CM_MAGIC_8
+        wasm_hash = hashlib.sha256(binary).hexdigest()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=binary)
+
+        fake_bridge = MagicMock()
+        fake_bridge.execute_component = MagicMock(
+            side_effect=RuntimeError("bridge execution failed")
+        )
+
+        runtime = ComponentStepRuntime(resolver, bridge=fake_bridge)
+        config = make_config(wasm_hash=wasm_hash, fallback_on_error="skip")
+
+        result = await runtime.execute(config, {})
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# ComponentStepRuntime — slow resolver triggers timeout (EBu8w)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_component_runtime_timeout_triggers_skip():
+    """A slow resolver that exceeds timeout_ms is treated as an error."""
+    import asyncio
+    import hashlib
+    binary = CORE_MAGIC_8
+    actual_hash = hashlib.sha256(binary).hexdigest()
+
+    class _SlowResolver:
+        async def resolve(self, binary_hash: str) -> bytes:
+            await asyncio.sleep(10)  # cancelled by timeout
+            return binary
+
+    runtime = ComponentStepRuntime(_SlowResolver())
+    config = make_config(
+        wasm_hash=actual_hash,
+        timeout_ms=50,
+        fallback_on_error="skip",
+    )
+
+    result = await runtime.execute(config, {})
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# WasmComponentPool — hot-swap and caching
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_wasm_component_pool_caches_compiled_component():
+    """get_or_compile returns the same object on repeated calls (no recompile)."""
+    import sys
+    import hashlib
+
+    binary = CM_MAGIC_8
+    wasm_hash = hashlib.sha256(binary).hexdigest()
+
+    # Create a fake wasmtime.component module so the import inside get_or_compile succeeds.
+    fake_component_cls = MagicMock()
+    fake_component_instance = object()
+    fake_component_cls.return_value = fake_component_instance
+
+    fake_wt_component = MagicMock()
+    fake_wt_component.Component = fake_component_cls
+
+    pool = WasmComponentPool()
+    pool._engine = MagicMock()  # skip real Engine creation
+
+    with patch.dict(sys.modules, {"wasmtime.component": fake_wt_component}):
+        result1 = await pool.get_or_compile(binary, wasm_hash)
+        result2 = await pool.get_or_compile(binary, wasm_hash)
+
+    assert result1 is fake_component_instance
+    assert result2 is fake_component_instance  # second call returns cached — no recompile
+    # Component() was only called once (cache hit on second call)
+    assert fake_component_cls.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wasm_component_pool_swap_module_replaces_cache():
+    """swap_module atomically replaces the cached component for a given hash."""
+    import sys
+    import hashlib
+
+    binary_v1 = CM_MAGIC_8
+    binary_v2 = b"\x00asm\x0e\x00\x01\x00" + b"\xff" * 100
+    wasm_hash = hashlib.sha256(binary_v1).hexdigest()
+
+    fake_v1 = object()
+    fake_v2 = object()
+
+    call_count = 0
+
+    def _fake_component_cls(engine, binary):
+        nonlocal call_count
+        call_count += 1
+        return fake_v1 if call_count == 1 else fake_v2
+
+    fake_wt_component = MagicMock()
+    fake_wt_component.Component = _fake_component_cls
+
+    pool = WasmComponentPool()
+    pool._engine = MagicMock()  # skip real Engine creation
+
+    with patch.dict(sys.modules, {"wasmtime.component": fake_wt_component}):
+        # Prime the cache with v1
+        first = await pool.get_or_compile(binary_v1, wasm_hash)
+        assert first is fake_v1
+
+        # Hot-swap to v2
+        await pool.swap_module(wasm_hash, binary_v2)
+
+    # After swap, cache holds v2
+    assert pool._cache[wasm_hash] is fake_v2

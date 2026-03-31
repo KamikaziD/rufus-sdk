@@ -1,9 +1,9 @@
 """
 Domain Transfer Objects (DTOs) for Rufus provider interfaces.
 
-These typed dataclasses replace Dict[str, Any] return types across all provider
-interfaces, giving implementations a verifiable contract and enabling static
-analysis to catch schema drift early.
+These msgspec.Struct subclasses replace Dict[str, Any] return types across all
+provider interfaces, giving implementations a verifiable contract and enabling
+static analysis to catch schema drift early.
 
 All fields map 1-to-1 with the DB columns defined in:
   - PostgreSQL: src/rufus/db_schema/database.py  (source of truth)
@@ -16,12 +16,12 @@ Nullable DB columns are represented as Optional fields.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import msgspec
 
-@dataclass(slots=True)
-class WorkflowRecord:
+
+class WorkflowRecord(msgspec.Struct):
     """Represents a row from workflow_executions."""
     id: str
     workflow_type: str
@@ -34,7 +34,7 @@ class WorkflowRecord:
     workflow_version: Optional[str] = None
     definition_snapshot: Optional[Dict[str, Any]] = None
     saga_mode: bool = False
-    completed_steps_stack: List[Dict[str, Any]] = field(default_factory=list)
+    completed_steps_stack: List[Dict[str, Any]] = []
     parent_execution_id: Optional[str] = None
     blocked_on_child_id: Optional[str] = None
     data_region: Optional[str] = None
@@ -48,8 +48,7 @@ class WorkflowRecord:
     completed_at: Optional[str] = None
 
 
-@dataclass(slots=True)
-class TaskRecord:
+class TaskRecord(msgspec.Struct):
     """Represents a row from the tasks table."""
     task_id: str
     execution_id: str
@@ -71,8 +70,7 @@ class TaskRecord:
     updated_at: Optional[str] = None
 
 
-@dataclass(slots=True)
-class AuditLogRecord:
+class AuditLogRecord(msgspec.Struct):
     """Represents a row from workflow_audit_log."""
     workflow_id: str
     event_type: str
@@ -93,8 +91,7 @@ class AuditLogRecord:
     execution_duration_ms: Optional[float] = None
 
 
-@dataclass(slots=True)
-class MetricRecord:
+class MetricRecord(msgspec.Struct):
     """Represents a row from workflow_metrics."""
     workflow_id: str
     metric_name: str
@@ -109,8 +106,7 @@ class MetricRecord:
     recorded_at: Optional[str] = None
 
 
-@dataclass(slots=True)
-class SyncStateRecord:
+class SyncStateRecord(msgspec.Struct):
     """Represents a row from edge_sync_state."""
     key: str
     value: str

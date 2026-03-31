@@ -78,6 +78,7 @@ class ConfigManager:
         poll_interval_seconds: int = 60,
         persistence=None,
         adapter: Optional[PlatformAdapter] = None,
+        platform_adapter: Optional[PlatformAdapter] = None,
     ):
         self.config_url = config_url
         self.device_id = device_id
@@ -88,7 +89,7 @@ class ConfigManager:
         self._current_config: Optional[DeviceConfig] = None
         self._current_etag: Optional[str] = None
         self._last_poll_at: Optional[datetime] = None
-        self._adapter: Optional[PlatformAdapter] = adapter
+        self._adapter: Optional[PlatformAdapter] = platform_adapter or adapter
         self._polling_task: Optional[asyncio.Task] = None
         self._on_config_change_callbacks: list[Callable[[DeviceConfig], None]] = []
 

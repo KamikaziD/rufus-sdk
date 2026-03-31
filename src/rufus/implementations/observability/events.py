@@ -122,7 +122,13 @@ class EventPublisherObserver(WorkflowObserver):
             return
 
         try:
-            workflow_dict = await self._persistence.load_workflow(workflow_id)
+            raw = await self._persistence.load_workflow(workflow_id)
+            # load_workflow may return a WorkflowRecord DTO (msgspec.Struct) or a plain dict
+            if hasattr(raw, "__struct_fields__") or not isinstance(raw, dict):
+                import msgspec as _ms
+                workflow_dict = _ms.to_builtins(raw)
+            else:
+                workflow_dict = raw
 
             full_state = {
                 "id": workflow_dict.get("id"),

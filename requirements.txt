@@ -51,6 +51,11 @@ alembic>=1.13.0
 # CLI formatting
 rich>=13.0.0
 
+# NATS JetStream + Protobuf (optional transport layer)
+nats-py>=2.3
+betterproto>=0.9.0
+protobuf>=4.21
+
 # Environment
 python-dotenv>=1.0.0
 

@@ -2,7 +2,7 @@
 Rufus SDK — Comprehensive Benchmark Suite
 ==========================================
 
-Covers 11 sections:
+Covers 14 sections:
   1. JSON Serialization
   2. Import Caching
   3. SQLite Persistence
@@ -14,6 +14,9 @@ Covers 11 sections:
   9. Ed25519 Signatures      (requires cryptography)
  10. API Key Hashing
  11. Full SAF Pipeline       (requires cryptography)
+ 12. msgspec Typed Codec     (requires msgspec)
+ 13. WASM Bridge Dispatch    (requires rufus-sdk-edge)
+ 14. Proto Codec             (requires betterproto; generated code optional)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -70,6 +73,18 @@ try:
     _UVLOOP_AVAILABLE = True
 except ImportError:
     _UVLOOP_AVAILABLE = False
+
+try:
+    import msgspec as _msgspec
+    _MSGSPEC_AVAILABLE = True
+except ImportError:
+    _MSGSPEC_AVAILABLE = False
+
+try:
+    import betterproto as _betterproto
+    _BETTERPROTO_AVAILABLE = True
+except ImportError:
+    _BETTERPROTO_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Module-level state — must be importable as dotted paths for WorkflowBuilder
@@ -828,6 +843,477 @@ async def bench_saf_pipeline(n: int) -> Section:
 
 
 # ---------------------------------------------------------------------------
+# Section 12 — msgspec Typed Codec
+# ---------------------------------------------------------------------------
+
+def bench_msgspec_codec(n: int) -> Section:
+    sec = Section("12. msgspec Typed Codec")
+
+    if not _MSGSPEC_AVAILABLE:
+        sec.note("msgspec not installed — skipping")
+        return sec
+
+    from rufus.providers.dtos import WorkflowRecord
+    from rufus.utils.serialization import decode_typed, encode_struct, deserialize, serialize_bytes
+
+    record = WorkflowRecord(
+        id="wf-bench-001",
+        workflow_type="BenchmarkWorkflow",
+        status="ACTIVE",
+        current_step=2,
+        state={"amount": 50000, "user_id": "u_42", "approved": True},
+        steps_config=[{"name": "Step1", "type": "STANDARD"}, {"name": "Step2", "type": "ASYNC"}],
+        state_model_path="benchmark.State",
+        saga_mode=False,
+        completed_steps_stack=[{"step": "Step1"}],
+        metadata={"source": "api"},
+    )
+    struct_bytes = _msgspec.json.encode(record)
+    dict_repr = _msgspec.to_builtins(record)
+    dict_bytes = serialize_bytes(dict_repr)
+
+    # Warmup
+    for _ in range(min(n, 200)):
+        encode_struct(record)
+        decode_typed(struct_bytes, WorkflowRecord)
+        deserialize(dict_bytes)
+
+    # encode_struct (struct → bytes)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        encode_struct(record)
+        times.append(time.perf_counter() - t)
+    st = _stats(times)
+    sec.add("encode_struct (struct→bytes)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # decode_typed (bytes → struct, typed fast path)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        decode_typed(struct_bytes, WorkflowRecord)
+        times.append(time.perf_counter() - t)
+    st_typed = _stats(times)
+    sec.add("decode_typed (bytes→struct)", ops_per_sec=st_typed["ops_per_sec"], p95_ms=st_typed["p95_ms"])
+
+    # dict decode (orjson/stdlib, for comparison)
+    times = []
+    for _ in range(n):
+        t = time.perf_counter()
+        deserialize(dict_bytes)
+        times.append(time.perf_counter() - t)
+    st_dict = _stats(times)
+    speedup = st_typed["ops_per_sec"] / st_dict["ops_per_sec"] if st_dict["ops_per_sec"] else 0
+    sec.add(
+        f"dict decode for comparison ({speedup:.1f}× slower than typed decode)",
+        ops_per_sec=st_dict["ops_per_sec"],
+        p95_ms=st_dict["p95_ms"],
+    )
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
+# Section 13 — WASM Bridge Dispatch
+# ---------------------------------------------------------------------------
+
+async def bench_wasm_bridge_dispatch(n: int) -> Section:
+    sec = Section("13. WASM Bridge Dispatch")
+
+    try:
+        from rufus_edge.platform.wasm_bridge import (
+            NativeWasmBridge,
+            detect_wasm_bridge,
+        )
+        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+    except ImportError as exc:
+        sec.note(f"rufus-sdk-edge not installed — skipping ({exc})")
+        return sec
+
+    # ------------------------------------------------------------------
+    # 12a: detect_wasm_bridge() overhead (factory call + sys.platform check)
+    # ------------------------------------------------------------------
+    for _ in range(500):  # warmup
+        detect_wasm_bridge()
+
+    times_detect = []
+    for _ in range(n):
+        t = time.perf_counter()
+        detect_wasm_bridge()
+        times_detect.append(time.perf_counter() - t)
+
+    st = _stats(times_detect)
+    sec.add("detect_wasm_bridge()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12b: JSON state encode/decode at the component boundary
+    #      This is the overhead every WASM step pays to cross the Python→Wasm boundary.
+    # ------------------------------------------------------------------
+    state_payload = {
+        "workflow_id": "wf_" + "x" * 20,
+        "amount_cents": 9999,
+        "currency": "USD",
+        "merchant": "Acme Corp",
+        "card_last_four": "4242",
+        "risk_flags": ["high_velocity", "new_device"],
+        "device_id": "pos-edge-001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "metadata": {k: f"v{k}" for k in range(20)},
+    }
+    state_json = json.dumps(state_payload)
+    assert len(state_json) > 300, "state payload too small"
+
+    for _ in range(500):
+        json.loads(json.dumps(state_payload))
+
+    times_enc = []
+    for _ in range(n):
+        t = time.perf_counter()
+        json.dumps(state_payload)
+        times_enc.append(time.perf_counter() - t)
+
+    times_dec = []
+    for _ in range(n):
+        t = time.perf_counter()
+        json.loads(state_json)
+        times_dec.append(time.perf_counter() - t)
+
+    st = _stats(times_enc)
+    sec.add("state encode (bridge boundary)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+    st = _stats(times_dec)
+    sec.add("state decode (bridge boundary)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12c: NativeWasmBridge.execute_component dispatch overhead
+    #      _call_component is mocked so we measure pure Python dispatch cost
+    #      (import resolution, call overhead, not wasmtime itself).
+    # ------------------------------------------------------------------
+    CM_BINARY = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 200
+    bridge = NativeWasmBridge()
+    _original_call = ComponentStepRuntime._call_component
+
+    def _mock_call(binary, state_json_arg, step_name):
+        return '{"ok": true}'
+
+    ComponentStepRuntime._call_component = staticmethod(_mock_call)
+    try:
+        for _ in range(200):  # warmup
+            bridge.execute_component(CM_BINARY, state_json, "execute")
+
+        times_bridge = []
+        for _ in range(n):
+            t = time.perf_counter()
+            bridge.execute_component(CM_BINARY, state_json, "execute")
+            times_bridge.append(time.perf_counter() - t)
+    finally:
+        ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+    st = _stats(times_bridge)
+    sec.add("NativeWasmBridge dispatch (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 12d: SqliteWasmBinaryResolver.resolve() from in-memory SQLite
+    #      Measures the lookup cost from device_wasm_cache — the first
+    #      thing every WASM step does before calling the bridge.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite
+        import hashlib as _hashlib
+
+        fake_binary = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 1024
+        fake_hash = _hashlib.sha256(fake_binary).hexdigest()
+
+        async with aiosqlite.connect(":memory:") as conn:
+            await conn.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (fake_hash, fake_binary),
+            )
+            await conn.commit()
+
+            resolver = SqliteWasmBinaryResolver(conn)
+
+            # warmup
+            for _ in range(20):
+                await resolver.resolve(fake_hash)
+
+            resolve_n = max(10, n // 10)
+            times_resolve = []
+            for _ in range(resolve_n):
+                t = time.perf_counter()
+                await resolver.resolve(fake_hash)
+                times_resolve.append(time.perf_counter() - t)
+
+        st = _stats(times_resolve)
+        sec.add("SqliteWasmBinaryResolver.resolve (1KB)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping resolver benchmark")
+
+    # ------------------------------------------------------------------
+    # 12e: Full dispatch chain — resolve → hash verify → bridge (mocked)
+    #      End-to-end cost of ComponentStepRuntime._dispatch() without
+    #      actual wasmtime execution.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite as _aiosqlite
+
+        async with _aiosqlite.connect(":memory:") as conn:
+            await conn.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (fake_hash, fake_binary),
+            )
+            await conn.commit()
+
+            from unittest.mock import MagicMock
+
+            wasm_config = MagicMock()
+            wasm_config.wasm_hash = fake_hash
+            wasm_config.entrypoint = "execute"
+            wasm_config.state_mapping = None
+            wasm_config.timeout_ms = 5000
+            wasm_config.fallback_on_error = "fail"
+
+            resolver2 = SqliteWasmBinaryResolver(conn)
+            runtime = ComponentStepRuntime(resolver2, bridge=None)
+
+            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            try:
+                # warmup
+                for _ in range(5):
+                    await runtime._dispatch(wasm_config, state_payload)
+
+                chain_n = max(10, n // 20)
+                times_chain = []
+                for _ in range(chain_n):
+                    t = time.perf_counter()
+                    await runtime._dispatch(wasm_config, state_payload)
+                    times_chain.append(time.perf_counter() - t)
+            finally:
+                ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+        st = _stats(times_chain)
+        sec.add("full chain: resolve+verify+bridge (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping full chain benchmark")
+
+    # ------------------------------------------------------------------
+    # 12f: execute_batch vs 5× execute — event-loop round-trip savings
+    #      Measures the overhead reduction from collapsing N sequential
+    #      run_in_executor calls into a single batch dispatch.
+    # ------------------------------------------------------------------
+    try:
+        import aiosqlite as _aiosqlite2
+        import hashlib as _hashlib2
+
+        batch_n = 5  # steps per batch (fixed; matches wasm_steps_per_sync default)
+        _fake_binary = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 1024
+        _fake_hash = _hashlib2.sha256(_fake_binary).hexdigest()
+
+        async with _aiosqlite2.connect(":memory:") as conn2:
+            await conn2.execute(
+                "CREATE TABLE device_wasm_cache "
+                "(binary_hash TEXT PRIMARY KEY, binary_data BLOB)"
+            )
+            await conn2.execute(
+                "INSERT INTO device_wasm_cache VALUES (?, ?)",
+                (_fake_hash, _fake_binary),
+            )
+            await conn2.commit()
+
+            from unittest.mock import MagicMock
+
+            wasm_config2 = MagicMock()
+            wasm_config2.wasm_hash = _fake_hash
+            wasm_config2.entrypoint = "execute"
+            wasm_config2.state_mapping = None
+            wasm_config2.timeout_ms = 5000
+            wasm_config2.fallback_on_error = "fail"
+
+            resolver3 = SqliteWasmBinaryResolver(conn2)
+            runtime2 = ComponentStepRuntime(resolver3, bridge=None)
+
+            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            try:
+                batch_iterations = max(5, n // 20)
+
+                # (a) Sequential baseline: batch_n independent execute() calls
+                times_seq = []
+                for _ in range(batch_iterations):
+                    t = time.perf_counter()
+                    for _ in range(batch_n):
+                        await runtime2._dispatch(wasm_config2, state_payload)
+                    times_seq.append(time.perf_counter() - t)
+
+                # (b) Batch: single execute_batch() call for batch_n states
+                times_batch = []
+                for _ in range(batch_iterations):
+                    t = time.perf_counter()
+                    await runtime2.execute_batch(wasm_config2, [state_payload] * batch_n)
+                    times_batch.append(time.perf_counter() - t)
+            finally:
+                ComponentStepRuntime._call_component = staticmethod(_original_call)
+
+        st_seq = _stats(times_seq)
+        st_bat = _stats(times_batch)
+
+        speedup = st_seq["p50_ms"] / st_bat["p50_ms"] if st_bat["p50_ms"] > 0 else float("inf")
+        round_trip_savings = batch_n - 1  # one call instead of batch_n
+
+        sec.add(
+            f"sequential {batch_n}× execute (baseline)",
+            ops_per_sec=st_seq["ops_per_sec"],
+            p95_ms=st_seq["p95_ms"],
+        )
+        sec.add(
+            f"execute_batch ({batch_n} states, 1 round-trip)",
+            ops_per_sec=st_bat["ops_per_sec"],
+            p95_ms=st_bat["p95_ms"],
+        )
+        sec.note(
+            f"Section 12f  execute_batch vs {batch_n}x execute\n"
+            f"  sequential {batch_n}-step:  p50={st_seq['p50_ms']:.3f}ms  p95={st_seq['p95_ms']:.3f}ms\n"
+            f"  batch {batch_n}-step:        p50={st_bat['p50_ms']:.3f}ms  p95={st_bat['p95_ms']:.3f}ms\n"
+            f"  Speedup:            {speedup:.1f}x  (saves {round_trip_savings} event-loop round-trips per device)"
+        )
+
+    except ImportError:
+        sec.note("aiosqlite not installed — skipping 12f batch overhead benchmark")
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
+# Section 14 — Proto Codec (pack_message / unpack_message)
+# ---------------------------------------------------------------------------
+
+def bench_proto_codec(n: int) -> "Section":
+    """Benchmark pack_message/unpack_message envelope codec vs raw orjson baseline.
+
+    Tests the serialization.py envelope system introduced in Phase 4:
+      - JSON envelope (ENCODING_JSON prefix + orjson/json payload)
+      - Proto envelope (ENCODING_PROTO prefix + betterproto bytes, when available)
+
+    Payload: HeartbeatMsg-equivalent dict (~287B JSON / ~48B proto).
+    """
+    sec = Section("14. Proto Codec (pack_message)")
+
+    try:
+        from rufus.utils.serialization import pack_message, unpack_message, _USING_PROTO
+    except ImportError as exc:
+        sec.note(f"rufus SDK not on path — skipping ({exc})")
+        return sec
+
+    hb_dict = {
+        "device_id": "pos-terminal-bench-001",
+        "device_status": "online",
+        "pending_sync_count": 3,
+        "last_sync_at": "2026-03-24T12:34:56.789Z",
+        "config_version": "v1.0.0rc5",
+        "sdk_version": "1.0.0rc5",
+        "sent_at": "2026-03-24T12:35:00.000Z",
+    }
+
+    # ------------------------------------------------------------------
+    # 14a: JSON envelope — pack_message(dict) → ENCODING_JSON + orjson/json
+    # ------------------------------------------------------------------
+    for _ in range(500):  # warmup
+        pack_message(hb_dict)
+
+    times_pack_json = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        data = pack_message(hb_dict)
+        times_pack_json.append(time.perf_counter() - t0)
+
+    st_pj = _stats(times_pack_json)
+    encoded_json_size = len(data)
+    sec.add("pack_message JSON envelope", ops_per_sec=st_pj["ops_per_sec"], p95_ms=st_pj["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 14b: JSON envelope — unpack_message
+    # ------------------------------------------------------------------
+    json_data = pack_message(hb_dict)
+    for _ in range(500):
+        unpack_message(json_data)
+
+    times_unpack_json = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        unpack_message(json_data)
+        times_unpack_json.append(time.perf_counter() - t0)
+
+    st_uj = _stats(times_unpack_json)
+    sec.add("unpack_message JSON envelope", ops_per_sec=st_uj["ops_per_sec"], p95_ms=st_uj["p95_ms"])
+
+    # ------------------------------------------------------------------
+    # 14c: Proto envelope (only when betterproto available)
+    # ------------------------------------------------------------------
+    if _USING_PROTO and _BETTERPROTO_AVAILABLE:
+        try:
+            from rufus.proto.gen import HeartbeatMsg  # type: ignore
+            proto_msg = HeartbeatMsg(**hb_dict)
+
+            for _ in range(500):
+                pack_message(hb_dict, proto_msg)
+
+            times_pack_proto = []
+            for _ in range(n):
+                t0 = time.perf_counter()
+                data_proto = pack_message(hb_dict, proto_msg)
+                times_pack_proto.append(time.perf_counter() - t0)
+
+            st_pp = _stats(times_pack_proto)
+            encoded_proto_size = len(data_proto)
+            sec.add("pack_message proto envelope", ops_per_sec=st_pp["ops_per_sec"], p95_ms=st_pp["p95_ms"])
+
+            # unpack_message proto
+            for _ in range(500):
+                unpack_message(data_proto, proto_type=HeartbeatMsg)
+
+            times_unpack_proto = []
+            for _ in range(n):
+                t0 = time.perf_counter()
+                unpack_message(data_proto, proto_type=HeartbeatMsg)
+                times_unpack_proto.append(time.perf_counter() - t0)
+
+            st_up = _stats(times_unpack_proto)
+            sec.add("unpack_message proto envelope", ops_per_sec=st_up["ops_per_sec"], p95_ms=st_up["p95_ms"])
+
+            size_ratio = encoded_json_size / encoded_proto_size if encoded_proto_size else 0
+            sec.note(
+                f"Payload sizes: JSON={encoded_json_size}B  proto={encoded_proto_size}B  "
+                f"({size_ratio:.1f}× smaller with proto)\n"
+                f"  pack JSON:   p50={st_pj['p50_ms']:.3f}ms  p95={st_pj['p95_ms']:.3f}ms\n"
+                f"  pack proto:  p50={st_pp['p50_ms']:.3f}ms  p95={st_pp['p95_ms']:.3f}ms\n"
+                f"  Speed delta: {abs(st_pp['ops_per_sec'] - st_pj['ops_per_sec']):.0f} ops/sec "
+                f"({'proto faster' if st_pp['ops_per_sec'] > st_pj['ops_per_sec'] else 'json faster'})"
+            )
+        except ImportError:
+            sec.note(
+                "betterproto installed but generated code not found — "
+                "run `make proto` to generate src/rufus/proto/gen/. "
+                "JSON envelope benchmark above still valid."
+            )
+    else:
+        sec.note(
+            f"betterproto not installed (pip install betterproto) — "
+            f"JSON envelope only. JSON payload size: {encoded_json_size}B"
+        )
+
+    return sec
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -844,6 +1330,9 @@ def _defaults(quick: bool, override: Optional[int]) -> Dict[str, int]:
         "ed25519_n": 500,
         "apikey_n": 5000,
         "saf_n": 200,
+        "msgspec_n": 10000,
+        "wasm_n": 500,
+        "proto_n": 10000,
     }
     if quick:
         base = {k: max(10, v // 10) for k, v in base.items()}
@@ -861,29 +1350,31 @@ async def _run(args) -> List[Section]:
     print("\n" + "=" * 78)
     print("  RUFUS SDK — COMPREHENSIVE BENCHMARK SUITE")
     print("=" * 78)
-    print(f"  orjson     : {'yes' if _ORJSON_AVAILABLE else 'no'}")
+    print(f"  orjson      : {'yes' if _ORJSON_AVAILABLE else 'no'}")
+    print(f"  msgspec     : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")
+    print(f"  betterproto : {'yes' if _BETTERPROTO_AVAILABLE else 'no'}")
     print(f"  cryptography: {'yes' if _CRYPTO_AVAILABLE else 'no'}")
-    print(f"  uvloop     : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
+    print(f"  uvloop      : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
     if skip_security and not args.no_security:
         print("  NOTE: cryptography not installed — sections 7–11 will be skipped")
     print()
 
-    print("[1/11] JSON Serialization...")
+    print("[1/14] JSON Serialization...")
     sections.append(bench_json_serialization(counts["json_n"]))
 
-    print("[2/11] Import Caching...")
+    print("[2/14] Import Caching...")
     sections.append(bench_import_caching(counts["import_n"]))
 
-    print("[3/11] SQLite Persistence...")
+    print("[3/14] SQLite Persistence...")
     sections.append(await bench_sqlite(counts["sqlite_n"]))
 
-    print("[4/11] E2E Workflow...")
+    print("[4/14] E2E Workflow...")
     sections.append(await bench_e2e_workflow(counts["e2e_n"]))
 
-    print("[5/11] Async Event Loop...")
+    print("[5/14] Async Event Loop...")
     sections.append(await bench_event_loop(counts["loop_n"]))
 
-    print("[6/11] Pydantic State Model...")
+    print("[6/14] Pydantic State Model...")
     sections.append(bench_pydantic(counts["pydantic_n"]))
 
     if skip_security:
@@ -900,20 +1391,29 @@ async def _run(args) -> List[Section]:
             s.note("skipped")
             sections.append(s)
     else:
-        print("[7/11] Fernet Encryption...")
+        print("[7/14] Fernet Encryption...")
         sections.append(bench_fernet(counts["fernet_n"]))
 
-        print("[8/11] HMAC-SHA256...")
+        print("[8/14] HMAC-SHA256...")
         sections.append(bench_hmac(counts["hmac_n"]))
 
-        print("[9/11] Ed25519 Signatures...")
+        print("[9/14] Ed25519 Signatures...")
         sections.append(bench_ed25519(counts["ed25519_n"]))
 
-        print("[10/11] API Key Hashing...")
+        print("[10/14] API Key Hashing...")
         sections.append(bench_api_key_hashing(counts["apikey_n"]))
 
-        print("[11/11] Full SAF Pipeline...")
+        print("[11/14] Full SAF Pipeline...")
         sections.append(await bench_saf_pipeline(counts["saf_n"]))
+
+    print("[12/14] msgspec Typed Codec...")
+    sections.append(bench_msgspec_codec(counts["msgspec_n"]))
+
+    print("[13/14] WASM Bridge Dispatch...")
+    sections.append(await bench_wasm_bridge_dispatch(counts["wasm_n"]))
+
+    print("[14/14] Proto Codec (pack_message)...")
+    sections.append(bench_proto_codec(counts["proto_n"]))
 
     return sections
 

@@ -929,97 +929,6 @@ def test_workflow_executor_portable(executor):
     ...
 ```
 
-### Direct `Workflow()` Instantiation in Tests
-
-`Workflow.__init__` requires **all 6 providers** — it raises `ValueError` if any is `None`:
-`persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, `template_engine_cls`.
-
-The recommended approach is `WorkflowBuilder.create_workflow()` which handles wiring. For tests that need direct `Workflow` access:
-
-```python
-from unittest.mock import MagicMock
-from rufus.workflow import Workflow
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-
-wf = Workflow(
-    workflow_id="test-wf",
-    workflow_steps=[step],
-    initial_state_model=MyState(),
-    workflow_type="MyType",
-    persistence_provider=InMemoryPersistence(),
-    execution_provider=SyncExecutor(),
-    workflow_observer=observer,            # MagicMock() if not under test
-    workflow_builder=MagicMock(),          # MagicMock() is fine for most tests
-    expression_evaluator_cls=SimpleExpressionEvaluator,
-    template_engine_cls=Jinja2TemplateEngine,
-)
-```
-
-### SAFTransaction Required Fields
-
-When writing test data that exercises the `SyncManager._get_pending_transactions()` path, the `task_data` stored in the tasks table **must** contain a `"transaction"` key with all required `SAFTransaction` fields:
-
-```python
-task_data = {
-    "transaction": {
-        "transaction_id": "txn-001",
-        "idempotency_key": "key-001",
-        "device_id": "device-001",       # required
-        "merchant_id": "merch-001",      # required
-        "amount": "9.99",                # required (Decimal-compatible string)
-        "currency": "USD",               # optional, defaults to "USD"
-        "card_token": "tok_test",        # required
-        "card_last_four": "4242",        # required
-    }
-}
-```
-
-Malformed transactions are silently skipped (logged as WARNING), so tests that assert on pending transaction counts will silently get 0 if required fields are missing.
-
-### `get_edge_sync_state` Return Value
-
-`get_edge_sync_state(key: str) -> Optional[str]` returns a **plain string** (or `None`), not a `SyncStateRecord`. Access the result directly:
-
-```python
-stored = await persistence.get_edge_sync_state("api_key")
-if stored:
-    api_key = stored  # already a str, no .value attribute
-```
-
-### FastAPI Import Guard in Test Files
-
-The dev venv has a `pydantic`/`fastapi` version mismatch (`annotated_types.Not` AttributeError). Any test file that imports FastAPI at module level must be guarded:
-
-```python
-try:
-    from fastapi.testclient import TestClient
-    from rufus_server.main import app
-    _FASTAPI_AVAILABLE = True
-except Exception:
-    TestClient = None
-    app = None
-    _FASTAPI_AVAILABLE = False
-
-pytestmark = pytest.mark.skipif(
-    not _FASTAPI_AVAILABLE,
-    reason="FastAPI/server dependencies not available in this environment",
-)
-```
-
-### `AsyncWorkflowStep` Hierarchy
-
-`AsyncWorkflowStep` **inherits** from `WorkflowStep` — `isinstance(step, WorkflowStep)` is `True` for it. Whether a step uses sync timing in `workflow.py` is determined by:
-
-```python
-is_sync_step = not isinstance(step, (
-    AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
-    FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, WasmWorkflowStep
-))
-```
-
 ---
 
 ## §8 Performance Optimizations (Code)
@@ -2818,3 +2727,52 @@ Cloud commands support a `priority` field consumed by the edge agent's command q
 | `CRITICAL` | Next heartbeat / immediate WS push | Fraud HITL decision, emergency stop |
 | `HIGH` | Within 2 heartbeat cycles | Config update, workflow deploy |
 | `NORMAL` | Best-effort | Telemetry requests, log flush |
+
+## §23 — Proto Codec Dual-Backend (v1.0.0rc5+)
+
+Both `betterproto` and `google.protobuf` are supported and switchable at runtime:
+
+| Backend | Env var | Speed | Notes |
+|---------|---------|-------|-------|
+| `betterproto` | default | ~2.3M ops/sec | Pure Python dataclasses; works in Pyodide/WASI; no C extension |
+| `google.protobuf` | `RUFUS_PROTO_BACKEND=google` | ~3–4× faster | C extension (`protobuf>=4.21`); `SerializeToString`/`FromString` API |
+
+The `src/rufus/proto/gen/__init__.py` selects the right generated classes on import. The serialization helpers in `rufus.utils.serialization` dispatch based on `hasattr(msg, "SerializeToString")` — application code never changes between backends.
+
+Generated files:
+- `src/rufus/proto/gen/*_pb2.py` — google.protobuf C-extension classes (from `buf generate`)
+- `src/rufus/proto/gen/*.py` (betterproto dataclasses) — default path
+
+Wire format envelope (used on NATS):
+- `0x01` prefix → JSON payload (orjson bytes)
+- `0x02` prefix → proto binary (betterproto or google.protobuf bytes)
+
+`pack_message(dict)` → JSON envelope. `pack_message(dict, proto_msg)` → proto envelope. `unpack_message(bytes, MsgType)` → auto-detects prefix.
+
+Benchmarks: `python tests/benchmarks/benchmark_proto.py`
+Expected: HeartbeatMsg JSON=287B proto=48B (6×), WorkflowRecord JSON=4.2KB proto=690B (6.1×)
+
+## §24 — RUVON, SAF, and Security Architecture Reference
+
+Full architecture documentation (with code snippets, tables, and flow descriptions) lives at:
+
+**`examples/browser_demo_2/architecture.html`** — open in any browser.
+
+Sections:
+- **§11 Store-and-Forward (SAF)** — offline queue, Fernet encryption, HMAC-SHA256 integrity, floor limits, process-safe lock, cloud reconciliation, mesh relay forwarding
+- **§12 RUVON** — vector scoring formula `S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P`, circuit breaker, dynamic peer discovery, local master election, advisory heartbeat
+- **§13 Security** — Fernet at-rest, HMAC transport, device API key, Keycloak OIDC + RBAC, semantic firewall, key rotation, rate limiting, audit log, NATS TLS/NKey, PCI-DSS posture
+
+### SAF Key Facts (quick reference)
+- Edge table: `saf_pending_transactions` (SQLite) — survives restarts; no FK cascade on workflow purge
+- Cloud table: `saf_transactions` (PostgreSQL) — `status` field: `pending` → `synced` / `rejected`
+- `amount_cents` stored as INTEGER; divide by 100 in API responses
+- HMAC signed over `transaction_id | encrypted_blob | key_id`; end-to-end through mesh relay
+- Floor limit hot-deployed via ETag; cached in `device_config_cache`; survives restarts
+- Cloud KPI: `GET /api/v1/metrics/edge-impact` returns `saf_recovered_cents` + `fraud_prevented_cents`
+
+### RUVON Key Facts (quick reference)
+- `RUFUS_PROTO_BACKEND=google` for max throughput on server; leave default (betterproto) for browser/WASI
+- Alembic HEAD: `l7m8n9o0p1q2` — adds `relay_server_url` + `mesh_advisory` to `edge_devices`
+- Production DB size at 664k executions: ~1.69 GB total (workflow_executions 1.44 GB dominates)
+- Cleanup lever: purge `workflow_executions WHERE status IN ('COMPLETED','FAILED') AND created_at < now() - interval '30 days'`

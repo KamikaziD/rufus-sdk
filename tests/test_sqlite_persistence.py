@@ -165,16 +165,16 @@ class TestSQLitePersistence:
 
         # Verify
         assert loaded is not None
-        assert loaded['id'] == workflow_id
-        assert loaded['workflow_type'] == 'TestWorkflow'
-        assert loaded['current_step'] == 1
-        assert loaded['status'] == 'ACTIVE'
-        assert loaded['state']['user_id'] == '456'
-        assert loaded['state']['amount'] == 100
-        assert len(loaded['steps_config']) == 1
-        assert loaded['saga_mode'] is False
-        assert loaded['idempotency_key'] == 'test_key_123'
-        assert loaded['metadata']['source'] == 'test'
+        assert loaded.id == workflow_id
+        assert loaded.workflow_type == 'TestWorkflow'
+        assert loaded.current_step == 1
+        assert loaded.status == 'ACTIVE'
+        assert loaded.state['user_id'] == '456'
+        assert loaded.state['amount'] == 100
+        assert len(loaded.steps_config) == 1
+        assert loaded.saga_mode is False
+        assert loaded.idempotency_key == 'test_key_123'
+        assert loaded.metadata['source'] == 'test'
 
     @pytest.mark.asyncio
     async def test_load_nonexistent_workflow(self, sqlite_provider):
@@ -267,24 +267,24 @@ class TestSQLitePersistence:
             max_retries=5
         )
 
-        assert 'task_id' in task_record
-        assert task_record['execution_id'] == execution_id
-        assert task_record['step_name'] == "ProcessData"
-        assert task_record['status'] == 'PENDING'
+        assert task_record.task_id is not None
+        assert task_record.execution_id == execution_id
+        assert task_record.step_name == "ProcessData"
+        assert task_record.status == 'PENDING'
 
         # Get task
-        task_id = task_record['task_id']
+        task_id = task_record.task_id
         retrieved = await sqlite_provider.get_task_record(task_id)
 
         assert retrieved is not None
-        assert retrieved['task_id'] == task_id
-        assert retrieved['execution_id'] == execution_id
-        assert retrieved['step_name'] == "ProcessData"
-        assert retrieved['step_index'] == 0
-        assert retrieved['status'] == 'PENDING'
-        assert retrieved['task_data']['input'] == 'test_data'
-        assert retrieved['max_retries'] == 5
-        assert retrieved['idempotency_key'] == 'task_key_123'
+        assert retrieved.task_id == task_id
+        assert retrieved.execution_id == execution_id
+        assert retrieved.step_name == "ProcessData"
+        assert retrieved.step_index == 0
+        assert retrieved.status == 'PENDING'
+        assert retrieved.task_data['input'] == 'test_data'
+        assert retrieved.max_retries == 5
+        assert retrieved.idempotency_key == 'task_key_123'
 
     @pytest.mark.asyncio
     async def test_update_task_status(self, sqlite_provider):
@@ -301,21 +301,21 @@ class TestSQLitePersistence:
             step_name="ProcessData",
             step_index=0
         )
-        task_id = task_record['task_id']
+        task_id = task_record.task_id
 
         # Update to RUNNING
         await sqlite_provider.update_task_status(task_id, 'RUNNING')
         task = await sqlite_provider.get_task_record(task_id)
-        assert task['status'] == 'RUNNING'
-        assert task['started_at'] is not None
+        assert task.status == 'RUNNING'
+        assert task.started_at is not None
 
         # Update to COMPLETED with result
         result_data = {'output': 'success'}
         await sqlite_provider.update_task_status(task_id, 'COMPLETED', result=result_data)
         task = await sqlite_provider.get_task_record(task_id)
-        assert task['status'] == 'COMPLETED'
-        assert task['result']['output'] == 'success'
-        assert task['completed_at'] is not None
+        assert task.status == 'COMPLETED'
+        assert task.result['output'] == 'success'
+        assert task.completed_at is not None
 
     @pytest.mark.asyncio
     async def test_log_execution(self, sqlite_provider):
@@ -437,16 +437,16 @@ class TestSQLitePersistence:
         metrics = await sqlite_provider.get_workflow_metrics(workflow_id)
 
         assert len(metrics) == 2
-        assert metrics[0]['metric_name'] in ['step_duration_ms', 'retry_count']
-        assert all('metric_value' in m for m in metrics)
-        assert all('recorded_at' in m for m in metrics)
+        assert metrics[0].metric_name in ['step_duration_ms', 'retry_count']
+        assert all(m.metric_value is not None for m in metrics)
+        assert all(m.recorded_at is not None for m in metrics)
 
         # Verify first metric details
-        duration_metric = next(m for m in metrics if m['metric_name'] == 'step_duration_ms')
-        assert duration_metric['metric_value'] == 250.5
-        assert duration_metric['unit'] == 'ms'
-        assert duration_metric['step_name'] == 'ProcessData'
-        assert duration_metric['tags']['environment'] == 'test'
+        duration_metric = next(m for m in metrics if m.metric_name == 'step_duration_ms')
+        assert duration_metric.metric_value == 250.5
+        assert duration_metric.unit == 'ms'
+        assert duration_metric.step_name == 'ProcessData'
+        assert duration_metric.tags['environment'] == 'test'
 
     @pytest.mark.asyncio
     async def test_get_workflow_summary(self, sqlite_provider):
@@ -560,8 +560,8 @@ class TestSQLitePersistence:
 
         # Verify update
         loaded = await sqlite_provider.load_workflow(workflow_id)
-        assert loaded['current_step'] == 1
-        assert loaded['state']['count'] == 2
+        assert loaded.current_step == 1
+        assert loaded.state['count'] == 2
 
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, sqlite_provider):

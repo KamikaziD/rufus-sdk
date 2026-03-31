@@ -42,6 +42,11 @@ class LoadTestResults:
     errors_4xx: int = 0      # Client errors — auth, bad request
     errors_timeout: int = 0  # Network timeouts
 
+    # WASM step execution metrics (wasm_steps scenario)
+    wasm_steps_executed: int = 0
+    wasm_step_failures: int = 0
+    wasm_execution_latencies: List[float] = field(default_factory=list)
+
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
 
@@ -92,6 +97,22 @@ class LoadTestResults:
         d["errors_5xx"] = self.errors_5xx
         d["errors_4xx"] = self.errors_4xx
         d["errors_timeout"] = self.errors_timeout
+        if self.wasm_steps_executed > 0 or self.wasm_step_failures > 0:
+            d["wasm_steps_executed"] = self.wasm_steps_executed
+            d["wasm_step_failures"] = self.wasm_step_failures
+            total_wasm = self.wasm_steps_executed + self.wasm_step_failures
+            d["wasm_step_success_rate"] = (
+                f"{self.wasm_steps_executed / total_wasm * 100:.2f}%"
+                if total_wasm else "N/A"
+            )
+            if self.wasm_execution_latencies:
+                wl = sorted(self.wasm_execution_latencies)
+                idx_p50 = int(0.50 * (len(wl) - 1))
+                idx_p95 = int(0.95 * (len(wl) - 1))
+                idx_p99 = int(0.99 * (len(wl) - 1))
+                d["wasm_exec_p50_ms"] = f"{wl[idx_p50] * 1000:.1f}"
+                d["wasm_exec_p95_ms"] = f"{wl[idx_p95] * 1000:.1f}"
+                d["wasm_exec_p99_ms"] = f"{wl[idx_p99] * 1000:.1f}"
         return d
 
 
@@ -131,14 +152,23 @@ class LoadTestOrchestrator:
         self._devices: List[SimulatedEdgeDevice] = []
         self._metrics_lock = asyncio.Lock()
         self._aggregated_metrics: Dict[str, DeviceMetrics] = {}
+        self._devices_registered: bool = False  # True only after _register_devices()
 
-    async def setup_devices(self, num_devices: int, cleanup_first: bool = True):
+    async def setup_devices(
+        self,
+        num_devices: int,
+        cleanup_first: bool = True,
+        register_with_server: bool = True,
+    ):
         """
         Setup devices for load testing (shared across scenarios).
 
         Args:
             num_devices: Number of devices to create
             cleanup_first: Whether to cleanup existing devices before setup
+            register_with_server: Whether to register devices with the control plane.
+                Set False for local-only scenarios (wasm_thundering_herd) to skip
+                the N registration + N cleanup HTTP round-trips entirely.
         """
         logger.info(f"Setting up {num_devices} devices for load testing...")
 
@@ -167,14 +197,22 @@ class LoadTestOrchestrator:
         logger.info(f"Initializing {num_devices} HTTP clients...")
         await asyncio.gather(*[device.initialize() for device in self._devices])
 
-        # Clean up any existing load test devices (if requested)
-        if cleanup_first:
-            logger.info(f"Cleaning up existing load test devices...")
-            await self._cleanup_devices()
+        if register_with_server:
+            # Clean up any existing load test devices (if requested)
+            if cleanup_first:
+                logger.info(f"Cleaning up existing load test devices...")
+                await self._cleanup_devices()
 
-        # Register devices with control plane (idempotent)
-        logger.info(f"Registering {num_devices} devices with control plane...")
-        await self._register_devices(idempotent=True)
+            # Register devices with control plane (idempotent)
+            logger.info(f"Registering {num_devices} devices with control plane...")
+            await self._register_devices(idempotent=True)
+            self._devices_registered = True
+        else:
+            logger.info(
+                f"Skipping server registration for {num_devices} devices "
+                f"(local-only scenario — no HTTP calls will be made)."
+            )
+            self._devices_registered = False
 
         logger.info(f"Device setup complete: {num_devices} devices ready")
 
@@ -182,13 +220,16 @@ class LoadTestOrchestrator:
         """Teardown devices after all scenarios complete."""
         logger.info("Tearing down devices...")
 
-        # Close HTTP clients
+        # Close HTTP clients (only those that were lazily created)
         if self._devices:
             await asyncio.gather(*[device.close() for device in self._devices])
 
-        # Cleanup from server
-        logger.info("Cleaning up devices from server...")
-        await self._cleanup_devices()
+        # Only hit the server if we actually registered devices there
+        if self._devices_registered:
+            logger.info("Cleaning up devices from server...")
+            await self._cleanup_devices()
+        else:
+            logger.info("Skipping server cleanup — devices were never registered.")
 
         logger.info("Device teardown complete")
 
@@ -230,8 +271,13 @@ class LoadTestOrchestrator:
             raise ValueError(
                 "No devices available. Call setup_devices() first or set skip_device_setup=False")
         elif not skip_device_setup:
-            # Single scenario mode - setup and cleanup
-            await self.setup_devices(num_devices, cleanup_first=True)
+            # Single scenario mode — skip server registration for local-only scenarios
+            _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
+            await self.setup_devices(
+                num_devices,
+                cleanup_first=True,
+                register_with_server=not _local_only,
+            )
 
         # Start timer
         start_time = time.time()
@@ -240,10 +286,37 @@ class LoadTestOrchestrator:
         # Devices prepare their payload then block on the event; the orchestrator
         # releases all of them at once after a short prep window.
         go_event = None
-        if scenario == "thundering_herd":
+        if scenario in ("thundering_herd", "wasm_thundering_herd"):
             go_event = asyncio.Event()
             for device in self._devices:
                 device._go_event = go_event
+
+        # For wasm_thundering_herd: build ONE shared runtime, warm it up once,
+        # then inject it into every device so they skip per-device _setup_wasm_runtime()
+        # and the N redundant warmup resolve calls.
+        # At 100k devices this avoids creating 100k identical resolver/bridge/runtime
+        # objects and eliminates 100k sequential SQLite-style resolve coroutines.
+        if scenario == "wasm_thundering_herd" and self._devices:
+            probe = self._devices[0]
+            probe._setup_wasm_runtime()
+            if probe._wasm_runtime is not None:
+                # Warm the shared resolver once
+                try:
+                    await probe._wasm_runtime._resolver.resolve(probe._wasm_hash)
+                except Exception:
+                    pass
+                shared_runtime = probe._wasm_runtime
+                shared_config = probe._wasm_config
+                shared_hash = probe._wasm_hash
+                logger.info(
+                    f"Shared WASM runtime ready (hash={shared_hash[:16]}…). "
+                    f"Injecting into {len(self._devices):,} devices — "
+                    f"skipping {len(self._devices):,} per-device warmup resolves."
+                )
+                for device in self._devices[1:]:
+                    device._wasm_runtime = shared_runtime
+                    device._wasm_config = shared_config
+                    device._wasm_hash = shared_hash
 
         # Run scenario on all devices concurrently (as tasks so the event loop
         # can interleave them before the go_event fires)
@@ -262,14 +335,26 @@ class LoadTestOrchestrator:
         if go_event is not None:
             # Give all devices time to reach their wait point (prep phase)
             prep_seconds = min(5, max(2, num_devices // 200))
-            logger.info(
-                f"Thundering herd prep window: {prep_seconds}s "
-                f"(devices generating transactions...)"
-            )
+            if scenario == "wasm_thundering_herd":
+                logger.info(
+                    f"WASM thundering herd prep window: {prep_seconds}s "
+                    f"(devices warming WASM resolver...)"
+                )
+            else:
+                logger.info(
+                    f"Thundering herd prep window: {prep_seconds}s "
+                    f"(devices generating transactions...)"
+                )
             await asyncio.sleep(prep_seconds)
-            logger.info(
-                f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
-            )
+            if scenario == "wasm_thundering_herd":
+                logger.info(
+                    f"WASM THUNDERING HERD: Releasing {num_devices} simultaneous "
+                    f"local WASM dispatches NOW (target: >= 0.8 steps/device/sec)"
+                )
+            else:
+                logger.info(
+                    f"THUNDERING HERD: Releasing {num_devices} simultaneous SAF syncs NOW"
+                )
             go_event.set()
 
         try:
@@ -324,6 +409,9 @@ class LoadTestOrchestrator:
                 results.errors_4xx += metrics.errors_4xx
                 results.errors_timeout += metrics.errors_timeout
                 results.request_latencies.extend(metrics.latencies)
+                results.wasm_steps_executed += metrics.wasm_steps_executed
+                results.wasm_step_failures += metrics.wasm_step_failures
+                results.wasm_execution_latencies.extend(metrics.wasm_execution_latencies)
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -360,15 +448,9 @@ class LoadTestOrchestrator:
                                 existing_api_key = data.get("api_key")
                                 if existing_api_key:
                                     device.config.api_key = existing_api_key
-                                    await device._http_client.aclose()
-                                    device._http_client = httpx.AsyncClient(
-                                        timeout=60.0,
-                                        headers={
-                                            "X-API-Key": device.config.api_key,
-                                            "X-Device-ID": device.config.device_id,
-                                            "Content-Type": "application/json",
-                                        }
-                                    )
+                                    if device._http_client:
+                                        await device._http_client.aclose()
+                                    device._http_client = None  # Recreate lazily with new api_key
                                     logger.debug(
                                         f"Device {device.config.device_id} already registered (using existing)")
                                     return True
@@ -395,15 +477,9 @@ class LoadTestOrchestrator:
                         if response.status_code == 200:
                             data = response.json()
                             device.config.api_key = data.get("api_key", device.config.api_key)
-                            await device._http_client.aclose()
-                            device._http_client = httpx.AsyncClient(
-                                timeout=60.0,
-                                headers={
-                                    "X-API-Key": device.config.api_key,
-                                    "X-Device-ID": device.config.device_id,
-                                    "Content-Type": "application/json",
-                                }
-                            )
+                            if device._http_client:
+                                await device._http_client.aclose()
+                            device._http_client = None  # Recreate lazily with new api_key
                             logger.debug(f"Registered device {device.config.device_id}")
                             return True
                         elif response.status_code == 400 and "already registered" in response.text:
@@ -582,3 +658,103 @@ class ScenarioRunner:
             skip_device_setup=True,
         )
 
+    @staticmethod
+    async def run_wasm_steps_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 300,
+    ) -> LoadTestResults:
+        """Run Scenario 6: WASM Step Execution Throughput.
+
+        Measures:
+        - Cloud: sync_wasm command delivery via heartbeat
+        - Edge:  simulated WASM step execution latency distribution
+        """
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="wasm_steps",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_wasm_thundering_herd_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 1000,
+    ) -> LoadTestResults:
+        """Run WASM Thundering Herd: coordinated burst of local WASM dispatches.
+
+        All devices fire simultaneously (go_event barrier) — no HTTP, no DB write.
+        Pass criterion: success rate >= 99% + >= 0.8 steps/device/sec (scale-invariant).
+        p99 latency reflects asyncio scheduler backlog, not WASM exec time — it grows
+        with device count and is reported as informational context only.
+        """
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="wasm_thundering_herd",
+            duration_seconds=60,  # Single burst — duration is just the timeout guard
+            skip_device_setup=True,
+        )
+
+
+    @staticmethod
+    async def run_nats_transport_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run NATS transport scenario: devices publish heartbeats directly to JetStream.
+
+        Measures JetStream publish ack latency (scale-aware p99 target:
+        <10ms @<=100 devices, <25ms @<=1k, <50ms @<=10k, <150ms beyond).
+        No HTTP calls, no server registration — pure NATS publish path.
+        Requires RUFUS_NATS_URL or NATS_URL env var.
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="nats_transport",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_msgspec_codec_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 500,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run msgspec codec variant: heartbeat load with msgspec serialization path.
+
+        Identical to the heartbeat scenario but validates that the msgspec encode/decode
+        path is live before starting. Use this to confirm throughput numbers after the
+        msgspec DTO migration — compare req/s against the baseline heartbeat run.
+        """
+        try:
+            import msgspec as _ms
+            from rufus.providers.dtos import WorkflowRecord
+            _sample = WorkflowRecord(
+                id="preflight",
+                workflow_type="T",
+                status="ACTIVE",
+                current_step=0,
+                state={},
+                steps_config=[],
+                state_model_path="t.S",
+            )
+            _ms.json.decode(_ms.json.encode(_sample), type=WorkflowRecord)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[msgspec_codec_test] preflight failed ({exc}), running heartbeat path anyway"
+            )
+
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="heartbeat",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )

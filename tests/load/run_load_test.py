@@ -116,11 +116,24 @@ def print_results(results: LoadTestResults, workers: int = 1):
     print("=" * 80)
     print(f"Devices:              {results.num_devices}")
     print(f"Duration:             {results.duration_seconds:.1f}s")
-    print(f"Total Requests:       {results.total_requests:,}")
-    print(f"Total Errors:         {results.total_errors:,}")
-    print(f"Error Rate:           {results.error_rate:.2f}%")
-    print(f"Success Rate:         {100 - results.error_rate:.2f}%")
-    print(f"Throughput:           {results.requests_per_second:.1f} req/sec")
+
+    # For pure-local WASM scenarios there are no HTTP requests; show WASM steps/sec instead.
+    _is_wasm_local = results.scenario in ("wasm_thundering_herd",)
+    if _is_wasm_local:
+        wasm_tps = results.wasm_steps_executed / results.duration_seconds if results.duration_seconds > 0 else 0
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_err_rate = results.wasm_step_failures / total_wasm * 100 if total_wasm else 0
+        print(f"WASM Steps Total:     {total_wasm:,}")
+        print(f"WASM Step Failures:   {results.wasm_step_failures:,}")
+        print(f"Error Rate:           {wasm_err_rate:.2f}%")
+        print(f"Success Rate:         {100 - wasm_err_rate:.2f}%")
+        print(f"Throughput:           {wasm_tps:.1f} steps/sec")
+    else:
+        print(f"Total Requests:       {results.total_requests:,}")
+        print(f"Total Errors:         {results.total_errors:,}")
+        print(f"Error Rate:           {results.error_rate:.2f}%")
+        print(f"Success Rate:         {100 - results.error_rate:.2f}%")
+        print(f"Throughput:           {results.requests_per_second:.1f} req/sec")
     print()
 
     if results.heartbeats_sent > 0:
@@ -137,6 +150,21 @@ def print_results(results: LoadTestResults, workers: int = 1):
 
     if results.commands_received > 0:
         print(f"Commands Received:    {results.commands_received:,}")
+
+    if results.wasm_steps_executed > 0 or results.wasm_step_failures > 0:
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        print(f"WASM Steps Executed:  {results.wasm_steps_executed:,}")
+        print(f"WASM Step Failures:   {results.wasm_step_failures:,}")
+        print(f"WASM Success Rate:    {wasm_success_rate:.2f}%")
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p50_wasm = wl[int(0.50 * (len(wl) - 1))] * 1000
+            p95_wasm = wl[int(0.95 * (len(wl) - 1))] * 1000
+            p99_wasm = wl[int(0.99 * (len(wl) - 1))] * 1000
+            print(f"WASM Exec p50:        {p50_wasm:.0f}ms")
+            print(f"WASM Exec p95:        {p95_wasm:.0f}ms")
+            print(f"WASM Exec p99:        {p99_wasm:.0f}ms")
 
     # Error breakdown
     if results.total_errors > 0:
@@ -171,9 +199,10 @@ def print_results(results: LoadTestResults, workers: int = 1):
     print("\nPERFORMANCE TARGETS:")
     print("=" * 80)
 
-    # Error rate target: < 1%
-    error_pass = results.error_rate < 1.0
-    print(f"Error Rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+    # Error rate target: < 1%  (skip for pure-local WASM — no HTTP requests)
+    if results.scenario not in ("wasm_thundering_herd",):
+        error_pass = results.error_rate < 1.0
+        print(f"Error Rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
 
     # Latency target: p95 < 500ms / p99 < 1000ms (not applicable to thundering_herd)
     if results.request_latencies and results.scenario != "thundering_herd":
@@ -216,6 +245,59 @@ def print_results(results: LoadTestResults, workers: int = 1):
         throughput_pass = results.requests_per_second >= throughput_target * 0.9
         print(f"Command Throughput >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
 
+    elif results.scenario == "wasm_steps":
+        # Target: >90% step success rate; p95 execution < 300ms (simulated wasmtime budget)
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        wasm_pass = wasm_success_rate >= 90.0
+        print(f"WASM success >= 90%:  {'✅ PASS' if wasm_pass else '❌ FAIL'} ({wasm_success_rate:.1f}%)")
+
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p95_wasm = wl[int(0.95 * (len(wl) - 1))] * 1000
+            wasm_lat_pass = p95_wasm < 300.0
+            print(f"WASM p95 < 300ms:     {'✅ PASS' if wasm_lat_pass else '❌ FAIL'} ({p95_wasm:.0f}ms)")
+
+        # Throughput: steps-per-second across all devices
+        wasm_tps = results.wasm_steps_executed / results.duration_seconds if results.duration_seconds > 0 else 0
+        wasm_steps_per_sync = 5  # default from DeviceConfig
+        target_tps = results.num_devices * wasm_steps_per_sync / results.duration_seconds if results.duration_seconds > 0 else 0
+        tps_pass = wasm_tps >= target_tps * 0.9
+        print(f"WASM steps/sec:       {wasm_tps:.1f}  (target: {target_tps:.1f}  {'✅ PASS' if tps_pass else '❌ FAIL'})")
+
+    elif results.scenario == "wasm_thundering_herd":
+        # WASM dispatch is local — no HTTP, no DB. Contrast vs SAF thundering herd.
+        #
+        # The only hard pass/fail is success rate: did every step complete without error?
+        # Throughput and p99 are reported as informational — they scale non-linearly with
+        # device count because all coroutines share a single asyncio event loop thread.
+        # p99 measures asyncio scheduling backlog (time-in-queue), not WASM exec time.
+        total_wasm = results.wasm_steps_executed + results.wasm_step_failures
+        wasm_success_rate = results.wasm_steps_executed / total_wasm * 100 if total_wasm else 0
+        wasm_pass = wasm_success_rate >= 99.0
+        throughput = results.wasm_steps_executed / results.duration_seconds if results.duration_seconds > 0 else 0
+        # steps_per_device_per_sec: normalises throughput by device count for apples-to-apples
+        # comparison across runs at different scale. Stable target: >= 0.8 steps/device/sec
+        # (each device completes its burst in ≤ wasm_steps_per_sync / 0.8 ≈ 6s).
+        steps_per_device_per_sec = throughput / results.num_devices if results.num_devices else 0
+        rate_pass = steps_per_device_per_sec >= 0.8
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"WASM steps fired:     {total_wasm:,}")
+        print(f"Device success >= 99%:{'✅ PASS' if wasm_pass else '❌ FAIL'} ({wasm_success_rate:.1f}%)")
+        print(
+            f"Rate >= 0.8/dev/s:    {'✅ PASS' if rate_pass else '❌ FAIL'} "
+            f"({steps_per_device_per_sec:.2f} steps/device/sec  |  {throughput:,.0f} total steps/sec)"
+        )
+        if results.wasm_execution_latencies:
+            wl = sorted(results.wasm_execution_latencies)
+            p50_wasm = wl[int(0.50 * (len(wl) - 1))] * 1000
+            p99_wasm = wl[int(0.99 * (len(wl) - 1))] * 1000
+            baseline_p99_ms = 5055.0
+            improvement = baseline_p99_ms / p99_wasm if p99_wasm > 0 else float('inf')
+            print(f"Sched p50:            {p50_wasm:.2f}ms  ← asyncio queue depth, not exec time")
+            print(f"Sched p99:            {p99_wasm:.2f}ms  (scales with device count)")
+            print(f"Improvement vs SAF:   {improvement:.0f}x vs pre-Sovereign-Dispatcher SAF p99={baseline_p99_ms:.0f}ms")
+
     elif results.scenario == "thundering_herd":
         # Count devices that succeeded (sync_failures == 0 AND synced at least 1 tx)
         devices_succeeded = sum(
@@ -239,6 +321,47 @@ def print_results(results: LoadTestResults, workers: int = 1):
             max_latency_target_ms = results.num_devices / expected_throughput * 1000
             tail_pass = p_max < max_latency_target_ms
             print(f"Max latency < {max_latency_target_ms / 1000:.0f}s:     {'✅ PASS' if tail_pass else '❌ FAIL'} ({p_max:.0f}ms)")
+
+    elif results.scenario == "msgspec_codec":
+        rps = results.total_requests / results.duration_seconds if results.duration_seconds > 0 else 0
+        rps_pass = rps >= 50.0  # sanity floor — preflight + heartbeat should always clear this
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Requests:             {results.total_requests:,}")
+        print(f"Heartbeats sent:      {results.heartbeats_sent:,}")
+        print(f"Req/sec >= 50:        {'✅ PASS' if rps_pass else '❌ FAIL'} ({rps:.1f} req/sec)")
+        print(f"Error rate:           {results.error_rate:.2f}%")
+
+    elif results.scenario == "nats_transport":
+        # NATS JetStream publish latency — no HTTP, measures ack round-trip only.
+        # Target: p99 < 10ms (vs 50-300ms HTTP heartbeat path).
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Publishes sent:       {results.heartbeats_sent:,}")
+        print(f"Publish failures:     {results.heartbeat_failures:,}")
+        error_pass = results.error_rate < 1.0
+        print(f"Error rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+        if results.request_latencies:
+            p50 = results.latency_percentile(0.50)
+            p95 = results.latency_percentile(0.95)
+            p99 = results.latency_percentile(0.99)
+            # p99 target scales with load: <10ms at <=100 devices (idle NATS),
+            # <25ms at <=1k, <50ms at <=10k, <150ms beyond.
+            # Above 10k the asyncio scheduler backlog (not NATS itself) dominates p99 —
+            # same pattern as wasm_thundering_herd. p50 stays <2ms even at 100k devices.
+            if results.num_devices <= 100:
+                p99_threshold = 10.0
+            elif results.num_devices <= 1_000:
+                p99_threshold = 25.0
+            elif results.num_devices <= 10_000:
+                p99_threshold = 50.0
+            else:
+                p99_threshold = 150.0
+            p99_pass = p99 < p99_threshold
+            print(f"Publish p50:          {p50:.2f}ms")
+            print(f"Publish p95:          {p95:.2f}ms")
+            print(f"Publish p99 < {p99_threshold:.0f}ms:  {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.2f}ms)")
+            print(f"Samples:              {len(results.request_latencies):,}")
+        else:
+            print("  (no latency samples — is RUFUS_NATS_URL set and NATS server running?)")
 
     print("=" * 80)
 
@@ -264,8 +387,13 @@ async def run_single_scenario(
     )
 
     try:
-        # Setup devices for this scenario
-        await orchestrator.setup_devices(num_devices, cleanup_first=True)
+        # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
+        _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=not _local_only,
+            register_with_server=not _local_only,
+        )
 
         # Run scenario with existing devices
         results = await orchestrator.run_scenario(
@@ -302,6 +430,10 @@ async def run_all_scenarios(
         ("saf_sync", 300),
         ("config_poll", 600),
         ("cloud_commands", 600),
+        ("wasm_steps", 300),
+        ("wasm_thundering_herd", 60),
+        ("msgspec_codec", 120),
+        ("nats_transport", 120),
     ]
 
     # Create single orchestrator for all scenarios
@@ -417,6 +549,10 @@ Scenarios:
   config_poll        - Config polling with ETag (60s interval)
   cloud_commands     - Cloud-to-device command delivery
   thundering_herd    - Synchronized SAF sync burst (all devices simultaneous)
+  wasm_steps         - WASM step execution throughput (sync_wasm command delivery + edge execution)
+  wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: >= 0.8 steps/device/sec)
+  msgspec_codec      - Heartbeat load with msgspec preflight (validates typed decode fast path)
+  nats_transport     - Publish heartbeats directly to NATS JetStream (p99 <10ms @<=100, <25ms @<=1k, <50ms @<=10k, <150ms beyond)
         """
     )
 
@@ -440,6 +576,10 @@ Scenarios:
             "config_poll",
             "cloud_commands",
             "thundering_herd",
+            "wasm_steps",
+            "wasm_thundering_herd",
+            "msgspec_codec",
+            "nats_transport",
         ],
         help="Test scenario to run"
     )

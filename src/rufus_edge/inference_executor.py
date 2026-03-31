@@ -9,10 +9,18 @@ Handles execution of AI_INFERENCE workflow steps, including:
 - Error handling and fallbacks
 """
 
+from __future__ import annotations
+
 import logging
 import asyncio
 from typing import Any, Dict, Optional, Union
-import numpy as np
+
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
+    _NUMPY_AVAILABLE = False
 
 from rufus.providers.inference import (
     InferenceProvider,

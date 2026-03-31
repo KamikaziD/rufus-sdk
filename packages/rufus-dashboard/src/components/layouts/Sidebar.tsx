@@ -7,12 +7,12 @@ import { cn } from "@/lib/utils";
 import { getVisibleNavItems } from "@/lib/roles";
 import {
   LayoutDashboard, GitBranch, CheckSquare, Cpu, Shield,
-  Clock, FileText, Settings, Server
+  Clock, FileText, Settings, Server, Network
 } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, GitBranch, CheckSquare, Cpu, Shield,
-  Clock, FileText, Settings, Server,
+  Clock, FileText, Settings, Server, Network,
 };
 
 // Section groupings — icons as anchors
@@ -22,6 +22,7 @@ const SECTION_LABELS: Record<string, string> = {
   CheckSquare:     "EXECUTION",
   Cpu:             "FLEET",
   Server:          "FLEET",
+  Network:         "FLEET",
   Shield:          "SYSTEM",
   Clock:           "SYSTEM",
   FileText:        "SYSTEM",

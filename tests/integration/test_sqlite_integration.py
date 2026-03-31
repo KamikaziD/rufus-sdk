@@ -227,7 +227,7 @@ class TestSQLiteIntegration:
             idempotency_key=f'payment_{workflow_id}'
         )
 
-        task_id = task['task_id']
+        task_id = task.task_id
 
         # Simulate task processing
         await provider.update_task_status(task_id, 'RUNNING')
@@ -271,23 +271,23 @@ class TestSQLiteIntegration:
         # 6. Verify complete workflow state
         loaded = await provider.load_workflow(workflow_id)
         assert loaded is not None
-        assert loaded['status'] == 'COMPLETED'
-        assert loaded['current_step'] == 3
-        assert len(loaded['completed_steps_stack']) == 2
-        assert loaded['state']['transaction_id'] == 'TXN-9876543'
-        assert loaded['saga_mode'] is True
+        assert loaded.status == 'COMPLETED'
+        assert loaded.current_step == 3
+        assert len(loaded.completed_steps_stack) == 2
+        assert loaded.state['transaction_id'] == 'TXN-9876543'
+        assert loaded.saga_mode is True
 
         # 7. Verify task record
         task_record = await provider.get_task_record(task_id)
-        assert task_record['status'] == 'COMPLETED'
-        assert task_record['result']['transaction_id'] == 'TXN-9876543'
+        assert task_record.status == 'COMPLETED'
+        assert task_record.result['transaction_id'] == 'TXN-9876543'
 
         # 8. Verify metrics
         metrics = await provider.get_workflow_metrics(workflow_id)
         assert len(metrics) >= 1
         payment_metric = next(
-            m for m in metrics if m['metric_name'] == 'payment_processing_time_ms')
-        assert payment_metric['metric_value'] == 1250.5
+            m for m in metrics if m.metric_name == 'payment_processing_time_ms')
+        assert payment_metric.metric_value == 1250.5
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -411,8 +411,8 @@ class TestSQLiteIntegration:
 
         # Verify parent resumed
         loaded_parent = await provider.load_workflow(parent_id)
-        assert loaded_parent['status'] == 'ACTIVE'
-        assert loaded_parent['blocked_on_child_id'] is None
+        assert loaded_parent.status == 'ACTIVE'
+        assert loaded_parent.blocked_on_child_id is None
 
     @pytest.mark.asyncio
     async def test_workflow_summary_aggregation(self, sqlite_with_schema):
@@ -482,7 +482,7 @@ class TestSQLiteIntegration:
         # Verify it was saved
         loaded = await provider.load_workflow('workflow_1')
         assert loaded is not None
-        assert loaded['idempotency_key'] == 'unique_key_12345'
+        assert loaded.idempotency_key == 'unique_key_12345'
 
         # Create another workflow with same idempotency key should replace the first one
         # (INSERT OR REPLACE behavior in SQLite)
@@ -502,7 +502,7 @@ class TestSQLiteIntegration:
         # The second workflow should have replaced the first due to idempotency key
         loaded_2 = await provider.load_workflow('workflow_2')
         assert loaded_2 is not None
-        assert loaded_2['idempotency_key'] == 'unique_key_12345'
+        assert loaded_2.idempotency_key == 'unique_key_12345'
 
         # First workflow should still exist (different ID)
         loaded_1 = await provider.load_workflow('workflow_1')
@@ -556,7 +556,7 @@ class TestSQLiteIntegration:
 
         loaded = await provider.load_workflow('test_1')
         assert loaded is not None
-        assert loaded['id'] == 'test_1'
+        assert loaded.id == 'test_1'
 
         await provider.close()
 

@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rufus — Sovereign Dispatcher Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1c2230;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --amber:    #f9a825;
+    --red:      #f85149;
+    --blue:     #1565c0;
+    --purple:   #9c27b0;
+    --radius:   8px;
+    --mono:     "SF Mono", "Fira Code", monospace;
+    --sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .header-title span { color: var(--accent); }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  .badge-green  { color: var(--green);  border-color: var(--green);  background: #0d2e18; }
+  .badge-grey   { color: var(--muted);  border-color: var(--border); background: var(--surface2); }
+  .badge-red    { color: var(--red);    border-color: var(--red);    background: #2a0d0d; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .header-spacer { flex: 1; }
+
+  /* ── Controls ────────────────────────────────────────────────────────── */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  select, button {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  select:focus, button:hover { border-color: var(--accent); outline: none; }
+
+  .btn-primary   { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-primary:hover { background: #79b8ff; border-color: #79b8ff; }
+  .btn-danger    { background: #5a1a1a; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover { background: #7a2020; }
+  .btn-success   { background: #0d2e18; color: var(--green); border-color: var(--green); }
+  .btn-success:hover { background: #12401f; }
+  .btn-warn      { background: #2a1a00; color: var(--amber); border-color: var(--amber); }
+  .btn-warn:hover { background: #3a2400; }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── Legacy banner ───────────────────────────────────────────────────── */
+  #legacy-banner {
+    display: none;
+    background: #3a1a00;
+    border-bottom: 1px solid var(--amber);
+    padding: 8px 24px;
+    color: var(--amber);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* ── Main layout ─────────────────────────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* ── Fleet canvas ────────────────────────────────────────────────────── */
+  #fleet-panel {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .canvas-wrap {
+    position: relative;
+    display: block;
+    width: 100%;
+  }
+  #fleet-canvas {
+    display: block;
+    width: 100%;
+    border-radius: 6px;
+    cursor: crosshair;
+    background: #060810;
+  }
+  #canvas-tooltip {
+    position: absolute;
+    background: rgba(6,8,16,0.92);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+    pointer-events: none;
+    white-space: nowrap;
+    display: none;
+    z-index: 5;
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Stats panel ─────────────────────────────────────────────────────── */
+  #stats-panel {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--muted); }
+  .stat-value { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+  .stat-value.green  { color: var(--green); }
+  .stat-value.amber  { color: var(--amber); }
+  .stat-value.blue   { color: var(--accent); }
+
+  .net-controls {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .net-controls button { width: 100%; }
+
+  .cond-select { margin-top: 10px; }
+  .cond-select label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .cond-select select { width: 100%; }
+
+  /* ── Wire benchmark panel ────────────────────────────────────────────── */
+  #wire-panel { grid-row: 2; grid-column: 1; }
+  .wire-section { margin-bottom: 14px; }
+  .wire-section:last-child { margin-bottom: 0; }
+  .wire-section-title {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .05em; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .wire-ratio-badge {
+    background: #0d2e18; color: var(--green); border: 1px solid var(--green);
+    border-radius: 12px; font-size: 11px; font-weight: 700;
+    padding: 1px 7px; font-family: var(--mono);
+  }
+  .wire-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .wire-codec {
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    width: 38px; flex-shrink: 0; text-align: right;
+  }
+  .wire-codec.json  { color: var(--amber); }
+  .wire-codec.proto { color: var(--green); }
+  .wire-bar-bg {
+    flex: 1; height: 12px; background: #0a0d12;
+    border-radius: 3px; overflow: hidden; border: 1px solid var(--border);
+  }
+  .wire-bar { height: 100%; border-radius: 3px; transition: width .4s ease; width: 0; }
+  .wire-bar.json-bar  { background: linear-gradient(90deg, #c17f00, #f9a825); }
+  .wire-bar.proto-bar { background: linear-gradient(90deg, #1b5e20, #3fb950); }
+  .wire-bytes {
+    font-family: var(--mono); font-size: 11px; color: var(--text); width: 44px;
+    flex-shrink: 0; text-align: right;
+  }
+
+  /* ── NATS panel ──────────────────────────────────────────────────────── */
+  #nats-panel { grid-row: 2; grid-column: 2; }
+  #nats-feed {
+    background: #0a0d12; border: 1px solid var(--border); border-radius: 4px;
+    height: 148px; overflow-y: auto; padding: 6px 10px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.6;
+  }
+  .nats-evt-wf     { color: var(--green); }
+  .nats-evt-hb     { color: var(--accent); }
+  .nats-evt-proto  { color: #ff7043; }
+  .nats-evt-err    { color: var(--red); }
+  .nats-mini-stat  { display: flex; flex-direction: column; align-items: center; }
+  .nats-mini-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+  .nats-mini-val   { font-family: var(--mono); font-weight: 700; font-size: 15px; }
+
+  /* ── Relay section (enhanced) ────────────────────────────────────────── */
+  .relay-hero-row {
+    padding: 5px 0 4px; border-bottom: 1px solid rgba(48,54,61,0.5);
+    font-size: 11px; font-family: var(--mono);
+  }
+  .relay-hero-row:last-child { border-bottom: none; }
+  .relay-hero-top  { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
+  .relay-hero-id   { color: var(--muted); }
+  .relay-hero-ct   { color: #ff7043; font-weight: 700; }
+  .relay-hero-hop  { color: var(--muted); font-size: 10px; }
+  .relay-master-badge { background:#b8860b; color:#fff; font-size:9px; font-weight:700;
+    border-radius:3px; padding:1px 5px; margin-left:5px; letter-spacing:.04em; }
+  .ruvon-bars { display:flex; gap:3px; align-items:center; }
+  .ruvon-bar-wrap { display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+  .ruvon-bar-label { font-size:9px; color:var(--muted); line-height:1; }
+  .ruvon-bar-bg { width:36px; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
+  .ruvon-bar-fill { height:100%; border-radius:2px; transition: width .4s; }
+  .bar-c { background:#58a6ff; }
+  .bar-u { background:#3fb950; }
+  .bar-p { background:#bc8cff; }
+  .ruvon-score { font-size:10px; color:#e6edf3; font-weight:700; margin-left:4px; }
+
+  /* ── Log panel ───────────────────────────────────────────────────────── */
+  #log-panel {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  #log-output {
+    background: #0a0d12;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 180px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  #log-output .log-offline  { color: var(--amber); }
+  #log-output .log-sync     { color: var(--accent); }
+  #log-output .log-synced   { color: var(--green); }
+  #log-output .log-warn     { color: var(--amber); }
+  #log-output .log-declined { color: var(--red); }
+  #log-output .log-highrisk { color: var(--purple); }
+
+  /* ── Responsive ──────────────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    .main { grid-template-columns: 1fr; }
+    #stats-panel { grid-column: 1; grid-row: 2; }
+    #log-panel   { grid-row: 3; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-title">RUFUS <span>SOVEREIGN DISPATCHER</span></div>
+  <div id="cloud-badge" class="badge badge-grey">
+    <span class="dot"></span>
+    <span id="cloud-label">Checking…</span>
+  </div>
+  <div class="header-spacer"></div>
+  <div class="controls">
+    <label style="color:var(--muted);font-size:12px">Devices</label>
+    <select id="device-count" title="Number of devices">
+      <option value="10">10</option>
+      <option value="25">25</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:var(--muted)">
+      <input type="checkbox" id="legacy-toggle" style="cursor:pointer">
+      Legacy Mode
+    </label>
+    <button id="start-btn" class="btn-primary">▶ Start</button>
+    <button id="stop-btn" disabled>■ Stop</button>
+  </div>
+</header>
+
+<!-- Legacy warning banner -->
+<div id="legacy-banner">
+  ⚠️ Legacy Mode: 100 independent setTimeout callbacks running on the main thread.
+  The UI will freeze — this demonstrates the problem the Sovereign Dispatcher solves.
+</div>
+
+<!-- Main content -->
+<div class="main">
+
+  <!-- Fleet heatmap -->
+  <div class="panel" id="fleet-panel">
+    <div class="panel-title">Device Fleet — Mesh Network Graph</div>
+    <div class="canvas-wrap">
+      <canvas id="fleet-canvas"></canvas>
+      <div id="canvas-tooltip"></div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="swatch" style="background:#1a237e"></div>Idle</div>
+      <div class="legend-item"><div class="swatch" style="background:#2e7d32"></div>Online</div>
+      <div class="legend-item"><div class="swatch" style="background:#c62828"></div>Processing payment</div>
+      <div class="legend-item"><div class="swatch" style="background:#f9a825"></div>Offline / SAF queued</div>
+      <div class="legend-item"><div class="swatch" style="background:#1565c0"></div>Syncing SAF</div>
+      <div class="legend-item"><div class="swatch" style="background:#4a148c"></div>Workflow done</div>
+      <div class="legend-item"><div class="swatch" style="background:#ff7043"></div>Mesh relay</div>
+    </div>
+  </div>
+
+  <!-- Stats + controls -->
+  <div class="panel" id="stats-panel">
+    <div class="panel-title">Fleet Stats</div>
+
+    <div class="stat-row">
+      <span class="stat-label">Txns / sec</span>
+      <span class="stat-value green" id="stat-sps">—</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">p99 payment</span>
+      <span class="stat-value blue" id="stat-p99">—</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">SAF queue depth</span>
+      <span class="stat-value amber" id="stat-saf">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Synced txns</span>
+      <span class="stat-value green" id="stat-synced">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Mesh relayed</span>
+      <span class="stat-value" style="color:#ff7043" id="stat-mesh-relayed">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Approved online / offline</span>
+      <span class="stat-value green" id="stat-approved">0 / 0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Declined</span>
+      <span class="stat-value" style="color:var(--red)" id="stat-declined">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Risk HIGH+</span>
+      <span class="stat-value" style="color:var(--purple)" id="stat-highrisk">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Online / Total</span>
+      <span class="stat-value" id="stat-online">0 / 0</span>
+    </div>
+
+    <div id="relay-leaderboard" style="margin-top:10px;">
+      <div style="font-size:11px; color:#ff7043; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px; font-weight:600;">
+        ⟳ Relay Heroes
+      </div>
+      <div id="relay-heroes-list" style="font-size:11px; font-family:var(--mono); color:var(--muted); font-style:italic;">
+        Cut the network to trigger mesh relay
+      </div>
+    </div>
+
+    <div class="net-controls">
+      <button id="cut-btn" class="btn-danger" disabled>⚡ Cut Network</button>
+      <button id="restore-btn" class="btn-success" disabled>🔄 Restore Network</button>
+    </div>
+
+    <div class="cond-select">
+      <label>Network condition</label>
+      <select id="cond-select">
+        <option value="good" selected>Good (~2ms)</option>
+        <option value="degraded">Degraded (~100ms)</option>
+        <option value="lossy">Lossy (20% drop)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Wire format benchmark -->
+  <div class="panel" id="wire-panel">
+    <div class="panel-title">Wire Protocol — JSON vs Protobuf</div>
+
+    <!-- HeartbeatMsg -->
+    <div class="wire-section">
+      <div class="wire-section-title">
+        <span>HeartbeatMsg <span style="color:var(--muted);font-weight:400">(edge → cloud · 1 Hz per device)</span></span>
+        <span class="wire-ratio-badge" id="hb-ratio">—</span>
+      </div>
+      <div class="wire-row">
+        <span class="wire-codec json">JSON</span>
+        <div class="wire-bar-bg"><div class="wire-bar json-bar" id="hb-json-bar"></div></div>
+        <span class="wire-bytes" id="hb-json-bytes">—</span>
+      </div>
+      <div class="wire-row">
+        <span class="wire-codec proto">PROTO</span>
+        <div class="wire-bar-bg"><div class="wire-bar proto-bar" id="hb-proto-bar"></div></div>
+        <span class="wire-bytes" id="hb-proto-bytes">—</span>
+      </div>
+    </div>
+
+    <!-- SyncBatch -->
+    <div class="wire-section">
+      <div class="wire-section-title">
+        <span>SyncBatch <span style="color:var(--muted);font-weight:400" id="saf-batch-label">(SAF drain · waiting…)</span></span>
+        <span class="wire-ratio-badge" id="saf-ratio">—</span>
+      </div>
+      <div class="wire-row">
+        <span class="wire-codec json">JSON</span>
+        <div class="wire-bar-bg"><div class="wire-bar json-bar" id="saf-json-bar"></div></div>
+        <span class="wire-bytes" id="saf-json-bytes">—</span>
+      </div>
+      <div class="wire-row">
+        <span class="wire-codec proto">PROTO</span>
+        <div class="wire-bar-bg"><div class="wire-bar proto-bar" id="saf-proto-bar"></div></div>
+        <span class="wire-bytes" id="saf-proto-bytes">—</span>
+      </div>
+    </div>
+
+    <!-- Mesh Relay Stats -->
+    <div class="wire-section" style="border-top:1px solid var(--border);padding-top:12px">
+      <div class="wire-section-title" style="color:#ff7043">
+        Mesh Relay Network
+        <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none">P2P SAF routing — offline devices hand off to online peers</span>
+      </div>
+      <div style="display:flex;gap:20px;margin-bottom:8px">
+        <div>
+          <div style="font-size:10px;color:var(--muted)">Txns relayed</div>
+          <div style="font-family:var(--mono);font-weight:700;color:#ff7043;font-size:16px" id="wire-mesh-relayed">0</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted)">Active relays</div>
+          <div style="font-family:var(--mono);font-weight:700;color:#ff9a7a;font-size:16px" id="wire-active-relays">0</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted)">Reduction</div>
+          <div style="font-family:var(--mono);font-weight:700;color:var(--green);font-size:16px" id="wire-hb-saved">—</div>
+        </div>
+      </div>
+      <div id="wire-relay-heroes" style="font-size:11px;color:var(--muted);font-style:italic">
+        Cut the network (⚡) to trigger mesh relay →
+      </div>
+    </div>
+  </div>
+
+  <!-- NATS JetStream live feed -->
+  <div class="panel" id="nats-panel">
+    <div class="panel-title" style="display:flex;align-items:center;gap:8px">
+      NATS JetStream
+      <span id="nats-badge" class="badge badge-grey" style="font-size:10px;padding:2px 7px">
+        <span class="dot"></span>
+        <span id="nats-badge-label">Connecting…</span>
+      </span>
+    </div>
+    <div id="nats-feed">
+      <div style="color:var(--muted);font-style:italic">Attempting ws://localhost:8081…</div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:8px;justify-content:space-around">
+      <div class="nats-mini-stat">
+        <div class="nats-mini-label">Heartbeats</div>
+        <div class="nats-mini-val" style="color:var(--accent)" id="nats-hb-count">0</div>
+      </div>
+      <div class="nats-mini-stat">
+        <div class="nats-mini-label">WF Events</div>
+        <div class="nats-mini-val" style="color:var(--green)" id="nats-wf-count">0</div>
+      </div>
+      <div class="nats-mini-stat">
+        <div class="nats-mini-label">Proto msgs</div>
+        <div class="nats-mini-val" style="color:#ff7043" id="nats-proto-count">0</div>
+      </div>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+      Real-time push from cloud control plane (Docker edge-sim + cloud workers)
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="panel" id="log-panel">
+    <div class="panel-title">Event Log</div>
+    <div id="log-output"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const CLOUD_URL = "http://localhost:8000";
+const REGISTRATION_KEY = "demo-registration-key-2024";  // matches RUFUS_REGISTRATION_KEY in .env
+const MAX_LOG    = 30;
+const PEER_RADIUS = 5;  // must match worker.js
+
+// State index → fill color
+const STATE_COLORS = [
+  "#1e2a5e",  // 0 IDLE        — dim navy
+  "#1b5e20",  // 1 ONLINE      — dark green
+  "#b71c1c",  // 2 WASM_EXEC   — deep red
+  "#4a148c",  // 3 WORKFLOW_DONE— purple
+  "#4a2e00",  // 4 OFFLINE     — dark amber
+  "#f9a825",  // 5 SAF_QUEUED  — amber
+  "#0d47a1",  // 6 SYNCING     — blue
+  "#00695c",  // 7 SYNCED      — teal
+  "#ff7043",  // 8 MESH_RELAY  — orange
+];
+// Glow colors for active states
+const STATE_GLOW = [
+  null, "#2e7d32", null, null, null, "#f9a825", "#1565c0", null, "#ff7043",
+];
+const STATE_NAMES = [
+  "Idle", "Online", "WASM exec", "Workflow done",
+  "Offline", "SAF queued", "Syncing", "Synced", "Mesh relay",
+];
+
+let worker          = null;
+let deviceStates    = [];
+let nodePositions   = [];
+let numDevices      = 50;
+let relayEdges      = new Map();    // `${from}-${to}` → { from, to, expiresAt }
+let relayPackets    = [];           // animated packet dots on relay edges
+let animFrameId     = null;
+let _cloudReachable = false;
+let _activeRelayCount = 0;         // concurrent relay operations in flight
+
+const canvas  = document.getElementById("fleet-canvas");
+const ctx     = canvas.getContext("2d");
+const tooltip = document.getElementById("canvas-tooltip");
+
+// ── Cloud connectivity check ───────────────────────────────────────────────
+async function checkCloud() {
+  let reachable = false;
+  try {
+    const resp = await fetch(`${CLOUD_URL}/health`, {
+      signal: AbortSignal.timeout(1500)
+    });
+    reachable = resp.ok;
+  } catch { /* fall through */ }
+
+  const changed = reachable !== _cloudReachable;
+  _cloudReachable = reachable;
+  setCloudBadge(reachable);
+
+  if (worker && changed) {
+    worker.postMessage({ type: "CLOUD_STATUS", reachable });
+  }
+  return reachable;
+}
+
+function setCloudBadge(online) {
+  const badge = document.getElementById("cloud-badge");
+  const label = document.getElementById("cloud-label");
+  if (online) {
+    badge.className = "badge badge-green";
+    label.textContent = `Connected ✓ ${CLOUD_URL}`;
+  } else {
+    badge.className = "badge badge-grey";
+    label.textContent = "Offline / Simulation Only";
+  }
+}
+
+checkCloud();
+setInterval(checkCloud, 30000);
+
+// ── Node layout ────────────────────────────────────────────────────────────
+function computeNodePositions(n, W, H) {
+  const margin = 32;
+  const aspect = W / H;
+  const cols   = Math.ceil(Math.sqrt(n * aspect));
+  const rows   = Math.ceil(n / cols);
+  const cellW  = (W - 2 * margin) / cols;
+  const cellH  = (H - 2 * margin) / rows;
+
+  // seeded LCG — same seed → same layout every run
+  let seed = 0xdeadbeef;
+  const lcg = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  };
+
+  return Array.from({ length: n }, (_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx  = margin + col * cellW + cellW / 2;
+    const cy  = margin + row * cellH + cellH / 2;
+    return {
+      x: cx + (lcg() - 0.5) * cellW * 0.6,
+      y: cy + (lcg() - 0.5) * cellH * 0.6,
+    };
+  });
+}
+
+// ── Canvas init ────────────────────────────────────────────────────────────
+function initCanvas(n) {
+  const panelEl = document.getElementById("fleet-panel");
+  const W = Math.max(300, panelEl.clientWidth - 32);
+  const H = Math.max(220, Math.round(W * 0.48));
+
+  canvas.width  = W;
+  canvas.height = H;
+
+  deviceStates   = new Uint8Array(n);
+  nodePositions  = computeNodePositions(n, W, H);
+  relayEdges.clear();
+  relayPackets   = [];
+  _activeRelayCount = 0;
+
+  scheduleRender();
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+function scheduleRender() {
+  if (!animFrameId) {
+    animFrameId = requestAnimationFrame(renderGraph);
+  }
+}
+
+function renderGraph() {
+  animFrameId = null;
+  const W = canvas.width, H = canvas.height;
+  const n = numDevices;
+  const now = Date.now();
+
+  // Background
+  ctx.fillStyle = "#060810";
+  ctx.fillRect(0, 0, W, H);
+
+  // Expire old relay edges
+  for (const [k, e] of relayEdges) {
+    if (e.expiresAt < now) relayEdges.delete(k);
+  }
+
+  // ── Peer connection lines (static, very dim) ───────────────────────────
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth   = 0.8;
+  for (let i = 0; i < n; i++) {
+    const a = nodePositions[i];
+    for (let d = 1; d <= PEER_RADIUS && i + d < n; d++) {
+      const b = nodePositions[i + d];
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // ── Active relay edges (orange, fading) ────────────────────────────────
+  let hasActive = false;
+  for (const [, e] of relayEdges) {
+    const ttl = e.expiresAt - now;
+    if (ttl <= 0 || e.from >= n || e.to >= n) continue;
+    hasActive = true;
+    const alpha = Math.min(1, ttl / 600);  // fade in last 600 ms
+    const a = nodePositions[e.from];
+    const b = nodePositions[e.to];
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,112,67,${alpha * 0.85})`;
+    ctx.lineWidth   = 1.2 + alpha * 1.2;
+    ctx.shadowColor = "#ff7043";
+    ctx.shadowBlur  = 8 * alpha;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Relay packet animation (dots traveling along orange edges) ─────────
+  relayPackets = relayPackets.filter(p => now - p.startedAt < p.duration);
+  for (const pkt of relayPackets) {
+    if (pkt.from >= n || pkt.to >= n) continue;
+    const t  = Math.min(1, (now - pkt.startedAt) / pkt.duration);
+    const a  = nodePositions[pkt.from];
+    const b  = nodePositions[pkt.to];
+    const px = a.x + (b.x - a.x) * t;
+    const py = a.y + (b.y - a.y) * t;
+    // Pulsing glow at packet position
+    const pulse = 0.5 + 0.5 * Math.sin(now / 80 + pkt.from);
+    ctx.save();
+    ctx.fillStyle   = "#ff7043";
+    ctx.shadowColor = "#ff7043";
+    ctx.shadowBlur  = 10 + 6 * pulse;
+    ctx.globalAlpha = 0.7 + 0.3 * pulse;
+    ctx.beginPath();
+    ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    hasActive = true;
+  }
+
+  // ── Device nodes ──────────────────────────────────────────────────────
+  for (let i = 0; i < n; i++) {
+    const s   = deviceStates[i];
+    const pos = nodePositions[i];
+    const col = STATE_COLORS[s] || STATE_COLORS[0];
+    const glow = STATE_GLOW[s];
+    const r   = (s === 8) ? 6 : (s === 5 || s === 1) ? 5 : 4;
+
+    if (glow) {
+      ctx.save();
+      ctx.shadowColor = glow;
+      ctx.shadowBlur  = (s === 8) ? 14 : 8;
+      ctx.fillStyle   = col;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Keep animating while relay edges are fading
+  if (hasActive) scheduleRender();
+}
+
+// ── Canvas tooltip ─────────────────────────────────────────────────────────
+canvas.addEventListener("mousemove", (e) => {
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+  let found = -1;
+  const HIT_R2 = 100; // 10px hit radius
+  for (let i = 0; i < numDevices; i++) {
+    const p  = nodePositions[i];
+    const dx = mx - p.x, dy = my - p.y;
+    if (dx * dx + dy * dy < HIT_R2) { found = i; break; }
+  }
+
+  if (found >= 0) {
+    const state = deviceStates[found];
+    tooltip.style.display = "block";
+    tooltip.style.left    = (e.clientX - rect.left + 14) + "px";
+    tooltip.style.top     = (e.clientY - rect.top  - 10) + "px";
+    tooltip.textContent   = `#${found + 1}  ${STATE_NAMES[state] || "?"}`;
+  } else {
+    tooltip.style.display = "none";
+  }
+});
+canvas.addEventListener("mouseleave", () => {
+  tooltip.style.display = "none";
+});
+
+// ── Worker message handler ─────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
+
+  if (type === "STATE_UPDATE") {
+    const { deviceIndex, newState } = e.data;
+    if (deviceIndex < numDevices) {
+      deviceStates[deviceIndex] = newState;
+      scheduleRender();
+    }
+
+  } else if (type === "STATS") {
+    const { txnsPerSec, p99Payment, totalSynced, totalSafQueued, onlineCount, totalDevices,
+            approvedOnline, approvedOffline, declined, highRiskCount, meshRelayed, wireStats } = e.data;
+    document.getElementById("stat-sps").textContent           = (txnsPerSec || 0).toLocaleString();
+    document.getElementById("stat-p99").textContent           = (p99Payment || 0) + "ms";
+    document.getElementById("stat-saf").textContent           = (totalSafQueued || 0).toLocaleString();
+    document.getElementById("stat-synced").textContent        = (totalSynced || 0).toLocaleString();
+    document.getElementById("stat-mesh-relayed").textContent  = (meshRelayed || 0).toLocaleString();
+    document.getElementById("stat-approved").textContent      = `${approvedOnline || 0} / ${approvedOffline || 0}`;
+    document.getElementById("stat-declined").textContent      = (declined || 0).toLocaleString();
+    document.getElementById("stat-highrisk").textContent      = (highRiskCount || 0).toLocaleString();
+    document.getElementById("stat-online").textContent        = `${onlineCount} / ${totalDevices}`;
+    if (wireStats) updateWirePanel(wireStats, meshRelayed);
+
+  } else if (type === "SAF_CHANGE") {
+    // stats tick handles the aggregate; individual pixel already updated by STATE_UPDATE
+
+  } else if (type === "LEADERBOARD") {
+    updateLeaderboard(e.data.heroes);
+
+  } else if (type === "RELAY_EDGE") {
+    const { from, to, hops, count } = e.data;
+    const key = `${from}-${to}`;
+    relayEdges.set(key, { from, to, expiresAt: Date.now() + 2500 });
+    // Animated packet: one dot per hop (multi-hop relay: chain through nodes)
+    relayPackets.push({ from, to, startedAt: Date.now(), duration: 900 + hops * 300 });
+    _activeRelayCount++;
+    setTimeout(() => { _activeRelayCount = Math.max(0, _activeRelayCount - 1); }, 2500);
+    scheduleRender();
+
+  } else if (type === "LOG") {
+    appendLog(e.data.message);
+
+  } else if (type === "REGISTERED") {
+    appendLog(`device-${String(e.data.deviceIndex + 1).padStart(3, "0")} registered with control plane`);
+  }
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────
+function appendLog(msg) {
+  const out = document.getElementById("log-output");
+  const line = document.createElement("div");
+
+  if (msg.includes("MESH_RELAY")) {
+    line.style.color = "#ff7043";
+  } else if (msg.includes("OFFLINE") || msg.includes("went OFFLINE") || msg.includes("missed")) {
+    line.className = "log-offline";
+  } else if (msg.includes("SYNCING") || msg.includes("Syncing") || msg.includes("uploading")) {
+    line.className = "log-sync";
+  } else if (msg.includes("✓") || msg.includes("SYNCED")) {
+    line.className = "log-synced";
+  } else if (msg.includes("DECLINED")) {
+    line.className = "log-declined";
+  } else if (msg.includes("risk: HIGH") || msg.includes("risk: CRITICAL")) {
+    line.className = "log-highrisk";
+  } else if (msg.includes("⚠️") || msg.includes("Legacy")) {
+    line.className = "log-warn";
+  }
+  line.textContent = msg;
+  out.appendChild(line);
+
+  // Trim to MAX_LOG lines
+  while (out.children.length > MAX_LOG) out.removeChild(out.firstChild);
+  out.scrollTop = out.scrollHeight;
+}
+
+// ── Wire Protocol Panel ────────────────────────────────────────────────────
+function updateWirePanel(ws, meshRelayed) {
+  const { hbJson, hbProto, safJson, safProto, safCount, safEstimated } = ws;
+
+  if (hbJson > 0 && hbProto > 0) {
+    const ratio = (hbJson / hbProto).toFixed(1);
+    document.getElementById("hb-json-bytes").textContent  = hbJson + "B";
+    document.getElementById("hb-proto-bytes").textContent = hbProto + "B";
+    document.getElementById("hb-ratio").textContent       = ratio + "×";
+    document.getElementById("hb-json-bar").style.width    = "100%";
+    document.getElementById("hb-proto-bar").style.width   = (hbProto / hbJson * 100).toFixed(1) + "%";
+
+    // Total bandwidth saved across the fleet at 1Hz
+    const savedPerSec = (hbJson - hbProto) * numDevices;
+    document.getElementById("wire-hb-saved").textContent  =
+      savedPerSec >= 1024 ? (savedPerSec / 1024).toFixed(1) + " KB/s" : savedPerSec + " B/s";
+  }
+
+  if (safJson > 0 && safProto > 0) {
+    const ratio = (safJson / safProto).toFixed(1);
+    document.getElementById("saf-json-bytes").textContent  = safJson < 1024 ? safJson + "B" : (safJson / 1024).toFixed(1) + "KB";
+    document.getElementById("saf-proto-bytes").textContent = safProto < 1024 ? safProto + "B" : (safProto / 1024).toFixed(1) + "KB";
+    document.getElementById("saf-ratio").textContent       = ratio + "×";
+    document.getElementById("saf-json-bar").style.width    = "100%";
+    document.getElementById("saf-proto-bar").style.width   = (safProto / safJson * 100).toFixed(1) + "%";
+    document.getElementById("saf-batch-label").textContent = safEstimated
+      ? `(1 txn · estimated)`
+      : `last drain · ${safCount} txn${safCount !== 1 ? "s" : ""}`;
+  }
+
+  // Relay stats in wire panel
+  document.getElementById("wire-mesh-relayed").textContent = (meshRelayed || 0).toLocaleString();
+  document.getElementById("wire-active-relays").textContent = _activeRelayCount;
+}
+
+// ── Relay Leaderboard ──────────────────────────────────────────────────────
+function updateLeaderboard(heroes) {
+  const list = document.getElementById("relay-heroes-list");
+  if (!list) return;
+
+  if (!heroes || heroes.length === 0) {
+    list.innerHTML = '<span style="color:var(--muted);font-style:italic">Cut the network to trigger mesh relay</span>';
+    return;
+  }
+
+  list.innerHTML = heroes.map(({ id, count, score, C, U, P, isLocalMaster }, i) => {
+    const pct = v => Math.round((v || 0) * 100);
+    const masterBadge = isLocalMaster
+      ? `<span class="relay-master-badge">★ MASTER</span>` : "";
+    return `<div class="relay-hero-row">` +
+      `<div class="relay-hero-top">` +
+        `<span class="relay-hero-id">${String(i + 1).padStart(2, "0")} ${id.slice(0, 12)}…${masterBadge}</span>` +
+        `<span class="relay-hero-ct">${count} txns</span>` +
+      `</div>` +
+      `<div class="ruvon-bars">` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">C</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-c" style="width:${pct(C)}%"></div></div></div>` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">U</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-u" style="width:${pct(U)}%"></div></div></div>` +
+        `<div class="ruvon-bar-wrap"><div class="ruvon-bar-label">P</div><div class="ruvon-bar-bg"><div class="ruvon-bar-fill bar-p" style="width:${pct(P)}%"></div></div></div>` +
+        `<span class="ruvon-score">${(score || 0).toFixed(2)}</span>` +
+      `</div>` +
+    `</div>`;
+  }).join("");
+
+  // Mirror into wire panel relay heroes
+  const wireHeroes = document.getElementById("wire-relay-heroes");
+  if (wireHeroes && heroes.length > 0) {
+    wireHeroes.innerHTML = heroes.slice(0, 3).map(({ id, count, score, isLocalMaster }, i) =>
+      `<div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--mono);padding:1px 0">` +
+      `<span style="color:${isLocalMaster ? "#b8860b" : "#ff9a7a"}">${String(i + 1).padStart(2, "0")} ${id.slice(0, 16)}…${isLocalMaster ? " ★" : ""}</span>` +
+      `<span style="color:#ff7043;font-weight:700">${(score || 0).toFixed(2)} / ${count} txns</span>` +
+      `</div>`
+    ).join("");
+    wireHeroes.style.fontStyle = "normal";
+  }
+}
+
+// ── NATS JetStream WebSocket ───────────────────────────────────────────────
+let _natsHbCount    = 0;
+let _natsWfCount    = 0;
+let _natsProtoCount = 0;
+const MAX_NATS_FEED = 20;
+const NATS_WS_URL   = "ws://localhost:8081";
+
+function appendNatsFeed(cls, msg) {
+  const feed = document.getElementById("nats-feed");
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = msg;
+  feed.appendChild(line);
+  while (feed.children.length > MAX_NATS_FEED) feed.removeChild(feed.firstChild);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function setNatsBadge(state) {
+  const badge = document.getElementById("nats-badge");
+  const label = document.getElementById("nats-badge-label");
+  if (state === "connected") {
+    badge.className = "badge badge-green";
+    label.textContent = "Connected ✓";
+  } else if (state === "offline") {
+    badge.className = "badge badge-red";
+    label.textContent = "Not reachable";
+  } else {
+    badge.className = "badge badge-grey";
+    label.textContent = "Connecting…";
+  }
+}
+
+async function connectNats() {
+  try {
+    // Load nats.ws ESM from CDN — graceful fail if offline
+    const { connect } = await import(
+      "https://cdn.jsdelivr.net/npm/nats.ws@1.29.2/esm/nats.js"
+    );
+    const nc = await connect({ servers: NATS_WS_URL });
+    setNatsBadge("connected");
+
+    const feed = document.getElementById("nats-feed");
+    feed.innerHTML = "";  // clear "connecting" placeholder
+    appendNatsFeed("nats-evt-hb", `✓ Connected to ${NATS_WS_URL}`);
+
+    const ts = () => new Date().toLocaleTimeString("en-GB", { hour12: false });
+
+    // ── Subscribe: workflow events ──────────────────────────────────────
+    const wfSub = nc.subscribe("workflow.events.>");
+    (async () => {
+      for await (const msg of wfSub) {
+        const data = msg.data;  // Uint8Array
+        const envelope = data[0];
+        const body = data.slice(1);
+
+        if (envelope === 0x02) {
+          // Proto-encoded — show subject + byte count
+          _natsProtoCount++;
+          document.getElementById("nats-proto-count").textContent = _natsProtoCount;
+          const subShort = msg.subject.replace("workflow.events.", "wf.").slice(0, 30);
+          appendNatsFeed("nats-evt-proto",
+            `${ts()} [PROTO ${data.length}B] ${subShort}`);
+        } else {
+          // JSON or plain text
+          try {
+            const text = new TextDecoder().decode(envelope === 0x01 ? body : data);
+            const evt  = JSON.parse(text);
+            _natsWfCount++;
+            document.getElementById("nats-wf-count").textContent = _natsWfCount;
+            const evtType = evt.event_type || evt.type || "EVENT";
+            const wfType  = evt.workflow_type || "";
+            const subShort = msg.subject.replace("workflow.events.", "wf:").slice(0, 18);
+            appendNatsFeed("nats-evt-wf",
+              `${ts()} ${evtType}  ${wfType}  [${subShort}]`);
+          } catch {
+            appendNatsFeed("",
+              `${ts()} ${msg.subject} [${data.length}B]`);
+          }
+        }
+      }
+    })();
+
+    // ── Subscribe: device heartbeats (from Docker edge devices) ─────────
+    const hbSub = nc.subscribe("devices.*.heartbeat");
+    (async () => {
+      for await (const msg of hbSub) {
+        _natsHbCount++;
+        document.getElementById("nats-hb-count").textContent = _natsHbCount;
+        const data = msg.data;
+        const envelope = data[0];
+        if (envelope === 0x02) {
+          _natsProtoCount++;
+          document.getElementById("nats-proto-count").textContent = _natsProtoCount;
+        }
+        // Only log every 20th heartbeat to keep feed readable
+        if (_natsHbCount % 20 === 1) {
+          const subParts = msg.subject.split(".");
+          const devId = subParts[1] ? subParts[1].slice(0, 14) : "?";
+          const codec = envelope === 0x02 ? `PROTO ${data.length}B` : `JSON ${data.length}B`;
+          appendNatsFeed("nats-evt-hb",
+            `${ts()} heartbeat  ${devId}  [${codec}]`);
+        }
+      }
+    })();
+
+    return nc;
+  } catch (e) {
+    setNatsBadge("offline");
+    const feed = document.getElementById("nats-feed");
+    feed.innerHTML = "";
+    appendNatsFeed("nats-evt-err",
+      "ws://localhost:8081 not reachable");
+    appendNatsFeed("",
+      "Start NATS: docker compose up nats -d");
+    return null;
+  }
+}
+
+// Attempt NATS connection after a brief delay (let page settle)
+setTimeout(connectNats, 800);
+
+// ── Controls ───────────────────────────────────────────────────────────────
+const startBtn   = document.getElementById("start-btn");
+const stopBtn    = document.getElementById("stop-btn");
+const cutBtn     = document.getElementById("cut-btn");
+const restoreBtn = document.getElementById("restore-btn");
+const legacyChk  = document.getElementById("legacy-toggle");
+const condSel    = document.getElementById("cond-select");
+const devCount   = document.getElementById("device-count");
+
+startBtn.addEventListener("click", async () => {
+  numDevices = parseInt(devCount.value, 10);
+  const legacy = legacyChk.checked;
+
+  initCanvas(numDevices);
+
+  if (worker) { worker.terminate(); }
+  worker = new Worker("./worker.js");
+  worker.onmessage = handleWorkerMessage;
+
+  // Do a fresh connectivity check right before starting so the worker
+  // knows immediately whether cloud is reachable (avoids CORS flood)
+  const reachable = await checkCloud();
+  worker.postMessage({ type: "INIT", numDevices, cloudUrl: CLOUD_URL, registrationKey: REGISTRATION_KEY, batchSize: 50, legacyMode: legacy, cloudReachable: reachable });
+  worker.postMessage({ type: "START" });
+
+  startBtn.disabled = true;
+  stopBtn.disabled  = false;
+  cutBtn.disabled   = false;
+  restoreBtn.disabled = false;
+  devCount.disabled = true;
+
+  if (legacy) {
+    document.getElementById("legacy-banner").style.display = "block";
+  }
+  appendLog(`▶ Started ${numDevices} devices in ${legacy ? "legacy" : "sovereign"} mode`);
+});
+
+stopBtn.addEventListener("click", () => {
+  if (worker) {
+    worker.postMessage({ type: "STOP" });
+    worker.terminate();
+    worker = null;
+  }
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  cutBtn.disabled   = true;
+  restoreBtn.disabled = true;
+  devCount.disabled = false;
+  document.getElementById("legacy-banner").style.display = "none";
+  appendLog("■ Stopped");
+});
+
+cutBtn.addEventListener("click", () => {
+  if (worker) worker.postMessage({ type: "CUT_NETWORK" });
+  appendLog("⚡ Network cut by user");
+  cutBtn.disabled = true;
+  restoreBtn.disabled = false;
+});
+
+restoreBtn.addEventListener("click", () => {
+  if (worker) worker.postMessage({ type: "RESTORE_NETWORK" });
+  appendLog("🔄 Network restore triggered by user");
+  cutBtn.disabled = false;
+  restoreBtn.disabled = true;
+});
+
+condSel.addEventListener("change", () => {
+  if (worker) worker.postMessage({ type: "SET_CONDITION", condition: condSel.value });
+});
+
+legacyChk.addEventListener("change", () => {
+  document.getElementById("legacy-banner").style.display =
+    legacyChk.checked ? "block" : "none";
+});
+
+// ── Initial canvas ─────────────────────────────────────────────────────────
+// Defer until layout is complete so fleet-panel has its final width
+requestAnimationFrame(() => {
+  initCanvas(parseInt(devCount.value, 10));
+});
+appendLog("Rufus Sovereign Dispatcher — Browser Demo 2");
+appendLog(`Cloud URL: ${CLOUD_URL}  (checking connectivity…)`);
+</script>
+</body>
+</html>

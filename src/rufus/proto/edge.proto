@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package rufus.edge;
+
+// Mesh relay metadata stamped on messages hopping between peer devices
+message MeshRelayMeta {
+  string origin_device_id = 1;
+  repeated string hop_path = 2;     // device IDs in relay chain
+  int32 hop_count = 3;
+  string relayed_at = 4;            // ISO-8601
+  float vector_score = 5;           // RUVON score of the winning relay peer
+  string relay_peer_id = 6;         // device_id of the peer that accepted the relay
+}
+
+// RUVON advisory mesh state advertised by a device in each heartbeat
+message VectorAdvisory {
+  float relay_score = 1;            // S(Vc) — this device's current RUVON routing score
+  float connectivity_quality = 2;   // 1.0 online, 0.5 degraded, 0.0 offline
+  int32 known_peers = 3;            // peer URLs in this device's mesh_peer_urls cache
+  bool is_local_master = 4;         // true when elected Local Master (cloud unreachable)
+}
+
+// Heartbeat sent from edge device to cloud control plane
+message HeartbeatMsg {
+  string device_id = 1;
+  string device_status = 2;         // "online" | "offline"
+  int32 pending_sync_count = 3;
+  string last_sync_at = 4;          // ISO-8601 or empty
+  string config_version = 5;
+  string sdk_version = 6;
+  string sent_at = 7;               // ISO-8601
+  MeshRelayMeta relay_meta = 8;     // set when relayed via peer mesh
+  VectorAdvisory vector_advisory = 9; // RUVON advisory state (Phase 5)
+}
+
+// A single command from cloud to edge device
+message CommandMsg {
+  string command_id = 1;
+  string command_type = 2;
+  bytes command_data_json = 3;      // JSON-encoded command payload
+  string issued_at = 4;             // ISO-8601
+}
+
+// Batch of pending commands returned in heartbeat response (HTTP mode)
+message CommandBatch {
+  repeated CommandMsg commands = 1;
+}
+
+// One encrypted SAF transaction ready for cloud sync
+message EncryptedTransaction {
+  string transaction_id = 1;
+  string encrypted_blob = 2;        // hex-encoded ciphertext
+  string encryption_key_id = 3;
+  string merchant_id = 4;
+  int64 amount_cents = 5;
+  string currency = 6;
+  string card_token = 7;
+  string card_last_four = 8;
+  string workflow_id = 9;
+  string hmac = 10;
+}
+
+// Batch of transactions sent from edge to cloud for SAF sync
+message SyncBatch {
+  repeated EncryptedTransaction transactions = 1;
+  int64 device_sequence = 2;
+  string device_timestamp = 3;      // ISO-8601
+  string device_id = 4;
+  MeshRelayMeta relay_meta = 5;
+}
+
+// Cloud response to a SAF sync batch
+message SyncResponse {
+  repeated SyncAck accepted = 1;
+  repeated SyncReject rejected = 2;
+}
+
+message SyncAck {
+  string transaction_id = 1;
+  string status = 2;                // "ACCEPTED" | "DUPLICATE"
+}
+
+message SyncReject {
+  string transaction_id = 1;
+  string reason = 2;
+}
+
+// Config request from edge device (ETag-based conditional fetch)
+message ConfigRequest {
+  string device_id = 1;
+  string if_none_match = 2;         // ETag from last successful fetch
+}
+
+// Config response from cloud
+message ConfigResponse {
+  bool not_modified = 1;            // true = 304 equivalent; use cached config
+  bytes config_json = 2;            // JSON-encoded DeviceConfig when not_modified=false
+  string etag = 3;
+}
+
+// Batch of completed workflow executions synced from edge to cloud
+message WorkflowSyncBatch {
+  repeated bytes workflow_records_json = 1;  // JSON-encoded workflow dicts
+  repeated bytes audit_log_records_json = 2; // JSON-encoded audit log dicts
+  string device_id = 3;
+}

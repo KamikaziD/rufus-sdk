@@ -7,6 +7,9 @@ import type {
   AuditQueryResponse,
   Policy,
   DeviceCommand,
+  DeviceMeshStats,
+  MeshTopologyResponse,
+  RelayContext,
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_RUFUS_API_URL ?? "http://localhost:8000";
@@ -79,9 +82,10 @@ export async function listWorkflows(
 }
 
 export async function getWorkflow(token: string, id: string): Promise<WorkflowStatusResponse> {
-  const [raw, auditRaw] = await Promise.all([
+  const [raw, auditRaw, relayRaw] = await Promise.all([
     apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/status`, token),
     apiFetch<Record<string, unknown>[]>(`/api/v1/workflow/${id}/audit`, token).catch(() => []),
+    apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/relay-context`, token).catch(() => null),
   ]);
   return {
     workflow_id: raw.workflow_id as string,
@@ -99,6 +103,9 @@ export async function getWorkflow(token: string, id: string): Promise<WorkflowSt
     workflow_type: raw.workflow_type as string | undefined,
     started_at: (raw.created_at ?? raw.started_at ?? null) as string | null,
     completed_at: (raw.completed_at ?? null) as string | null,
+    relay_context: (relayRaw?.relay_device_id)
+      ? relayRaw as unknown as RelayContext
+      : null,
   };
 }
 
@@ -445,6 +452,17 @@ export function getMetricsThroughput(
   return apiFetch(`/api/v1/metrics/throughput?hours=${hours}`, token);
 }
 
+export interface EdgeImpactData {
+  saf_recovered_cents:  number;
+  saf_recovered_count:  number;
+  fraud_prevented_cents: number;
+  fraud_prevented_count: number;
+}
+
+export function getEdgeImpact(token: string): Promise<EdgeImpactData> {
+  return apiFetch("/api/v1/metrics/edge-impact", token);
+}
+
 export function getSystemHealth(token: string): Promise<{ workers: WorkerSummary[] }> {
   return listWorkers(token);
 }
@@ -652,6 +670,10 @@ export interface SafTransaction {
   status: string;
   created_at: string;
   synced_at: string | null;
+  relay_device_id?: string | null;
+  relay_source_device_id?: string | null;
+  hop_count?: number | null;
+  relayed_at?: string | null;
 }
 
 export async function getDeviceSafTransactions(
@@ -890,4 +912,14 @@ export function pushWorkflowToDevices(
       target_filter: body.target_filter ?? {},
     }),
   });
+}
+
+// ── Mesh Relay API ────────────────────────────────────────────────────────────
+
+export async function getDeviceMeshStats(token: string, deviceId: string): Promise<DeviceMeshStats> {
+  return apiFetch<DeviceMeshStats>(`/api/v1/devices/${deviceId}/mesh-stats`, token);
+}
+
+export async function getMeshTopology(token: string): Promise<MeshTopologyResponse> {
+  return apiFetch<MeshTopologyResponse>(`/api/v1/mesh/topology`, token);
 }

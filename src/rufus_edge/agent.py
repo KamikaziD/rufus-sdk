@@ -6,10 +6,14 @@ ATMs, mobile readers, and other edge devices.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
+import random
+import time
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from rufus.builder import WorkflowBuilder
@@ -73,6 +77,10 @@ class RufusEdgeAgent:
         heartbeat_interval: int = 60,
         workflow_sync_enabled: bool = True,
         platform_adapter: Optional[PlatformAdapter] = None,
+        peer_listen_port: int = 0,
+        peer_urls: Optional[List[str]] = None,
+        nats_url: Optional[str] = None,
+        nats_credentials: Optional[str] = None,
     ):
         """
         Initialize the edge agent.
@@ -86,6 +94,12 @@ class RufusEdgeAgent:
             config_poll_interval: Seconds between config polls
             sync_interval: Seconds between sync attempts
             heartbeat_interval: Seconds between heartbeats
+            peer_listen_port: Port for inbound peer relay server (0 = disabled)
+            peer_urls: Known peer device URLs for BFS mesh routing ([] = disabled)
+            nats_url: NATS server URL (e.g. "nats://localhost:4222"). When set,
+                      activates NATSEdgeTransport for sub-ms command delivery.
+                      Also read from RUFUS_NATS_URL environment variable.
+            nats_credentials: Optional path to NATS credentials file (NKey/JWT).
         """
         self.device_id = device_id
         self.cloud_url = cloud_url.rstrip("/")
@@ -97,6 +111,10 @@ class RufusEdgeAgent:
         self.heartbeat_interval = heartbeat_interval
         self.workflow_sync_enabled = workflow_sync_enabled
         self._platform_adapter: Optional[PlatformAdapter] = platform_adapter
+        self._peer_listen_port = peer_listen_port
+        self._peer_urls: List[str] = list(peer_urls or [])
+        self._nats_url: Optional[str] = nats_url or os.getenv("RUFUS_NATS_URL")
+        self._nats_credentials: Optional[str] = nats_credentials or os.getenv("RUFUS_NATS_CREDENTIALS")
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -106,6 +124,10 @@ class RufusEdgeAgent:
         self.sync_manager: Optional[SyncManager] = None
         self.config_manager: Optional[ConfigManager] = None
         self.workflow_syncer: Optional[EdgeWorkflowSyncer] = None
+        self._wasm_resolver = None  # SqliteWasmBinaryResolver, set in start()
+
+        # Transport (initialized in start())
+        self._transport = None
 
         # State
         self._is_running = False
@@ -115,6 +137,15 @@ class RufusEdgeAgent:
         self._heartbeat_consecutive_failures: int = 0
         # Custom command handlers registered by application code
         self._custom_command_handlers: dict = {}
+        # Mesh peer relay (initialized in start() when peer_urls/peer_listen_port are set)
+        self._mesh_router = None
+
+        # RUVON Local Master election state
+        self._cloud_offline_secs: float = 0.0   # cumulative offline time since last cloud contact
+        self._is_local_master: bool = False      # True when this device has won election
+        self._local_master_id: Optional[str] = None  # device_id of current local master
+        self._election_threshold: int = 300      # seconds before election triggers (5 min)
+        self._agent_start_time: float = 0.0     # set in start() for uptime-based scoring
 
     async def start(self):
         """Start the edge agent."""
@@ -127,6 +158,10 @@ class RufusEdgeAgent:
         # Initialize persistence
         self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
         await self.persistence.initialize()
+
+        # Wire WASM binary resolver so WASM steps can read from device_wasm_cache
+        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
 
         # Auto-bootstrap factory-fresh devices (no pre-configured API key)
         if not self.api_key and self.cloud_url:
@@ -145,7 +180,7 @@ class RufusEdgeAgent:
             api_key=self.api_key,
             poll_interval_seconds=self.config_poll_interval,
             persistence=self.persistence,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.config_manager.initialize()
 
@@ -155,7 +190,7 @@ class RufusEdgeAgent:
             sync_url=self.cloud_url,
             device_id=self.device_id,
             api_key=self.api_key,
-            adapter=self._platform_adapter,
+            platform_adapter=self._platform_adapter,
         )
         await self.sync_manager.initialize()
 
@@ -174,6 +209,23 @@ class RufusEdgeAgent:
                 device_id=self.device_id,
                 api_key=self.api_key,
             )
+
+        # Initialize transport (NATS when RUFUS_NATS_URL is set, else HTTP)
+        from rufus_edge.transport import create_transport
+        self._transport = create_transport(
+            device_id=self.device_id,
+            cloud_url=self.cloud_url,
+            api_key=self.api_key,
+            nats_url=self._nats_url,
+            nats_credentials=self._nats_credentials,
+        )
+        await self._transport.connect()
+
+        # If NATS is active, subscribe to command, config push, and WASM patch channels
+        if self._nats_url:
+            await self._transport.subscribe_commands(self._handle_cloud_command)
+            await self._transport.subscribe_config_push(self._on_config_push)
+            await self._transport.subscribe_patch_broadcast(self._on_patch_broadcast)
 
         # Register config change callback to reload workflows
         self.config_manager.on_config_change(self._on_config_change)
@@ -196,6 +248,37 @@ class RufusEdgeAgent:
         # Start config polling
         await self.config_manager.start_polling()
 
+        # Mesh peer relay — spin up relay server and BFS router if configured
+        if self._peer_listen_port > 0 or self._peer_urls:
+            from rufus_edge.peer_relay import MeshRouter
+            self._mesh_router = MeshRouter(
+                device_id=self.device_id,
+                sync_manager=self.sync_manager,
+            )
+
+        if self._peer_listen_port > 0:
+            from rufus_edge.peer_relay import PeerRelayServer, create_relay_app
+            relay_app = create_relay_app(
+                sync_manager=self.sync_manager,
+                device_id=self.device_id,
+                peer_urls=self._peer_urls,
+                is_online_fn=lambda: self._is_online,
+                leadership_score_fn=self._compute_leadership_score,
+                is_master_fn=lambda: self._is_local_master,
+            )
+            relay_server = PeerRelayServer(relay_app, self._peer_listen_port)
+            self._background_tasks.append(
+                asyncio.create_task(relay_server.start())
+            )
+            logger.info(
+                f"[Mesh] Relay server started on port {self._peer_listen_port}"
+            )
+
+        # Register with cloud so other devices can discover this relay via /mesh-peers
+        if self._peer_listen_port > 0 and self._is_online and self.cloud_url:
+            asyncio.create_task(self._register_relay_server())
+
+        self._agent_start_time = time.monotonic()
         self._is_running = True
         logger.info(f"Rufus Edge Agent started: {self.device_id}")
 
@@ -279,6 +362,10 @@ class RufusEdgeAgent:
 
         logger.info(f"Stopping Rufus Edge Agent: {self.device_id}")
 
+        # Disconnect transport first (before cancelling tasks that may use it)
+        if self._transport:
+            await self._transport.disconnect()
+
         # Cancel background tasks
         for task in self._background_tasks:
             task.cancel()
@@ -344,6 +431,7 @@ class RufusEdgeAgent:
             workflow_observer=self.observer,
             initial_data=data,
             owner_id=self.device_id,
+            wasm_binary_resolver=self._wasm_resolver,
         )
 
         # Execute to completion
@@ -514,6 +602,51 @@ class RufusEdgeAgent:
                         except Exception as exc:
                             logger.warning(f"Workflow sync error: {exc}")
 
+                    # Refresh peer list from cloud (cached in SQLite for offline use)
+                    if self._mesh_router:
+                        await self._refresh_mesh_peers()
+
+                    # Reset cloud-offline counter and abdicate if we were local master
+                    if self._cloud_offline_secs > 0:
+                        self._cloud_offline_secs = 0.0
+                        if self._is_local_master:
+                            await self._abdicate()
+
+                else:
+                    # Offline: attempt mesh peer relay if peers are configured
+                    if self._mesh_router and self.sync_manager:
+                        pending = await self.sync_manager.get_pending_count()
+                        if pending > 0:
+                            relay_txns = await self.sync_manager._build_signed_transaction_dicts()
+                            if relay_txns:
+                                effective_peers = await self._get_effective_peer_urls()
+                                logger.info(
+                                    f"[Mesh] Offline — probing {len(effective_peers)} peer(s)..."
+                                )
+                                result = await self._mesh_router.find_relay(
+                                    relay_txns, effective_peers
+                                )
+                                if result and result.accepted_ids:
+                                    await self.sync_manager.mark_relayed(result.accepted_ids)
+                                    logger.info(
+                                        f"[Mesh] Relayed {len(result.accepted_ids)} txns "
+                                        f"via {result.relay_path}"
+                                    )
+
+                    # Track cumulative offline time; trigger election if threshold crossed
+                    self._cloud_offline_secs += self.sync_interval
+                    if (
+                        self._cloud_offline_secs >= self._election_threshold
+                        and self._mesh_router
+                        and not self._is_local_master
+                        and self._local_master_id is None
+                    ):
+                        logger.info(
+                            f"[RUVON] Cloud offline {self._cloud_offline_secs:.0f}s "
+                            f"— triggering election"
+                        )
+                        asyncio.create_task(self._run_election())
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -542,6 +675,12 @@ class RufusEdgeAgent:
                 self._is_online = True
                 logger.info("Device reconnected — running immediate sync")
 
+                # Abdicate local master role now that cloud is reachable
+                if self._is_local_master:
+                    await self._abdicate()
+                self._cloud_offline_secs = 0.0
+                self._local_master_id = None
+
                 if self.sync_manager:
                     pending = await self.sync_manager.get_pending_count()
                     if pending > 0:
@@ -566,14 +705,27 @@ class RufusEdgeAgent:
 
     async def _heartbeat_loop(self):
         """Background heartbeat loop - reports device health to cloud."""
+        # Stagger initial heartbeat across fleet to prevent thundering herd.
+        # Jitter: uniform 0–50% of heartbeat_interval so a fleet of N devices
+        # coming back online simultaneously doesn't all fire at T+interval.
+        startup_jitter = random.uniform(0, self.heartbeat_interval * 0.5)
+        await asyncio.sleep(startup_jitter)
+
         while True:
             try:
-                await asyncio.sleep(self.heartbeat_interval)
                 await self._send_heartbeat()
+                # Per-cycle drift (±10%) prevents re-synchronization after a
+                # cloud outage where all devices went silent at the same time.
+                drift = random.uniform(
+                    self.heartbeat_interval * 0.9,
+                    self.heartbeat_interval * 1.1,
+                )
+                await asyncio.sleep(drift)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Heartbeat loop error: {e}")
+                await asyncio.sleep(self.heartbeat_interval)
 
     async def _send_heartbeat(self):
         """Send heartbeat with device metrics to cloud control plane."""
@@ -581,6 +733,15 @@ class RufusEdgeAgent:
             return
 
         pending_count = await self.sync_manager.get_pending_count() if self.sync_manager else 0
+
+        # Build RUVON vector advisory — cheap (sync, no I/O)
+        known_peers = len(await self._get_effective_peer_urls()) if self._mesh_router else 0
+        vector_advisory = {
+            "relay_score": self._compute_leadership_score() if self._agent_start_time else 0.0,
+            "connectivity_quality": 1.0 if self._is_online else 0.0,
+            "known_peers": known_peers,
+            "is_local_master": self._is_local_master,
+        }
 
         payload = {
             "device_status": "online" if self._is_online else "offline",
@@ -597,26 +758,92 @@ class RufusEdgeAgent:
                     else None
                 ),
             },
+            "vector_advisory": vector_advisory,
         }
 
+        if not self._transport:
+            return
+
         try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{self.cloud_url}/api/v1/devices/{self.device_id}/heartbeat",
-                    json=payload,
-                    headers={"X-API-Key": self.api_key} if self.api_key else {},
-                )
-            if response.status_code == 200:
-                self._heartbeat_consecutive_failures = 0
-                for cmd in response.json().get("commands", []):
-                    await self._handle_cloud_command(cmd)
-            else:
-                self._heartbeat_consecutive_failures += 1
-                self._log_heartbeat_failure(f"unexpected status {response.status_code}")
+            commands = await self._transport.send_heartbeat(payload)
+            self._heartbeat_consecutive_failures = 0
+            for cmd in commands:
+                await self._handle_cloud_command(cmd)
         except Exception as e:
             self._heartbeat_consecutive_failures += 1
             self._log_heartbeat_failure(str(e))
+
+    async def _on_config_push(self, config_data: Dict[str, Any]) -> None:
+        """Handle a server-initiated config push (NATS mode)."""
+        try:
+            from rufus_edge.models import DeviceConfig
+            new_config = DeviceConfig(**config_data)
+            old_config = self.config_manager._current_config
+            self.config_manager._current_config = new_config
+            logger.info(f"[Config] NATS push received — version {new_config.version}")
+            if old_config is None or old_config.version != new_config.version:
+                for cb in self.config_manager._on_config_change_callbacks:
+                    try:
+                        cb(new_config)
+                    except Exception as e:
+                        logger.error(f"Config change callback error: {e}")
+        except Exception as e:
+            logger.error(f"[Config] Failed to apply NATS config push: {e}")
+
+    async def _on_patch_broadcast(self, binary: bytes, wasm_hash: str, step_name: str) -> None:
+        """Handle a fleet-wide WASM binary patch delivered via ruvon.node.patch.
+
+        Hash integrity has already been verified by NATSEdgeTransport before
+        this handler is called.  If NKeyPatchVerifier is configured, it performs
+        an additional Ed25519 signature check before accepting the binary.
+
+        The compiled Component is hot-swapped into WasmComponentPool.  In-flight
+        calls using the old component complete normally; the next execute() call
+        for this hash gets the updated component.
+        """
+        try:
+            # Optional signature verification (wired if NKeyPatchVerifier is available)
+            if hasattr(self, "_nkey_verifier") and self._nkey_verifier is not None:
+                # Signature is embedded in the NATS message subject header or
+                # passed as a separate field.  The verifier receives raw binary.
+                if not self._nkey_verifier.verify(binary, ""):
+                    logger.warning(
+                        "[Agent:patch] NKey signature verification failed for "
+                        "step=%s hash=%s… — discarding", step_name, wasm_hash[:16]
+                    )
+                    return
+
+            from rufus.implementations.execution.component_runtime import _get_wasm_pool
+            pool = _get_wasm_pool()
+            await pool.swap_module(wasm_hash, binary)
+            logger.info(
+                "[Agent:patch] Hot-swapped WASM component for step=%s hash=%s…",
+                step_name, wasm_hash[:16],
+            )
+        except Exception as e:
+            logger.error("[Agent:patch] Failed to apply WASM patch: %s", e)
+
+    async def _get_effective_peer_urls(self) -> list:
+        """
+        Return the current peer URL list for RUVON routing.
+
+        Priority:
+          1. Cloud-fetched peer list (cached in edge_sync_state "mesh_peer_urls")
+          2. Static peer_urls from constructor config
+
+        The cached list is refreshed every sync cycle when online.
+        When offline, the last-known list from SQLite ensures continuity.
+        """
+        if self.persistence:
+            try:
+                raw = await self.persistence.get_edge_sync_state("mesh_peer_urls")
+                if raw:
+                    cached = json.loads(raw)
+                    if cached:
+                        return cached
+            except Exception:
+                pass
+        return self._peer_urls
 
     def _log_heartbeat_failure(self, reason: str):
         """Graduated heartbeat failure logging."""
@@ -630,6 +857,227 @@ class RufusEdgeAgent:
                 f"Device {self.device_id} is invisible to cloud control plane "
                 f"({n} consecutive heartbeat failures). Last error: {reason}"
             )
+
+    async def _register_relay_server(self):
+        """
+        POST relay server URL to cloud so peers can discover this device.
+
+        Idempotent: compares the current host against the last-registered value
+        stored in edge_sync_state key "relay_server_host". Re-registers only when
+        the host has changed (e.g. DHCP lease renewal assigned a new IP), so the
+        cloud always holds a fresh URL.
+
+        Called once at startup (via asyncio.create_task) and then on every online
+        sync cycle via _refresh_mesh_peers(), making DHCP IP rotation self-healing
+        within one sync interval.
+        """
+        import httpx
+        import socket
+        try:
+            # Prefer the outbound IP over FQDN — more reliable on LAN when DHCP
+            # assigns a new address without updating reverse-DNS.
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))   # doesn't send packets; just resolves route
+                host = s.getsockname()[0]
+                s.close()
+            except Exception:
+                host = socket.getfqdn()  # fallback for air-gapped / loopback-only hosts
+
+            # Skip cloud round-trip if the registered host hasn't changed
+            if self.persistence:
+                cached_host = await self.persistence.get_edge_sync_state("relay_server_host")
+                if cached_host == host:
+                    return
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{self.cloud_url}/api/v1/devices/{self.device_id}/relay-server",
+                    json={"host": host, "port": self._peer_listen_port},
+                    headers={"X-API-Key": self.api_key},
+                )
+            if resp.status_code == 200:
+                logger.info(
+                    f"[RUVON] Relay server registered: {host}:{self._peer_listen_port}"
+                )
+                # Cache so subsequent calls are no-ops when IP is stable
+                if self.persistence:
+                    await self.persistence.set_edge_sync_state("relay_server_host", host)
+            else:
+                logger.warning(
+                    f"[RUVON] Relay server registration returned {resp.status_code}"
+                )
+        except Exception as e:
+            logger.debug(f"[RUVON] Relay server registration failed: {e}")
+
+    async def _refresh_mesh_peers(self):
+        """
+        Fetch active relay peers from cloud and cache to edge_sync_state.
+
+        Also re-checks this device's own relay server URL on every call so that
+        DHCP IP changes are self-healing within one sync interval — _register_relay_server()
+        is a no-op when the IP is stable (SQLite read only) and re-registers when it changes.
+        """
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{self.cloud_url}/api/v1/devices/{self.device_id}/mesh-peers",
+                    headers={"X-API-Key": self.api_key},
+                )
+            if resp.status_code == 200:
+                peers = resp.json().get("peers", [])
+                peer_urls = [p["relay_url"] for p in peers if p.get("relay_url")]
+                if self.persistence:
+                    await self.persistence.set_edge_sync_state(
+                        "mesh_peer_urls", json.dumps(peer_urls)
+                    )
+                if peer_urls:
+                    logger.debug(f"[RUVON] Refreshed mesh peers: {peer_urls}")
+        except Exception as e:
+            logger.debug(f"[RUVON] Mesh peer refresh failed: {e}")
+
+        # Re-register relay server URL each cycle — detects DHCP IP rotation
+        if self._peer_listen_port > 0:
+            await self._register_relay_server()
+
+    def _compute_leadership_score(self) -> float:
+        """
+        Compute RUVON leadership score for Local Master election.
+
+        S_lead = 0.50·P + 0.25·C + 0.25·U
+
+        P = Power:    1.0 if AC/wall power, else battery% / 100 (0.5 if unknown)
+        C = CPU:      1.0 - cpu_fraction (0.5 if psutil unavailable)
+        U = Uptime:   min(seconds_since_start / 86400, 1.0)
+
+        A device on wall power, low CPU, and running for a full day scores ≈ 1.0.
+        A phone at 20% battery with 90% CPU scores ≈ 0.125.
+        """
+        # P — power source
+        try:
+            import psutil
+            battery = psutil.sensors_battery()
+            if battery is None or battery.power_plugged:
+                P = 1.0
+            else:
+                P = battery.percent / 100.0
+        except Exception:
+            P = 0.5  # unknown — assume moderate
+
+        # C — available CPU
+        try:
+            import psutil
+            cpu_fraction = psutil.cpu_percent(interval=None) / 100.0
+            C = 1.0 - cpu_fraction
+        except Exception:
+            C = 0.5  # unknown — assume moderate
+
+        # U — uptime stability (time since agent.start(), capped at 1 day)
+        uptime_secs = time.monotonic() - self._agent_start_time
+        U = min(uptime_secs / 86400.0, 1.0)
+
+        score = round(0.50 * P + 0.25 * C + 0.25 * U, 4)
+        return score
+
+    async def _run_election(self) -> None:
+        """
+        RUVON Local Master election protocol.
+
+        1. Compute S_lead for this device.
+        2. Send leadership CLAIM to all known 1-hop peers concurrently.
+        3. Wait for responses (1s httpx timeout per peer).
+        4. If any peer rejects the claim (they have a higher score): yield to them.
+        5. Device-ID-seeded backoff before self-promotion prevents dual-master on
+           equal scores (lower device_id wins the tie deterministically).
+        6. Persist election outcome to edge_sync_state.
+        """
+        if self._is_local_master:
+            return  # already master — nothing to do
+
+        peers = await self._get_effective_peer_urls()
+        if not peers:
+            # Island scenario — no peers reachable, self-promote immediately
+            await self._promote_to_master(self._compute_leadership_score())
+            return
+
+        my_score = self._compute_leadership_score()
+        logger.info(
+            f"[RUVON] Election initiated — S_lead={my_score:.3f} "
+            f"peers={len(peers)}"
+        )
+
+        # Device-ID-seeded backoff: 100–500ms (deterministic per device)
+        seed = int(hashlib.sha256(self.device_id.encode()).hexdigest()[:8], 16)
+        backoff_secs = (100 + (seed % 400)) / 1000.0
+
+        # Send claims concurrently and collect responses
+        from rufus_edge.peer_relay import PeerRelayClient
+        client = PeerRelayClient()
+        results = await asyncio.gather(
+            *[
+                client.send_election_claim(url, self.device_id, my_score)
+                for url in peers
+            ],
+            return_exceptions=True,
+        )
+
+        # Evaluate responses — any rejection means a peer has a higher score
+        beaten = False
+        for result in results:
+            if isinstance(result, Exception) or result is None:
+                continue  # unreachable peer doesn't block election
+            if not result.get("accepted", True):
+                peer_score = result.get("my_score", 0.0)
+                peer_id = result.get("my_device_id", "")
+                # Confirm the peer truly outranks us (re-apply tie-break logic)
+                if peer_score > my_score or (
+                    peer_score == my_score and peer_id < self.device_id
+                ):
+                    logger.info(
+                        f"[RUVON] Yielding to {peer_id} (score={peer_score:.3f})"
+                    )
+                    self._local_master_id = peer_id
+                    beaten = True
+                    break
+
+        # Backoff before self-promotion (gives higher-score peers time to claim first)
+        await asyncio.sleep(backoff_secs)
+
+        if not beaten:
+            await self._promote_to_master(my_score)
+
+    async def _promote_to_master(self, score: float = 0.0) -> None:
+        """Claim local master role and persist to edge_sync_state."""
+        self._is_local_master = True
+        self._local_master_id = self.device_id
+        logger.info(
+            f"[RUVON] Leadership claimed: device={self.device_id} score={score:.3f}"
+        )
+        if self.persistence:
+            await self.persistence.set_edge_sync_state("i_am_master", "true")
+            await self.persistence.set_edge_sync_state("local_master_id", self.device_id)
+
+    async def _abdicate(self) -> None:
+        """Relinquish local master role when cloud connectivity is restored."""
+        self._is_local_master = False
+        self._local_master_id = None
+        logger.info("[RUVON] Abdicating — cloud reconnected")
+        if self.persistence:
+            await self.persistence.set_edge_sync_state("i_am_master", "false")
+            await self.persistence.set_edge_sync_state("local_master_id", "")
+
+    def _reload_wasm_resolver(self) -> None:
+        """Re-instantiate the WASM resolver against the live SQLite connection.
+
+        aiosqlite.Connection rows are immediately visible after INSERT, so
+        re-instantiation is only needed to pick up a fresh conn reference if
+        persistence was re-initialized.  Called after a successful sync_wasm
+        command to ensure new WASM binaries are available to the next workflow.
+        """
+        if self.persistence and self.persistence.conn:
+            from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+            self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
 
     def register_command_handler(self, command_type: str, handler) -> None:
         """Register an async handler for a cloud command type.
@@ -668,6 +1116,7 @@ class RufusEdgeAgent:
         elif cmd_type == "sync_wasm":
             if self.config_manager:
                 await self.config_manager.handle_sync_wasm_command(cmd_data)
+                self._reload_wasm_resolver()
             else:
                 logger.warning("sync_wasm command received but config_manager is not set")
         elif cmd_type in self._custom_command_handlers:

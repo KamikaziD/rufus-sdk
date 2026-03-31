@@ -1,0 +1,101 @@
+/// WIT interface contract for the Rufus Sovereign Infrastructure.
+///
+/// Defines the Brain / Muscle / Vault component boundary.
+///
+/// Brain  (Python WASM)  — workflow orchestration, imports muscle + vault
+/// Muscle (Rust WASI 0.3) — mesh networking, jittered heartbeat, SIMD inference
+/// Vault  (Rust WASI)     — FIPS crypto, Ed25519 attestation
+///
+/// Build targets:
+///   Brain:  py2wasm / componentize-py (wasm32-wasip2)
+///   Muscle: cargo-component (wasm32-wasip2), wit-bindgen generated stubs
+///   Vault:  cargo-component (wasm32-wasip2)
+///
+/// This WIT file is the frozen contract.  Rust Muscle is built against this
+/// interface in a follow-up PR; wit-bindgen generates stubs from it now.
+
+package rufus:edge@2.0.0;
+
+// ---------------------------------------------------------------------------
+// Muscle — mesh networking and on-device inference
+// ---------------------------------------------------------------------------
+
+/// Mesh networking and inference acceleration provided by the Rust Muscle.
+interface muscle {
+    /// Score neighboring devices by connectivity / latency metric.
+    ///
+    /// Returns a list of (device-id, score) tuples sorted by descending score.
+    /// Used by the Brain to decide which peer to forward a Saga step to.
+    score-neighbors: func(target-id: string) -> list<tuple<string, float32>>;
+
+    /// Ping a device in the mesh with a random jitter to avoid thundering herd.
+    ///
+    /// jitter-ms: additional random delay in milliseconds (0 = no jitter)
+    /// Returns true if the device responded within the configured timeout.
+    ping-mesh: func(device-id: string, jitter-ms: u32) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Vault — FIPS crypto and hardware attestation
+// ---------------------------------------------------------------------------
+
+/// Cryptographic primitives provided by the Rust Vault.
+interface vault {
+    /// Sign a payload with the device's Ed25519 private key.
+    ///
+    /// Returns the 64-byte Ed25519 signature.
+    sign-payload: func(payload: list<u8>) -> list<u8>;
+
+    /// Verify an Ed25519 signature against a payload and a public key.
+    ///
+    /// pub-key: hex-encoded Ed25519 public key (64 hex chars = 32 bytes)
+    /// Returns true if the signature is valid.
+    verify-signature: func(
+        payload: list<u8>,
+        signature: list<u8>,
+        pub-key: string,
+    ) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Brain Pool — batch execution for the Sovereign Dispatcher
+// ---------------------------------------------------------------------------
+
+/// Batch execution interface used by the Rust SovereignDispatcher.
+///
+/// Allows a pool of pre-warmed WASM instances to process a burst of sagas
+/// in parallel, returning results in input order.
+interface brain-pool {
+    /// Process a list of saga payloads in parallel across the instance pool.
+    ///
+    /// sagas: JSON-encoded step payloads to execute concurrently.
+    /// Returns: ok(list of JSON result strings) or err(human-readable error).
+    execute-batch: func(sagas: list<string>) -> result<list<string>, string>;
+}
+
+// ---------------------------------------------------------------------------
+// World — the Brain component's full import/export surface
+// ---------------------------------------------------------------------------
+
+/// The world that the Rufus Brain WASM module implements.
+///
+/// The Brain imports Muscle (networking) and Vault (crypto) from the host
+/// and exports execute-saga as its entry point for the edge runtime.
+world rufus-node {
+    /// Mesh networking and SIMD inference (provided by Rust Muscle at link time)
+    import muscle;
+
+    /// FIPS crypto and hardware attestation (provided by Rust Vault at link time)
+    import vault;
+
+    /// Execute a Saga workflow step.
+    ///
+    /// saga-id: Unique identifier for the saga execution.
+    /// payload: JSON-encoded step input (passed as workflow state slice).
+    ///
+    /// Returns: ok(JSON result string) or err(human-readable error message).
+    export execute-saga: func(saga-id: string, payload: string) -> result<string, string>;
+
+    /// Batch execution for the Sovereign Dispatcher (parallel instance pool).
+    export brain-pool;
+}

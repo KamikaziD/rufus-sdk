@@ -16,6 +16,31 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# ---------------------------------------------------------------------------
+# Stub heavy optional deps before any rufus.implementations.inference import.
+# tflite.py imports numpy at module level; paged_browser imports js (Pyodide).
+# ---------------------------------------------------------------------------
+if "numpy" not in sys.modules:
+    _np = types.ModuleType("numpy")
+    _np.ndarray = list
+    _np.float32 = float
+    _np.int32 = int
+    _np.int64 = int
+    _np.dtype = type
+    _np.array = MagicMock(return_value=[])
+    _np.zeros = MagicMock(return_value=[])
+    _np.expand_dims = MagicMock(return_value=[])
+    _np.isscalar = lambda x: isinstance(x, (int, float, complex, bool))
+    _np.bool_ = bool
+    sys.modules["numpy"] = _np
+
+# Stub tflite_runtime so TFLiteInferenceProvider doesn't crash at import
+for _tflite_mod in ("tflite_runtime", "tflite_runtime.interpreter"):
+    if _tflite_mod not in sys.modules:
+        _stub = types.ModuleType(_tflite_mod)
+        _stub.Interpreter = MagicMock
+        sys.modules[_tflite_mod] = _stub
+
 from rufus.models import AIInferenceConfig
 
 

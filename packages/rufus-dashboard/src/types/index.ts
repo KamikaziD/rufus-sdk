@@ -40,6 +40,13 @@ export interface StepInfo {
   input_schema?: Record<string, unknown>;
 }
 
+export interface RelayContext {
+  relay_device_id: string;
+  relay_source_device_id?: string;
+  hop_count: number;
+  relayed_at?: string;
+}
+
 export interface WorkflowStatusResponse {
   workflow_id: string;
   status: WorkflowStatus;
@@ -54,6 +61,7 @@ export interface WorkflowStatusResponse {
   blocked_on_child_id?: string;
   started_at?: string | null;
   completed_at?: string | null;
+  relay_context?: RelayContext | null;
 }
 
 export interface StepConfig {
@@ -157,4 +165,41 @@ export interface RufusUser {
   roles: RufusRole[];
   org_id?: string;
   accessToken: string;
+}
+
+// ── Mesh Relay Types ─────────────────────────────────────────────────────────
+
+export interface DeviceMeshStats {
+  device_id: string;
+  relayed_for_others: number;
+  saved_by_peers: number;
+  total_relay_hops: number;
+  last_relay_at: string | null;
+}
+
+export interface MeshTopologyNode {
+  device_id: string;
+  device_type: string;
+  relayed_for_others: number;
+  saved_by_peers: number;
+  relay_score: number;            // 0-1 legacy relay score
+  // RUVON fields (present when device has sent a VectorAdvisory heartbeat)
+  vector_score?: number;          // S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P
+  connectivity_quality?: number;  // C dimension (0-1)
+  known_peers?: number;           // peers known to this device
+  is_local_master?: boolean;      // elected local master when cloud unreachable
+  relay_server_url?: string;      // registered relay URL for this device
+}
+
+export interface MeshTopologyEdge {
+  source_device_id: string;
+  relay_device_id: string;
+  relay_count: number;
+  avg_hop_count: number;
+}
+
+export interface MeshTopologyResponse {
+  nodes: MeshTopologyNode[];
+  edges: MeshTopologyEdge[];
+  generated_at: string;
 }

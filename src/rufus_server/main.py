@@ -64,6 +64,7 @@ from rufus_server.api_models import (
     WorkflowDefinitionResponse, WorkflowDefinitionDetailResponse,
     ServerCommandRequest, ServerCommandResponse,
     WorkflowSyncRequest, WorkflowSyncResponse,
+    MeshRelayMeta, DeviceMeshStats, MeshTopologyNode, MeshTopologyEdge, MeshTopologyResponse,
 )
 
 # --- FastAPI App Setup ---
@@ -128,6 +129,12 @@ from rufus_server.server_command_service import ServerCommandService
 # --- WASM Component Routes ---
 from rufus_server.wasm_routes import router as wasm_router
 app.include_router(wasm_router)
+
+# --- Device Sidecar Routes ---
+from rufus_server.api.device_suggestions import router as device_suggestions_router
+from rufus_server.api.device_approvals import router as device_approvals_router
+app.include_router(device_suggestions_router)
+app.include_router(device_approvals_router)
 
 # --- Policy Engine ---
 from rufus_server.policy_engine import (
@@ -386,6 +393,20 @@ async def startup_event():
             except Exception as e:
                 logger.error(f"Failed to mount custom router '{router_path}': {e}")
 
+    # Initialize NATS Bridge (when RUFUS_NATS_URL is set)
+    nats_url = os.getenv("RUFUS_NATS_URL")
+    if nats_url:
+        from rufus_server.nats_bridge import NATSBridge, set_nats_bridge
+        nats_bridge = NATSBridge(
+            nats_url=nats_url,
+            device_service=device_service,
+            persistence=persistence_provider,
+            nats_credentials=os.getenv("RUFUS_NATS_CREDENTIALS"),
+        )
+        await nats_bridge.start()
+        set_nats_bridge(nats_bridge)
+        logger.info(f"NATSBridge started — server-side NATS bridge active at {nats_url}")
+
     print("Rufus Edge Control Plane started.")
 
 
@@ -408,6 +429,11 @@ async def shutdown_event():
         await persistence_provider.close()
     if execution_provider:
         await execution_provider.close()
+    # Shut down NATS bridge if running
+    from rufus_server.nats_bridge import get_nats_bridge
+    nats_bridge = get_nats_bridge()
+    if nats_bridge:
+        await nats_bridge.stop()
     print("Rufus Edge Control Plane shut down.")
 
 
@@ -424,6 +450,19 @@ async def health_check():
 # ─────────────────────────────────────────────────────────────────────────────
 # Workflow Management APIs
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _as_dict(raw) -> dict:
+    """Normalise a load_workflow result to a plain dict (handles msgspec Structs)."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        import msgspec
+        return msgspec.to_builtins(raw)
+    except Exception:
+        if hasattr(raw, "__struct_fields__"):
+            return {f: getattr(raw, f) for f in raw.__struct_fields__}
+        return vars(raw)
+
 
 async def _get_workflow_or_404(workflow_id: str):
     """Load a workflow by ID, raising 404 if not found."""
@@ -526,6 +565,7 @@ async def get_workflow_status(
             raw = await persistence_provider.load_workflow(workflow_id)
             if raw is None:
                 raise  # genuine 404 — row doesn't exist
+            raw = _as_dict(raw)
             # Return read-only status from raw DB data — no step reconstruction needed
             state = raw.get("state", {})
             if isinstance(state, str):
@@ -844,6 +884,71 @@ async def get_metrics_throughput(
         raise HTTPException(status_code=500, detail=f"Failed to fetch throughput: {str(e)}")
 
 
+@app.get("/api/v1/metrics/edge-impact", tags=["Monitoring"])
+async def get_edge_impact_metrics(
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """
+    Business-impact KPIs that showcase the value of Rufus Edge:
+
+    - saf_recovered_cents  : total cents of offline transactions successfully synced to cloud
+    - saf_recovered_count  : number of those transactions
+    - fraud_prevented_cents: total cents of transactions blocked by the fraud scorer
+    - fraud_prevented_count: number of blocked transactions
+
+    Returns zeros when no data is available (no PostgreSQL backend, empty tables, etc.)
+    so the dashboard always renders without errors.
+    """
+    zero = {
+        "saf_recovered_cents": 0,
+        "saf_recovered_count": 0,
+        "fraud_prevented_cents": 0,
+        "fraud_prevented_count": 0,
+    }
+
+    if workflow_engine is None:
+        return zero
+
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        return zero
+
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            # SAF: sum all offline transactions that made it back to the cloud
+            saf_row = await conn.fetchrow("""
+                SELECT
+                    COALESCE(SUM(amount_cents), 0)  AS recovered_cents,
+                    COUNT(*)                         AS recovered_count
+                FROM saf_transactions
+                WHERE status = 'synced'
+            """)
+
+            # Fraud: completed workflows where the fraud scorer chose BLOCK
+            # state is stored as TEXT so must cast to json first
+            # Works for both auto-blocked (action='BLOCK') and human-reviewed (review_decision='BLOCK')
+            fraud_row = await conn.fetchrow("""
+                SELECT
+                    COUNT(*)                                                                        AS prevented_count,
+                    COALESCE(SUM(((state::json)->>'amount')::numeric * 100), 0)::bigint             AS prevented_cents
+                FROM workflow_executions
+                WHERE status = 'COMPLETED'
+                  AND (
+                      (state::json)->>'action'          = 'BLOCK'
+                   OR (state::json)->>'review_decision' = 'BLOCK'
+                  )
+            """)
+
+        return {
+            "saf_recovered_cents":  int(saf_row["recovered_cents"]),
+            "saf_recovered_count":  int(saf_row["recovered_count"]),
+            "fraud_prevented_cents": int(fraud_row["prevented_cents"]),
+            "fraud_prevented_count": int(fraud_row["prevented_count"]),
+        }
+    except Exception:
+        return zero
+
+
 @app.get("/api/v1/metrics/summary", tags=["Monitoring"])
 async def get_metrics_summary(hours: int = 24):
     """Get aggregated metrics across workflows (PostgreSQL backend required)."""
@@ -957,6 +1062,36 @@ async def get_workflow_audit_log(
         raise HTTPException(status_code=500, detail=f"Failed to fetch audit log: {str(e)}")
 
 
+@app.get("/api/v1/workflow/{workflow_id}/relay-context", tags=["Workflows"])
+async def get_workflow_relay_context(
+    workflow_id: str,
+    user: Optional[UserContext] = Depends(get_current_user)
+):
+    """Return mesh relay metadata for this workflow's SAF transaction, if relayed."""
+    if workflow_engine is None:
+        return {}
+    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    if not isinstance(workflow_engine.persistence, PostgresPersistenceProvider):
+        return {}
+    try:
+        async with workflow_engine.persistence.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT relay_device_id, relay_source_device_id, hop_count, relayed_at
+                FROM saf_transactions
+                WHERE workflow_id = $1
+                  AND relay_device_id IS NOT NULL
+                LIMIT 1
+            """, workflow_id)
+            if not row:
+                return {}
+            result = dict(row)
+            if result.get("relayed_at") and hasattr(result["relayed_at"], "isoformat"):
+                result["relayed_at"] = result["relayed_at"].isoformat()
+            return result
+    except Exception:
+        return {}
+
+
 @app.get("/api/v1/admin/workers", tags=["Monitoring"])
 async def get_registered_workers(
     limit: int = 100,
@@ -1011,7 +1146,7 @@ async def retry_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1066,7 +1201,7 @@ async def cancel_workflow(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1106,7 +1241,7 @@ async def rewind_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1172,7 +1307,7 @@ async def resume_workflow(
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
     # Load workflow
-    workflow_dict = await workflow_engine.persistence.load_workflow(str(workflow_uuid))
+    workflow_dict = _as_dict(await workflow_engine.persistence.load_workflow(str(workflow_uuid)) or {})
     if not workflow_dict:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -1835,6 +1970,7 @@ async def device_heartbeat(
         device_id=device_id,
         status=request_data.device_status,
         metrics=request_data.metrics,
+        vector_advisory=request_data.vector_advisory,
     )
 
     return DeviceHeartbeatResponse(**result)
@@ -1878,12 +2014,22 @@ async def sync_device_transactions(
         for t in request_data.transactions
     ]
 
+    relay_metadata = None
+    if request_data.mesh_relay:
+        relay_metadata = {
+            "relay_device_id": request_data.mesh_relay.relay_device_id,
+            "relay_source_device_id": device_id,  # the device whose endpoint was called is the origin
+            "hop_count": request_data.mesh_relay.hop_count,
+            "relayed_at": request_data.mesh_relay.relayed_at,
+        }
+
     result = await device_service.sync_transactions(
         device_id=device_id,
         transactions=transactions,
         api_key=x_api_key,  # Pass API key for HMAC verification
         device_sequence=request_data.device_sequence if hasattr(request_data, "device_sequence") else 0,
         payload_signature=x_payload_signature,
+        relay_metadata=relay_metadata,
     )
 
     # Convert to response format
@@ -1912,6 +2058,63 @@ async def list_device_saf(
             if txn.get(key) and hasattr(txn[key], "isoformat"):
                 txn[key] = txn[key].isoformat()
     return {"transactions": transactions}
+
+
+@app.get("/api/v1/devices/{device_id}/mesh-stats", tags=["Devices"])
+async def device_mesh_stats(
+    device_id: str,
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Get mesh relay statistics for a device (how many txns it relayed vs was saved by peers)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    return await device_service.get_mesh_stats(device_id)
+
+
+@app.get("/api/v1/mesh/topology", tags=["Devices"])
+async def mesh_topology(
+    user: Optional[UserContext] = Depends(get_current_user),
+):
+    """Get fleet-wide mesh relay topology graph (nodes + edges)."""
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    return await device_service.get_mesh_topology()
+
+
+@app.post("/api/v1/devices/{device_id}/relay-server", tags=["Devices"])
+async def register_relay_server(
+    device_id: str,
+    body: dict,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+):
+    """
+    Register this device as a RUVON peer relay server.
+    Called by the edge agent on startup when peer_listen_port > 0.
+    Body: {"host": "192.168.1.5", "port": 9001}
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    host = body.get("host", "")
+    port = body.get("port", 0)
+    if not host or not port:
+        raise HTTPException(status_code=400, detail="host and port required")
+    return await device_service.register_relay_server(device_id, host, port)
+
+
+@app.get("/api/v1/devices/{device_id}/mesh-peers", tags=["Devices"])
+async def get_mesh_peers(
+    device_id: str,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+):
+    """
+    Return active RUVON relay peers known to the cloud (excluding self).
+    Active = last heartbeat within 5 minutes.
+    Used by edge agents to dynamically discover their peer neighborhood.
+    """
+    if device_service is None:
+        raise HTTPException(status_code=503, detail="Device service not initialized")
+    peers = await device_service.get_mesh_peers(device_id)
+    return {"peers": peers}
 
 
 @app.post("/api/v1/devices/{device_id}/rotate-key", tags=["Devices"])

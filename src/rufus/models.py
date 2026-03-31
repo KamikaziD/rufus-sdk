@@ -70,6 +70,15 @@ class CompensatableStep(WorkflowStep):
     """Workflow step that includes a compensation function for saga patterns."""
     compensate_func: Callable
 
+    async def compensate(self, state: Any, context: Any = None, **kwargs) -> dict:
+        """Invoke the compensation function, handling both sync and async callables."""
+        import asyncio
+        if asyncio.iscoroutinefunction(self.compensate_func):
+            result = await self.compensate_func(state, context, **kwargs)
+        else:
+            result = self.compensate_func(state, context, **kwargs)
+        return result if isinstance(result, dict) else {}
+
 
 class AsyncWorkflowStep(WorkflowStep):
     """Workflow step that executes asynchronously, allowing the workflow to pause and wait for an external event or callback."""
@@ -353,6 +362,196 @@ class HumanWorkflowStep(WorkflowStep):
     func is optional — if omitted, user_input is merged directly into state on resume.
     """
     pass  # Inherits func, input_schema, required_input, automate_next, routes from WorkflowStep
+
+
+# --- AI Workflow Builder Step Types ---
+
+
+class AILLMInferenceConfig(BaseModel):
+    """Configuration for LLM inference (cloud or local) within a workflow step."""
+    model: str = Field(..., description="Model name, e.g. 'claude-sonnet-4-6', 'llama3', 'bitnet-3b'")
+    model_location: str = Field("cloud", description="'cloud' | 'ollama' | 'edge' | 'auto'")
+    ollama_base_url: str = Field("http://localhost:11434", description="Ollama server URL")
+    system_prompt: str = Field(..., description="System prompt for the LLM")
+    user_prompt: str = Field(..., description="User prompt; supports $.steps.X.output selectors")
+    output_schema: Optional[Dict[str, Any]] = Field(None, description="JSON Schema for structured output validation")
+    temperature: float = Field(0.3, ge=0.0, le=2.0)
+    max_tokens: int = Field(1000, ge=1)
+    fallback_model: Optional[str] = Field(None, description="Model to try if primary is unavailable")
+    pii_detected: bool = Field(False, description="Set true to enforce downstream AUDIT_EMIT (GOV-001)")
+    data_sovereignty: str = Field("cloud", description="'local' | 'cloud' | 'any'")
+    model_config = {"extra": "forbid", "protected_namespaces": ()}
+
+
+class AILLMInferenceWorkflowStep(WorkflowStep):
+    """Workflow step that calls an LLM (Anthropic cloud, Ollama local, or BitNet edge).
+
+    Distinct from AI_INFERENCE (TFLite/ONNX) — this step is for text generation models.
+
+    Example YAML:
+        - name: "Score_Bid"
+          type: "AI_LLM_INFERENCE"
+          llm_config:
+            model: claude-sonnet-4-6
+            model_location: cloud
+            system_prompt: "You are a procurement evaluator."
+            user_prompt: "Score this bid: {{$.steps.parse_bid.output}}"
+            temperature: 0.2
+          automate_next: true
+    """
+    llm_config: AILLMInferenceConfig
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+
+class HumanApprovalConfig(BaseModel):
+    """Configuration for a human approval gate with channels, timeout, and escalation."""
+    title: str = Field(..., description="Display title shown to approvers")
+    description: str = Field("", description="Context for the decision; supports selectors")
+    approvers: List[str] = Field(default_factory=list, description="User IDs or role names")
+    timeout_hours: int = Field(24, ge=1, description="Hours before timeout action fires")
+    on_timeout: str = Field("auto_reject", description="'auto_reject' | 'auto_approve' | 'escalate'")
+    escalate_to: Optional[str] = Field(None, description="User/role to escalate to on timeout")
+    channels: List[str] = Field(default_factory=list, description="Notification channels: 'slack', 'email', 'dashboard'")
+    data_to_show: List[str] = Field(default_factory=list, description="$.steps.X selectors for context data")
+    model_config = {"extra": "forbid"}
+
+
+class HumanApprovalWorkflowStep(WorkflowStep):
+    """Workflow step that pauses for a human approval decision with rich configuration.
+
+    Unlike HUMAN_IN_LOOP, supports multi-channel notifications, timeout escalation,
+    and structured approval metadata. Outputs: decision, approver_id, approved_at, notes.
+
+    Example YAML:
+        - name: "Committee_Review"
+          type: "HUMAN_APPROVAL"
+          approval_config:
+            title: "Bid Evaluation Review"
+            approvers: [role:procurement-committee]
+            timeout_hours: 48
+            on_timeout: auto_reject
+            channels: [slack, email, dashboard]
+    """
+    approval_config: HumanApprovalConfig
+
+
+class AuditEmitConfig(BaseModel):
+    """Configuration for an immutable WORM audit record emission."""
+    event_type: str = Field(..., description="Audit event identifier, e.g. 'bid.evaluated'")
+    severity: str = Field("INFO", description="'INFO' | 'WARN' | 'CRITICAL'")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Audit payload; supports selectors")
+    retention_days: int = Field(2555, ge=1, description="Retention period (default: 7 years)")
+    tags: List[str] = Field(default_factory=list)
+    pii_fields: List[str] = Field(default_factory=list, description="Fields to SHA-256 hash before storage")
+    model_config = {"extra": "forbid"}
+
+
+class AuditEmitWorkflowStep(WorkflowStep):
+    """Workflow step that emits an immutable audit record to the Rufus audit trail.
+
+    Records are append-only (WORM). Required downstream of any AI_LLM_INFERENCE step
+    with pii_detected=true (enforced by GOV-001 governance rule).
+
+    Example YAML:
+        - name: "Audit_Bid_Decision"
+          type: "AUDIT_EMIT"
+          audit_config:
+            event_type: bid.evaluated
+            severity: INFO
+            retention_days: 2555
+            tags: [bid-evaluation, uae-procurement]
+    """
+    audit_config: AuditEmitConfig
+
+
+class ComplianceCheckConfig(BaseModel):
+    """Configuration for a declarative compliance ruleset evaluation."""
+    ruleset: str = Field(..., description="Path to a compliance ruleset YAML file")
+    input_data: Dict[str, Any] = Field(default_factory=dict, description="Selectors for data to evaluate")
+    jurisdiction: List[str] = Field(default_factory=list, description="e.g. ['UAE', 'GDPR', 'HIPAA']")
+    model: str = Field("claude-sonnet-4-6", description="LLM model for ambiguous rule application")
+    confidence_threshold: float = Field(0.85, ge=0.0, le=1.0)
+    model_config = {"extra": "forbid", "protected_namespaces": ()}
+
+
+class ComplianceCheckWorkflowStep(WorkflowStep):
+    """Workflow step that evaluates a declarative compliance ruleset against workflow data.
+
+    Returns: passed (bool), score (float 0-1), violations (list).
+
+    Example YAML:
+        - name: "UAE_Compliance"
+          type: "COMPLIANCE_CHECK"
+          compliance_config:
+            ruleset: ./rulesets/uae-procurement-v2.yaml
+            jurisdiction: [UAE]
+            confidence_threshold: 0.85
+    """
+    compliance_config: ComplianceCheckConfig
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+
+class EdgeModelCallConfig(BaseModel):
+    """Configuration for a local-only edge model inference call (data sovereignty guaranteed)."""
+    model_id: str = Field(..., description="Registered local model ID")
+    prompt: str = Field(..., description="Prompt text; supports $.steps.X selectors")
+    output_schema: Optional[Dict[str, Any]] = Field(None, description="Expected output JSON Schema")
+    max_tokens: int = Field(512, ge=1, description="Conservative token limit for edge hardware")
+    device_check: bool = Field(True, description="Verify model is loaded before calling")
+    offline_only: bool = Field(False, description="If true, fail if network is detected")
+    model_config = {"extra": "forbid", "protected_namespaces": ()}
+
+
+class EdgeModelCallWorkflowStep(WorkflowStep):
+    """Workflow step that calls a locally-running model with a data sovereignty guarantee.
+
+    Data never leaves the device. Distinct from AI_LLM_INFERENCE to make the offline
+    contract explicit in the workflow definition.
+
+    Example YAML:
+        - name: "Local_Classify"
+          type: "EDGE_MODEL_CALL"
+          edge_config:
+            model_id: bitnet-neelo-classifier-v2
+            prompt: "Classify this bid: {{$.steps.parse_bid.output}}"
+            max_tokens: 256
+    """
+    edge_config: EdgeModelCallConfig
+    merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
+    merge_conflict_behavior: MergeConflictBehavior = MergeConflictBehavior.PREFER_NEW
+
+
+class WorkflowBuilderMetaConfig(BaseModel):
+    """AI generation provenance metadata stored in the workflow definition."""
+    generated_by: str = Field("rufus-workflow-builder/0.1")
+    original_prompt: str = Field("", description="The exact user prompt used to generate this workflow")
+    pipeline_version: str = Field("0.1.0")
+    model_versions: Dict[str, str] = Field(default_factory=dict, description="e.g. {intent_parse: 'claude-sonnet-4-6'}")
+    lint_results: Dict[str, Any] = Field(default_factory=dict, description="Governance lint report summary")
+    human_reviewed: bool = Field(False)
+    reviewed_by: Optional[str] = Field(None)
+    reviewed_at: Optional[str] = Field(None)
+    model_config = {"extra": "forbid"}
+
+
+class WorkflowBuilderMetaStep(WorkflowStep):
+    """No-op metadata step injected by the AI Workflow Builder into every generated workflow.
+
+    Stores generation provenance: original prompt, model versions, lint results.
+    Provides auditability — regulators can ask 'how was this workflow created?'
+    and find the answer inside the workflow itself.
+
+    Example YAML:
+        - name: "_builder_meta"
+          type: "WORKFLOW_BUILDER_META"
+          meta_config:
+            generated_by: rufus-workflow-builder/0.1
+            original_prompt: "handle incoming bid submissions"
+            human_reviewed: false
+    """
+    meta_config: WorkflowBuilderMetaConfig
 
 
 # --- Directives and Exceptions ---

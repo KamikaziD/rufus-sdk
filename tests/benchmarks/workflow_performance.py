@@ -32,6 +32,67 @@ def simple_step(state: BenchmarkState, context: Any) -> dict:
     return {"processed": True, "counter": state.counter}
 
 
+def benchmark_msgspec(iterations: int = 10000):
+    """Benchmark msgspec typed encode/decode vs orjson dict round-trip."""
+    try:
+        import msgspec
+        from rufus.providers.dtos import WorkflowRecord
+        from rufus.utils.serialization import decode_typed, encode_struct
+    except ImportError:
+        return {"skipped": True, "reason": "msgspec not available"}
+
+    sample_record = WorkflowRecord(
+        id="wf-bench-001",
+        workflow_type="BenchmarkWorkflow",
+        status="ACTIVE",
+        current_step=2,
+        state={"amount": 50000, "user_id": "u_42", "approved": True},
+        steps_config=[{"name": "Step1", "type": "STANDARD"}, {"name": "Step2", "type": "ASYNC"}],
+        state_model_path="benchmark.State",
+        saga_mode=False,
+        completed_steps_stack=[{"step": "Step1"}],
+        metadata={"source": "api"},
+    )
+    sample_json = msgspec.json.encode(sample_record)
+
+    # Warmup
+    for _ in range(200):
+        encode_struct(sample_record)
+        decode_typed(sample_json, WorkflowRecord)
+
+    # Benchmark encode (struct → bytes)
+    start = time.perf_counter()
+    for _ in range(iterations):
+        encode_struct(sample_record)
+    encode_time = time.perf_counter() - start
+
+    # Benchmark typed decode (bytes → struct, no intermediate dict)
+    start = time.perf_counter()
+    for _ in range(iterations):
+        decode_typed(sample_json, WorkflowRecord)
+    typed_decode_time = time.perf_counter() - start
+
+    # Compare: orjson dict round-trip (current path without msgspec)
+    from rufus.utils.serialization import deserialize, serialize_bytes
+    sample_dict = msgspec.to_builtins(sample_record)
+    sample_dict_bytes = serialize_bytes(sample_dict)
+    start = time.perf_counter()
+    for _ in range(iterations):
+        deserialize(sample_dict_bytes)
+    dict_decode_time = time.perf_counter() - start
+
+    return {
+        "iterations": iterations,
+        "encode_struct_ops_per_sec": iterations / encode_time,
+        "encode_struct_latency_us": (encode_time / iterations) * 1_000_000,
+        "typed_decode_ops_per_sec": iterations / typed_decode_time,
+        "typed_decode_latency_us": (typed_decode_time / iterations) * 1_000_000,
+        "dict_decode_ops_per_sec": iterations / dict_decode_time,
+        "dict_decode_latency_us": (dict_decode_time / iterations) * 1_000_000,
+        "typed_decode_speedup_vs_dict": dict_decode_time / typed_decode_time,
+    }
+
+
 def benchmark_serialization(iterations: int = 10000):
     """Benchmark JSON serialization performance"""
     from rufus.utils.serialization import serialize, deserialize
@@ -204,19 +265,23 @@ async def run_all_benchmarks():
     print()
 
     # Run benchmarks
-    print("\n[1/4] Benchmarking JSON Serialization...")
+    print("\n[1/5] Benchmarking JSON Serialization...")
     serialization_results = benchmark_serialization(iterations=10000)
     print_benchmark_results("JSON Serialization Performance", serialization_results)
 
-    print("[2/4] Benchmarking Import Caching...")
+    print("[2/5] Benchmarking msgspec Typed Decode...")
+    msgspec_results = benchmark_msgspec(iterations=10000)
+    print_benchmark_results("msgspec Typed Decode vs Dict Decode", msgspec_results)
+
+    print("[3/5] Benchmarking Import Caching...")
     import_results = benchmark_import_caching(iterations=1000)
     print_benchmark_results("Import Caching Performance", import_results)
 
-    print("[3/4] Benchmarking Async Overhead...")
+    print("[4/5] Benchmarking Async Overhead...")
     async_results = await benchmark_async_overhead(iterations=1000)
     print_benchmark_results("Async/Await Overhead", async_results)
 
-    print("[4/4] Benchmarking Workflow Throughput...")
+    print("[5/5] Benchmarking Workflow Throughput...")
     throughput_results = await benchmark_workflow_throughput(num_workflows=1000)
     print_benchmark_results("Workflow Execution Throughput", throughput_results)
 
@@ -225,6 +290,8 @@ async def run_all_benchmarks():
     print("  SUMMARY")
     print("="*60)
     print(f"  Serialization: {serialization_results['serialize_ops_per_sec']:,.0f} ops/sec ({serialization_results['backend']})")
+    if not msgspec_results.get("skipped"):
+        print(f"  msgspec typed decode: {msgspec_results['typed_decode_speedup_vs_dict']:.1f}x faster than dict decode")
     print(f"  Import Cache: {import_results['speedup']:.1f}x speedup")
     print(f"  Async Latency: {async_results['p50_latency_us']:.1f}µs (p50), {async_results['p99_latency_us']:.1f}µs (p99)")
     print(f"  Workflow Throughput: {throughput_results['throughput_per_sec']:,.0f} workflows/sec")

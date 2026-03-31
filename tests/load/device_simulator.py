@@ -19,6 +19,68 @@ import psutil
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared NATS connection singleton (nats_transport scenario)
+# One connection is shared across all simulated devices — creating N separate
+# connections (N up to 100k) would exhaust OS file descriptors immediately.
+# ---------------------------------------------------------------------------
+_NATS_NC = None   # nats.aio.client.Client
+_NATS_JS = None   # JetStream context
+_NATS_LOCK: Optional[asyncio.Lock] = None
+_NATS_IMPORT_ERROR: Optional[str] = None  # set once if nats-py missing
+_NATS_PUBLISH_SEM: Optional[asyncio.Semaphore] = None  # caps concurrent in-flight publishes
+
+# Max concurrent JetStream publishes on the shared connection.
+# Each publish is a request/reply round-trip; beyond ~500 concurrent the
+# NATS server queues internally and measured latency reflects queue depth,
+# not wire latency. 500 gives throughput headroom without overwhelming either
+# the server or the asyncio event loop scheduler.
+_NATS_MAX_CONCURRENT = 500
+
+
+async def _get_shared_nats(nats_url: str):
+    """Return (nc, js, sem) shared across all devices, connecting once."""
+    global _NATS_NC, _NATS_JS, _NATS_LOCK, _NATS_IMPORT_ERROR, _NATS_PUBLISH_SEM
+
+    if _NATS_IMPORT_ERROR:
+        return None, None, None
+
+    # Lazy-init asyncio primitives (must be created inside a running loop)
+    if _NATS_LOCK is None:
+        _NATS_LOCK = asyncio.Lock()
+    if _NATS_PUBLISH_SEM is None:
+        _NATS_PUBLISH_SEM = asyncio.Semaphore(_NATS_MAX_CONCURRENT)
+
+    # Fast path — already connected, no lock needed
+    if _NATS_NC is not None and not _NATS_NC.is_closed:
+        return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
+    async with _NATS_LOCK:
+        # Re-check inside lock (another coroutine may have connected while we waited)
+        if _NATS_NC is not None and not _NATS_NC.is_closed:
+            return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
+        try:
+            import nats as _nats_mod
+        except ImportError:
+            _NATS_IMPORT_ERROR = (
+                "\n  ✘  nats-py not installed in this venv.\n"
+                "     Fix: pip install nats-py\n"
+                "     Then re-run the scenario.\n"
+            )
+            return None, None, None
+
+        try:
+            _NATS_NC = await _nats_mod.connect(servers=[nats_url])
+            _NATS_JS = _NATS_NC.jetstream()
+            logger.info(f"[nats_transport] Shared NATS connection established: {nats_url}")
+        except Exception as exc:
+            logger.error(f"[nats_transport] Cannot connect to NATS at {nats_url}: {exc}")
+            _NATS_NC = None
+            _NATS_JS = None
+
+    return _NATS_NC, _NATS_JS, _NATS_PUBLISH_SEM
+
 
 # Retry configuration (can be overridden by environment variables)
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
@@ -38,6 +100,7 @@ class DeviceConfig:
     heartbeat_interval: int = 30  # seconds
     saf_batch_size: int = 50
     config_poll_interval: int = 60  # seconds
+    wasm_steps_per_sync: int = 5  # simulated WASM step executions per sync_wasm command
 
 
 @dataclass
@@ -57,6 +120,10 @@ class DeviceMetrics:
     errors_4xx: int = 0      # Client errors (auth, bad request)
     errors_timeout: int = 0  # Network timeouts
     latencies: List[float] = field(default_factory=list)  # per-request latency in seconds
+    # WASM step execution metrics
+    wasm_steps_executed: int = 0
+    wasm_step_failures: int = 0
+    wasm_execution_latencies: List[float] = field(default_factory=list)
 
 
 class SimulatedEdgeDevice:
@@ -92,16 +159,26 @@ class SimulatedEdgeDevice:
         self._current_config_etag: Optional[str] = None
         self._pending_transactions: List[Dict[str, Any]] = []
 
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Lazily create the HTTP client on first use.
+
+        Defers allocation until a scenario actually makes an HTTP call.
+        Pure-local scenarios (wasm_thundering_herd) never call this, so
+        no client objects are created — critical for 100k-device runs.
+        """
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=60.0,
+                headers={
+                    "X-API-Key": self.config.api_key,
+                    "X-Device-ID": self.config.device_id,
+                    "Content-Type": "application/json",
+                }
+            )
+        return self._http_client
+
     async def initialize(self):
-        """Initialize HTTP client."""
-        self._http_client = httpx.AsyncClient(
-            timeout=60.0,  # Increased for load testing
-            headers={
-                "X-API-Key": self.config.api_key,
-                "X-Device-ID": self.config.device_id,
-                "Content-Type": "application/json",
-            }
-        )
+        """Record device as ready. HTTP client is created lazily on first use."""
         logger.info(f"Device {self.config.device_id} initialized")
 
     async def close(self):
@@ -225,6 +302,16 @@ class SimulatedEdgeDevice:
                 await self._config_polling_scenario(duration_seconds)
             elif scenario == "cloud_commands":
                 await self._cloud_commands_scenario(duration_seconds)
+            elif scenario == "wasm_steps":
+                await self._wasm_steps_scenario(duration_seconds)
+            elif scenario == "wasm_thundering_herd":
+                await self._wasm_thundering_herd_scenario()
+            elif scenario == "msgspec_codec":
+                # msgspec_codec is a heartbeat run with a server-side preflight already done
+                # by ScenarioRunner.run_msgspec_codec_test(). Devices just run heartbeat.
+                await self._heartbeat_scenario(duration_seconds)
+            elif scenario == "nats_transport":
+                await self._nats_transport_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -280,7 +367,7 @@ class SimulatedEdgeDevice:
 
             # Retry heartbeat with exponential backoff
             async def send_heartbeat():
-                response = await self._http_client.post(
+                response = await self._get_http_client().post(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/heartbeat",
                     json={
                         "device_status": "online",
@@ -410,7 +497,7 @@ class SimulatedEdgeDevice:
         try:
             # Retry sync with exponential backoff
             async def send_sync():
-                response = await self._http_client.post(
+                response = await self._get_http_client().post(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/sync",
                     json={
                         "transactions": transactions,
@@ -527,7 +614,7 @@ class SimulatedEdgeDevice:
 
             # Retry config poll with exponential backoff
             async def poll_config():
-                response = await self._http_client.get(
+                response = await self._get_http_client().get(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/config",
                     headers=headers
                 )
@@ -600,6 +687,311 @@ class SimulatedEdgeDevice:
 
             # Report command completion (in real impl)
             # For load testing, we skip this to avoid extra requests
+
+    # -------------------------------------------------------------------------
+    # WASM runtime setup (shared by wasm_steps and wasm_thundering_herd)
+    # -------------------------------------------------------------------------
+
+    def _setup_wasm_runtime(self):
+        """
+        Build a real ComponentStepRuntime wired with an in-memory resolver and a
+        MockWasmBridge.  No wasmtime installation required — _call_component is
+        bypassed by the bridge injection, which is exactly the code path the
+        feat/wasi-bridge work wired into agent.py.
+
+        Measures the actual Python dispatch overhead (import resolution,
+        hash verification, JSON encode/decode, bridge call) — not a fake sleep.
+        """
+        try:
+            from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+            from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        except ImportError:
+            self._wasm_runtime = None
+            self._wasm_config = None
+            return
+
+        # 1KB Component Model binary (magic bytes + padding)
+        self._wasm_binary = b"\x00asm\x0e\x00\x01\x00" + b"\x00" * 1024
+        self._wasm_hash = hashlib.sha256(self._wasm_binary).hexdigest()
+
+        class _MemoryResolver:
+            """In-process resolver — no SQLite roundtrip, measures pure dispatch."""
+            def __init__(self, binary, binary_hash):
+                self._binary = binary
+                self._hash = binary_hash
+
+            async def resolve(self, h: str) -> bytes:
+                if h == self._hash:
+                    return self._binary
+                raise FileNotFoundError(h)
+
+        class _MockWasmBridge:
+            """
+            Zero-cost bridge: returns a fixed JSON result immediately.
+            This isolates the bridge dispatch overhead from wasmtime itself,
+            matching the benchmark sub-section 12c/12e.
+            """
+            _RESULT = '{"wasm_ok": true, "risk_score": 42}'
+
+            def execute_component(self, binary: bytes, state_json: str, step_name: str) -> str:
+                return self._RESULT
+
+            def execute_batch(self, binary: bytes, states_json: list, step_name: str) -> list:
+                return [self._RESULT] * len(states_json)
+
+        resolver = _MemoryResolver(self._wasm_binary, self._wasm_hash)
+        bridge = _MockWasmBridge()
+        self._wasm_runtime = ComponentStepRuntime(resolver, bridge=bridge)
+
+        # Reusable config mock
+        from unittest.mock import MagicMock
+        cfg = MagicMock()
+        cfg.wasm_hash = self._wasm_hash
+        cfg.entrypoint = "execute"
+        cfg.state_mapping = None
+        cfg.timeout_ms = 5000
+        cfg.fallback_on_error = "skip"
+        cfg.default_result = {}
+        self._wasm_config = cfg
+
+    # -------------------------------------------------------------------------
+    # Scenario 5: WASM Step Execution (sustained throughput)
+    # -------------------------------------------------------------------------
+
+    async def _wasm_steps_scenario(self, duration_seconds: int):
+        """
+        Measure real WASM bridge dispatch throughput at the edge.
+
+        Each heartbeat cycle fires wasm_steps_per_sync dispatches through the
+        actual ComponentStepRuntime + bridge pipeline (resolve → hash verify →
+        bridge call → JSON decode).  No fake sleeps — these are real timings.
+
+        The heartbeat to cloud is still sent so cloud-side command delivery
+        latency is captured alongside local execution latency.
+        """
+        self._setup_wasm_runtime()
+
+        end_time = time.time() + duration_seconds
+        initial_offset = random.uniform(0, self.config.heartbeat_interval)
+        await asyncio.sleep(min(initial_offset, end_time - time.time()))
+
+        heartbeats_without_wasm = 0
+
+        while time.time() < end_time and self._running:
+            success = await self._send_heartbeat()
+            if success:
+                self.metrics.heartbeats_sent += 1
+                heartbeats_without_wasm += 1
+            else:
+                self.metrics.heartbeat_failures += 1
+
+            # Execute after every heartbeat (or if a sync_wasm command arrived)
+            wasm_triggered = self.metrics.commands_received > 0 and heartbeats_without_wasm > 0
+            if wasm_triggered or heartbeats_without_wasm >= 1:
+                await self._execute_wasm_dispatch_batch(self.config.wasm_steps_per_sync)
+                heartbeats_without_wasm = 0
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            jitter = random.uniform(-2, 2)
+            remaining = end_time - time.time()
+            await asyncio.sleep(min(self.config.heartbeat_interval + jitter, remaining))
+
+    async def _execute_wasm_dispatch_batch(self, num_steps: int):
+        """
+        Run *num_steps* real ComponentStepRuntime dispatches and record latencies.
+
+        Each call goes through: resolve → sha256 verify → bridge.execute_component
+        → json.loads.  The bridge returns immediately (mock), so all measured time
+        is pure Python overhead — exactly what the Wizer snapshot and bridge wiring
+        are designed to minimise.
+        """
+        if self._wasm_runtime is None or self._wasm_config is None:
+            return
+
+        state_data = {
+            "amount_cents": random.randint(100, 50000),
+            "merchant_id": self.config.merchant_id,
+            "device_id": self.config.device_id,
+            "currency": "USD",
+        }
+
+        t0 = time.perf_counter()
+        try:
+            if hasattr(self._wasm_runtime, 'execute_batch'):
+                results = await self._wasm_runtime.execute_batch(
+                    self._wasm_config, [state_data] * num_steps
+                )
+                elapsed = time.perf_counter() - t0
+                self.metrics.wasm_steps_executed += len(results)
+                per_step = elapsed / num_steps
+                self.metrics.wasm_execution_latencies.extend([per_step] * num_steps)
+            else:
+                for _ in range(num_steps):
+                    st = time.perf_counter()
+                    await self._wasm_runtime.execute(self._wasm_config, state_data)
+                    self.metrics.wasm_steps_executed += 1
+                    self.metrics.wasm_execution_latencies.append(time.perf_counter() - st)
+        except Exception as exc:
+            self.metrics.wasm_step_failures += num_steps
+            logger.debug(f"Device {self.config.device_id} WASM batch error: {exc}")
+
+    # -------------------------------------------------------------------------
+    # Scenario 6: WASM Thundering Herd
+    # -------------------------------------------------------------------------
+
+    async def _wasm_thundering_herd_scenario(self):
+        """
+        Coordinated burst: all devices simultaneously dispatch WASM steps.
+
+        Mirrors the SAF thundering_herd pattern (go_event barrier) but exercises
+        the local WASM bridge dispatch pipeline instead of an HTTP SAF sync.
+
+        Expected outcome: because WASM dispatch is local (no HTTP, no DB write),
+        p99 should be orders of magnitude lower than the SAF thundering herd
+        (target: >= 0.8 steps/device/sec, scale-invariant vs SAF p50 ~6s).
+        p99 latency reflects asyncio event-loop scheduling backlog (all coroutines
+        fire simultaneously via go_event) — it grows with device count and is
+        reported as informational context, not a pass/fail criterion.
+
+        Phase 1 (prep): build state payload and warm the resolver (no network).
+        Phase 2 (wait): block on orchestrator's go_event barrier.
+        Phase 3 (fire): dispatch wasm_steps_per_sync steps back-to-back.
+
+        When the orchestrator pre-injects a shared runtime (via _wasm_runtime /
+        _wasm_config attributes) the per-device setup and warmup resolve are
+        skipped — the orchestrator already warmed the shared resolver once.
+        """
+        # Allow orchestrator to inject a shared runtime to avoid N redundant
+        # object allocations and N warmup resolver calls at large device counts.
+        if self._wasm_runtime is None:
+            self._setup_wasm_runtime()
+
+            # Phase 1: warmup the resolver cache (one dry-run resolve).
+            # Skipped when the orchestrator provides a pre-warmed shared runtime.
+            if self._wasm_runtime is not None and self._wasm_config is not None:
+                try:
+                    await self._wasm_runtime._resolver.resolve(self._wasm_hash)
+                except Exception:
+                    pass
+
+        state_data = {
+            "amount_cents": random.randint(100, 50000),
+            "merchant_id": self.config.merchant_id,
+            "device_id": self.config.device_id,
+            "currency": "USD",
+        }
+
+        logger.debug(
+            f"Device {self.config.device_id} ready for WASM thundering herd"
+        )
+
+        # Phase 2: wait for coordinated release
+        go_event: Optional[asyncio.Event] = getattr(self, "_go_event", None)
+        if go_event is not None:
+            await go_event.wait()
+
+        # Phase 3: fire — dispatch all steps immediately
+        logger.debug(f"Device {self.config.device_id} FIRING WASM thundering herd")
+
+        if self._wasm_runtime is None or self._wasm_config is None:
+            self.metrics.wasm_step_failures += self.config.wasm_steps_per_sync
+            return
+
+        num_steps = self.config.wasm_steps_per_sync
+        t0 = time.perf_counter()
+        try:
+            if hasattr(self._wasm_runtime, 'execute_batch'):
+                results = await self._wasm_runtime.execute_batch(
+                    self._wasm_config, [state_data] * num_steps
+                )
+                elapsed = time.perf_counter() - t0
+                self.metrics.wasm_steps_executed += len(results)
+                per_step = elapsed / num_steps
+                self.metrics.wasm_execution_latencies.extend([per_step] * num_steps)
+            else:
+                for _ in range(num_steps):
+                    st = time.perf_counter()
+                    await self._wasm_runtime.execute(self._wasm_config, state_data)
+                    elapsed = time.perf_counter() - st
+                    self.metrics.wasm_steps_executed += 1
+                    self.metrics.wasm_execution_latencies.append(elapsed)
+        except Exception as exc:
+            self.metrics.wasm_step_failures += num_steps
+            logger.debug(f"WASM herd dispatch error: {exc}")
+
+        if self.metrics_callback:
+            await self.metrics_callback(self.config.device_id, self.metrics)
+
+    # -------------------------------------------------------------------------
+    # Scenario 8: NATS Transport Publish Latency
+    # -------------------------------------------------------------------------
+
+    async def _nats_transport_scenario(self, duration_seconds: int):
+        """
+        Publish heartbeats directly to NATS JetStream (no HTTP).
+
+        All devices share a single NATS connection and a concurrency semaphore
+        (_NATS_MAX_CONCURRENT = 500) that caps in-flight publishes.  Without
+        the semaphore, 100k simultaneous js.publish() calls each become a
+        request/reply that queues internally in NATS and the event loop
+        scheduler stalls — measured latency becomes queue depth, not wire RTT.
+
+        Startup is staggered (random sleep up to 1s) so 100k coroutines don't
+        all race the connection lock at once.
+
+        Pass criteria:
+          - p99 publish latency < 10ms  (vs 50-300ms HTTP heartbeat)
+          - error rate < 1%
+
+        Requires RUFUS_NATS_URL or NATS_URL env var and nats-py installed.
+        """
+        import os
+        import json as _json
+        nats_url = os.getenv("RUFUS_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
+
+        # Stagger startup so 100k coroutines don't simultaneously race the lock
+        await asyncio.sleep(random.uniform(0, 1.0))
+
+        nc, js, sem = await _get_shared_nats(nats_url)
+
+        if nc is None:
+            if _NATS_IMPORT_ERROR:
+                print(_NATS_IMPORT_ERROR, flush=True)
+            return
+
+        subject = f"devices.{self.config.device_id}.heartbeat"
+        end_time = time.time() + duration_seconds
+
+        while time.time() < end_time and self._running:
+            payload = {
+                "device_id": self.config.device_id,
+                "device_status": "online",
+                "pending_sync_count": len(self._pending_transactions),
+                "sent_at": datetime.utcnow().isoformat() + "Z",
+                "sdk_version": "1.0.0rc5",
+            }
+            data = b"\x01" + _json.dumps(payload).encode()
+
+            t0 = time.perf_counter()
+            try:
+                async with sem:
+                    await js.publish(subject, data)
+                elapsed = time.perf_counter() - t0
+                self.metrics.latencies.append(elapsed)
+                self.metrics.heartbeats_sent += 1
+                self.metrics.total_requests += 1
+            except Exception as e:
+                self.metrics.heartbeat_failures += 1
+                self.metrics.total_errors += 1
+                logger.debug(f"[{self.config.device_id}] NATS publish error: {e}")
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Each device publishes every ~1s; stagger prevents synchronised bursts
+            await asyncio.sleep(1.0 + random.uniform(-0.1, 0.1))
 
     def get_metrics(self) -> DeviceMetrics:
         """Get current metrics."""

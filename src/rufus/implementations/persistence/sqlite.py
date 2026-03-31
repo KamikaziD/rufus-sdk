@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Import from rufus package structure
 from rufus.workflow import Workflow
 from rufus.providers.persistence import PersistenceProvider
+from rufus.providers.dtos import WorkflowRecord, TaskRecord, MetricRecord
 from rufus.utils.serialization import serialize, deserialize
 
 
@@ -524,28 +525,28 @@ class SQLitePersistenceProvider(PersistenceProvider):
         if not row:
             return None
 
-        return {
-            'id': row[0],
-            'workflow_type': row[1],
-            'workflow_version': row[2],
-            'definition_snapshot': self._deserialize_json(row[3]) if row[3] else None,
-            'current_step': row[4],
-            'status': row[5],
-            'state': self._deserialize_json(row[6]),
-            'steps_config': self._deserialize_json(row[7]),
-            'state_model_path': row[8],
-            'saga_mode': self._int_to_bool(row[9]),
-            'completed_steps_stack': self._deserialize_json(row[10]),
-            'parent_execution_id': row[11],
-            'blocked_on_child_id': row[12],
-            'data_region': row[13],
-            'priority': row[14],
-            'created_at': self._from_iso8601(row[15]),
-            'updated_at': self._from_iso8601(row[16]),
-            'completed_at': self._from_iso8601(row[17]),
-            'idempotency_key': row[18],
-            'metadata': self._deserialize_json(row[19]),
-        }
+        return WorkflowRecord(
+            id=row[0],
+            workflow_type=row[1],
+            workflow_version=row[2],
+            definition_snapshot=self._deserialize_json(row[3]) if row[3] else None,
+            current_step=row[4],
+            status=row[5],
+            state=self._deserialize_json(row[6]),
+            steps_config=self._deserialize_json(row[7]),
+            state_model_path=row[8],
+            saga_mode=self._int_to_bool(row[9]),
+            completed_steps_stack=self._deserialize_json(row[10]),
+            parent_execution_id=row[11],
+            blocked_on_child_id=row[12],
+            data_region=row[13],
+            priority=row[14],
+            created_at=self._from_iso8601(row[15]),
+            updated_at=self._from_iso8601(row[16]),
+            completed_at=self._from_iso8601(row[17]),
+            idempotency_key=row[18],
+            metadata=self._deserialize_json(row[19]),
+        )
 
     async def list_workflows(self, **filters) -> List[Dict[str, Any]]:
         """
@@ -700,14 +701,13 @@ class SQLitePersistenceProvider(PersistenceProvider):
         ))
         await self.conn.commit()
 
-        return {
-            'task_id': task_id,
-            'execution_id': execution_id,
-            'step_name': step_name,
-            'step_index': step_index,
-            'status': 'PENDING',
-            'created_at': datetime.utcnow(),
-        }
+        return TaskRecord(
+            task_id=task_id,
+            execution_id=execution_id,
+            step_name=step_name,
+            step_index=step_index,
+            status='PENDING',
+        )
 
     async def update_task_status(
         self,
@@ -774,25 +774,25 @@ class SQLitePersistenceProvider(PersistenceProvider):
         if not row:
             return None
 
-        return {
-            'task_id': row[0],
-            'execution_id': row[1],
-            'step_name': row[2],
-            'step_index': row[3],
-            'status': row[4],
-            'worker_id': row[5],
-            'claimed_at': self._from_iso8601(row[6]),
-            'started_at': self._from_iso8601(row[7]),
-            'completed_at': self._from_iso8601(row[8]),
-            'retry_count': row[9],
-            'max_retries': row[10],
-            'last_error': row[11],
-            'task_data': self._deserialize_json(row[12]),
-            'result': self._deserialize_json(row[13]),
-            'idempotency_key': row[14],
-            'created_at': self._from_iso8601(row[15]),
-            'updated_at': self._from_iso8601(row[16]),
-        }
+        return TaskRecord(
+            task_id=row[0],
+            execution_id=row[1],
+            step_name=row[2],
+            step_index=row[3],
+            status=row[4],
+            worker_id=row[5],
+            claimed_at=self._from_iso8601(row[6]),
+            started_at=self._from_iso8601(row[7]),
+            completed_at=self._from_iso8601(row[8]),
+            retry_count=row[9],
+            max_retries=row[10],
+            last_error=row[11],
+            task_data=self._deserialize_json(row[12]),
+            result=self._deserialize_json(row[13]),
+            idempotency_key=row[14],
+            created_at=self._from_iso8601(row[15]),
+            updated_at=self._from_iso8601(row[16]),
+        )
 
     # ============================================================================
     # LOGGING METHODS
@@ -966,14 +966,15 @@ class SQLitePersistenceProvider(PersistenceProvider):
 
         metrics = []
         for row in rows:
-            metrics.append({
-                'metric_name': row[0],
-                'metric_value': row[1],
-                'unit': row[2],
-                'step_name': row[3],
-                'recorded_at': self._from_iso8601(row[4]),
-                'tags': self._deserialize_json(row[5]),
-            })
+            metrics.append(MetricRecord(
+                workflow_id=workflow_id,
+                metric_name=row[0],
+                metric_value=row[1],
+                unit=row[2],
+                step_name=row[3],
+                recorded_at=self._from_iso8601(row[4]),
+                tags=self._deserialize_json(row[5]),
+            ))
 
         return metrics
 

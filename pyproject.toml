@@ -42,6 +42,7 @@ click = "^8.0"
 aiosqlite = ">=0.19"
 anyio = "^4.0"
 orjson = "^3.9"
+msgspec = ">=0.18"
 httpx = ">=0.25"
 cryptography = ">=41.0"
 sqlalchemy = "^2.0"
@@ -65,11 +66,31 @@ uvloop = {version = ">=0.19", optional = true}
 opentelemetry-sdk = {version = ">=1.20", optional = true}
 opentelemetry-exporter-otlp-proto-grpc = {version = ">=1.20", optional = true}
 
+# NATS JetStream + Protobuf (optional)
+nats-py = {version = ">=2.3", optional = true}
+betterproto = {version = ">=0.9.0", optional = true}
+protobuf = {version = ">=4.21", optional = true}
+
+# AI Workflow Builder (optional) — Ollama uses httpx (already a core dep)
+anthropic = {version = ">=0.25", optional = true}
+
+# Knowledge base / RAG (optional)
+lancedb = {version = ">=0.6", optional = true}
+fastembed = {version = ">=0.3", optional = true}
+rank-bm25 = {version = ">=0.2", optional = true}
+psutil = {version = ">=5.9", optional = true}
+sqlite-vec = {version = ">=0.1", optional = true}
+
 [tool.poetry.extras]
 postgres = ["asyncpg"]
 cli = ["rich"]
 performance = ["uvloop"]
 otel = ["opentelemetry-sdk", "opentelemetry-exporter-otlp-proto-grpc"]
+nats = ["nats-py", "betterproto", "protobuf"]
+builder = ["anthropic"]
+rag = ["lancedb", "fastembed", "rank-bm25", "psutil"]
+rag-edge = ["fastembed", "sqlite-vec", "rank-bm25", "psutil"]
+builder-full = ["anthropic", "lancedb", "fastembed", "rank-bm25", "psutil"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0"

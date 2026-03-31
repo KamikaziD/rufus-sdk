@@ -5,11 +5,18 @@ Defines the contract for on-device AI/ML inference engines.
 Supports multiple runtimes: TensorFlow Lite, ONNX, and custom implementations.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
-import numpy as np
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
+    _NUMPY_AVAILABLE = False
 
 
 class InferenceRuntime(str, Enum):

@@ -10,6 +10,7 @@ import {
   saveAdminDeviceConfig,
   saveDeviceConfig,
   broadcastDeviceCommand,
+  getDeviceMeshStats,
   type DeviceConfigData,
 } from "@/lib/api";
 import { DeviceStatusBadge } from "@/components/shared/StatusBadge";
@@ -76,19 +77,22 @@ export default function DeviceDetailPage({ params }: { params: { id: string } })
       </div>
 
       {activeTab === "overview" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-[#111113] border border-[#1E1E22] rounded-none p-4">
-            <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">DEVICE INFO</div>
-            <div className="grid grid-cols-2 gap-1 font-mono text-xs">
-              <InfoRow label="Device ID"   value={device.device_id} />
-              <InfoRow label="Type"        value={device.device_type} />
-              <InfoRow label="Merchant"    value={device.merchant_id} />
-              <InfoRow label="Firmware"    value={device.firmware_version ?? "—"} />
-              <InfoRow label="SDK"         value={device.sdk_version ?? "—"} />
-              <InfoRow label="Last Seen"   value={formatRelativeTime(device.last_heartbeat)} />
-              <InfoRow label="Pending SAF" value={String(device.pending_saf_count)} amber={device.pending_saf_count > 0} />
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-[#111113] border border-[#1E1E22] rounded-none p-4">
+              <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">DEVICE INFO</div>
+              <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+                <InfoRow label="Device ID"   value={device.device_id} />
+                <InfoRow label="Type"        value={device.device_type} />
+                <InfoRow label="Merchant"    value={device.merchant_id} />
+                <InfoRow label="Firmware"    value={device.firmware_version ?? "—"} />
+                <InfoRow label="SDK"         value={device.sdk_version ?? "—"} />
+                <InfoRow label="Last Seen"   value={formatRelativeTime(device.last_heartbeat)} />
+                <InfoRow label="Pending SAF" value={String(device.pending_saf_count)} amber={device.pending_saf_count > 0} />
+              </div>
             </div>
           </div>
+          <MeshStatsPanel deviceId={id} />
         </div>
       )}
 
@@ -97,6 +101,41 @@ export default function DeviceDetailPage({ params }: { params: { id: string } })
       {activeTab === "config" && <ConfigTab deviceId={id} />}
 
       {activeTab === "saf" && <SafTab deviceId={id} pendingCount={device.pending_saf_count} />}
+    </div>
+  );
+}
+
+function MeshStatsPanel({ deviceId }: { deviceId: string }) {
+  const { data: session } = useSession();
+  const token = (session as unknown as { accessToken?: string })?.accessToken;
+
+  const { data } = useQuery({
+    queryKey: ["mesh-stats", deviceId],
+    queryFn: () => getDeviceMeshStats(token!, deviceId),
+    enabled: !!token,
+    refetchInterval: 15000,
+  });
+
+  if (!data || (data.relayed_for_others === 0 && data.saved_by_peers === 0)) return null;
+
+  return (
+    <div className="bg-[#111113] border border-[#1E1E22] rounded-none p-4">
+      <p className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mb-3">Mesh Relay Activity</p>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-wider">Relayed for Others</p>
+          <p className="font-mono text-2xl text-[#ff7043] font-bold">{data.relayed_for_others}</p>
+          <p className="font-mono text-[10px] text-zinc-600">transactions carried</p>
+        </div>
+        <div>
+          <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-wider">Saved by Peers</p>
+          <p className="font-mono text-2xl text-amber-400 font-bold">{data.saved_by_peers}</p>
+          <p className="font-mono text-[10px] text-zinc-600">transactions rescued</p>
+        </div>
+      </div>
+      {data.last_relay_at && (
+        <p className="font-mono text-[10px] text-zinc-700 mt-3">Last relay: {formatRelativeTime(data.last_relay_at)}</p>
+      )}
     </div>
   );
 }
@@ -452,7 +491,7 @@ function SafTab({ deviceId, pendingCount }: { deviceId: string; pendingCount: nu
         <table className="w-full">
           <thead>
             <tr className="bg-[#0D0D0F] border-b border-[#1E1E22]">
-              {["TRANSACTION ID", "AMOUNT", "MERCHANT", "STATUS", "WORKFLOW", "CREATED", "SYNCED"].map((h) => (
+              {["TRANSACTION ID", "AMOUNT", "MERCHANT", "STATUS", "VIA", "WORKFLOW", "CREATED", "SYNCED"].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
                   {h}
                 </th>
@@ -479,6 +518,9 @@ function SafTab({ deviceId, pendingCount }: { deviceId: string; pendingCount: nu
                   }`}>
                     {tx.synced_at ? "SYNCED" : "PENDING"}
                   </span>
+                </td>
+                <td className="px-4 py-3 font-mono text-[11px] text-[#ff7043]">
+                  {tx.relay_device_id ? tx.relay_device_id.slice(0, 12) + "…" : "—"}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs">
                   {tx.workflow_id ? (

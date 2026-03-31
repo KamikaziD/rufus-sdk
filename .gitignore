@@ -28,3 +28,7 @@ results/
 usecase_pilot/
 
 confucius/
+
+# Proto generated code
+src/rufus/proto/gen/*.py
+!src/rufus/proto/gen/__init__.py

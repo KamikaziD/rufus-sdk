@@ -208,6 +208,28 @@ class PersistenceBenchmark:
 
         self.results[provider_name]['record_metric'] = result
 
+    async def benchmark_msgspec_load_workflow(self, provider_name: str, provider, iterations: int = 100):
+        """Benchmark load_workflow returning WorkflowRecord struct vs raw dict decode."""
+        try:
+            import msgspec
+            from rufus.providers.dtos import WorkflowRecord
+            from rufus.utils.serialization import encode_struct, decode_typed
+        except ImportError:
+            return
+
+        result = BenchmarkResult(f"{provider_name}_msgspec_load_workflow")
+        workflow_ids = getattr(provider, '_benchmark_workflow_ids', [])
+        if not workflow_ids:
+            return
+
+        for i in range(iterations):
+            start = time.perf_counter()
+            rec = await provider.load_workflow(workflow_ids[i % len(workflow_ids)])
+            elapsed = time.perf_counter() - start
+            result.add_time(elapsed)
+
+        self.results[provider_name]['msgspec_load_workflow'] = result
+
     async def run_all_benchmarks(self):
         """Run all benchmarks"""
         providers = [('sqlite', self.sqlite)]
@@ -236,6 +258,9 @@ class PersistenceBenchmark:
 
             print(f"  → Benchmarking record_metric...")
             await self.benchmark_record_metric(provider_name, provider, iterations=200)
+
+            print(f"  → Benchmarking msgspec_load_workflow...")
+            await self.benchmark_msgspec_load_workflow(provider_name, provider, iterations=100)
 
             print(f"  ✓ Completed {provider_name} benchmarks")
 

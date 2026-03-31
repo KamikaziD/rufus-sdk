@@ -1,5 +1,11 @@
 # Lessons Learned
 
+## Pattern: WASM Binary for Sidecar Agent Requires External Toolchain — Cannot Be Auto-Built
+**Context:** `src/rufus_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
+**Anti-Pattern:** Assuming the binary can be compiled at test time or during a normal dev install. Neither `py2wasm` nor `wasi-sdk` are pip-installable; they require separate OS-level toolchain setup. Attempting `build_wasm.build()` without them raises `RuntimeError` and the binary is absent.
+**Correction:** The WASM path is a production-only opt-in. The default `deployment_monitor.yaml` workflow uses `type: STANDARD` (Python, zero deps). The WASM variant (`deployment_monitor_wasm.yaml`) requires running `rufus sidecar build-wasm` once after installing py2wasm or wasi-sdk. All tests guard with `pytest.mark.skipif(importlib.util.find_spec("wasmtime") is None, ...)` so CI is always green without the binary. The `.wasm` file should be committed to the repo after compilation so it travels with the source.
+**Verification:** `tests/edge/test_sidecar_wasm.py` passes (1 skipped for binary test) with no toolchain installed. `build_wasm.build(force=True)` raises `RuntimeError: No WASM toolchain found. Install py2wasm or wasi-sdk.` as expected.
+
 ## Pattern: Celery Task Signature Mismatch for Parallel Tasks
 **Context:** Celery parallel tasks (chord header) in `dispatch_parallel_tasks`
 **Anti-Pattern:** `async def verify_id_agent(state, context: StepContext, *args, **kwargs)` — Celery calls `check_arguments` eagerly when building chord signatures; `context` is required but not provided, crashes before queuing
@@ -236,8 +242,139 @@ userinfo: {
 **Correction:** (1) Add `.env` to `.gitignore` before ever staging it. (2) Run `git rm --cached .env` to stop tracking it. (3) If already committed: soft-reset the commit, unstage .env, re-commit without it. Do NOT use `--no-verify` to bypass push protection.
 **Verification:** `git status` shows `.env` as untracked (??); `git push` succeeds without GH013 error
 
+## Pattern: buf generate Fails on betterproto-Specific Proto Options — Remove Them
+**Context:** Running `buf generate` after adding `option python_betterproto_package = "..."` to `.proto` files
+**Anti-Pattern:** Embedding `option python_betterproto_package = "rufus.proto.gen"` in the `.proto` file itself — buf's linter rejects it with `field python_betterproto_package of google.protobuf.FileOptions does not exist`; protoc also rejects it with `Option unknown`
+**Correction:** Remove the option from `.proto` files entirely — it's redundant since `buf.gen.yaml` already carries `opt: python_package=rufus.proto.gen`. betterproto reads the opt from buf, not from the proto file.
+**Verification:** `buf generate --path src/rufus/proto` exits 0; generated `*.py` and `*_pb2.py` appear in `gen/`
+
+## Pattern: buf generate Requires Remote Plugin Access — Use protoc as Fallback
+**Context:** Running `buf generate` when buf is installed but plugins aren't cached/available
+**Anti-Pattern:** Relying only on `buf generate` in CI or offline — the betterproto plugin (`buf.build/community/danielgtaylor-python-betterproto`) is fetched from the buf registry; fails with "plugin not found" when registry is unreachable
+**Correction:** Add a `make proto-protoc` target that uses local `protoc --python_out=` for the google.protobuf `_pb2.py` files. betterproto codegen still requires buf; document both paths in the Makefile.
+**Verification:** `make proto-protoc` generates `*_pb2.py` files; benchmark shows google.protobuf ~50× faster encode than betterproto at same wire size
+
+## Pattern: google.protobuf bytes Fields Require Python bytes, Not str
+**Context:** Constructing `WorkflowRecord` proto message with `state_json` field
+**Anti-Pattern:** `WorkflowRecord(state_json="{\"key\": \"value\"}")` — google.protobuf raises `TypeError: expected bytes, str found` for `bytes` proto fields
+**Correction:** Encode strings before assigning: `WorkflowRecord(state_json=state_str.encode())`. betterproto accepts str for bytes fields but google.protobuf is strict.
+**Verification:** `WR_pb.FromString(wf_pb.SerializeToString())` round-trips without TypeError
+
+## Pattern: DTO-Returning load_workflow Must Be Unwrapped Before Dict .get() Calls
+**Context:** `events.py _publish_full_workflow_state()` calling `.get()` on the result of `persistence.load_workflow()`
+**Anti-Pattern:** Assuming `load_workflow()` always returns a plain dict — it returns a `WorkflowRecord` msgspec.Struct; calling `.get("status")` on it raises `AttributeError: 'WorkflowRecord' object has no attribute 'get'`
+**Correction:** Check the return type and convert: `if hasattr(raw, "__struct_fields__"): workflow_dict = msgspec.to_builtins(raw)`. This is a general pattern: any code receiving the result of `load_workflow()` must handle both dict and Struct return types.
+**Verification:** No `Failed to publish full workflow state` errors in server logs; Redis pub/sub delivers workflow state to dashboard WebSocket clients
+
+## Pattern: Wrapping Per-Row INSERT Loop in asyncpg Transaction Breaks Per-Row Error Handling
+**Context:** `device_service.sync_transactions()` — proposal to wrap INSERT loop in `async with conn.transaction():`
+**Anti-Pattern:** Adding `async with conn.transaction():` around a loop that has per-row `try/except` — if any INSERT raises an exception, asyncpg marks the transaction as broken; no further queries can execute; remaining rows are silently skipped; partial `accepted`/`rejected` lists are returned but nothing commits
+**Correction:** Keep the existing pattern (each INSERT auto-commits individually) for per-row error tolerance. Only wrap in a transaction if you're willing to accept all-or-nothing semantics (which SAF sync is not).
+**Verification:** A batch with one bad row still accepts all valid rows; `accepted` list has the correct entries
+
+## Pattern: asyncpg Batch UPDATE column = ANY($n::uuid[]) Fails When Column Is varchar
+**Context:** `device_service._get_pending_commands()` batch-updating `device_commands.status` for a list of IDs
+**Anti-Pattern:** `WHERE command_id = ANY($2::uuid[])` — if `command_id` is `character varying` (not `uuid`), asyncpg raises `operator does not exist: character varying = uuid`; PostgreSQL cannot compare varchar to uuid without an explicit cast
+**Correction:** Match the cast to the actual column type: `WHERE command_id = ANY($2::text[])`. Always check the DB schema (`\d device_commands`) before writing array-cast SQL.
+**Verification:** NATSBridge heartbeat handler no longer logs `operator does not exist: character varying = uuid`
+
+## Pattern: aiosqlite Connection Must Be Closed Before pytest-asyncio Tears Down Per-Test Event Loop
+**Context:** `tests/edge/test_agent_wasm_integration.py` — tests that call `agent.start()` which opens an aiosqlite connection internally
+**Anti-Pattern:** Starting the agent (which opens `aiosqlite.connect(":memory:")`) inside a test without a matching `await conn.close()` in teardown. pytest-asyncio creates and closes a new event loop per test; aiosqlite's background I/O thread has pending futures bound to the old loop → the loop never shuts down → test suite hangs indefinitely (confirmed 18+ hours)
+**Correction:** Wrap test setup/teardown in an `asynccontextmanager` that calls `await agent.persistence.close()` in the `finally` block. Also explicitly `.close()` any coroutines passed to `mock asyncio.create_task` to suppress "never awaited" warnings.
+**Pattern:**
+```python
+@asynccontextmanager
+async def started_agent():
+    agent = make_agent()
+    await _start_agent_minimal(agent)
+    try:
+        yield agent
+    finally:
+        if agent.persistence:
+            await agent.persistence.close()
+        agent._is_running = False
+```
+**Verification:** Full test suite runs in <5s with no hanging processes; `ps aux | grep pytest` shows no zombie processes
+
+## Pattern: CLI Tests That Invoke Infinite-Loop Daemons Must Be Skipped
+**Context:** `tests/cli/test_zombie_commands.py` — `test_zombie_daemon_custom_interval` and `test_zombie_daemon_with_db_url`
+**Anti-Pattern:** Using `cli_runner.invoke(app, ["zombie-daemon", ...], input="\n")` hoping that `"\n"` as stdin causes the daemon to exit — the zombie-daemon command runs an infinite polling loop; stdin input is not monitored; `cli_runner.invoke` blocks forever
+**Correction:** Mark both tests `@pytest.mark.skip(reason="Daemon runs indefinitely - cannot be tested without signal injection")`. Only test daemon behavior via unit tests that mock the sleep loop, not via CLI invocation.
+**Verification:** `pytest tests/cli/test_zombie_commands.py` completes in 0.06s; full suite shows 4 passed 6 skipped for that file
+
+## Pattern: New API Request Fields That Expand a Protocol Must Be Optional
+**Context:** `DeviceHeartbeatRequest.vector_advisory` in `api_models.py` — added in RUVON Phase 5
+**Anti-Pattern:** Adding `vector_advisory: Dict[str, Any]` (required field) — all deployed edge agents that don't know about RUVON start failing heartbeat POSTs with 422 Unprocessable Entity the moment the server is updated
+**Correction:** Always add new request body fields as `Optional[...] = Field(default=None)`. The server handles `None` gracefully (skip the DB write), and old agents continue working without modification. Only promote to required after a coordinated fleet upgrade.
+**Verification:** An old-format heartbeat `{"device_status": "online", "metrics": {}}` returns 200 on the updated server; no 422 errors in logs
+
+## Pattern: Topology Queries Should JOIN the Device Registry in One Query, Not N Lookups
+**Context:** `device_service.get_mesh_topology()` — extended in RUVON Phase 5 to include relay_server_url, mesh_advisory per node
+**Anti-Pattern:** Fetching relay metadata with a separate `SELECT ... WHERE device_id = $1` inside a loop over nodes — O(N) round-trips to the DB for a fleet of N devices, making topology queries slow under load
+**Correction:** Extend the existing `SELECT device_id, device_type FROM edge_devices WHERE device_id = ANY($1::text[])` to also fetch `relay_server_url, mesh_advisory` in the same query. Build lookup dicts (`relay_url_map`, `advisory_map`) and join in Python. One DB round-trip regardless of fleet size.
+**Verification:** `get_mesh_topology()` for 100 devices generates 2 SQL queries (edges + device metadata), not 102
+
+## Pattern: Leaderboards Should Sort by the Computed Score, Not the Raw Activity Count
+**Context:** `browser_demo_2/worker.js` LEADERBOARD message — extended in RUVON Phase 5
+**Anti-Pattern:** Sorting heroes by `relayLoadTotal` (lifetime relay count) — a device that was busy relaying for a long time but is now degraded (low C, overloaded P) ranks above a fresh, healthy device with fewer relays but a higher current vector score
+**Correction:** Sort by `vectorScore = 0.50C + 0.15/H + 0.25U + 0.10P`. Include both `count` (for display) and `score` (for sorting) in each hero entry. The leaderboard then reflects current capability, not historical busyness.
+**Verification:** When a high-relay device goes offline (C=0.0), its score drops to ≈0.025 and it falls to the bottom of the leaderboard regardless of relay count
+
+## Pattern: Circuit Breakers Must Have a Half-Open Recovery State
+**Context:** `peer_relay.py` MeshRouter per-peer failure tracking for RUVON mesh routing
+**Anti-Pattern:** `return failures >= threshold` — once a peer accumulates N failures it is permanently skipped; a device that was temporarily offline and has recovered is never re-probed
+**Correction:** Three-state check using `last_fail` timestamp: CLOSED (failures < threshold) → OPEN (failures ≥ threshold AND last_fail within cooldown) → HALF-OPEN (failures ≥ threshold AND last_fail > cooldown seconds ago, allow one probe). A successful half-open probe resets failures to 0 (→ CLOSED); a failed probe updates `last_fail` (restarts the cooldown, stays OPEN). Store `_CB_HALF_OPEN_SECS` as a named constant at module level for easy tuning.
+**Verification:** After 3 failures, peer is skipped; after cooldown elapses, one probe is allowed; success restores normal routing
+
+## Pattern: Network Self-Registration Must Re-Check Each Sync Cycle, Not Just At Startup
+**Context:** `agent._register_relay_server()` — RUVON peer relay URL stored in cloud DB
+**Anti-Pattern:** Calling `_register_relay_server()` once in `start()` via `asyncio.create_task()` — if DHCP assigns a new IP between restarts or during a long run, the cloud holds a stale URL; other devices probe a dead address and take 3× 2s timeouts before the circuit opens
+**Correction:** (1) Use outbound-route IP detection (`socket.connect("8.8.8.8", 80); getsockname()[0]`) instead of `getfqdn()` — gives the actual LAN IP even on multi-homed hosts. (2) Cache the last-registered host in `edge_sync_state["relay_server_host"]`; compare before each cloud POST (no-op when stable = single SQLite read). (3) Call `_register_relay_server()` at the end of `_refresh_mesh_peers()` so it fires every online sync cycle.
+**Verification:** Change LAN IP; within one sync interval the cloud record updates and probes resume succeeding
+
+## Pattern: Distributed Election Tie-Breaking Requires Deterministic Per-Device Backoff
+**Context:** `agent._run_election()` — RUVON Local Master election when cloud is unreachable
+**Anti-Pattern:** Fixed 500ms self-promotion timeout for all devices — two devices with identical leadership scores both wait 500ms, both see no objection, both self-promote → dual-master split-brain
+**Correction:** Seed the backoff from the device ID: `seed = int(hashlib.sha256(device_id.encode()).hexdigest()[:8], 16); backoff_ms = 100 + (seed % 400)`. This gives each device a unique, stable wait time (100–500ms). Apply the same tie-break in the claim endpoint: `incoming_wins = score > my_score OR (score == my_score AND incoming_device_id < device_id)`. The lexicographically lower device_id always wins ties — consistent across all nodes without coordination.
+**Verification:** Two equal-score devices always elect the same one (lower device_id) regardless of timing
+
+## Pattern: PostgreSQL state Column Is TEXT, Not JSONB — Cast Before Extracting Fields
+**Context:** `GET /api/v1/metrics/edge-impact` — aggregating `amount` from `workflow_executions.state`
+**Anti-Pattern:** `state_data->>'action'` or `state->>'field'` — column `state_data` doesn't exist; `state` is `TEXT`, not `JSONB`; the `->>`/`->` operators only work on `jsonb`; raises `column "state_data" does not exist` or `operator does not exist: text ->> unknown`
+**Correction:** Cast to json first: `(state::json)->>'action'` and `((state::json)->>'amount')::numeric`. Use `COALESCE(SUM(...), 0)` to handle rows where the field is absent.
+**Verification:** `GET /metrics/edge-impact` returns non-zero values; no `operator does not exist` in postgres logs
+
+## Pattern: TypeScript null vs undefined — API JSON Returns null, Not undefined
+**Context:** `NodeTooltip` in fleet-topology — guarding optional RUVON fields like `vector_score`
+**Anti-Pattern:** `if (node.vector_score !== undefined)` — JSON serialization converts Python `None` to JSON `null`, which deserializes to JavaScript `null`, not `undefined`. `null !== undefined` is `true`, so the guard passes and `.toFixed(3)` crashes with `Cannot read properties of null`
+**Correction:** Use loose equality `!= null` which catches both `null` and `undefined`: `if (node.vector_score != null)`. Apply the same guard everywhere: leaderboard sort, stats bar count, tooltip rendering.
+**Verification:** No `Cannot read properties of null` crash in browser console; tooltip renders correctly for devices without VectorAdvisory
+
+## Pattern: Canvas Z-Order — Draw Overlapping Elements in a Second Pass, Not Inline
+**Context:** Fleet topology canvas — rendering ★ local master badge on top of all nodes
+**Anti-Pattern:** Drawing the star inside the node render loop at `r * 1.1` px offset (radius-relative, as small as 4px) — any subsequent node draw call covers it; star is invisible when nodes overlap
+**Correction:** Add a dedicated second render pass after the node loop. Draw all decorations (stars, badges) at a fixed size (18px) with a dark stroke for contrast and gold glow:
+```typescript
+ctx.font = `bold 18px sans-serif`;
+for (const node of masterNodes) {
+  ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 3;
+  ctx.strokeText("★", pos.x, pos.y - 18);
+  ctx.fillStyle = "#ffd700";
+  ctx.fillText("★", pos.x, pos.y - 18);
+}
+```
+This guarantees z-order — stars are always on top regardless of node rendering order.
+**Verification:** ★ is visible on every local master node; not covered by adjacent nodes
+
 ## Pattern: Alembic upgrade head Fails on Pre-Existing Tables — Stamp + Raw SQL as Escape Hatch
 **Context:** Migration `a1b2c3d4e5f6` trying to create ~15 tables that were already created outside Alembic (init-db.sql, manual runs)
 **Anti-Pattern:** Trying to fix all conflicts in the migration file and re-run — each run hits a new `DuplicateTable` in a transactional DDL block, rolling back everything, requiring another round-trip
 **Correction:** Create only the missing table(s) directly via `asyncpg` with `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`, then stamp: `INSERT INTO alembic_version (version_num) VALUES ('<rev>') ON CONFLICT DO NOTHING`. Worker container has psycopg2; server container does not.
 **Verification:** `SELECT version_num FROM alembic_version` shows the new revision; target endpoint returns 200
+
+## Pattern: Edit Tool new_string Must Use Real Newlines, Not \n Escape Sequences
+**Context:** Adding a multi-line HTML section to `architecture.html` via the Edit tool
+**Anti-Pattern:** Writing `\n` as a two-character escape sequence inside the `new_string` parameter — the Edit tool writes them as literal backslash-n characters in the file. The browser renders `\n` as visible text: section headings show correctly but paragraph text, pre blocks, and table rows all display `\n` scattered through the content.
+**Correction:** Always use actual newlines (press Enter) inside `new_string` blocks. When a large multi-line block needs to be inserted, use the Write tool to rewrite the whole file, or use a Bash heredoc + Python script to do the replacement. The Edit tool's `new_string` is not a string literal in a programming language — it does not interpret escape sequences.
+**Verification:** Open the HTML file in a browser and confirm no visible `\n` characters appear in rendered text; `python3 -c "print(open('file.html').read().count('\\\\n'))"` returns 0
