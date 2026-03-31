@@ -363,6 +363,62 @@ def print_results(results: LoadTestResults, workers: int = 1):
         else:
             print("  (no latency samples — is RUFUS_NATS_URL set and NATS server running?)")
 
+    elif results.scenario == "ruvon_gossip":
+        # RUVON capability gossip — measures vector serialise/publish/select pipeline.
+        # Targets:
+        #   - broadcast (encode + optional NATS publish) p95 < 1ms (no NATS) / < 50ms (NATS)
+        #   - error rate < 1%
+        print(f"Devices:              {results.num_devices:,}")
+        total_gossip = results.gossip_broadcasts + results.gossip_failures
+        gossip_success_rate = results.gossip_broadcasts / total_gossip * 100 if total_gossip else 0
+        print(f"Gossip broadcasts:    {results.gossip_broadcasts:,}")
+        print(f"Gossip failures:      {results.gossip_failures:,}")
+        print(f"Error rate:           {results.error_rate:.2f}%")
+        error_pass = results.error_rate < 1.0
+        print(f"Error rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+        if results.gossip_broadcast_latencies:
+            gl = sorted(results.gossip_broadcast_latencies)
+            p50_g = gl[int(0.50 * (len(gl) - 1))] * 1000
+            p95_g = gl[int(0.95 * (len(gl) - 1))] * 1000
+            p99_g = gl[int(0.99 * (len(gl) - 1))] * 1000
+            p95_target = 50.0  # ms (NATS round-trip included)
+            p95_pass = p95_g < p95_target
+            print(f"Broadcast p50:        {p50_g:.2f}ms")
+            print(f"Broadcast p95:        {p95_g:.2f}ms")
+            print(f"Broadcast p99:        {p99_g:.2f}ms")
+            print(f"Broadcast p95 < {p95_target:.0f}ms: {'✅ PASS' if p95_pass else '❌ FAIL'} ({p95_g:.2f}ms)")
+            print(f"Samples:              {len(gl):,}")
+        else:
+            print("  (no latency samples — did gossip run?)")
+
+    elif results.scenario == "nkey_patch":
+        # NKey patch verification — Ed25519 signature verify throughput.
+        # Targets:
+        #   - error rate (incorrect accept or reject) < 0.1%
+        #   - verify p95 < 5ms
+        print(f"Devices:              {results.num_devices:,}")
+        total_nkey = results.nkey_verifications + results.nkey_failures
+        print(f"Total verifications:  {total_nkey:,}")
+        print(f"Correct outcomes:     {results.nkey_verifications:,}")
+        print(f"Incorrect outcomes:   {results.nkey_failures:,}")
+        nkey_error_rate = results.nkey_failures / total_nkey * 100 if total_nkey else 0
+        nkey_pass = nkey_error_rate < 0.1
+        print(f"Verify accuracy > 99.9%: {'✅ PASS' if nkey_pass else '❌ FAIL'} ({100 - nkey_error_rate:.3f}% accurate)")
+        if results.nkey_verify_latencies:
+            nl = sorted(results.nkey_verify_latencies)
+            p50_n = nl[int(0.50 * (len(nl) - 1))] * 1000
+            p95_n = nl[int(0.95 * (len(nl) - 1))] * 1000
+            p99_n = nl[int(0.99 * (len(nl) - 1))] * 1000
+            p95_target_n = 5.0
+            lat_pass = p95_n < p95_target_n
+            print(f"Verify p50:           {p50_n:.2f}ms")
+            print(f"Verify p95:           {p95_n:.2f}ms")
+            print(f"Verify p99:           {p99_n:.2f}ms")
+            print(f"Verify p95 < {p95_target_n:.0f}ms:    {'✅ PASS' if lat_pass else '❌ FAIL'} ({p95_n:.2f}ms)")
+            print(f"Samples:              {len(nl):,}")
+        else:
+            print("  (no latency samples — did nkey_patch run? requires cryptography + rufus-sdk-edge)")
+
     print("=" * 80)
 
 
@@ -388,7 +444,7 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
+        _local_only = scenario in ("wasm_thundering_herd", "nats_transport", "ruvon_gossip", "nkey_patch")
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,
@@ -434,6 +490,8 @@ async def run_all_scenarios(
         ("wasm_thundering_herd", 60),
         ("msgspec_codec", 120),
         ("nats_transport", 120),
+        ("ruvon_gossip", 120),
+        ("nkey_patch", 120),
     ]
 
     # Create single orchestrator for all scenarios
@@ -553,6 +611,8 @@ Scenarios:
   wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: >= 0.8 steps/device/sec)
   msgspec_codec      - Heartbeat load with msgspec preflight (validates typed decode fast path)
   nats_transport     - Publish heartbeats directly to NATS JetStream (p99 <10ms @<=100, <25ms @<=1k, <50ms @<=10k, <150ms beyond)
+  ruvon_gossip       - RUVON capability vector gossip (p95 <50ms broadcast, <1% error) [local-only, no server needed]
+  nkey_patch         - NKey Ed25519 patch verification throughput (p95 <5ms, >99.9% accurate) [local-only]
         """
     )
 
@@ -580,6 +640,8 @@ Scenarios:
             "wasm_thundering_herd",
             "msgspec_codec",
             "nats_transport",
+            "ruvon_gossip",
+            "nkey_patch",
         ],
         help="Test scenario to run"
     )

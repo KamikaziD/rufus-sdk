@@ -177,7 +177,7 @@ def benchmark_import_caching(iterations: int = 1000):
 
 
 async def benchmark_async_overhead(iterations: int = 1000):
-    """Benchmark async/await overhead with uvloop vs stdlib"""
+    """Benchmark async/await overhead with uvloop vs stdlib, including simulated NATS publish cost."""
 
     async def simple_async_task():
         """Minimal async task"""
@@ -188,12 +188,42 @@ async def benchmark_async_overhead(iterations: int = 1000):
     for _ in range(100):
         await simple_async_task()
 
-    # Benchmark
+    # Benchmark bare asyncio.sleep(0)
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
         await simple_async_task()
         times.append(time.perf_counter() - start)
+
+    # Simulate NATS-style async publish overhead: queue a coroutine that
+    # serialises a small payload and does two asyncio.sleep(0) yields
+    # (mimics the asyncio event-loop cost of a lock acquire + release that
+    # the shared NATS semaphore adds before each js.publish() call).
+    import json as _json
+
+    _sample_payload = {
+        "device_id": "bench-device-001",
+        "device_status": "online",
+        "pending_sync_count": 3,
+        "sent_at": "2026-01-01T00:00:00Z",
+        "sdk_version": "1.0.0",
+    }
+
+    async def simulated_nats_publish():
+        """Simulate NATS semaphore + serialize + yield cost (no real network)."""
+        await asyncio.sleep(0)                            # semaphore acquire yield
+        data = b"\x01" + _json.dumps(_sample_payload).encode()  # prefix byte + encode
+        await asyncio.sleep(0)                            # semaphore release yield
+        return len(data)
+
+    for _ in range(100):
+        await simulated_nats_publish()
+
+    nats_times = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        await simulated_nats_publish()
+        nats_times.append(time.perf_counter() - start)
 
     return {
         "iterations": iterations,
@@ -202,6 +232,11 @@ async def benchmark_async_overhead(iterations: int = 1000):
         "p95_latency_us": statistics.quantiles(times, n=20)[18] * 1_000_000,
         "p99_latency_us": statistics.quantiles(times, n=100)[98] * 1_000_000,
         "event_loop_type": type(asyncio.get_event_loop()).__name__,
+        # NATS simulated publish overhead (asyncio cost without network)
+        "nats_sim_p50_us": statistics.median(nats_times) * 1_000_000,
+        "nats_sim_p95_us": statistics.quantiles(nats_times, n=20)[18] * 1_000_000,
+        "nats_sim_p99_us": statistics.quantiles(nats_times, n=100)[98] * 1_000_000,
+        "nats_sim_overhead_ratio": statistics.mean(nats_times) / statistics.mean(times) if times else 0,
     }
 
 
@@ -294,6 +329,8 @@ async def run_all_benchmarks():
         print(f"  msgspec typed decode: {msgspec_results['typed_decode_speedup_vs_dict']:.1f}x faster than dict decode")
     print(f"  Import Cache: {import_results['speedup']:.1f}x speedup")
     print(f"  Async Latency: {async_results['p50_latency_us']:.1f}µs (p50), {async_results['p99_latency_us']:.1f}µs (p99)")
+    if "nats_sim_p50_us" in async_results:
+        print(f"  NATS sim overhead: {async_results['nats_sim_p50_us']:.1f}µs (p50), {async_results['nats_sim_overhead_ratio']:.1f}x vs bare asyncio.sleep(0)")
     print(f"  Workflow Throughput: {throughput_results['throughput_per_sec']:,.0f} workflows/sec")
     print("="*60 + "\n")
 

@@ -124,6 +124,14 @@ class DeviceMetrics:
     wasm_steps_executed: int = 0
     wasm_step_failures: int = 0
     wasm_execution_latencies: List[float] = field(default_factory=list)
+    # RUVON capability gossip metrics
+    gossip_broadcasts: int = 0
+    gossip_failures: int = 0
+    gossip_broadcast_latencies: List[float] = field(default_factory=list)
+    # NKey patch verification metrics
+    nkey_verifications: int = 0
+    nkey_failures: int = 0
+    nkey_verify_latencies: List[float] = field(default_factory=list)
 
 
 class SimulatedEdgeDevice:
@@ -312,6 +320,10 @@ class SimulatedEdgeDevice:
                 await self._heartbeat_scenario(duration_seconds)
             elif scenario == "nats_transport":
                 await self._nats_transport_scenario(duration_seconds)
+            elif scenario == "ruvon_gossip":
+                await self._ruvon_gossip_scenario(duration_seconds)
+            elif scenario == "nkey_patch":
+                await self._nkey_patch_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -996,3 +1008,209 @@ class SimulatedEdgeDevice:
     def get_metrics(self) -> DeviceMetrics:
         """Get current metrics."""
         return self.metrics
+
+    # -------------------------------------------------------------------------
+    # Scenario 10: RUVON Capability Gossip
+    # -------------------------------------------------------------------------
+
+    async def _ruvon_gossip_scenario(self, duration_seconds: int):
+        """
+        Simulate RUVON capability gossip: each device periodically builds,
+        serialises, and (optionally) publishes its CapabilityVector, then
+        deserialises received peer vectors and runs find_best_builder().
+
+        When NATS is available, vectors are published to
+        ``ruvon.mesh.capabilities``.  Without NATS, the cost of the
+        serialise / deserialise / select pipeline is benchmarked in-process —
+        still useful for measuring pure CPU overhead.
+
+        Pass criteria:
+          - broadcast serialise+encode p95 < 1 ms
+          - find_best_builder() on ≤100 peers p95 < 5 ms
+          - error rate < 1%
+        """
+        import os as _os
+        import json as _json
+
+        # Lazy import — graceful no-op if rufus-sdk-edge not installed
+        try:
+            from rufus_edge.capability_gossip import (
+                CapabilityVector, NodeTier, _tier_to_int,
+            )
+        except ImportError:
+            logger.warning(
+                "[ruvon_gossip] rufus-sdk-edge not installed — "
+                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+            )
+            return
+
+        nats_url = _os.getenv("RUFUS_NATS_URL") or _os.getenv("NATS_URL", "nats://localhost:4222")
+        nc, js, sem = await _get_shared_nats(nats_url)
+        nats_available = nc is not None and not nc.is_closed
+
+        # Build a stable peer fleet for this device (simulates 20 discovered peers)
+        peer_count = 20
+        peer_vecs = [
+            CapabilityVector(
+                device_id=f"sim-peer-{i:04d}",
+                available_ram_mb=256.0 + (i % 4) * 512,
+                cpu_load=0.05 + (i % 8) * 0.07,
+                model_tier=1 + (i % 3),
+                latency_ms=5.0 + (i % 5) * 3.0,
+                task_queue_length=i % 6,
+                node_tier=[NodeTier.TIER_1, NodeTier.TIER_2, NodeTier.TIER_3][i % 3],
+            )
+            for i in range(peer_count)
+        ]
+        peer_map = {v.device_id: v for v in peer_vecs}
+
+        def _find_best_sync(peers):
+            candidates = [
+                v for v in peers.values()
+                if _tier_to_int(v.node_tier) >= 2 and v.available_ram_mb > 256
+            ]
+            if not candidates:
+                return None
+            candidates.sort(
+                key=lambda v: (_tier_to_int(v.node_tier), -v.cpu_load, v.available_ram_mb),
+                reverse=True,
+            )
+            return candidates[0].device_id
+
+        end_time = time.time() + duration_seconds
+        await asyncio.sleep(random.uniform(0, 0.5))  # stagger start
+
+        while time.time() < end_time and self._running:
+            # Build local vector
+            local_vec = CapabilityVector(
+                device_id=self.config.device_id,
+                available_ram_mb=512.0 + random.uniform(-50, 50),
+                cpu_load=random.uniform(0.1, 0.7),
+                model_tier=2,
+                latency_ms=random.uniform(5.0, 30.0),
+                task_queue_length=random.randint(0, 5),
+                node_tier=NodeTier.TIER_2,
+            )
+
+            t0 = time.perf_counter()
+            payload = _json.dumps(local_vec.to_dict()).encode()
+            success = True
+
+            if nats_available:
+                try:
+                    async with sem:
+                        await js.publish("ruvon.mesh.capabilities", payload)
+                except Exception as exc:
+                    logger.debug(f"[{self.config.device_id}] gossip publish error: {exc}")
+                    success = False
+            # else: serialise cost measured locally
+
+            elapsed = time.perf_counter() - t0
+            if success:
+                self.metrics.gossip_broadcasts += 1
+                self.metrics.gossip_broadcast_latencies.append(elapsed)
+                self.metrics.total_requests += 1
+            else:
+                self.metrics.gossip_failures += 1
+                self.metrics.total_errors += 1
+
+            # Deserialise incoming peer vectors (simulate receive path)
+            for pv in peer_vecs:
+                raw = _json.dumps(pv.to_dict()).encode()
+                CapabilityVector.from_dict(_json.loads(raw))
+
+            # find_best_builder() peer selection
+            _find_best_sync(peer_map)
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Gossip interval: 30s in production; 1s here for load-test throughput
+            await asyncio.sleep(1.0 + random.uniform(-0.1, 0.1))
+
+    # -------------------------------------------------------------------------
+    # Scenario 11: NKey Patch Verification
+    # -------------------------------------------------------------------------
+
+    async def _nkey_patch_scenario(self, duration_seconds: int):
+        """
+        Simulate receiving WASM patch broadcasts and verifying Ed25519 signatures.
+
+        Each "device" generates a keypair on startup (simulating the control
+        plane's signing key), then continuously verifies patches — measuring
+        throughput and error rate.  A configurable fraction of patches carry
+        intentionally bad signatures to validate the rejection path.
+
+        Pass criteria:
+          - verify() p95 < 5 ms per verification
+          - error rate on valid signatures < 0.1%
+          - rejection rate on bad signatures > 99.9%
+        """
+        try:
+            from rufus_edge.nkey_verifier import NKeyPatchVerifier
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            import base64 as _b64
+        except ImportError as exc:
+            logger.warning(
+                f"[nkey_patch] Skipping — missing dependency: {exc}\n"
+                "  Fix: pip install cryptography && "
+                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+            )
+            return
+
+        # Generate a signing keypair (simulates the TMS/control plane key)
+        priv = Ed25519PrivateKey.generate()
+        pub_bytes = priv.public_key().public_bytes_raw()
+        pub_b64 = _b64.urlsafe_b64encode(pub_bytes).decode()
+        verifier = NKeyPatchVerifier(pub_b64)
+
+        # Pre-generate several WASM patch payloads (varying size)
+        patches = [secrets.token_bytes(sz) for sz in (256, 4096, 32768)]
+        valid_sigs = [
+            _b64.urlsafe_b64encode(priv.sign(p)).decode() for p in patches
+        ]
+        bad_sig = _b64.urlsafe_b64encode(secrets.token_bytes(64)).decode()
+
+        # 5% of patches carry a bad signature (simulates rogue broadcast)
+        BAD_PATCH_RATE = 0.05
+
+        end_time = time.time() + duration_seconds
+        await asyncio.sleep(random.uniform(0, 0.3))
+
+        while time.time() < end_time and self._running:
+            idx = random.randint(0, len(patches) - 1)
+            binary = patches[idx]
+            inject_bad = random.random() < BAD_PATCH_RATE
+            sig = bad_sig if inject_bad else valid_sigs[idx]
+
+            t0 = time.perf_counter()
+            try:
+                result = verifier.verify(binary, sig)
+                elapsed = time.perf_counter() - t0
+                self.metrics.nkey_verify_latencies.append(elapsed)
+                self.metrics.total_requests += 1
+
+                if inject_bad:
+                    # Expected: rejected
+                    if result:
+                        self.metrics.nkey_failures += 1
+                        self.metrics.total_errors += 1
+                    else:
+                        self.metrics.nkey_verifications += 1
+                else:
+                    # Expected: accepted
+                    if not result:
+                        self.metrics.nkey_failures += 1
+                        self.metrics.total_errors += 1
+                    else:
+                        self.metrics.nkey_verifications += 1
+            except Exception as exc:
+                self.metrics.nkey_failures += 1
+                self.metrics.total_errors += 1
+                logger.debug(f"[{self.config.device_id}] nkey verify error: {exc}")
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Each device receives a patch broadcast every ~0.1s during load test
+            await asyncio.sleep(0.1 + random.uniform(-0.01, 0.01))

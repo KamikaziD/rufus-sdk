@@ -1031,6 +1031,55 @@ function startStatsLoop() {
                            index: v.index }));
     postMessage({ type: "LEADERBOARD", heroes });
 
+    // ── RUVON Capability Gossip simulation (PR#28) ─────────────────────────
+    // Each tick, simulate N devices broadcasting their capability vectors.
+    // Tier classification mirrors capability_gossip.py classify_node_tier():
+    //   T1: index % 5 === 0 (constrained, ~20%)
+    //   T3: index % 7 === 0 (server-class, ~14%)
+    //   T2: everything else (gateway, ~66%)
+    const broadcastThisTick = Math.floor(devices.length * 0.2); // 20% broadcast per second
+    const gossipEvents = [];
+    for (let gi = 0; gi < broadcastThisTick; gi++) {
+      const d = devices[(gi * 7) % devices.length];
+      const tier = d.index % 7 === 0 ? 3 : d.index % 5 === 0 ? 1 : 2;
+      const ramMb = tier === 1 ? 128 + (d.index % 4) * 64
+                 : tier === 3 ? 4096 + (d.index % 3) * 2048
+                 : 512 + (d.index % 4) * 256;
+      const cpuLoad = d.state === STATE.OFFLINE ? 0.05
+                    : d.state === STATE.WASM_EXEC ? 0.75 + Math.random() * 0.2
+                    : 0.1 + Math.random() * 0.4;
+      const vecC = d.vectorC !== undefined ? d.vectorC : 1.0;
+      const vecU = d.vectorU !== undefined ? d.vectorU : 0.5;
+      const vecP = d.vectorP !== undefined ? d.vectorP : 0.8;
+      const score = (0.50 * vecC + 0.15 * 1.0 + 0.25 * vecU + 0.10 * vecP).toFixed(3);
+      gossipEvents.push({
+        device_id: `dev-${String(d.index).padStart(4, "0")}`,
+        tier,
+        score,
+        ram_mb: ramMb,
+        cpu_load: parseFloat(cpuLoad.toFixed(3)),
+      });
+    }
+    const tier1Count = devices.filter((_, i) => i % 5 === 0 && i % 7 !== 0).length;
+    const tier3Count = devices.filter((_, i) => i % 7 === 0).length;
+    const tier2Count = devices.length - tier1Count - tier3Count;
+    postMessage({
+      type: "GOSSIP",
+      tier1: tier1Count,
+      tier2: tier2Count,
+      tier3: tier3Count,
+      broadcasts: broadcastThisTick,
+      events: gossipEvents.slice(0, 3),  // max 3 events per tick to keep feed readable
+    });
+
+    // ── NKey patch verification simulation (PR#28) ─────────────────────────
+    // Simulate WASM patch broadcasts arriving at ~1/5 of online devices per tick.
+    // 5% carry bad signatures (mirrors _nkey_patch_scenario in device_simulator.py).
+    const nkeyCount = Math.max(1, Math.floor(onlineCount * 0.2));
+    const nkeyBad = Math.floor(nkeyCount * 0.05);
+    const nkeyGood = nkeyCount - nkeyBad;
+    postMessage({ type: "NKEY_STATS", accepted: nkeyGood, rejected: nkeyBad });
+
     txnCount = 0;
     txnWindowStart = now;
     if (latencyTimings.length > 1000) latencyTimings = latencyTimings.slice(-1000);
