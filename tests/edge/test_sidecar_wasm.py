@@ -59,10 +59,15 @@ def test_is_up_to_date_false_when_no_binary(tmp_path):
 def test_build_raises_when_no_toolchain(tmp_path):
     """build() raises RuntimeError when py2wasm and wasi-sdk are absent."""
     mod = _import_sidecar("build_wasm")
+    # Simulate missing toolchain by making every subprocess.run call raise FileNotFoundError
+    # (py2wasm may be installed in the dev env, but we still need to test the no-toolchain path)
     with patch.object(mod, "_WASM_OUT", tmp_path / "apply_config.wasm"):
         with patch.object(mod, "_WASM_HASH", tmp_path / "apply_config.sha256"):
-            with pytest.raises(RuntimeError, match="py2wasm|wasi-sdk"):
-                mod.build(force=True)
+            with patch("subprocess.run", side_effect=FileNotFoundError("py2wasm")):
+                import shutil
+                with patch.object(shutil, "which", return_value=None):
+                    with pytest.raises(RuntimeError, match="py2wasm|wasi-sdk"):
+                        mod.build(force=True)
 
 
 # ---------------------------------------------------------------------------
@@ -155,24 +160,30 @@ def test_wasm_main_invalid_json_writes_error(monkeypatch):
     importlib.util.find_spec("wasmtime") is None,
     reason="wasmtime not installed — skipping WASM binary test"
 )
-def test_wasm_binary_executes_hot_swap():
+def test_wasm_binary_executes_hot_swap(tmp_path):
     """Load apply_config.wasm and verify it processes a hot-swap proposal."""
+    import tempfile
     import wasmtime
 
     wasm_path = _SIDECAR_BASE / "wasm" / "apply_config.wasm"
     if not wasm_path.exists():
         pytest.skip("apply_config.wasm not compiled — run: python -m rufus_edge.sidecar.build_wasm")
 
+    proposal = json.dumps({"key": "fraud_threshold", "value": 0.9, "approved": True})
+
+    # Write stdin to a temp file (wasmtime Python API uses file paths, not BytesIO)
+    stdin_file = tmp_path / "stdin.json"
+    stdout_file = tmp_path / "stdout.json"
+    stdin_file.write_text(proposal)
+    stdout_file.write_text("")
+
     engine = wasmtime.Engine()
     store = wasmtime.Store(engine)
     module = wasmtime.Module.from_file(engine, str(wasm_path))
 
-    # Feed the proposal via WASI stdin
-    proposal = json.dumps({"key": "fraud_threshold", "value": 0.9, "approved": True})
     wasi = wasmtime.WasiConfig()
-    wasi.stdin_bytes = proposal.encode()
-    stdout_buf = io.BytesIO()
-    wasi.stdout = wasmtime.WasiFile.from_fileobj(stdout_buf)
+    wasi.stdin_file = str(stdin_file)
+    wasi.stdout_file = str(stdout_file)
     store.set_wasi(wasi)
 
     linker = wasmtime.Linker(engine)
@@ -181,7 +192,14 @@ def test_wasm_binary_executes_hot_swap():
 
     start = instance.exports(store).get("_start") or instance.exports(store).get("wasm_main")
     if start:
-        start(store)
+        try:
+            start(store)
+        except Exception as e:
+            # wasmtime raises on sys.exit(0) — treat exit 0 as success
+            if "exit status 0" not in str(e):
+                raise
 
-    result = json.loads(stdout_buf.getvalue().decode())
+    out = stdout_file.read_text()
+    assert out, "WASM produced no stdout"
+    result = json.loads(out)
     assert "outcome" in result

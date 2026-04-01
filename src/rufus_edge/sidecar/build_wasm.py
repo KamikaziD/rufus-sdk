@@ -104,10 +104,26 @@ def build(force: bool = False) -> Path:
 
 
 def _build_with_py2wasm() -> None:
-    """Compile using py2wasm (pure Python → WASM transpiler)."""
+    """Compile using py2wasm (Python → WASM via Nuitka/WASI-SDK).
+
+    py2wasm requires Python 3.11+.  If the current interpreter is 3.10, we
+    look for a python3.11 binary on PATH and invoke py2wasm through it.
+    """
+    import sys
+
     entry = Path(__file__).parent / "config_applier.py"
+    py2wasm_cmd = ["py2wasm", str(entry), "-o", str(_WASM_OUT)]
+
+    # py2wasm 2.6+ requires Python 3.11+; fall back to explicit python3.11
+    if sys.version_info < (3, 11):
+        import shutil
+        py311 = shutil.which("python3.11")
+        if py311 is None:
+            raise FileNotFoundError("py2wasm requires Python 3.11+; python3.11 not found on PATH")
+        py2wasm_cmd = [py311, "-m", "py2wasm", str(entry), "-o", str(_WASM_OUT)]
+
     subprocess.run(
-        ["py2wasm", str(entry), "-o", str(_WASM_OUT), "--entry", "wasm_main"],
+        py2wasm_cmd,
         check=True,
         capture_output=True,
         text=True,

@@ -62,6 +62,9 @@ msgspec>=0.18.0
 # WebAssembly runtime (optional — required for WASM step type and WASM benchmarks)
 wasmtime>=12.0.0
 
+# Python → WASM compiler (optional — required to rebuild apply_config.wasm; needs Python 3.11+)
+py2wasm>=2.6.2
+
 # Environment
 python-dotenv>=1.0.0
 

@@ -1,10 +1,13 @@
 # Lessons Learned
 
-## Pattern: WASM Binary for Sidecar Agent Requires External Toolchain — Cannot Be Auto-Built
+## Pattern: WASM Binary Build — py2wasm IS pip-installable but requires Python 3.11+
 **Context:** `src/rufus_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
-**Anti-Pattern:** Assuming the binary can be compiled at test time or during a normal dev install. Neither `py2wasm` nor `wasi-sdk` are pip-installable; they require separate OS-level toolchain setup. Attempting `build_wasm.build()` without them raises `RuntimeError` and the binary is absent.
-**Correction:** The WASM path is a production-only opt-in. The default `deployment_monitor.yaml` workflow uses `type: STANDARD` (Python, zero deps). The WASM variant (`deployment_monitor_wasm.yaml`) requires running `rufus sidecar build-wasm` once after installing py2wasm or wasi-sdk. All tests guard with `pytest.mark.skipif(importlib.util.find_spec("wasmtime") is None, ...)` so CI is always green without the binary. The `.wasm` file should be committed to the repo after compilation so it travels with the source.
-**Verification:** `tests/edge/test_sidecar_wasm.py` passes (1 skipped for binary test) with no toolchain installed. `build_wasm.build(force=True)` raises `RuntimeError: No WASM toolchain found. Install py2wasm or wasi-sdk.` as expected.
+**Anti-Pattern (corrected):** Earlier lesson said "Neither py2wasm nor wasi-sdk are pip-installable". This was WRONG. `pip install py2wasm>=2.6.2` works and auto-downloads wasi-sdk during first run. However, py2wasm 2.6.x requires **Python 3.11+** — it fails on 3.10 with "Python version '3.10' is not supported". Always invoke via `python3.11 -m py2wasm` or `/path/to/python3.11/bin/py2wasm`.
+**Additional Anti-Pattern:** `config_applier.py` had `if __name__ == "__wasm__": wasm_main()` — this guard NEVER fires because WASI sets `__name__` to `"__main__"`, not `"__wasm__"`. Binary ran clean (exit 0) but produced no output. Fix: `if __name__ == "__main__": wasm_main()`.
+**Additional Anti-Pattern:** `build_wasm._build_with_py2wasm()` passed `--entry wasm_main` flag which does not exist in py2wasm — causes exit code 2. py2wasm takes only `filename` and `-o OUTPUT`.
+**Additional Anti-Pattern:** wasmtime Python bindings use `WasiConfig.stdin_file = "/path"` (property, string path) NOT `stdin_bytes` or `WasiFile.from_fileobj()` which don't exist.
+**Correction:** `pip install py2wasm>=2.6.2` then `python3.11 -m py2wasm config_applier.py -o apply_config.wasm`. Binary is ~25MB (CPython embedded). Commit the binary so it travels with the source. The `.sha256` hash file is used for staleness detection. Tests use subprocess mock for the no-toolchain path; the binary test uses file-based stdin/stdout with temp files.
+**Verification:** `tests/edge/test_sidecar_wasm.py` — 9/9 passing. Binary at `src/rufus_edge/sidecar/wasm/apply_config.wasm` (25MB). Test verifies hot-swap proposal produces `{"outcome": ..., "method": "hot_swap"}` on stdout.
 
 ## Pattern: Celery Task Signature Mismatch for Parallel Tasks
 **Context:** Celery parallel tasks (chord header) in `dispatch_parallel_tasks`
