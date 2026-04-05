@@ -1,6 +1,6 @@
 [project]
 name = "rufus-sdk-edge"
-version = "1.0.0rc5"
+version = "1.0.0rc6"
 description = "Rufus edge agent for offline-first fintech devices (POS, ATM, kiosks)"
 authors = [{name = "Rufus Team", email = "team@rufus.dev"}]
 license = {text = "Apache-2.0"}
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["rufus-sdk>=1.0.0rc5"]
+dependencies = ["rufus-sdk>=1.0.0rc6"]
 
 [project.urls]
 Homepage = "https://github.com/KamikaziD/rufus-sdk"

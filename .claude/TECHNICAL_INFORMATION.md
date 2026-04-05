@@ -2622,7 +2622,7 @@ Tune the threshold based on your query distribution. The built-in heuristic clas
 
 ---
 
-## §22 — Edge Device Cloud HITL Round-Trips (v1.0.0rc5)
+## §22 — Edge Device Cloud HITL Round-Trips (v1.0.0rc5+)
 
 ### Overview
 

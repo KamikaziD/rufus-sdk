@@ -51,24 +51,24 @@ Or use the published images directly:
 # docker-compose.yml
 services:
   rufus-server:
-    image: ruhfuskdev/rufus-server:1.0.0rc5
+    image: ruhfuskdev/rufus-server:1.0.0rc6
     env_file: .env
     ports: ["8000:8000"]
     depends_on: [postgres, redis]
 
   rufus-worker:
-    image: ruhfuskdev/rufus-worker:1.0.0rc5
+    image: ruhfuskdev/rufus-worker:1.0.0rc6
     env_file: .env
     volumes:
       - ./my_workflows:/app/workflows
     depends_on: [postgres, redis]
 
   rufus-flower:
-    image: ruhfuskdev/rufus-flower:1.0.0rc5
+    image: ruhfuskdev/rufus-flower:1.0.0rc6
     ports: ["5555:5555"]
 
   rufus-dashboard:
-    image: ruhfuskdev/rufus-dashboard:1.0.0rc5
+    image: ruhfuskdev/rufus-dashboard:1.0.0rc6
     ports: ["3000:3000"]
     environment:
       NEXTAUTH_URL: http://localhost:3000
@@ -96,7 +96,7 @@ API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs` · 
 ## 5-Minute Tutorial
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc5
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc6
 ```
 
 ```python
@@ -200,7 +200,7 @@ builder = WorkflowBuilder(
 
 ## Rufus Dashboard
 
-The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:1.0.0rc5`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
+The dashboard is a 9-page management UI that ships as `ruhfuskdev/rufus-dashboard:1.0.0rc6`. It connects to the REST API and provides role-based access to every aspect of a Rufus deployment.
 
 ### Pages
 
@@ -416,7 +416,7 @@ Rufus follows the [Diátaxis](https://diataxis.fr/) framework:
 
 ### Appendices
 
-- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v1.0.0rc5 (latest)
+- [Changelog](docs/appendices/changelog.md) — v0.1.0 → v1.0.0rc6 (latest)
 - [Roadmap](docs/appendices/roadmap.md)
 - [Migration Notes](docs/appendices/migration-notes.md)
 - [Glossary](docs/appendices/glossary.md)
@@ -477,13 +477,13 @@ Apache 2.0 — See [LICENSE](LICENSE) file for details.
 
 ## Distribution
 
-**Docker Hub:** `ruhfuskdev/rufus-server:1.0.0rc5` · `ruhfuskdev/rufus-worker:1.0.0rc5` · `ruhfuskdev/rufus-flower:1.0.0rc5` · `ruhfuskdev/rufus-dashboard:1.0.0rc5`
+**Docker Hub:** `ruhfuskdev/rufus-server:1.0.0rc6` · `ruhfuskdev/rufus-worker:1.0.0rc6` · `ruhfuskdev/rufus-flower:1.0.0rc6` · `ruhfuskdev/rufus-dashboard:1.0.0rc6`
 
 > Dashboard auth requires Keycloak (included in `docker/docker-compose.keycloak.yml`) or any OIDC provider configured via `KEYCLOAK_ISSUER`, `KEYCLOAK_ID`, and `KEYCLOAK_SECRET`.
 
 **TestPyPI:**
 ```bash
-pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc5
+pip install --index-url https://test.pypi.org/simple/ rufus-sdk==1.0.0rc6
 
 # Optional extras
 pip install 'rufus-sdk[wasm]'                  # WASM steps (wasmtime>=15.0)
@@ -494,5 +494,5 @@ pip install 'rufus-sdk-edge[wasi]'             # WASI 0.3 compiled target
 
 ---
 
-**Current Version:** v1.0.0rc5
+**Current Version:** v1.0.0rc6
 **Support:** 📖 [Documentation](docs/index.md) · 💬 [Discussions](https://github.com/KamikaziD/rufus-sdk/discussions) · 🐛 [Issues](https://github.com/KamikaziD/rufus-sdk/issues)

@@ -982,7 +982,7 @@ class SimulatedEdgeDevice:
                 "device_status": "online",
                 "pending_sync_count": len(self._pending_transactions),
                 "sent_at": datetime.utcnow().isoformat() + "Z",
-                "sdk_version": "1.0.0rc5",
+                "sdk_version": "1.0.0rc6",
             }
             data = b"\x01" + _json.dumps(payload).encode()
 

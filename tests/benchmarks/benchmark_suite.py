@@ -1232,8 +1232,8 @@ def bench_proto_codec(n: int) -> "Section":
         "device_status": "online",
         "pending_sync_count": 3,
         "last_sync_at": "2026-03-24T12:34:56.789Z",
-        "config_version": "v1.0.0rc5",
-        "sdk_version": "1.0.0rc5",
+        "config_version": "v1.0.0rc6",
+        "sdk_version": "1.0.0rc6",
         "sent_at": "2026-03-24T12:35:00.000Z",
     }
 

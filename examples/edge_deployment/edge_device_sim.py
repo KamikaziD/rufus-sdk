@@ -247,7 +247,7 @@ async def register_device() -> str:
                 "device_name": device_name,
                 "merchant_id": "test-merchant-001",
                 "firmware_version": "1.0.0",
-                "sdk_version": "1.0.0rc5",
+                "sdk_version": "1.0.0rc6",
                 "capabilities": ["workflow_execution", "update_workflow"],
             },
             headers={"X-Registration-Key": REGISTRATION_KEY},
@@ -443,7 +443,7 @@ async def main():
             async with _net_sim.make_client(base_url=CLOUD_URL, timeout=10.0) as client:
                 await client.patch(
                     f"/api/v1/devices/{DEVICE_ID}",
-                    json={"sdk_version": "1.0.0rc5"},
+                    json={"sdk_version": "1.0.0rc6"},
                     headers={"X-API-Key": api_key},
                 )
         except Exception as e:

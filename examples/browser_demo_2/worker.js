@@ -204,7 +204,7 @@ async function registerDevice(dev) {
         device_name: `Browser ${dev.deviceType.toUpperCase()} ${dev.index + 1}`,
         merchant_id: "browser-demo-merchant",
         firmware_version: "1.0.0",
-        sdk_version: "1.0.0rc5",
+        sdk_version: "1.0.0rc6",
         capabilities: ["workflow_execution"],
       }),
     });
@@ -486,7 +486,7 @@ async function heartbeat(dev) {
     const bodyObj = {
       device_status: "online",
       pending_saf_count: dev.safQueue.length,
-      sdk_version: "1.0.0rc5",
+      sdk_version: "1.0.0rc6",
     };
     const bodyStr = JSON.stringify(bodyObj);
     // Track wire sizes for benchmark panel
@@ -930,7 +930,7 @@ function startStatsLoop() {
     // Fallback: compute representative wire sizes when no real HB/SAF has fired yet
     if (devices.length > 0 && lastHeartbeatJsonBytes === 0) {
       const dev = devices[0];
-      const sampleHb = { device_status: "online", pending_saf_count: 0, sdk_version: "1.0.0rc5" };
+      const sampleHb = { device_status: "online", pending_saf_count: 0, sdk_version: "1.0.0rc6" };
       lastHeartbeatJsonBytes  = new TextEncoder().encode(JSON.stringify(sampleHb)).length;
       lastHeartbeatProtoBytes = estimateHeartbeatProto(dev);
     }
@@ -1103,7 +1103,7 @@ function estimateHeartbeatProto(dev) {
   // HeartbeatMsg fields: device_id(1), device_status(2), pending_saf_count(3),
   //                      sdk_version(4), timestamp_ms(5 int64)
   return _protoStr(dev.id) + _protoStr("online") + _protoInt(dev.safQueue.length) +
-         _protoStr("1.0.0rc5") + 9;  // int64: tag(1) + fixed 8 bytes
+         _protoStr("1.0.0rc6") + 9;  // int64: tag(1) + fixed 8 bytes
 }
 
 function estimateSafBatchProto(txns) {

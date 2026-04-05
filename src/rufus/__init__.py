@@ -21,7 +21,7 @@ if _UVLOOP_ENABLED:
 else:
     _event_loop_backend = "asyncio (stdlib)"
 
-__version__ = "1.0.0rc5"
+__version__ = "1.0.0rc6"
 __all__ = [
     "Workflow",
     "WorkflowBuilder",
