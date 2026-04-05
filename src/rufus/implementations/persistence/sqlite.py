@@ -455,14 +455,42 @@ class SQLitePersistenceProvider(PersistenceProvider):
         metadata = self._serialize_json(workflow_dict.get('metadata', {}))
         completed_at = self._to_iso8601(workflow_dict.get('completed_at'))
 
-        # Insert or replace workflow execution
+        # If a different workflow holds the same idempotency_key, replace it explicitly
+        # before the upsert so the UNIQUE constraint doesn't conflict.
+        if idempotency_key:
+            await self.conn.execute(
+                "DELETE FROM workflow_executions WHERE idempotency_key = ? AND id != ?",
+                (idempotency_key, workflow_id),
+            )
+
+        # Upsert via ON CONFLICT(id) DO UPDATE to avoid triggering ON DELETE CASCADE
+        # on child tables (e.g. tasks) when the same workflow row is updated in-place.
         await self.conn.execute("""
-            INSERT OR REPLACE INTO workflow_executions (
+            INSERT INTO workflow_executions (
                 id, workflow_type, workflow_version, definition_snapshot, current_step, status, state, steps_config,
                 state_model_path, saga_mode, completed_steps_stack,
                 parent_execution_id, blocked_on_child_id, data_region, priority,
                 idempotency_key, metadata, completed_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                workflow_type = excluded.workflow_type,
+                workflow_version = excluded.workflow_version,
+                definition_snapshot = excluded.definition_snapshot,
+                current_step = excluded.current_step,
+                status = excluded.status,
+                state = excluded.state,
+                steps_config = excluded.steps_config,
+                state_model_path = excluded.state_model_path,
+                saga_mode = excluded.saga_mode,
+                completed_steps_stack = excluded.completed_steps_stack,
+                parent_execution_id = excluded.parent_execution_id,
+                blocked_on_child_id = excluded.blocked_on_child_id,
+                data_region = excluded.data_region,
+                priority = excluded.priority,
+                idempotency_key = excluded.idempotency_key,
+                metadata = excluded.metadata,
+                completed_at = excluded.completed_at,
+                updated_at = CURRENT_TIMESTAMP
         """, (
             workflow_id, workflow_type, workflow_version, definition_snapshot, current_step, status, state, steps_config,
             state_model_path, saga_mode, completed_steps_stack,

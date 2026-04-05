@@ -209,7 +209,8 @@ async def test_next_workflow_step_wrong_state(test_client, setup_test_workflow):
     workflow_id = start_resp.json()["workflow_id"]
 
     # Manually set workflow to COMPLETED
-    wf_data = await persistence.load_workflow(workflow_id)
+    wf_record = await persistence.load_workflow(workflow_id)
+    wf_data = {f: getattr(wf_record, f) for f in wf_record.__struct_fields__}
     wf_data["status"] = "COMPLETED"
     await persistence.save_workflow(workflow_id, wf_data)
 
@@ -243,7 +244,9 @@ async def test_get_workflow_executions_empty(test_client, setup_test_workflow):
     engine, persistence = setup_test_workflow
     response = test_client.get("/api/v1/workflows/executions")
     assert response.status_code == 200
-    assert response.json() == []
+    body = response.json()
+    workflows = body["workflows"] if isinstance(body, dict) else body
+    assert workflows == []
 
 
 @pytest.mark.asyncio
@@ -264,7 +267,8 @@ async def test_get_workflow_executions_filtered_by_status(test_client, setup_tes
 
     response = test_client.get("/api/v1/workflows/executions?status=ACTIVE")
     assert response.status_code == 200
-    results = response.json()
+    body = response.json()
+    results = body["workflows"] if isinstance(body, dict) else body
     assert all(wf.get("status") == "ACTIVE" for wf in results)
 
 
@@ -283,16 +287,22 @@ async def test_get_workflow_executions_pagination(test_client, setup_test_workfl
 
     all_resp = test_client.get("/api/v1/workflows/executions?limit=10&offset=0")
     assert all_resp.status_code == 200
-    total = len(all_resp.json())
+    all_body = all_resp.json()
+    all_workflows = all_body["workflows"] if isinstance(all_body, dict) else all_body
+    total = len(all_workflows)
     assert total >= 3
 
     limited_resp = test_client.get("/api/v1/workflows/executions?limit=1&offset=0")
     assert limited_resp.status_code == 200
-    assert len(limited_resp.json()) == 1
+    limited_body = limited_resp.json()
+    limited_workflows = limited_body["workflows"] if isinstance(limited_body, dict) else limited_body
+    assert len(limited_workflows) == 1
 
     offset_resp = test_client.get(f"/api/v1/workflows/executions?limit=10&offset={total}")
     assert offset_resp.status_code == 200
-    assert len(offset_resp.json()) == 0
+    offset_body = offset_resp.json()
+    offset_workflows = offset_body["workflows"] if isinstance(offset_body, dict) else offset_body
+    assert len(offset_workflows) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -417,7 +427,7 @@ async def test_retry_endpoint_success(test_client, setup_test_workflow):
 
         # Verify workflow status changed to ACTIVE
         updated_workflow = await persistence.load_workflow(str(workflow_id))
-        assert updated_workflow["status"] == "ACTIVE"
+        assert updated_workflow.status == "ACTIVE"
 
         # Verify Celery task was dispatched
         mock_task.delay.assert_called_once()
@@ -475,8 +485,8 @@ async def test_rewind_endpoint_success(test_client, setup_test_workflow):
     assert response.json()["current_step"] == "Step1"
 
     updated_workflow = await persistence.load_workflow(str(workflow_id))
-    assert updated_workflow["current_step"] == "Step1"
-    assert updated_workflow["status"] == "ACTIVE"
+    assert updated_workflow.current_step == "Step1"
+    assert updated_workflow.status == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -514,7 +524,8 @@ async def test_resume_endpoint_success(test_client, setup_test_workflow):
     workflow_id = workflow.id
 
     # Manually set status to WAITING_HUMAN in persistence
-    workflow_dict = await persistence.load_workflow(str(workflow_id))
+    wf_record = await persistence.load_workflow(str(workflow_id))
+    workflow_dict = {f: getattr(wf_record, f) for f in wf_record.__struct_fields__}
     workflow_dict["status"] = "WAITING_HUMAN"
     await persistence.save_workflow(str(workflow_id), workflow_dict)
 

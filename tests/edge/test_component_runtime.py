@@ -91,6 +91,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_component_binary_returns_merged_dict(self):
         import hashlib
+        from rufus.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -99,19 +100,21 @@ class TestComponentStepRuntimeComponentPath:
         runtime = ComponentStepRuntime(resolver)
 
         # Patch the synchronous _call_component
-        with patch.object(
-            ComponentStepRuntime,
-            "_call_component",
-            return_value='{"risk_score": 42}',
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {"amount": 100})
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(
+                ComponentStepRuntime,
+                "_call_component",
+                return_value='{"risk_score": 42}',
+            ):
+                config = make_config(wasm_hash=wasm_hash)
+                result = await runtime.execute(config, {"amount": 100})
 
         assert result == {"risk_score": 42}
 
     @pytest.mark.asyncio
     async def test_state_mapping_filters_input(self):
         import hashlib
+        from rufus.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -125,12 +128,13 @@ class TestComponentStepRuntimeComponentPath:
             captured_state_json.append(state_json)
             return '{"ok": true}'
 
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(
-                wasm_hash=wasm_hash,
-                state_mapping={"amount": "txn_amount"},  # state_key → wasm_key
-            )
-            await runtime.execute(config, {"amount": 50, "card": "tok_xxx"})
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
+                config = make_config(
+                    wasm_hash=wasm_hash,
+                    state_mapping={"amount": "txn_amount"},  # state_key → wasm_key
+                )
+                await runtime.execute(config, {"amount": 50, "card": "tok_xxx"})
 
         sent = json.loads(captured_state_json[0])
         assert "txn_amount" in sent
@@ -139,6 +143,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_fallback_skip_on_error(self):
         import hashlib
+        from rufus.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -149,15 +154,17 @@ class TestComponentStepRuntimeComponentPath:
         def fake_call(*a, **k):
             raise RuntimeError("simulated error")
 
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(wasm_hash=wasm_hash, fallback_on_error="skip")
-            result = await runtime.execute(config, {})
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
+                config = make_config(wasm_hash=wasm_hash, fallback_on_error="skip")
+                result = await runtime.execute(config, {})
 
         assert result == {}
 
     @pytest.mark.asyncio
     async def test_fallback_default_on_error(self):
         import hashlib
+        from rufus.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -168,13 +175,14 @@ class TestComponentStepRuntimeComponentPath:
         def fake_call(*a, **k):
             raise RuntimeError("simulated error")
 
-        with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
-            config = make_config(
-                wasm_hash=wasm_hash,
-                fallback_on_error="default",
-                default_result={"risk_score": 0},
-            )
-            result = await runtime.execute(config, {})
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(ComponentStepRuntime, "_call_component", side_effect=fake_call):
+                config = make_config(
+                    wasm_hash=wasm_hash,
+                    fallback_on_error="default",
+                    default_result={"risk_score": 0},
+                )
+                result = await runtime.execute(config, {})
 
         assert result == {"risk_score": 0}
 
@@ -232,13 +240,15 @@ class TestWasmRuntimeCMDelegation:
 
         runtime = WasmRuntime(resolver)
 
-        with patch.object(
-            ComponentStepRuntime,
-            "_call_component",
-            return_value='{"delegated": true}',
-        ):
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {})
+        from rufus.implementations.execution import component_runtime as _crt
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(
+                ComponentStepRuntime,
+                "_call_component",
+                return_value='{"delegated": true}',
+            ):
+                config = make_config(wasm_hash=wasm_hash)
+                result = await runtime.execute(config, {})
 
         assert result == {"delegated": True}
 
@@ -298,6 +308,7 @@ class TestComponentStepRuntimeBridgeIntegration:
     async def test_cloud_path_unchanged_when_bridge_is_none(self):
         """Without a bridge, the default _call_component (wasmtime) path runs."""
         import hashlib
+        from rufus.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -305,13 +316,15 @@ class TestComponentStepRuntimeBridgeIntegration:
 
         runtime = ComponentStepRuntime(resolver, bridge=None)
 
-        with patch.object(
-            ComponentStepRuntime,
-            "_call_component",
-            return_value='{"cloud": true}',
-        ) as mock_native:
-            config = make_config(wasm_hash=wasm_hash)
-            result = await runtime.execute(config, {})
+        # Simulate wasmtime pool unavailable so the fallback _call_component path triggers
+        with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
+            with patch.object(
+                ComponentStepRuntime,
+                "_call_component",
+                return_value='{"cloud": true}',
+            ) as mock_native:
+                config = make_config(wasm_hash=wasm_hash)
+                result = await runtime.execute(config, {})
 
         mock_native.assert_called_once()
         assert result == {"cloud": True}

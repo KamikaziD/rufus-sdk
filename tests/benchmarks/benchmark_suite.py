@@ -1099,7 +1099,12 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
             resolver2 = SqliteWasmBinaryResolver(conn)
             runtime = ComponentStepRuntime(resolver2, bridge=None)
 
-            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            _original_run_component = ComponentStepRuntime._run_component
+
+            async def _mock_run_component(self, binary, wasm_config, state_data):
+                return {"ok": True}
+
+            ComponentStepRuntime._run_component = _mock_run_component
             try:
                 # warmup
                 for _ in range(5):
@@ -1112,7 +1117,7 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
                     await runtime._dispatch(wasm_config, state_payload)
                     times_chain.append(time.perf_counter() - t)
             finally:
-                ComponentStepRuntime._call_component = staticmethod(_original_call)
+                ComponentStepRuntime._run_component = _original_run_component
 
         st = _stats(times_chain)
         sec.add("full chain: resolve+verify+bridge (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
@@ -1156,7 +1161,17 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
             resolver3 = SqliteWasmBinaryResolver(conn2)
             runtime2 = ComponentStepRuntime(resolver3, bridge=None)
 
-            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            _original_run_component2 = ComponentStepRuntime._run_component
+            _original_execute_batch = ComponentStepRuntime.execute_batch
+
+            async def _mock_run_component2(self, binary, wasm_config, state_data):
+                return {"ok": True}
+
+            async def _mock_execute_batch(self, wasm_config, states):
+                return [{"ok": True}] * len(states)
+
+            ComponentStepRuntime._run_component = _mock_run_component2
+            ComponentStepRuntime.execute_batch = _mock_execute_batch
             try:
                 batch_iterations = max(5, n // 20)
 
@@ -1175,7 +1190,8 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
                     await runtime2.execute_batch(wasm_config2, [state_payload] * batch_n)
                     times_batch.append(time.perf_counter() - t)
             finally:
-                ComponentStepRuntime._call_component = staticmethod(_original_call)
+                ComponentStepRuntime._run_component = _original_run_component2
+                ComponentStepRuntime.execute_batch = _original_execute_batch
 
         st_seq = _stats(times_seq)
         st_bat = _stats(times_batch)

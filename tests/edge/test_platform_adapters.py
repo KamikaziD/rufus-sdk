@@ -209,8 +209,10 @@ class TestDetectPlatform:
         if sys.platform == "wasm32":
             pytest.skip("Running inside WASM")
 
-        # Remove any stub 'js' module that earlier tests may have injected
+        # Remove any stub 'js' / 'pyodide' modules that earlier tests may have injected
         monkeypatch.delitem(sys.modules, "js", raising=False)
+        monkeypatch.delitem(sys.modules, "pyodide", raising=False)
+        monkeypatch.delitem(sys.modules, "pyodide.ffi", raising=False)
 
         # Reload the platform package so detect_platform() re-evaluates
         import rufus_edge.platform as platform_pkg
