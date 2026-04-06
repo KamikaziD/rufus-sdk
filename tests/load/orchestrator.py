@@ -309,6 +309,13 @@ class LoadTestOrchestrator:
                 register_with_server=not _local_only,
             )
 
+        # Reset per-device metrics so each scenario gets a clean slate.
+        # DeviceMetrics accumulates across calls otherwise, making scenario N
+        # include all data from scenarios 1…N-1.
+        for device in self._devices:
+            device.metrics.reset()
+        self._aggregated_metrics.clear()
+
         # Start timer
         start_time = time.time()
 
@@ -472,7 +479,9 @@ class LoadTestOrchestrator:
             async with semaphore:
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as client:
-                        # Check if device already exists (idempotent mode)
+                        # For idempotent mode: delete any pre-existing device so we always
+                        # get a fresh API key back from registration (the GET endpoint never
+                        # returns api_key, so re-use without deletion = 401 on SAF sync).
                         if idempotent:
                             check_response = await client.get(
                                 f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
@@ -480,16 +489,14 @@ class LoadTestOrchestrator:
                             )
 
                             if check_response.status_code == 200:
-                                data = check_response.json()
-                                existing_api_key = data.get("api_key")
-                                if existing_api_key:
-                                    device.config.api_key = existing_api_key
-                                    if device._http_client:
-                                        await device._http_client.aclose()
-                                    device._http_client = None  # Recreate lazily with new api_key
-                                    logger.debug(
-                                        f"Device {device.config.device_id} already registered (using existing)")
-                                    return True
+                                # Delete so re-registration returns a known key
+                                await client.delete(
+                                    f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                                    headers={"X-Registration-Key": registration_key}
+                                )
+                                logger.debug(
+                                    f"Device {device.config.device_id} existed — deleted for fresh key"
+                                )
 
                         # Register new device
                         response = await client.post(

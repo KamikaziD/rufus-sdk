@@ -10,6 +10,7 @@ import hmac
 import logging
 import os
 import random
+import secrets
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
@@ -73,6 +74,15 @@ async def _get_shared_nats(nats_url: str):
         try:
             _NATS_NC = await _nats_mod.connect(servers=[nats_url])
             _NATS_JS = _NATS_NC.jetstream()
+            # Ensure the gossip stream exists (created once; idempotent on re-run)
+            try:
+                await _NATS_JS.add_stream(
+                    name="RUVON_GOSSIP",
+                    subjects=["ruvon.mesh.capabilities"],
+                    max_msgs=100_000,
+                )
+            except Exception:
+                pass  # Stream already exists — not an error
             logger.info(f"[nats_transport] Shared NATS connection established: {nats_url}")
         except Exception as exc:
             logger.error(f"[nats_transport] Cannot connect to NATS at {nats_url}: {exc}")
@@ -132,6 +142,32 @@ class DeviceMetrics:
     nkey_verifications: int = 0
     nkey_failures: int = 0
     nkey_verify_latencies: List[float] = field(default_factory=list)
+
+    def reset(self):
+        """Reset all counters and latency lists to zero (call before each scenario)."""
+        self.heartbeats_sent = 0
+        self.heartbeat_failures = 0
+        self.transactions_synced = 0
+        self.sync_failures = 0
+        self.configs_downloaded = 0
+        self.config_failures = 0
+        self.commands_received = 0
+        self.command_failures = 0
+        self.total_requests = 0
+        self.total_errors = 0
+        self.errors_5xx = 0
+        self.errors_4xx = 0
+        self.errors_timeout = 0
+        self.latencies = []
+        self.wasm_steps_executed = 0
+        self.wasm_step_failures = 0
+        self.wasm_execution_latencies = []
+        self.gossip_broadcasts = 0
+        self.gossip_failures = 0
+        self.gossip_broadcast_latencies = []
+        self.nkey_verifications = 0
+        self.nkey_failures = 0
+        self.nkey_verify_latencies = []
 
 
 class SimulatedEdgeDevice:
@@ -303,7 +339,7 @@ class SimulatedEdgeDevice:
             if scenario == "heartbeat":
                 await self._heartbeat_scenario(duration_seconds)
             elif scenario == "saf_sync":
-                await self._saf_sync_scenario()
+                await self._saf_sync_scenario(duration_seconds)
             elif scenario == "thundering_herd":
                 await self._thundering_herd_scenario()
             elif scenario == "config_poll":
@@ -313,7 +349,7 @@ class SimulatedEdgeDevice:
             elif scenario == "wasm_steps":
                 await self._wasm_steps_scenario(duration_seconds)
             elif scenario == "wasm_thundering_herd":
-                await self._wasm_thundering_herd_scenario()
+                await self._wasm_thundering_herd_scenario(duration_seconds)
             elif scenario == "msgspec_codec":
                 # msgspec_codec is a heartbeat run with a server-side preflight already done
                 # by ScenarioRunner.run_msgspec_codec_test(). Devices just run heartbeat.
@@ -429,41 +465,40 @@ class SimulatedEdgeDevice:
     # Scenario 2: Store-and-Forward Bulk Sync
     # -------------------------------------------------------------------------
 
-    async def _saf_sync_scenario(self):
+    async def _saf_sync_scenario(self, duration_seconds: int = 300):
         """
-        Generate offline transactions and sync to cloud.
+        Continuously sync a fixed transaction pool for the full test duration.
 
-        Simulates device going offline, queuing transactions, then syncing.
+        The pool is generated once. Subsequent syncs re-send the same
+        idempotency keys — the server deduplicates (ON CONFLICT DO NOTHING),
+        so the DB stays bounded while we measure HTTP + auth + idempotency
+        throughput at realistic concurrency.
         """
-        # Step 1: Generate offline transactions
-        num_transactions = random.randint(50, 150)
-        logger.info(
-            f"Device {self.config.device_id} generating {num_transactions} "
-            f"offline transactions"
-        )
+        # Build a fixed pool once; pool size = one full batch per device
+        pool_size = self.config.saf_batch_size
+        transaction_pool = [self._generate_transaction(i) for i in range(pool_size)]
 
-        for i in range(num_transactions):
-            transaction = self._generate_transaction(i)
-            self._pending_transactions.append(transaction)
+        end_time = time.time() + duration_seconds
 
-        # Step 2: Sync to cloud in batches
-        while self._pending_transactions and self._running:
-            batch = self._pending_transactions[:self.config.saf_batch_size]
-            success = await self._sync_batch(batch)
+        while time.time() < end_time and self._running:
+            # Pick a random slice of the pool each cycle to vary payload size
+            batch_size = random.randint(5, pool_size)
+            transactions = random.sample(transaction_pool, batch_size)
+
+            success = await self._sync_batch(transactions)
 
             if success:
-                # Remove synced transactions
-                self._pending_transactions = self._pending_transactions[len(batch):]
-                self.metrics.transactions_synced += len(batch)
+                self.metrics.transactions_synced += len(transactions)
             else:
                 self.metrics.sync_failures += 1
-                # Retry after delay
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
 
-        logger.info(
-            f"Device {self.config.device_id} completed SAF sync: "
-            f"{self.metrics.transactions_synced} synced"
-        )
+            # Report metrics after each sync so the progress tracker sees live data
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Stagger to avoid lock-step bursts across 1000 devices
+            await asyncio.sleep(random.uniform(0.5, 2.0))
 
     def _generate_transaction(self, index: int) -> Dict[str, Any]:
         """Generate a simulated SAF transaction."""
@@ -507,18 +542,16 @@ class SimulatedEdgeDevice:
     async def _sync_batch(self, transactions: List[Dict[str, Any]]) -> bool:
         """Sync a batch of transactions to cloud with retry logic."""
         try:
-            # Retry sync with exponential backoff
+            # Retry sync with exponential backoff (timeout errors only — 4xx/5xx handled below)
             async def send_sync():
-                response = await self._get_http_client().post(
+                return await self._get_http_client().post(
                     f"{self.config.cloud_url}/api/v1/devices/{self.config.device_id}/sync",
                     json={
                         "transactions": transactions,
-                        "device_sequence": 0,  # TODO: Track sequence
+                        "device_sequence": 0,
                         "device_timestamp": datetime.utcnow().isoformat(),
                     }
                 )
-                response.raise_for_status()
-                return response
 
             t0 = time.perf_counter()
             response = await self._retry_with_backoff("SAF sync", send_sync)
@@ -546,7 +579,9 @@ class SimulatedEdgeDevice:
                 return False
 
         except Exception as e:
+            # Network/timeout errors where no response was received
             logger.error(f"Sync error for {self.config.device_id}: {e}", exc_info=True)
+            self.metrics.total_requests += 1
             self.metrics.total_errors += 1
             return False
 
@@ -600,6 +635,11 @@ class SimulatedEdgeDevice:
 
         Simulates device checking for new configurations.
         """
+        # Spread the initial poll randomly across the poll interval so that
+        # 1000 devices don't all fire simultaneously at t=0 (and every 60s).
+        startup_jitter = random.uniform(0, self.config.config_poll_interval)
+        await asyncio.sleep(startup_jitter)
+
         end_time = time.time() + duration_seconds
 
         while time.time() < end_time and self._running:
@@ -853,7 +893,7 @@ class SimulatedEdgeDevice:
     # Scenario 6: WASM Thundering Herd
     # -------------------------------------------------------------------------
 
-    async def _wasm_thundering_herd_scenario(self):
+    async def _wasm_thundering_herd_scenario(self, duration_seconds: int = 60):
         """
         Coordinated burst: all devices simultaneously dispatch WASM steps.
 
@@ -870,6 +910,8 @@ class SimulatedEdgeDevice:
         Phase 1 (prep): build state payload and warm the resolver (no network).
         Phase 2 (wait): block on orchestrator's go_event barrier.
         Phase 3 (fire): dispatch wasm_steps_per_sync steps back-to-back.
+        Phase 4 (sustain): continue firing bursts every few seconds until
+        duration_seconds expires — sustains >= 0.8 steps/device/sec.
 
         When the orchestrator pre-injects a shared runtime (via _wasm_runtime /
         _wasm_config attributes) the per-device setup and warmup resolve are
@@ -894,6 +936,8 @@ class SimulatedEdgeDevice:
             "device_id": self.config.device_id,
             "currency": "USD",
         }
+
+        scenario_end_time = time.time() + duration_seconds
 
         logger.debug(
             f"Device {self.config.device_id} ready for WASM thundering herd"
@@ -935,6 +979,39 @@ class SimulatedEdgeDevice:
 
         if self.metrics_callback:
             await self.metrics_callback(self.config.device_id, self.metrics)
+
+        # Phase 4: sustain — keep firing independent bursts until the duration
+        # window expires.  This is what drives the >= 0.8 steps/device/sec
+        # target: the coordinated go_event burst is the spike; the sustain loop
+        # fills the remaining test window so aggregate throughput stays on target.
+        # Inter-burst sleep is randomised (2–4 s) to spread asyncio scheduling
+        # load rather than producing a second synchronized spike.
+        # Subtract a small buffer to avoid overshooting the duration window.
+        while time.time() < scenario_end_time - 0.5 and self._running:
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+            if not self._running or time.time() >= scenario_end_time:
+                break
+            if self._wasm_runtime is None or self._wasm_config is None:
+                break
+            try:
+                if hasattr(self._wasm_runtime, 'execute_batch'):
+                    res = await self._wasm_runtime.execute_batch(
+                        self._wasm_config, [state_data] * num_steps
+                    )
+                    self.metrics.wasm_steps_executed += len(res)
+                else:
+                    for _ in range(num_steps):
+                        st = time.perf_counter()
+                        await self._wasm_runtime.execute(self._wasm_config, state_data)
+                        self.metrics.wasm_execution_latencies.append(
+                            time.perf_counter() - st
+                        )
+                        self.metrics.wasm_steps_executed += 1
+            except Exception as exc:
+                self.metrics.wasm_step_failures += num_steps
+                logger.debug(f"WASM sustain dispatch error: {exc}")
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
 
     # -------------------------------------------------------------------------
     # Scenario 8: NATS Transport Publish Latency

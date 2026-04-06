@@ -28,15 +28,21 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from tests.load.orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults
 
-# Configure logging
+# Configure logging: INFO to file, WARNING-only to console (suppress httpx per-request noise)
+_file_handler = logging.FileHandler('load_test.log')
+_file_handler.setLevel(logging.INFO)
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.WARNING)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('load_test.log')
-    ]
+    handlers=[_console_handler, _file_handler]
 )
+
+# Suppress per-request httpx/httpcore noise from console
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +240,19 @@ def print_results(results: LoadTestResults, workers: int = 1):
         print(f"Transaction Rate >= {throughput_target} tx/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({tx_per_sec:.1f} tx/s)")
 
     elif results.scenario == "config_poll":
-        # Target: config polling should sustain reasonable rate
-        throughput_target = results.num_devices / 60  # ~1 poll per device per minute
-        throughput_pass = results.requests_per_second >= throughput_target * 0.9
-        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+        # Target: ~1 poll per device per minute.
+        # Effective duration subtracts one poll_interval because:
+        #   - startup jitter (0–poll_interval s) delays first poll per device
+        #   - devices sleep poll_interval after their last poll before exiting
+        # This means wall-clock duration is up to 2×poll_interval longer than
+        # the requested test window; subtracting one interval gives the active
+        # polling period (matching the heartbeat / msgspec effective-duration logic).
+        poll_interval = 60  # seconds — matches DeviceConfig default
+        throughput_target = results.num_devices / poll_interval
+        effective_duration = max(results.duration_seconds - poll_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        throughput_pass = effective_rps >= throughput_target * 0.9
+        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({effective_rps:.1f} req/s effective)")
 
     elif results.scenario == "cloud_commands":
         # Target: command delivery within heartbeat cycle
@@ -324,11 +339,18 @@ def print_results(results: LoadTestResults, workers: int = 1):
 
     elif results.scenario == "msgspec_codec":
         rps = results.total_requests / results.duration_seconds if results.duration_seconds > 0 else 0
-        rps_pass = rps >= 50.0  # sanity floor — preflight + heartbeat should always clear this
+        # Target: devices / heartbeat_interval (each device sends one heartbeat every 30s).
+        # Effective duration accounts for the stagger ramp (up to heartbeat_interval seconds
+        # before the first device fires), matching the heartbeat scenario accounting.
+        heartbeat_interval = 30
+        rps_target = results.num_devices / heartbeat_interval
+        effective_duration = max(results.duration_seconds - heartbeat_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        rps_pass = effective_rps >= rps_target * 0.9
         print(f"Devices:              {results.num_devices:,}")
         print(f"Requests:             {results.total_requests:,}")
         print(f"Heartbeats sent:      {results.heartbeats_sent:,}")
-        print(f"Req/sec >= 50:        {'✅ PASS' if rps_pass else '❌ FAIL'} ({rps:.1f} req/sec)")
+        print(f"Req/sec >= {rps_target:.1f}:   {'✅ PASS' if rps_pass else '❌ FAIL'} ({effective_rps:.1f} req/sec effective)")
         print(f"Error rate:           {results.error_rate:.2f}%")
 
     elif results.scenario == "nats_transport":
@@ -474,14 +496,19 @@ async def run_all_scenarios(
     num_devices: int,
     output_dir: str,
     workers: int = 4,
+    max_duration_per_scenario: int = None,
 ):
     """
     Run all test scenarios with shared devices.
 
     Devices are registered once at the start, used across all scenarios,
     and cleaned up once at the end. This avoids 401 errors and is more efficient.
+
+    Args:
+        max_duration_per_scenario: If set, caps each scenario duration to this many
+            seconds (e.g. pass --duration 60 for a quick smoke run).
     """
-    scenarios = [
+    _DEFAULT_DURATIONS = [
         ("heartbeat", 600),
         ("saf_sync", 300),
         ("config_poll", 600),
@@ -493,6 +520,14 @@ async def run_all_scenarios(
         ("ruvon_gossip", 120),
         ("nkey_patch", 120),
     ]
+    if max_duration_per_scenario:
+        scenarios = [(s, min(d, max_duration_per_scenario)) for s, d in _DEFAULT_DURATIONS]
+    else:
+        scenarios = _DEFAULT_DURATIONS
+
+    total_sec = sum(d for _, d in scenarios) + 5 * (len(scenarios) - 1)
+    print(f"\nTotal estimated run time: {total_sec // 60}m {total_sec % 60}s "
+          f"({len(scenarios)} scenarios, {num_devices} devices)\n")
 
     # Create single orchestrator for all scenarios
     logger.info("="*80)
@@ -508,10 +543,9 @@ async def run_all_scenarios(
 
     try:
         # Setup devices once (register with control plane)
-        logger.info("\n" + "="*80)
-        logger.info("DEVICE SETUP - Registering devices for all scenarios")
-        logger.info("="*80)
+        print(f"Setting up {num_devices} devices (register once for all scenarios)...", flush=True)
         await orchestrator.setup_devices(num_devices, cleanup_first=True)
+        print(f"Device setup complete.\n", flush=True)
 
         all_results = []
 
@@ -523,10 +557,25 @@ async def run_all_scenarios(
 
             output_file = f"{output_dir}/{scenario}_results.json" if output_dir else None
 
+            idx = next(i for i, (s, _) in enumerate(scenarios) if s == scenario)
+            print(f"[{idx + 1}/{len(scenarios)}] {scenario.upper()} — {duration}s", flush=True)
+
+            def _progress(progress: dict, _s=scenario, _d=duration):
+                elapsed = int(progress.get("elapsed_seconds", 0))
+                pct = min(elapsed / _d * 100, 100) if _d else 0
+                print(
+                    f"  {_s}: {pct:5.1f}%  "
+                    f"req={progress['total_requests']:,}  "
+                    f"err={progress['total_errors']:,}  "
+                    f"{progress['requests_per_second']:.1f} req/s",
+                    flush=True,
+                )
+
             # Run scenario (skip device setup since we already did it)
             results = await orchestrator.run_scenario(
                 scenario=scenario,
                 duration_seconds=duration,
+                progress_callback=_progress,
                 skip_device_setup=True  # Use existing devices
             )
 
@@ -568,10 +617,9 @@ async def run_all_scenarios(
 
     finally:
         # Cleanup devices once at the end
-        logger.info("\n" + "="*80)
-        logger.info("DEVICE TEARDOWN - Cleaning up all devices")
-        logger.info("="*80)
+        print("\nTearing down devices...", flush=True)
         await orchestrator.teardown_devices()
+        print("Done.", flush=True)
         logger.info("Load test complete!")
 
 
@@ -656,8 +704,11 @@ Scenarios:
     parser.add_argument(
         "--duration",
         type=int,
-        default=600,
-        help="Test duration in seconds (default: 600)"
+        default=None,
+        help=(
+            "Test duration in seconds. With --scenario: sets the run length (default 600). "
+            "With --all: caps each scenario to this duration (default: use scenario defaults)."
+        )
     )
 
     parser.add_argument(
@@ -719,13 +770,14 @@ Scenarios:
                 num_devices=args.devices,
                 output_dir=args.output_dir,
                 workers=args.workers,
+                max_duration_per_scenario=args.duration,
             ))
         else:
             results = asyncio.run(run_single_scenario(
                 cloud_url=args.cloud_url,
                 scenario=args.scenario,
                 num_devices=args.devices,
-                duration=args.duration,
+                duration=args.duration or 600,
                 output_file=args.output
             ))
 

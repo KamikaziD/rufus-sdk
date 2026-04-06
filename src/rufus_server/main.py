@@ -112,6 +112,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Heartbeat staleness threshold — devices not seen within this window are shown as offline.
+# Browser/demo devices send heartbeats every ~15 s; edge agents every 30 s.
+# Default: 300 s (5 min) to avoid false-positive offline flips during brief disconnects.
+_HEARTBEAT_TIMEOUT_SECONDS = int(os.getenv("RUFUS_HEARTBEAT_TIMEOUT_SECONDS", "300"))
+
 
 # --- Device Service ---
 from rufus_server.device_service import DeviceService
@@ -1694,7 +1699,7 @@ async def list_devices(
 
     # Update device statuses based on heartbeat timestamps
     from datetime import datetime, timedelta, timezone
-    offline_threshold = timedelta(seconds=120)  # 2 minutes
+    offline_threshold = timedelta(seconds=_HEARTBEAT_TIMEOUT_SECONDS)
     now = datetime.now(timezone.utc)  # Use timezone-aware datetime
 
     for device in devices:
@@ -1737,7 +1742,7 @@ async def get_device(
 
     # Apply same heartbeat-based offline detection as list_devices
     from datetime import datetime, timedelta, timezone
-    offline_threshold = timedelta(seconds=120)
+    offline_threshold = timedelta(seconds=_HEARTBEAT_TIMEOUT_SECONDS)
     now = datetime.now(timezone.utc)
     if isinstance(device, dict):
         last_heartbeat = device.get('last_heartbeat_at')

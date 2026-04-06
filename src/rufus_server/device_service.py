@@ -13,7 +13,7 @@ import hmac as hmac_lib
 import json
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import logging
 
@@ -694,6 +694,8 @@ class DeviceService:
 
         async with self.persistence.pool.acquire() as conn:
             # Update device heartbeat (include mesh_advisory when present)
+            # Use naive UTC: asyncpg requires naive datetime for TIMESTAMP WITHOUT TIME ZONE columns
+            _now = datetime.now(timezone.utc).replace(tzinfo=None)
             if vector_advisory is not None:
                 await conn.execute(
                     """
@@ -702,7 +704,7 @@ class DeviceService:
                         mesh_advisory = $4
                     WHERE device_id = $5
                     """,
-                    datetime.utcnow(),
+                    _now,
                     status,
                     json.dumps(metrics or {}),
                     json.dumps(vector_advisory),
@@ -715,7 +717,7 @@ class DeviceService:
                     SET last_heartbeat_at = $1, status = $2, metadata = $3
                     WHERE device_id = $4
                     """,
-                    datetime.utcnow(),
+                    _now,
                     status,
                     json.dumps(metrics or {}),
                     device_id,

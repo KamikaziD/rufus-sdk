@@ -163,22 +163,4 @@ async def acknowledge_decision(device_id: str, decision_id: str) -> ApprovalDeci
     )
 
 
-@router.post(
-    "/{device_id}/heartbeat",
-    status_code=status.HTTP_200_OK,
-    summary="Receive a health heartbeat from a healthy device",
-)
-async def receive_heartbeat(device_id: str, payload: Dict) -> Dict:
-    """Called by the sidecar when health_score >= 0.7 (no action needed).
-
-    Stores the last-known health state for the device registry dashboard.
-    """
-    logger.debug(
-        "[DeviceApprovals] Heartbeat from %s: health_score=%.2f",
-        device_id, payload.get("health_score", 0),
-    )
-    return {"status": "ok", "device_id": device_id}
-
-
-# Fix missing import
-from typing import Dict  # noqa: E402 (moved to satisfy linter)
+from typing import Dict  # noqa: E402
