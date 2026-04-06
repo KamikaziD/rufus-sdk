@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rufus — Tab-to-Tab Pod Mesh</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --t1: #e3b341;
+    --t2: #58a6ff;
+    --t3: #3fb950;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; color: var(--accent); letter-spacing: 0.5px; }
+  .pod-badge {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #1f2937;
+  }
+  .role-badge {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: bold;
+  }
+  .role-sovereign { background: #1a3a1a; border: 1px solid var(--green); color: var(--green); }
+  .role-relay     { background: #1a2a3a; border: 1px solid var(--accent); color: var(--accent); }
+  .role-offline   { background: #2a1a1a; border: 1px solid var(--red);    color: var(--red); }
+  .tier-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-weight: bold;
+  }
+  .t1 { background: #2a2000; border: 1px solid var(--t1); color: var(--t1); }
+  .t2 { background: #001a2a; border: 1px solid var(--t2); color: var(--t2); }
+  .t3 { background: #001a00; border: 1px solid var(--t3); color: var(--t3); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  @media (max-width: 800px) { .main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .card h2 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+
+  /* Mesh topology canvas */
+  #mesh-canvas {
+    width: 100%;
+    height: 220px;
+    border-radius: 6px;
+    background: #0a0f14;
+    display: block;
+  }
+
+  /* Peer table */
+  .peer-table { width: 100%; border-collapse: collapse; }
+  .peer-table th { color: var(--muted); font-size: 11px; text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  .peer-table td { padding: 4px 6px; font-size: 12px; border-bottom: 1px solid #1c2128; }
+  .peer-table tr.own td { color: var(--accent); }
+  .score-bar {
+    display: inline-block;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+
+  /* Controls */
+  .controls { display: flex; flex-direction: column; gap: 8px; }
+  button {
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #1f2937;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: background 0.15s;
+  }
+  button:hover { background: #2d3748; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button.danger  { border-color: var(--red);    color: var(--red); }
+  button.success { border-color: var(--green);  color: var(--green); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: #0a0f14; border-radius: 6px; padding: 8px 10px; }
+  .stat .val { font-size: 18px; font-weight: bold; color: var(--accent); }
+  .stat .lbl { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  /* Event log */
+  #log {
+    height: 200px;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted);
+    background: #0a0f14;
+    border-radius: 6px;
+    padding: 8px;
+  }
+  #log .ts   { color: #444; margin-right: 6px; }
+  #log .info { color: var(--text); }
+  #log .good { color: var(--green); }
+  #log .warn { color: var(--yellow); }
+  #log .err  { color: var(--red); }
+  #log .relay { color: var(--purple); }
+
+  /* ── Group Key Modal ──────────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 28px 32px; min-width: 340px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .modal-box h2 { font-size: 14px; color: var(--accent); margin: 0; }
+  .modal-box label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .modal-box input {
+    width: 100%; background: #0a0f14; border: 1px solid var(--border);
+    border-radius: 5px; color: var(--text); font-family: inherit;
+    font-size: 13px; padding: 7px 10px;
+  }
+  .modal-box input:focus { outline: 1px solid var(--accent); }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+<script src="./peerjs.min.js"></script>
+</head>
+<body>
+
+<!-- Group Key Modal -->
+<div class="modal-overlay hidden" id="group-modal">
+  <div class="modal-box">
+    <h2>Join Rufus Pod Mesh</h2>
+    <div>
+      <label for="input-group-key">Group Key</label>
+      <input id="input-group-key" type="text" placeholder="team-alpha-42" maxlength="40" />
+    </div>
+    <div>
+      <label for="input-nickname">Nickname (optional)</label>
+      <input id="input-nickname" type="text" placeholder="My Pod" maxlength="24" />
+    </div>
+    <div class="modal-footer">
+      <button onclick="generateGroupKey()" style="margin-right:auto">Generate Key</button>
+      <button onclick="joinLocalOnly()">Local Only</button>
+      <button onclick="joinMesh()" class="primary">Join Mesh ↗</button>
+    </div>
+    <div style="font-size:10px; color:var(--muted); line-height:1.6">
+      <strong>Local Only</strong>: BroadcastChannel — same device tabs, no server.<br>
+      <strong>Join Mesh</strong>: PeerJS WebRTC — cross-device, serverless via peerjs.com.<br>
+      <a href="about.html" target="_blank" style="color:var(--accent)">How does this work? →</a>
+    </div>
+  </div>
+</div>
+
+<header>
+  <h1>Rufus — Tab-to-Tab Pod Mesh</h1>
+  <span class="pod-badge" id="pod-id-display">Initialising…</span>
+  <span class="role-badge role-relay" id="role-display">RELAY</span>
+  <span class="tier-badge t2" id="tier-display">T2</span>
+  <span id="mesh-group-badge" style="display:none; font-size:11px; color:var(--muted)">
+    Mesh: <span id="badge-group-name" style="color:var(--accent)">—</span>
+    (<span id="badge-local-count">0</span> local •
+     <span id="badge-remote-count">0</span> remote)
+  </span>
+  <span style="margin-left:auto; color: var(--muted); font-size:11px" id="transport-desc">
+    BroadcastChannel("rufus-mesh") — no server required
+  </span>
+  <button id="btn-share-link" style="display:none; font-size:11px; padding:4px 10px"
+          onclick="copyShareLink()">Share Link</button>
+  <a href="about.html" target="_blank"
+     style="font-size:11px; color:var(--muted); text-decoration:none; padding:4px 10px;
+            border:1px solid var(--border); border-radius:4px;"
+     onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
+    About ↗</a>
+</header>
+
+<div class="main">
+  <!-- Left column -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+
+    <!-- Mesh topology -->
+    <div class="card">
+      <h2>Mesh Topology</h2>
+      <canvas id="mesh-canvas"></canvas>
+    </div>
+
+    <!-- Peer table -->
+    <div class="card">
+      <h2>Connected Pods</h2>
+      <table class="peer-table" id="peer-table">
+        <thead>
+          <tr>
+            <th>Pod ID</th><th>Tier</th><th>Score</th><th>CPU</th><th>RAM (MB)</th><th>Queue</th><th>Age</th><th>Src</th>
+          </tr>
+        </thead>
+        <tbody id="peer-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Event log -->
+    <div class="card">
+      <h2>Event Log</h2>
+      <div id="log"></div>
+    </div>
+
+  </div>
+
+  <!-- Right column -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+
+    <!-- Stats -->
+    <div class="card">
+      <h2>Stats</h2>
+      <div class="stats-grid">
+        <div class="stat"><div class="val" id="stat-peers">0</div><div class="lbl">Connected Pods</div></div>
+        <div class="stat"><div class="val" id="stat-score">0.00</div><div class="lbl">My Score S(Vc)</div></div>
+        <div class="stat"><div class="val" id="stat-tx">0</div><div class="lbl">Transactions Run</div></div>
+        <div class="stat"><div class="val" id="stat-relayed">0</div><div class="lbl">Relayed Txns</div></div>
+        <div class="stat"><div class="val" id="stat-saf">0</div><div class="lbl">SAF Queue Depth</div></div>
+        <div class="stat"><div class="val" id="stat-elections">0</div><div class="lbl">Elections</div></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button class="primary" onclick="openSecondPod()">Open Second Pod ↗</button>
+        <button onclick="runPayment()">Run Payment Workflow</button>
+        <button onclick="runBurst(5)">Burst 5 Payments</button>
+        <button id="btn-offline" class="danger" onclick="toggleOffline()">Simulate Offline</button>
+        <hr style="border-color:var(--border)">
+        <button onclick="clearLog()">Clear Log</button>
+      </div>
+    </div>
+
+    <!-- Architecture note -->
+    <div class="card">
+      <h2>How it works</h2>
+      <div style="color:var(--muted); line-height:1.8; font-size:11px;">
+        <p>Each browser tab = an edge <strong style="color:var(--text)">Pod</strong>.</p>
+        <br>
+        <p><strong style="color:var(--t3)">Sovereign</strong> — highest S(Vc) score.<br>
+           Executes relay transactions + owns leadership.</p>
+        <br>
+        <p><strong style="color:var(--accent)">Relay</strong> — online but not leader.<br>
+           Routes transactions through Sovereign.</p>
+        <br>
+        <p><strong style="color:var(--red)">Offline</strong> — SAF mode.<br>
+           Queues transactions locally; flushes on restore.</p>
+        <br>
+        <p>Scoring: <code style="color:var(--accent)">S = 0.5·C + 0.15·(1/H) + 0.25·U + 0.1·P</code></p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let worker = null;
+let myPodId = null;
+let myTier = 2;
+let isSovereign = false;
+let isOffline = false;
+let peers = [];
+
+let statTx = 0;
+let statRelayed = 0;
+let statSaf = 0;
+let statElections = 0;
+
+// URL param: ?group=<key> enables auto-join
+const _urlGroupKey = new URLSearchParams(location.search).get("group");
+
+// ---------------------------------------------------------------------------
+// PeerJS state (main-thread; PeerJS can't run in a Web Worker)
+// ---------------------------------------------------------------------------
+let myPeer = null;       // this pod's Peer (ID = rufus-{groupKey}-{POD_ID})
+let anchorPeer = null;   // second Peer if this pod is the mesh anchor
+let dataChannels = {};   // peerId → DataConnection
+let _anchorTimeout = null;
+let _pendingGroupKey = null; // set in joinMesh(), consumed in READY handler
+
+// ---------------------------------------------------------------------------
+// Modal controls
+// ---------------------------------------------------------------------------
+function generateGroupKey() {
+  const words = ["alpha","beta","gamma","delta","echo","fox","ghost","hawk",
+                 "iron","jade","kilo","lima","mesa","nova","omega","pine"];
+  const w1 = words[Math.floor(Math.random() * words.length)];
+  const w2 = words[Math.floor(Math.random() * words.length)];
+  const n  = Math.floor(Math.random() * 90) + 10;
+  document.getElementById("input-group-key").value = `${w1}-${w2}-${n}`;
+}
+
+function joinLocalOnly() {
+  destroyPeerJS();
+  document.getElementById("group-modal").classList.add("hidden");
+  initWorker(null, null);
+  document.getElementById("transport-desc").textContent =
+    'BroadcastChannel("rufus-mesh") — local only';
+  log('Local-only mesh — BroadcastChannel, no server required', "info");
+}
+
+function joinMesh() {
+  const key = document.getElementById("input-group-key").value.trim();
+  if (!key) { generateGroupKey(); return; }
+  const nick = document.getElementById("input-nickname").value.trim() || null;
+  document.getElementById("group-modal").classList.add("hidden");
+
+  document.getElementById("badge-group-name").textContent = key;
+  document.getElementById("mesh-group-badge").style.display = "";
+  document.getElementById("btn-share-link").style.display = "";
+  document.getElementById("transport-desc").textContent =
+    `BroadcastChannel + PeerJS mesh — group: ${key}`;
+
+  _pendingGroupKey = key;  // consumed in READY handler once we have pod_id
+  initWorker(key, nick);
+  log(`Joined mesh group: ${key}`, "good");
+}
+
+// ---------------------------------------------------------------------------
+// PeerJS mesh manager
+// ---------------------------------------------------------------------------
+function sanitisePeerId(s) {
+  return s.replace(/[^a-zA-Z0-9\-_]/g, "-");
+}
+
+function initPeerJS(groupKey, podId) {
+  destroyPeerJS();
+  const myPeerId  = sanitisePeerId(`rufus-${groupKey}-${podId}`);
+  const anchorId  = sanitisePeerId(`rufus-${groupKey}-anchor`);
+
+  myPeer = new Peer(myPeerId);
+
+  myPeer.on("open", () => {
+    log("PeerJS connected — discovering peers…", "info");
+    // Try to reach the well-known anchor for this group
+    const anchorConn = myPeer.connect(anchorId, { reliable: true });
+    anchorConn.on("open", () => {
+      clearTimeout(_anchorTimeout);
+      _anchorTimeout = null;
+      setupDataChannel(anchorConn);
+      log("Joined existing mesh room via anchor", "good");
+    });
+    // No open event within 2.5s → we are the first pod, become anchor
+    _anchorTimeout = setTimeout(() => becomeAnchor(groupKey, anchorId), 2500);
+  });
+
+  // Accept incoming connections from pods that find us via the anchor's member list
+  myPeer.on("connection", (conn) => {
+    conn.on("open", () => {
+      setupDataChannel(conn);
+      // If we hold the anchor slot, send the newcomer the current member list
+      if (anchorPeer) sendMemberList(conn);
+    });
+  });
+
+  myPeer.on("error", (err) => log(`PeerJS error: ${err.type}`, "warn"));
+}
+
+function becomeAnchor(groupKey, anchorId) {
+  anchorPeer = new Peer(anchorId);
+  anchorPeer.on("open", () => log("Became mesh anchor 🔗", "good"));
+  anchorPeer.on("connection", (conn) => {
+    conn.on("open", () => {
+      setupDataChannel(conn);
+      sendMemberList(conn);
+    });
+  });
+  // Another pod raced us to the anchor slot → connect to it as a regular peer
+  anchorPeer.on("error", () => {
+    anchorPeer = null;
+    const conn = myPeer.connect(anchorId, { reliable: true });
+    conn.on("open", () => setupDataChannel(conn));
+  });
+}
+
+function sendMemberList(conn) {
+  const members = Object.keys(dataChannels).filter(id => id !== conn.peer);
+  conn.send(JSON.stringify({ type: "_MEMBER_LIST", members }));
+}
+
+function setupDataChannel(conn) {
+  const peerId = conn.peer;
+  if (dataChannels[peerId]) return; // already connected
+  dataChannels[peerId] = conn;
+
+  conn.on("data", (raw) => {
+    try {
+      const msg = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (msg.type === "_MEMBER_LIST") {
+        // Connect directly to all peers the anchor introduced us to
+        for (const memberId of (msg.members || [])) {
+          if (memberId !== myPeer?.id && !dataChannels[memberId]) {
+            const c = myPeer.connect(memberId, { reliable: true });
+            c.on("open", () => setupDataChannel(c));
+          }
+        }
+        return;
+      }
+      // Forward RUVON message to worker
+      if (worker) worker.postMessage({ type: "REMOTE_MSG", msg });
+    } catch (_) {}
+  });
+
+  conn.on("close", () => {
+    delete dataChannels[peerId];
+    log(`Remote pod [${peerId.slice(-6)}] disconnected`, "warn");
+  });
+  conn.on("error", () => { delete dataChannels[peerId]; });
+}
+
+function sendToAllPeers(msg) {
+  if (!Object.keys(dataChannels).length) return;
+  const raw = JSON.stringify(msg);
+  for (const conn of Object.values(dataChannels)) {
+    if (conn.open) { try { conn.send(raw); } catch (_) {} }
+  }
+}
+
+function destroyPeerJS() {
+  if (_anchorTimeout) { clearTimeout(_anchorTimeout); _anchorTimeout = null; }
+  if (anchorPeer) { try { anchorPeer.destroy(); } catch (_) {} anchorPeer = null; }
+  if (myPeer)     { try { myPeer.destroy();     } catch (_) {} myPeer = null; }
+  dataChannels = {};
+}
+
+function copyShareLink() {
+  const key = document.getElementById("badge-group-name").textContent;
+  if (!key || key === "—") return;
+  const url = new URL(location.href);
+  url.searchParams.set("group", key);
+  navigator.clipboard.writeText(url.toString()).then(() => log("Share link copied to clipboard", "good"));
+}
+
+// ---------------------------------------------------------------------------
+// Worker lifecycle
+// ---------------------------------------------------------------------------
+function initWorker(gKey, nick) {
+  destroyPeerJS();
+  if (worker) { worker.postMessage({ type: "STOP" }); worker.terminate(); }
+  worker = new Worker("worker.js");
+  worker.onmessage = handleWorkerMessage;
+  worker.postMessage({ type: "INIT", group_key: gKey, nickname: nick });
+}
+
+// ---------------------------------------------------------------------------
+// Worker message handler
+// ---------------------------------------------------------------------------
+function handleWorkerMessage(evt) {
+  const msg = evt.data;
+  if (!msg) return;
+
+  switch (msg.type) {
+    case "READY":
+      myPodId = msg.pod_id;
+      myTier = detectTierLocal();
+      document.getElementById("pod-id-display").textContent = myPodId;
+      document.getElementById("tier-display").textContent = "T" + myTier;
+      document.getElementById("tier-display").className = "tier-badge t" + myTier;
+      log("Pod " + myPodId + " ready (T" + myTier + ")", "good");
+      updateStats();
+      if (_pendingGroupKey) {
+        initPeerJS(_pendingGroupKey, myPodId);
+        _pendingGroupKey = null;
+      }
+      break;
+
+    case "PEER_UPDATE": {
+      // Diff: log remote pod joins / leaves
+      const prevIds = new Set(peers.map(p => p.pod_id));
+      const nextIds = new Set(msg.peers.map(p => p.pod_id));
+      for (const p of msg.peers) {
+        if (!prevIds.has(p.pod_id) && p.source === "remote")
+          log(`Remote pod [${p.pod_id.slice(-6)}] joined via PeerJS DataChannel`, "info");
+      }
+      for (const p of peers) {
+        if (!nextIds.has(p.pod_id) && p.source === "remote")
+          log(`Remote pod [${p.pod_id.slice(-6)}] left the mesh`, "warn");
+      }
+      // Update remote/local count badges
+      const localN  = msg.peers.filter(p => p.source === "local").length;
+      const remoteN = msg.peers.filter(p => p.source === "remote").length;
+      document.getElementById("badge-local-count").textContent = localN;
+      document.getElementById("badge-remote-count").textContent = remoteN;
+
+      peers = msg.peers;
+      isSovereign = msg.is_sovereign;
+      renderPeerTable();
+      renderMeshCanvas();
+      updateRoleBadge();
+      document.getElementById("stat-peers").textContent = peers.length;
+      updateStats();
+      break;
+    }
+
+    case "STEP_DONE":
+      if (msg.step === "SAF_QUEUED") {
+        statSaf = msg.saf_queue_depth;
+        log("SAF queued: " + msg.tx_id + " (queue depth: " + msg.saf_queue_depth + ")", "warn");
+      } else {
+        log("Step: " + msg.step + " [" + msg.tx_id + "]", "info");
+      }
+      updateStats();
+      break;
+
+    case "WORKFLOW_DONE":
+      statTx++;
+      statSaf = Math.max(0, statSaf - 1);
+      const auth = msg.result?.authorised ? "✅ Authorised" : "❌ Declined";
+      const via = msg.relayed ? " (via relay)" : " (local)";
+      log(auth + via + " — " + msg.tx_id, msg.result?.authorised ? "good" : "err");
+      updateStats();
+      break;
+
+    case "WORKFLOW_ERROR":
+      log("Error: " + msg.error, "err");
+      break;
+
+    case "RELAY_SENT":
+      statRelayed++;
+      log("Relayed " + msg.tx_id + " → " + msg.to_pod, "relay");
+      updateStats();
+      break;
+
+    case "RELAY_RECEIVED":
+      if (msg.sovereign) {
+        log("Executing relay from " + msg.from_pod + ": " + msg.tx_id, "relay");
+      } else {
+        log("Relay result received for " + msg.tx_id + " from " + msg.from_pod, "relay");
+      }
+      break;
+
+    case "ELECTION":
+      statElections++;
+      const who = msg.is_me ? "I am now Sovereign 👑" : "New Sovereign: " + msg.sovereign_pod_id;
+      log("Election: " + who, "good");
+      updateStats();
+      break;
+
+    case "STATUS":
+      log("Status: " + (msg.online ? "Online" : "Offline") + " — " + msg.pod_id,
+          msg.online ? "good" : "warn");
+      break;
+
+    case "HELP_SENT":
+      log(`Help request → ${msg.targets.length} peer(s)`, "warn"); break;
+    case "HELP_OFFER_SENT":
+      log(`Help offer sent to ${msg.to.slice(-6)}`, "info"); break;
+    case "HELP_OFFER_RECEIVED":
+      log(`Help offer ← ${msg.from.slice(-6)} (score: ${msg.score.toFixed(3)})`, "good"); break;
+
+    case "REMOTE_SEND":
+      sendToAllPeers(msg.msg);
+      break;
+
+    case "WS_CONNECTED":
+    case "WS_DISCONNECTED":
+      // Legacy — WebSocket signaling replaced by PeerJS; ignore silently
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Role badge
+// ---------------------------------------------------------------------------
+function updateRoleBadge() {
+  const el = document.getElementById("role-display");
+  if (isOffline) {
+    el.textContent = "OFFLINE";
+    el.className = "role-badge role-offline";
+  } else if (isSovereign) {
+    el.textContent = "SOVEREIGN 👑";
+    el.className = "role-badge role-sovereign";
+  } else {
+    el.textContent = "RELAY";
+    el.className = "role-badge role-relay";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Peer table
+// ---------------------------------------------------------------------------
+function renderPeerTable() {
+  const tbody = document.getElementById("peer-tbody");
+  tbody.innerHTML = "";
+
+  // Own row
+  const myScore = computeMyScore();
+  const ownRow = document.createElement("tr");
+  ownRow.className = "own";
+  ownRow.innerHTML = `
+    <td>${myPodId} <strong>(me)</strong></td>
+    <td><span class="tier-badge t${myTier}">T${myTier}</span></td>
+    <td>${myScore.toFixed(3)} <span class="score-bar" style="width:${Math.round(myScore*80)}px"></span></td>
+    <td>—</td><td>—</td><td>0</td><td>—</td>
+    <td><span style="color:#3fb950;font-size:10px">BC</span></td>
+  `;
+  tbody.appendChild(ownRow);
+
+  for (const p of peers) {
+    const row = document.createElement("tr");
+    const ageSec = Math.round(p.age_ms / 1000);
+    const srcHtml = p.source === "remote"
+      ? `<span style="color:#58a6ff;font-size:10px">P2P</span>`
+      : `<span style="color:#3fb950;font-size:10px">BC</span>`;
+    row.innerHTML = `
+      <td>${p.pod_id}</td>
+      <td><span class="tier-badge t${p.tier}">T${p.tier}</span></td>
+      <td>${p.score.toFixed(3)} <span class="score-bar" style="width:${Math.round(p.score*80)}px"></span></td>
+      <td>${(p.cpu_load * 100).toFixed(0)}%</td>
+      <td>${p.available_ram_mb.toFixed(0)}</td>
+      <td>${p.task_queue_length}</td>
+      <td>${ageSec}s</td>
+      <td>${srcHtml}</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mesh canvas
+// ---------------------------------------------------------------------------
+function renderMeshCanvas() {
+  const canvas = document.getElementById("mesh-canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const allPods = [
+    { pod_id: myPodId, tier: myTier, score: computeMyScore(), is_me: true, sovereign: isSovereign, source: "local" }
+  ].concat(peers.map(p => ({ ...p, sovereign: p.pod_id === getSovereign(), source: p.source || "local" })));
+
+  if (allPods.length === 0) return;
+
+  // Position pods in a circle
+  const cx = W / 2, cy = H / 2;
+  const r = Math.min(W, H) * 0.32;
+  const positions = allPods.map((p, i) => {
+    const angle = (2 * Math.PI * i / allPods.length) - Math.PI / 2;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), pod: p };
+  });
+
+  // Draw edges (mesh connections)
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      ctx.beginPath();
+      ctx.moveTo(positions[i].x, positions[i].y);
+      ctx.lineTo(positions[j].x, positions[j].y);
+      ctx.strokeStyle = "#1c2a3a";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Draw nodes
+  const TIER_COLORS = { 1: "#e3b341", 2: "#58a6ff", 3: "#3fb950" };
+  function podColor(pod) {
+    if (pod.source === "remote") return "#58a6ff"; // remote pods always blue
+    return TIER_COLORS[pod.tier] || "#58a6ff";
+  }
+  for (const { x, y, pod } of positions) {
+    const nodeR = pod.sovereign ? 18 : 13;
+    const col = podColor(pod);
+
+    // Glow for sovereign
+    if (pod.sovereign) {
+      ctx.beginPath();
+      ctx.arc(x, y, nodeR + 6, 0, Math.PI * 2);
+      ctx.fillStyle = col + "22";
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR, 0, Math.PI * 2);
+    ctx.fillStyle = pod.is_me ? (isOffline ? "#2a1010" : "#0a1a2a") : "#0d1117";
+    ctx.strokeStyle = col;
+    ctx.lineWidth = pod.is_me ? 2.5 : 1.5;
+    ctx.fill();
+    // Dashed stroke for remote pods
+    ctx.setLineDash(pod.source === "remote" ? [4, 3] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    ctx.fillStyle = col;
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(pod.pod_id.slice(-4), x, y);
+
+    // Tier badge (or "WS" for remote)
+    ctx.font = "8px monospace";
+    ctx.fillStyle = col + "aa";
+    if (pod.source === "remote") {
+      ctx.fillText("WS", x, y + nodeR + 10);
+      // Rough RTT estimate from age_ms
+      const rttMs = Math.round((pod.age_ms || 0) / 2);
+      ctx.font = "7px monospace";
+      ctx.fillStyle = "#58a6ff66";
+      ctx.fillText(`~${rttMs}ms`, x, y + nodeR + 20);
+    } else {
+      ctx.fillText("T" + pod.tier, x, y + nodeR + 10);
+    }
+
+    // Crown for sovereign
+    if (pod.sovereign) {
+      ctx.font = "11px serif";
+      ctx.fillText("👑", x + nodeR - 4, y - nodeR - 4);
+    }
+  }
+}
+
+function getSovereign() {
+  if (isSovereign) return myPodId;
+  let best = null, bestScore = -1;
+  for (const p of peers) {
+    if (p.score > bestScore) { bestScore = p.score; best = p.pod_id; }
+  }
+  return best;
+}
+
+function computeMyScore() {
+  const tier = myTier;
+  const C = 0.65;
+  const H = 1;
+  const U = Math.min((navigator.deviceMemory || 2) * 1024 / 8192, 1);
+  const P = 0.8;
+  return 0.50 * C + 0.15 * (1.0 / Math.max(H, 1)) + 0.25 * U + 0.10 * P;
+}
+
+function detectTierLocal() {
+  const ram = navigator.deviceMemory || 2;
+  if (ram >= 8 || !!navigator.gpu) return 3;
+  if (ram >= 1) return 2;
+  return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+function updateStats() {
+  document.getElementById("stat-tx").textContent = statTx;
+  document.getElementById("stat-relayed").textContent = statRelayed;
+  document.getElementById("stat-saf").textContent = statSaf;
+  document.getElementById("stat-elections").textContent = statElections;
+  document.getElementById("stat-score").textContent = computeMyScore().toFixed(3);
+}
+
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+function openSecondPod() {
+  window.open(location.href, "_blank");
+  log("Opened second pod tab — check the new tab to form a 2-pod mesh", "info");
+}
+
+function runPayment() {
+  if (!worker) return;
+  worker.postMessage({ type: "RUN_PAYMENT" });
+}
+
+function runBurst(n) {
+  for (let i = 0; i < n; i++) setTimeout(runPayment, i * 80);
+}
+
+function toggleOffline() {
+  if (!worker) return;
+  isOffline = !isOffline;
+  const btn = document.getElementById("btn-offline");
+  if (isOffline) {
+    worker.postMessage({ type: "GO_OFFLINE" });
+    btn.textContent = "Restore Online";
+    btn.className = "success";
+  } else {
+    worker.postMessage({ type: "GO_ONLINE" });
+    btn.textContent = "Simulate Offline";
+    btn.className = "danger";
+  }
+  updateRoleBadge();
+}
+
+// ---------------------------------------------------------------------------
+// Event log
+// ---------------------------------------------------------------------------
+function log(msg, cls = "info") {
+  const el = document.getElementById("log");
+  const ts = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const div = document.createElement("div");
+  div.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${msg}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById("log").innerHTML = "";
+}
+
+// Resize handler for canvas
+window.addEventListener("resize", () => {
+  renderMeshCanvas();
+});
+
+// ---------------------------------------------------------------------------
+// Startup — show modal (pre-fill group key from URL ?group=<key>)
+// ---------------------------------------------------------------------------
+if (_urlGroupKey) {
+  document.getElementById("input-group-key").value = _urlGroupKey;
+}
+document.getElementById("group-modal").classList.remove("hidden");
+</script>
+</body>
+</html>

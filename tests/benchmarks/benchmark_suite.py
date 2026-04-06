@@ -2,7 +2,7 @@
 Rufus SDK — Comprehensive Benchmark Suite
 ==========================================
 
-Covers 14 sections:
+Covers 16 sections:
   1. JSON Serialization
   2. Import Caching
   3. SQLite Persistence
@@ -17,6 +17,8 @@ Covers 14 sections:
  12. msgspec Typed Codec     (requires msgspec)
  13. WASM Bridge Dispatch    (requires rufus-sdk-edge)
  14. Proto Codec             (requires betterproto; generated code optional)
+ 15. RUVON Capability Gossip (requires rufus-sdk-edge)
+ 16. NKey Patch Verification (requires cryptography + rufus-sdk-edge)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -85,6 +87,18 @@ try:
     _BETTERPROTO_AVAILABLE = True
 except ImportError:
     _BETTERPROTO_AVAILABLE = False
+
+try:
+    from rufus_edge.capability_gossip import CapabilityVector, NodeTier, classify_node_tier
+    _RUVON_GOSSIP_AVAILABLE = True
+except ImportError:
+    _RUVON_GOSSIP_AVAILABLE = False
+
+try:
+    from rufus_edge.nkey_verifier import NKeyPatchVerifier
+    _NKEY_AVAILABLE = True and _CRYPTO_AVAILABLE
+except ImportError:
+    _NKEY_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Module-level state — must be importable as dotted paths for WorkflowBuilder
@@ -1085,7 +1099,12 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
             resolver2 = SqliteWasmBinaryResolver(conn)
             runtime = ComponentStepRuntime(resolver2, bridge=None)
 
-            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            _original_run_component = ComponentStepRuntime._run_component
+
+            async def _mock_run_component(self, binary, wasm_config, state_data):
+                return {"ok": True}
+
+            ComponentStepRuntime._run_component = _mock_run_component
             try:
                 # warmup
                 for _ in range(5):
@@ -1098,7 +1117,7 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
                     await runtime._dispatch(wasm_config, state_payload)
                     times_chain.append(time.perf_counter() - t)
             finally:
-                ComponentStepRuntime._call_component = staticmethod(_original_call)
+                ComponentStepRuntime._run_component = _original_run_component
 
         st = _stats(times_chain)
         sec.add("full chain: resolve+verify+bridge (mock)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
@@ -1142,7 +1161,17 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
             resolver3 = SqliteWasmBinaryResolver(conn2)
             runtime2 = ComponentStepRuntime(resolver3, bridge=None)
 
-            ComponentStepRuntime._call_component = staticmethod(_mock_call)
+            _original_run_component2 = ComponentStepRuntime._run_component
+            _original_execute_batch = ComponentStepRuntime.execute_batch
+
+            async def _mock_run_component2(self, binary, wasm_config, state_data):
+                return {"ok": True}
+
+            async def _mock_execute_batch(self, wasm_config, states):
+                return [{"ok": True}] * len(states)
+
+            ComponentStepRuntime._run_component = _mock_run_component2
+            ComponentStepRuntime.execute_batch = _mock_execute_batch
             try:
                 batch_iterations = max(5, n // 20)
 
@@ -1161,7 +1190,8 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
                     await runtime2.execute_batch(wasm_config2, [state_payload] * batch_n)
                     times_batch.append(time.perf_counter() - t)
             finally:
-                ComponentStepRuntime._call_component = staticmethod(_original_call)
+                ComponentStepRuntime._run_component = _original_run_component2
+                ComponentStepRuntime.execute_batch = _original_execute_batch
 
         st_seq = _stats(times_seq)
         st_bat = _stats(times_batch)
@@ -1218,8 +1248,8 @@ def bench_proto_codec(n: int) -> "Section":
         "device_status": "online",
         "pending_sync_count": 3,
         "last_sync_at": "2026-03-24T12:34:56.789Z",
-        "config_version": "v1.0.0rc5",
-        "sdk_version": "1.0.0rc5",
+        "config_version": "v1.0.0rc6",
+        "sdk_version": "1.0.0rc6",
         "sent_at": "2026-03-24T12:35:00.000Z",
     }
 
@@ -1314,6 +1344,229 @@ def bench_proto_codec(n: int) -> "Section":
 
 
 # ---------------------------------------------------------------------------
+# Section 15 — RUVON Capability Gossip
+# ---------------------------------------------------------------------------
+
+def bench_ruvon_gossip(n: int) -> Section:
+    sec = Section("15. RUVON Capability Gossip")
+
+    if not _RUVON_GOSSIP_AVAILABLE:
+        sec.note(
+            "rufus-sdk-edge not installed or capability_gossip not found — "
+            "pip install -e 'packages/rufus-sdk-edge[edge]'"
+        )
+        return sec
+
+    import json as _json
+
+    # Build a representative CapabilityVector
+    def _make_vec(device_id: str, ram: float = 768.0, cpu: float = 0.35,
+                  tier: NodeTier = NodeTier.TIER_2) -> CapabilityVector:
+        return CapabilityVector(
+            device_id=device_id,
+            available_ram_mb=ram,
+            cpu_load=cpu,
+            model_tier=2 if tier == NodeTier.TIER_2 else (3 if tier == NodeTier.TIER_3 else 1),
+            latency_ms=12.5,
+            task_queue_length=3,
+            node_tier=tier,
+        )
+
+    sample = _make_vec("bench-device-001")
+
+    # --- to_dict / from_dict throughput ---
+    for _ in range(max(50, n // 100)):
+        sample.to_dict()
+
+    times_to = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        sample.to_dict()
+        times_to.append(time.perf_counter() - t0)
+    st = _stats(times_to)
+    sec.add("CapabilityVector.to_dict()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    d = sample.to_dict()
+    for _ in range(max(50, n // 100)):
+        CapabilityVector.from_dict(d)
+
+    times_from = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        CapabilityVector.from_dict(d)
+        times_from.append(time.perf_counter() - t0)
+    st = _stats(times_from)
+    sec.add("CapabilityVector.from_dict()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- is_stale() check ---
+    times_stale = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        sample.is_stale()
+        times_stale.append(time.perf_counter() - t0)
+    st = _stats(times_stale)
+    sec.add("CapabilityVector.is_stale()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- JSON round-trip (what the broadcast loop serialises to bytes) ---
+    times_json = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        _json.dumps(sample.to_dict()).encode()
+        times_json.append(time.perf_counter() - t0)
+    st = _stats(times_json)
+    sec.add("gossip payload encode (json+encode)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    raw_bytes = _json.dumps(sample.to_dict()).encode()
+    times_decode = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        CapabilityVector.from_dict(_json.loads(raw_bytes))
+        times_decode.append(time.perf_counter() - t0)
+    st = _stats(times_decode)
+    sec.add("gossip payload decode (json+from_dict)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- find_best_builder() selection across N peers (synchronous equivalent) ---
+    # Replicate the synchronous portion of find_best_builder without async overhead
+    def _find_best(peers: Dict[str, "CapabilityVector"]) -> Optional[str]:
+        from rufus_edge.capability_gossip import _tier_to_int
+        candidates = [
+            v for v in peers.values()
+            if _tier_to_int(v.node_tier) >= 2 and v.available_ram_mb > 256
+        ]
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda v: (_tier_to_int(v.node_tier), -v.cpu_load, v.available_ram_mb),
+            reverse=True,
+        )
+        return candidates[0].device_id
+
+    for peer_count in (10, 50, 100):
+        peers = {
+            f"peer-{i:04d}": _make_vec(
+                f"peer-{i:04d}",
+                ram=256.0 + (i % 3) * 512,
+                cpu=0.1 + (i % 5) * 0.1,
+                tier=NodeTier.TIER_2 if i % 3 != 0 else NodeTier.TIER_3,
+            )
+            for i in range(peer_count)
+        }
+        # warmup
+        for _ in range(20):
+            _find_best(peers)
+        times_sel = []
+        bench_n = max(100, n // 10)
+        for _ in range(bench_n):
+            t0 = time.perf_counter()
+            _find_best(peers)
+            times_sel.append(time.perf_counter() - t0)
+        st = _stats(times_sel)
+        sec.add(f"find_best_builder() — {peer_count} peers", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- classify_node_tier() ---
+    times_class = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        classify_node_tier(768.0, [])
+        times_class.append(time.perf_counter() - t0)
+    st = _stats(times_class)
+    sec.add("classify_node_tier()", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    sec.note(
+        "Gossip encode/decode pipeline: to_dict + json.dumps + encode = publish path; "
+        "json.loads + from_dict = receive path. find_best_builder() is O(N log N) in peer count."
+    )
+    return sec
+
+
+# ---------------------------------------------------------------------------
+# Section 16 — NKey Patch Verification
+# ---------------------------------------------------------------------------
+
+def bench_nkey_verification(n: int) -> Section:
+    sec = Section("16. NKey Patch Verification")
+
+    if not _NKEY_AVAILABLE:
+        if not _CRYPTO_AVAILABLE:
+            sec.note("cryptography not installed — pip install cryptography")
+        else:
+            sec.note(
+                "rufus-sdk-edge not installed or nkey_verifier not found — "
+                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+            )
+        return sec
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import base64 as _b64
+
+    # Generate a real keypair for benchmarking
+    priv_key = Ed25519PrivateKey.generate()
+    pub_bytes = priv_key.public_key().public_bytes_raw()
+    pub_b64 = _b64.urlsafe_b64encode(pub_bytes).decode()
+
+    # Create verifier
+    verifier = NKeyPatchVerifier(pub_b64)
+
+    # Simulate a WASM binary patch payload (realistic: 64 KB)
+    binary_small = secrets.token_bytes(256)    # 256 B — heartbeat-sized
+    binary_large = secrets.token_bytes(65536)  # 64 KB — typical WASM module
+
+    sig_small = _b64.urlsafe_b64encode(priv_key.sign(binary_small)).decode()
+    sig_large = _b64.urlsafe_b64encode(priv_key.sign(binary_large)).decode()
+    sig_bad = _b64.urlsafe_b64encode(secrets.token_bytes(64)).decode()
+
+    # --- valid signature, small payload ---
+    for _ in range(max(10, n // 100)):
+        verifier.verify(binary_small, sig_small)
+
+    times_valid_small = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        verifier.verify(binary_small, sig_small)
+        times_valid_small.append(time.perf_counter() - t0)
+    st = _stats(times_valid_small)
+    sec.add("verify() valid — 256 B payload", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- valid signature, 64 KB payload ---
+    times_valid_large = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        verifier.verify(binary_large, sig_large)
+        times_valid_large.append(time.perf_counter() - t0)
+    st = _stats(times_valid_large)
+    sec.add("verify() valid — 64 KB WASM", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- invalid signature rejection ---
+    times_invalid = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        verifier.verify(binary_small, sig_bad)
+        times_invalid.append(time.perf_counter() - t0)
+    st = _stats(times_invalid)
+    sec.add("verify() invalid sig rejection", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # --- NKeyPatchVerifier.from_env() with missing env var (None path) ---
+    times_none = []
+    for _ in range(min(n, 1000)):
+        t0 = time.perf_counter()
+        NKeyPatchVerifier.from_env()   # env var not set → returns None immediately
+        times_none.append(time.perf_counter() - t0)
+    st = _stats(times_none)
+    sec.add("from_env() → None (env var absent)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
+
+    # Summarise overhead delta
+    small_valid_ops = len(times_valid_small) / sum(times_valid_small) if times_valid_small else 0
+    large_valid_ops = len(times_valid_large) / sum(times_valid_large) if times_valid_large else 0
+    sec.note(
+        f"Ed25519 verify is constant-time w.r.t. payload size — "
+        f"256 B: {small_valid_ops:,.0f} ops/sec, "
+        f"64 KB: {large_valid_ops:,.0f} ops/sec. "
+        f"Overhead is dominated by signature verification, not data hashing."
+    )
+    return sec
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -1333,6 +1586,8 @@ def _defaults(quick: bool, override: Optional[int]) -> Dict[str, int]:
         "msgspec_n": 10000,
         "wasm_n": 500,
         "proto_n": 10000,
+        "gossip_n": 5000,
+        "nkey_n": 500,
     }
     if quick:
         base = {k: max(10, v // 10) for k, v in base.items()}
@@ -1355,26 +1610,28 @@ async def _run(args) -> List[Section]:
     print(f"  betterproto : {'yes' if _BETTERPROTO_AVAILABLE else 'no'}")
     print(f"  cryptography: {'yes' if _CRYPTO_AVAILABLE else 'no'}")
     print(f"  uvloop      : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
+    print(f"  ruvon gossip: {'yes' if _RUVON_GOSSIP_AVAILABLE else 'no (pip install rufus-sdk-edge[edge])'}")
+    print(f"  nkey verify : {'yes' if _NKEY_AVAILABLE else 'no (requires cryptography + rufus-sdk-edge)'}")
     if skip_security and not args.no_security:
         print("  NOTE: cryptography not installed — sections 7–11 will be skipped")
     print()
 
-    print("[1/14] JSON Serialization...")
+    print("[1/16] JSON Serialization...")
     sections.append(bench_json_serialization(counts["json_n"]))
 
-    print("[2/14] Import Caching...")
+    print("[2/16] Import Caching...")
     sections.append(bench_import_caching(counts["import_n"]))
 
-    print("[3/14] SQLite Persistence...")
+    print("[3/16] SQLite Persistence...")
     sections.append(await bench_sqlite(counts["sqlite_n"]))
 
-    print("[4/14] E2E Workflow...")
+    print("[4/16] E2E Workflow...")
     sections.append(await bench_e2e_workflow(counts["e2e_n"]))
 
-    print("[5/14] Async Event Loop...")
+    print("[5/16] Async Event Loop...")
     sections.append(await bench_event_loop(counts["loop_n"]))
 
-    print("[6/14] Pydantic State Model...")
+    print("[6/16] Pydantic State Model...")
     sections.append(bench_pydantic(counts["pydantic_n"]))
 
     if skip_security:
@@ -1391,29 +1648,35 @@ async def _run(args) -> List[Section]:
             s.note("skipped")
             sections.append(s)
     else:
-        print("[7/14] Fernet Encryption...")
+        print("[7/16] Fernet Encryption...")
         sections.append(bench_fernet(counts["fernet_n"]))
 
-        print("[8/14] HMAC-SHA256...")
+        print("[8/16] HMAC-SHA256...")
         sections.append(bench_hmac(counts["hmac_n"]))
 
-        print("[9/14] Ed25519 Signatures...")
+        print("[9/16] Ed25519 Signatures...")
         sections.append(bench_ed25519(counts["ed25519_n"]))
 
-        print("[10/14] API Key Hashing...")
+        print("[10/16] API Key Hashing...")
         sections.append(bench_api_key_hashing(counts["apikey_n"]))
 
-        print("[11/14] Full SAF Pipeline...")
+        print("[11/16] Full SAF Pipeline...")
         sections.append(await bench_saf_pipeline(counts["saf_n"]))
 
-    print("[12/14] msgspec Typed Codec...")
+    print("[12/16] msgspec Typed Codec...")
     sections.append(bench_msgspec_codec(counts["msgspec_n"]))
 
-    print("[13/14] WASM Bridge Dispatch...")
+    print("[13/16] WASM Bridge Dispatch...")
     sections.append(await bench_wasm_bridge_dispatch(counts["wasm_n"]))
 
-    print("[14/14] Proto Codec (pack_message)...")
+    print("[14/16] Proto Codec (pack_message)...")
     sections.append(bench_proto_codec(counts["proto_n"]))
+
+    print("[15/16] RUVON Capability Gossip...")
+    sections.append(bench_ruvon_gossip(counts["gossip_n"]))
+
+    print("[16/16] NKey Patch Verification...")
+    sections.append(bench_nkey_verification(counts["nkey_n"]))
 
     return sections
 

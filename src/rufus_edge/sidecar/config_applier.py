@@ -252,5 +252,5 @@ def wasm_main() -> None:
         sys.exit(1)
 
 
-if __name__ == "__wasm__":
+if __name__ == "__main__":
     wasm_main()

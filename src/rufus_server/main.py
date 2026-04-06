@@ -112,6 +112,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Heartbeat staleness threshold — devices not seen within this window are shown as offline.
+# Browser/demo devices send heartbeats every ~15 s; edge agents every 30 s.
+# Default: 300 s (5 min) to avoid false-positive offline flips during brief disconnects.
+_HEARTBEAT_TIMEOUT_SECONDS = int(os.getenv("RUFUS_HEARTBEAT_TIMEOUT_SECONDS", "300"))
+
 
 # --- Device Service ---
 from rufus_server.device_service import DeviceService
@@ -1694,7 +1699,7 @@ async def list_devices(
 
     # Update device statuses based on heartbeat timestamps
     from datetime import datetime, timedelta, timezone
-    offline_threshold = timedelta(seconds=120)  # 2 minutes
+    offline_threshold = timedelta(seconds=_HEARTBEAT_TIMEOUT_SECONDS)
     now = datetime.now(timezone.utc)  # Use timezone-aware datetime
 
     for device in devices:
@@ -1737,7 +1742,7 @@ async def get_device(
 
     # Apply same heartbeat-based offline detection as list_devices
     from datetime import datetime, timedelta, timezone
-    offline_threshold = timedelta(seconds=120)
+    offline_threshold = timedelta(seconds=_HEARTBEAT_TIMEOUT_SECONDS)
     now = datetime.now(timezone.utc)
     if isinstance(device, dict):
         last_heartbeat = device.get('last_heartbeat_at')
@@ -2579,6 +2584,55 @@ from rufus_server.command_types import (
 
 # WebSocket connections for real-time commands
 websocket_connections: Dict[str, WebSocket] = {}
+
+# Mesh signaling rooms — group_key → list of {ws, pod_id}
+# Used by Browser Demo 3 for cross-device pod mesh signaling.
+# No auth — group key isolation is the only access control.
+signal_rooms: Dict[str, List[Dict]] = {}
+
+
+@app.websocket("/api/v1/signal/{group_key}")
+async def signal_room(websocket: WebSocket, group_key: str):
+    """
+    WebSocket signaling relay for cross-device pod meshes (Browser Demo 3).
+
+    All pods connecting with the same group_key form an isolated room.
+    Every message received from one pod is fanned out to all other pods
+    in the same room. Supports all RUVON message types:
+      ANNOUNCE, HEARTBEAT, GOODBYE, RELAY_REQUEST, RELAY_RESULT, ELECTION,
+      HELP_REQUEST, HELP_OFFER  (+ future: WS_OFFER, WS_ANSWER, WS_ICE for WebRTC)
+    """
+    await websocket.accept()
+    entry: Dict = {"ws": websocket, "pod_id": None}
+    signal_rooms.setdefault(group_key, []).append(entry)
+    logger.info(f"[SIGNAL] Pod joined room '{group_key}'. Room size: {len(signal_rooms[group_key])}")
+    try:
+        while True:
+            data = await websocket.receive_json()
+            # Track pod_id for logging
+            if pod_id := data.get("pod_id"):
+                entry["pod_id"] = pod_id
+            # Tag so the receiving worker knows this came over the signaling channel
+            data["_via"] = "ws"
+            # Fan-out to all other pods in the same room
+            for peer in list(signal_rooms.get(group_key, [])):
+                if peer["ws"] is websocket:
+                    continue
+                try:
+                    await peer["ws"].send_json(data)
+                except Exception:
+                    pass  # stale connection — cleaned up on its own disconnect
+    except WebSocketDisconnect:
+        pass
+    finally:
+        room = signal_rooms.get(group_key, [])
+        signal_rooms[group_key] = [e for e in room if e["ws"] is not websocket]
+        if not signal_rooms[group_key]:
+            signal_rooms.pop(group_key, None)
+        logger.info(
+            f"[SIGNAL] Pod left room '{group_key}'. "
+            f"Room size: {len(signal_rooms.get(group_key, []))}"
+        )
 
 
 @app.post("/api/v1/devices/{device_id}/commands", tags=["Devices"])

@@ -1,10 +1,13 @@
 # Lessons Learned
 
-## Pattern: WASM Binary for Sidecar Agent Requires External Toolchain — Cannot Be Auto-Built
+## Pattern: WASM Binary Build — py2wasm IS pip-installable but requires Python 3.11+
 **Context:** `src/rufus_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
-**Anti-Pattern:** Assuming the binary can be compiled at test time or during a normal dev install. Neither `py2wasm` nor `wasi-sdk` are pip-installable; they require separate OS-level toolchain setup. Attempting `build_wasm.build()` without them raises `RuntimeError` and the binary is absent.
-**Correction:** The WASM path is a production-only opt-in. The default `deployment_monitor.yaml` workflow uses `type: STANDARD` (Python, zero deps). The WASM variant (`deployment_monitor_wasm.yaml`) requires running `rufus sidecar build-wasm` once after installing py2wasm or wasi-sdk. All tests guard with `pytest.mark.skipif(importlib.util.find_spec("wasmtime") is None, ...)` so CI is always green without the binary. The `.wasm` file should be committed to the repo after compilation so it travels with the source.
-**Verification:** `tests/edge/test_sidecar_wasm.py` passes (1 skipped for binary test) with no toolchain installed. `build_wasm.build(force=True)` raises `RuntimeError: No WASM toolchain found. Install py2wasm or wasi-sdk.` as expected.
+**Anti-Pattern (corrected):** Earlier lesson said "Neither py2wasm nor wasi-sdk are pip-installable". This was WRONG. `pip install py2wasm>=2.6.2` works and auto-downloads wasi-sdk during first run. However, py2wasm 2.6.x requires **Python 3.11+** — it fails on 3.10 with "Python version '3.10' is not supported". Always invoke via `python3.11 -m py2wasm` or `/path/to/python3.11/bin/py2wasm`.
+**Additional Anti-Pattern:** `config_applier.py` had `if __name__ == "__wasm__": wasm_main()` — this guard NEVER fires because WASI sets `__name__` to `"__main__"`, not `"__wasm__"`. Binary ran clean (exit 0) but produced no output. Fix: `if __name__ == "__main__": wasm_main()`.
+**Additional Anti-Pattern:** `build_wasm._build_with_py2wasm()` passed `--entry wasm_main` flag which does not exist in py2wasm — causes exit code 2. py2wasm takes only `filename` and `-o OUTPUT`.
+**Additional Anti-Pattern:** wasmtime Python bindings use `WasiConfig.stdin_file = "/path"` (property, string path) NOT `stdin_bytes` or `WasiFile.from_fileobj()` which don't exist.
+**Correction:** `pip install py2wasm>=2.6.2` then `python3.11 -m py2wasm config_applier.py -o apply_config.wasm`. Binary is ~25MB (CPython embedded). Commit the binary so it travels with the source. The `.sha256` hash file is used for staleness detection. Tests use subprocess mock for the no-toolchain path; the binary test uses file-based stdin/stdout with temp files.
+**Verification:** `tests/edge/test_sidecar_wasm.py` — 9/9 passing. Binary at `src/rufus_edge/sidecar/wasm/apply_config.wasm` (25MB). Test verifies hot-swap proposal produces `{"outcome": ..., "method": "hot_swap"}` on stdout.
 
 ## Pattern: Celery Task Signature Mismatch for Parallel Tasks
 **Context:** Celery parallel tasks (chord header) in `dispatch_parallel_tasks`
@@ -378,3 +381,33 @@ This guarantees z-order — stars are always on top regardless of node rendering
 **Anti-Pattern:** Writing `\n` as a two-character escape sequence inside the `new_string` parameter — the Edit tool writes them as literal backslash-n characters in the file. The browser renders `\n` as visible text: section headings show correctly but paragraph text, pre blocks, and table rows all display `\n` scattered through the content.
 **Correction:** Always use actual newlines (press Enter) inside `new_string` blocks. When a large multi-line block needs to be inserted, use the Write tool to rewrite the whole file, or use a Bash heredoc + Python script to do the replacement. The Edit tool's `new_string` is not a string literal in a programming language — it does not interpret escape sequences.
 **Verification:** Open the HTML file in a browser and confirm no visible `\n` characters appear in rendered text; `python3 -c "print(open('file.html').read().count('\\\\n'))"` returns 0
+
+## Pattern: FastAPI Route Precedence — Sub-Router Stub Shadows Real Handler
+**Context:** `device_approvals.py` had a stub `POST /{device_id}/heartbeat` route; real handler in `main.py` registered later
+**Anti-Pattern:** Assuming FastAPI evaluates all routes and picks the "best match" — it returns the **first** match. A stub in a sub-router included early silently intercepts all requests, returning a partial response without touching the DB. In this case `last_heartbeat_at` stayed NULL, every device showed OFFLINE.
+**Correction:** Search all routers for duplicate path patterns before diagnosing server-side logic. Remove any stub routes that were added for scaffolding.
+**Verification:** `grep -r "heartbeat" src/rufus_server/api/` — only one route definition should match the heartbeat path. After removal, DB shows non-NULL `last_heartbeat_at` for active devices.
+
+## Pattern: asyncpg Requires Naive Datetime for TIMESTAMP WITHOUT TIME ZONE Columns
+**Context:** Changing `datetime.utcnow()` to `datetime.now(timezone.utc)` in `device_service.py`
+**Anti-Pattern:** Passing a timezone-aware `datetime` object to asyncpg for a `TIMESTAMP WITHOUT TIME ZONE` column — asyncpg raises `DataError: can't subtract offset-naive and offset-aware datetimes` and the INSERT/UPDATE fails silently (or crashes the endpoint).
+**Correction:** `datetime.now(timezone.utc).replace(tzinfo=None)` — correct UTC time, tzinfo stripped so asyncpg accepts it.
+**Verification:** `process_heartbeat` completes without DataError; `last_heartbeat_at` shows a non-NULL timestamp in the DB.
+
+## Pattern: Load Test Metrics Pipeline — Every Scenario Loop Must Call metrics_callback
+**Context:** `_saf_sync_scenario` was one-shot; progress reporter showed `req=0` for the entire 300s test.
+**Anti-Pattern:** Forgetting to call `await self.metrics_callback(device_id, self.metrics)` inside a scenario loop — `orchestrator._aggregated_metrics` is only populated via this callback, so the progress reporter and final results stay at zero.
+**Correction:** Every scenario loop body must call `metrics_callback` after incrementing counters. Also ensure the scenario is duration-bounded (loop until `end_time`) not one-shot.
+**Verification:** Progress output shows rising `req=` count throughout the test window, not a flat zero.
+
+## Pattern: Throughput Targets Need Effective-Duration Denominator for Jittered Scenarios
+**Context:** CONFIG_POLL scenario adds startup jitter (0–60s) before first poll; wall-clock duration was 422s for a 300s test.
+**Anti-Pattern:** Dividing total requests by raw `duration_seconds` — startup jitter + trailing sleep inflate wall time by up to 2×poll_interval, making a perfectly healthy scenario appear to fail its throughput target.
+**Correction:** `effective_duration = max(results.duration_seconds - poll_interval, 1)` removes the ramp and tail, matching how the heartbeat scenario accounts for stagger. Apply to CONFIG_POLL and any scenario with startup jitter.
+**Verification:** Effective req/s matches the per-device rate visible in the rolling progress output.
+
+## Pattern: Bounded SAF Transaction Pool Prevents Docker Disk Exhaustion Under Load
+**Context:** 1000 devices each generating 50–150 unique transactions per cycle → 2.1M rows, 1.27GB in 5 min → Docker virtual disk exhausted, PostgreSQL `pg_subtrans` writes failed.
+**Anti-Pattern:** Generating unique transaction IDs every cycle — each cycle adds N rows permanently, DB grows unboundedly. At 1000 devices this exhausts Docker's default 60GB virtual disk in a single test run.
+**Correction:** Build a fixed transaction pool once per device (e.g. 50 rows). Re-send the same pool each cycle — server deduplicates via `ON CONFLICT (idempotency_key) DO NOTHING`. DB stays bounded; test measures HTTP/auth/idempotency throughput accurately.
+**Verification:** `SELECT count(*) FROM saf_transactions` stays bounded (≤ devices × pool_size) throughout a 300s test at 1000 devices.

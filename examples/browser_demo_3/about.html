@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rufus Demo 3 — How It Works</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --t1: #e3b341;
+    --t2: #58a6ff;
+    --t3: #3fb950;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  a { color: var(--accent); }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  header h1 { font-size: 15px; color: var(--accent); }
+  header a { font-size: 12px; color: var(--muted); text-decoration: none; }
+  header a:hover { color: var(--accent); }
+
+  .page { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  h2 {
+    font-size: 16px;
+    color: var(--accent);
+    margin: 40px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 13px; color: var(--yellow); margin: 24px 0 8px; }
+  p { margin-bottom: 12px; color: var(--text); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; }
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+    align-items: flex-start;
+  }
+  .steps li::before {
+    content: counter(step);
+    flex-shrink: 0;
+    width: 26px; height: 26px;
+    background: #1a2744;
+    border: 1px solid var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: var(--accent); font-weight: bold;
+    margin-top: 2px;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th { text-align: left; color: var(--muted); font-size: 11px; padding: 6px 10px;
+       border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; font-size: 12px; border-bottom: 1px solid #1c2128; }
+  td:first-child { color: var(--yellow); }
+
+  code {
+    background: #1c2128;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+    color: var(--green);
+  }
+  pre {
+    background: #0a0f14;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    margin: 12px 0;
+  }
+  pre .c  { color: var(--muted); }
+  pre .k  { color: var(--accent); }
+  pre .s  { color: var(--green); }
+  pre .n  { color: var(--yellow); }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+    margin-right: 4px;
+  }
+  .b-t1 { background: #2a2000; border: 1px solid var(--t1); color: var(--t1); }
+  .b-t2 { background: #001a2a; border: 1px solid var(--t2); color: var(--t2); }
+  .b-t3 { background: #001a00; border: 1px solid var(--t3); color: var(--t3); }
+  .b-sov { background: #1a3a1a; border: 1px solid var(--green); color: var(--green); }
+  .b-bc  { background: #0a1a0a; border: 1px solid var(--green); color: var(--green); }
+  .b-p2p { background: #001a2a; border: 1px solid var(--accent); color: var(--accent); }
+
+  .arch-diagram {
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--muted);
+    padding: 16px;
+    background: #0a0f14;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .arch-diagram .hi { color: var(--accent); }
+  .arch-diagram .gr { color: var(--green); }
+  .arch-diagram .ye { color: var(--yellow); }
+
+  .tip {
+    background: #0c1f0c;
+    border: 1px solid #1f4d1f;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 12px;
+    color: var(--green);
+  }
+  .tip strong { color: #6ee06e; }
+
+  .warn-box {
+    background: #1a1400;
+    border: 1px solid #3d3000;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 12px;
+    color: var(--yellow);
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+  }
+  .toc h3 { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 4px 0; }
+  .toc a { color: var(--text); text-decoration: none; font-size: 13px; }
+  .toc a:hover { color: var(--accent); }
+
+  .score-formula {
+    font-size: 15px;
+    text-align: center;
+    padding: 16px;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  .score-formula span { color: var(--muted); }
+
+  .cta {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 8px 18px;
+    background: var(--accent);
+    color: #000;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 13px;
+  }
+  .cta:hover { background: #79b8ff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Rufus — Demo 3: Regenerative Pod Mesh</h1>
+  <a href="index.html">← Back to Demo</a>
+  <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank" style="margin-left:auto">GitHub ↗</a>
+</header>
+
+<div class="page">
+
+  <div class="toc">
+    <h3>Contents</h3>
+    <ol>
+      <li><a href="#what">What is this demo?</a></li>
+      <li><a href="#quickstart">Quick start — how to use it</a></li>
+      <li><a href="#ruvon">RUVON: the gossip protocol</a></li>
+      <li><a href="#scoring">Capacity scoring S(Vc)</a></li>
+      <li><a href="#gossip">Adaptive gossip intervals</a></li>
+      <li><a href="#tiers">Tier system &amp; Sovereign election</a></li>
+      <li><a href="#transport">Transport layer — BroadcastChannel + PeerJS</a></li>
+      <li><a href="#peerjs">How PeerJS mesh discovery works</a></li>
+      <li><a href="#saf">Store-and-Forward (SAF)</a></li>
+      <li><a href="#arch">Architecture diagram</a></li>
+      <li><a href="#scenarios">Test scenarios</a></li>
+    </ol>
+  </div>
+
+  <!-- ── WHAT ────────────────────────────────────────────────────────────── -->
+  <h2 id="what">1. What is this demo?</h2>
+
+  <p>
+    This demo runs a <strong>live peer-to-peer mesh network entirely inside browser tabs</strong>.
+    No backend server is required. Open three tabs on the same device, or share a link to a friend
+    on a different continent — all pods discover each other and form a self-healing gossip mesh
+    using <strong>WebRTC DataChannels</strong> (via PeerJS) for cross-device traffic and the
+    browser's <strong>BroadcastChannel API</strong> for same-device tabs.
+  </p>
+
+  <p>
+    Each tab is a <strong>Rufus pod</strong> running a stripped-down edge agent in a Web Worker.
+    The pods run simulated payment transactions, gossip their capacity scores to neighbours,
+    elect a <em>Sovereign</em> to coordinate relay routing, and queue offline transactions in
+    an in-memory Store-and-Forward buffer when they simulate going offline.
+  </p>
+
+  <div class="tip">
+    <strong>Entirely serverless.</strong> No Rufus server, no database, no WebSocket relay.
+    PeerJS uses <code>peerjs.com</code> only for the initial handshake (SDP + ICE). All
+    RUVON gossip data travels directly peer-to-peer — it never touches peerjs.com.
+  </div>
+
+  <!-- ── QUICK START ──────────────────────────────────────────────────────── -->
+  <h2 id="quickstart">2. Quick start — how to use it</h2>
+
+  <h3>Same-device local mesh (no setup)</h3>
+  <ol class="steps">
+    <li>Serve the demo: <code>cd examples/browser_demo_3 &amp;&amp; python serve.py</code></li>
+    <li>Open <a href="http://localhost:8083">http://localhost:8083</a> in a tab.</li>
+    <li>Click <strong>Local Only</strong> in the modal that appears.</li>
+    <li>Open 2–4 more tabs to the same URL and click <strong>Local Only</strong> in each.</li>
+    <li>Watch pods discover each other via BroadcastChannel and elect a Sovereign.</li>
+  </ol>
+
+  <h3>Cross-device mesh via PeerJS (no server needed)</h3>
+  <ol class="steps">
+    <li>Serve the demo so other devices can reach it:
+      <pre>cd examples/browser_demo_3 &amp;&amp; python serve.py
+# prints: Other devices: http://192.168.x.x:8083</pre>
+    </li>
+    <li>Device A: open the URL → enter a group key (e.g. <code>team-42</code>) → <strong>Join Mesh ↗</strong></li>
+    <li>Device B: open the same URL → enter the <em>same</em> group key → <strong>Join Mesh ↗</strong></li>
+    <li>Or: Device A clicks <strong>Share Link</strong> in the header — paste the URL on Device B.</li>
+    <li>Watch "PeerJS connected" and "Joined existing mesh room" appear in both event logs.</li>
+  </ol>
+
+  <div class="tip">
+    <strong>Works anywhere you can serve static files</strong> — GitHub Pages, VS Code port
+    forwarding, <code>file://</code> (same device only). No port 8000 required.
+  </div>
+
+  <h3>Simulating offline / SAF</h3>
+  <ol class="steps">
+    <li>In any pod, click <strong>Go Offline</strong>. The pod badge turns red.</li>
+    <li>Trigger a transaction — it queues as SAF (yellow warning in the log).</li>
+    <li>Click <strong>Go Online</strong>. The SAF queue drains immediately.</li>
+  </ol>
+
+  <h3>URL parameters</h3>
+  <table>
+    <tr><th>Parameter</th><th>Effect</th><th>Example</th></tr>
+    <tr><td>?group=KEY</td><td>Pre-fills group key; auto-opens mesh modal</td><td>?group=team-42</td></tr>
+  </table>
+
+  <!-- ── RUVON ─────────────────────────────────────────────────────────────── -->
+  <h2 id="ruvon">3. RUVON: the gossip protocol</h2>
+
+  <p>
+    <strong>RUVON</strong> (Rufus Vectored Observation Network) is a lightweight gossip protocol
+    running entirely in a Web Worker. Each pod periodically broadcasts a signed <em>heartbeat</em>
+    to all neighbours. A heartbeat carries:
+  </p>
+
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td>pod_id</td><td>string</td><td>Unique ID generated at pod startup (8-char hex)</td></tr>
+    <tr><td>score</td><td>0–1 float</td><td>Capacity score S(Vc) — see §4</td></tr>
+    <tr><td>tier</td><td>1 / 2 / 3</td><td>Capacity tier derived from score</td></tr>
+    <tr><td>vec</td><td>object</td><td>Raw vector: cpu, heap, uptime, pending_count</td></tr>
+    <tr><td>is_sovereign</td><td>bool</td><td>True if this pod currently holds the Sovereign role</td></tr>
+    <tr><td>saf_depth</td><td>int</td><td>Number of queued SAF transactions</td></tr>
+    <tr><td>propagated_count</td><td>int</td><td>Number of re-broadcast hops (damping)</td></tr>
+    <tr><td>timestamp</td><td>ms epoch</td><td>Used for dedup and stale-peer eviction</td></tr>
+  </table>
+
+  <p>
+    Heartbeats propagate through the mesh in a <strong>fan-out with damping</strong>: each pod
+    re-broadcasts a received heartbeat once — but only if <code>propagated_count &lt; 15</code>
+    and the message was not seen before (LRU dedup cache, 50 entries). This prevents broadcast
+    storms while ensuring every pod hears about every other pod within 2–3 hops.
+  </p>
+
+  <h3>Message types</h3>
+  <table>
+    <tr><th>Type</th><th>Direction</th><th>Purpose</th></tr>
+    <tr><td>HEARTBEAT</td><td>broadcast</td><td>Periodic capacity advertisement</td></tr>
+    <tr><td>ELECTION</td><td>broadcast</td><td>Propose a new Sovereign (highest scorer)</td></tr>
+    <tr><td>RELAY_REQUEST</td><td>unicast → Sovereign</td><td>Offline pod delegates a transaction</td></tr>
+    <tr><td>RELAY_RESULT</td><td>unicast → requester</td><td>Sovereign returns execution result</td></tr>
+    <tr><td>HELP_REQUEST</td><td>multicast → top-3</td><td>Distressed pod asks for support</td></tr>
+    <tr><td>HELP_OFFER</td><td>unicast → requester</td><td>Healthy pod acknowledges help request</td></tr>
+  </table>
+
+  <!-- ── SCORING ────────────────────────────────────────────────────────────── -->
+  <h2 id="scoring">4. Capacity scoring S(Vc)</h2>
+
+  <p>Every pod computes a scalar score from its resource vector:</p>
+
+  <div class="score-formula">
+    S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P
+  </div>
+
+  <table>
+    <tr><th>Component</th><th>Weight</th><th>Source</th><th>Meaning</th></tr>
+    <tr><td>C — CPU slack</td><td>0.50</td><td><code>1 − cpu_usage</code></td><td>Available CPU headroom (dominant factor)</td></tr>
+    <tr><td>H — Heap pressure</td><td>0.15</td><td><code>1 / heap_ratio</code></td><td>Inverse of memory used / total</td></tr>
+    <tr><td>U — Uptime bonus</td><td>0.25</td><td><code>min(uptime_s / 120, 1)</code></td><td>Stability — new pods score lower</td></tr>
+    <tr><td>P — Queue penalty</td><td>0.10</td><td><code>1 − min(saf_queue/10, 1)</code></td><td>SAF backlog reduces capacity</td></tr>
+  </table>
+
+  <p>
+    In the browser, <code>cpu_usage</code> and <code>heap_ratio</code> come from
+    <code>performance.memory</code> (Chromium) with random jitter to simulate real device
+    variation. The score updates on every heartbeat cycle.
+  </p>
+
+  <!-- ── GOSSIP ─────────────────────────────────────────────────────────────── -->
+  <h2 id="gossip">5. Adaptive gossip intervals</h2>
+
+  <p>
+    Unlike a fixed-interval heartbeat, RUVON adjusts how often each pod gossips based on
+    its own score — <strong>healthy pods gossip fast, stressed pods gossip slow</strong>:
+  </p>
+
+  <pre>
+<span class="c">// Base interval: 2000 ms</span>
+<span class="n">interval</span> = <span class="n">BASE_INTERVAL</span> / score<span class="k">^1.2</span>
+           + jitter(±25–50%)        <span class="c">// prevents synchronised spikes</span>
+
+<span class="c">// Examples:</span>
+<span class="c">// score=0.95 (T1 healthy)  → ~300 ms gossip</span>
+<span class="c">// score=0.50 (T2 average)  → ~1.8 s gossip</span>
+<span class="c">// score=0.10 (T3 distress) → ~10 s gossip</span>
+  </pre>
+
+  <p>
+    <strong>Sovereign Pulse Mode:</strong> the elected Sovereign always uses exactly
+    <code>BASE_INTERVAL_MS</code> (2 s) regardless of score — it needs to be reliably
+    reachable for relay requests.
+  </p>
+
+  <p>
+    <strong>Help-push trigger:</strong> if a pod's score drops by more than 0.15 in a
+    single cycle, or its SAF queue reaches ≥ 3, it immediately sends a
+    <code>HELP_REQUEST</code> to the 3 highest-scoring peers. Those peers reply with a
+    <code>HELP_OFFER</code> — logged in the event panel.
+  </p>
+
+  <!-- ── TIERS ─────────────────────────────────────────────────────────────── -->
+  <h2 id="tiers">6. Tier system &amp; Sovereign election</h2>
+
+  <table>
+    <tr><th>Tier</th><th>Score range</th><th>Role</th><th>Re-broadcasts?</th></tr>
+    <tr>
+      <td><span class="badge b-t1">T1</span></td>
+      <td>≥ 0.70</td>
+      <td>High-capacity — eligible for Sovereign</td>
+      <td>Only if Sovereign</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-t2">T2</span></td>
+      <td>0.40–0.70</td>
+      <td>Standard relay pod</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-t3">T3</span></td>
+      <td>&lt; 0.40</td>
+      <td>Degraded — consumes only</td>
+      <td>Yes (reduced fanout)</td>
+    </tr>
+  </table>
+
+  <h3>Sovereign election</h3>
+  <p>
+    When a pod sees its own score is higher than the current Sovereign's last-known score,
+    it broadcasts an <code>ELECTION</code> message nominating itself. All pods update their
+    view of the Sovereign to whichever pod has the highest score. The election is
+    <strong>eventually consistent</strong> — brief split-brain is harmless because relay
+    requests are small and idempotent.
+  </p>
+
+  <p>
+    Stale peers (no heartbeat for &gt; 8 s) are automatically evicted from the peer table.
+    If the Sovereign goes stale, the next heartbeat from any T1 pod triggers a new election.
+  </p>
+
+  <!-- ── TRANSPORT ──────────────────────────────────────────────────────────── -->
+  <h2 id="transport">7. Transport layer — BroadcastChannel + PeerJS</h2>
+
+  <p>The demo uses two complementary transports:</p>
+
+  <table>
+    <tr><th>Transport</th><th>Scope</th><th>API</th><th>Label</th></tr>
+    <tr>
+      <td><span class="badge b-bc">BC</span> BroadcastChannel</td>
+      <td>Same device (all tabs, same origin)</td>
+      <td>Web standard, zero setup</td>
+      <td>Green <strong>BC</strong> in pod table</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p2p">P2P</span> PeerJS DataChannels</td>
+      <td>Cross-device (any network)</td>
+      <td>WebRTC via peerjs.com signaling</td>
+      <td>Blue <strong>P2P</strong> in pod table</td>
+    </tr>
+  </table>
+
+  <p>
+    The worker only knows about <code>broadcastAll(msg)</code> — it posts to BroadcastChannel
+    and sends <code>{type:"REMOTE_SEND"}</code> to the main thread. The main thread fans the
+    message out to all open PeerJS DataChannels. Incoming DataChannel messages arrive as
+    <code>{type:"REMOTE_MSG"}</code> and are forwarded to the worker for dedup + processing.
+  </p>
+
+  <p>
+    This split keeps WebRTC (which needs <code>window</code>) in the main thread and all
+    RUVON logic in the isolated worker — a clean architecture boundary.
+  </p>
+
+  <!-- ── PEERJS ─────────────────────────────────────────────────────────────── -->
+  <h2 id="peerjs">8. How PeerJS mesh discovery works</h2>
+
+  <p>
+    PeerJS requires each peer to know the remote peer's ID before connecting. The demo
+    solves discovery without any server using the <strong>anchor pod pattern</strong>:
+  </p>
+
+  <ol class="steps">
+    <li>
+      Every pod registers with PeerJS using the ID
+      <code>rufus-{groupKey}-{podId}</code>.
+    </li>
+    <li>
+      Simultaneously, every pod tries to connect to the <em>well-known anchor</em>
+      <code>rufus-{groupKey}-anchor</code>.
+    </li>
+    <li>
+      If the anchor responds (room already exists): the anchor sends a
+      <code>_MEMBER_LIST</code> message → the new pod connects directly to all listed peers.
+    </li>
+    <li>
+      If no anchor responds within 2.5 s: this is the first pod in the group. It registers
+      a second PeerJS peer with the anchor ID and starts relaying member lists to newcomers.
+    </li>
+    <li>
+      The anchor is just a regular pod wearing two hats. If it disconnects, the next pod
+      to join will time out on the anchor and claim the anchor slot — fully self-healing.
+    </li>
+  </ol>
+
+  <div class="arch-diagram">┌─────────────────────────────────────────────────────┐
+│  peerjs.com  (signaling only — never sees payload)  │
+│  SDP/ICE exchange:  Pod A ↔ Pod B                   │
+└──────────────────────┬──────────────────────────────┘
+                       │ handshake only
+           ┌───────────┴────────────┐
+           │                        │
+      ┌────▼────┐              ┌────▼────┐
+      │  Pod A  │◄────────────►│  Pod B  │
+      │ (anchor)│  WebRTC DC   │         │
+      └────┬────┘              └────┬────┘
+           │   BroadcastChannel     │
+      ┌────▼────┐              ┌────▼────┐
+      │ Tab A2  │              │  Pod C  │
+      │(same dev│              │(device3)│
+      └─────────┘              └─────────┘</div>
+
+  <div class="tip">
+    <strong>peerjs.com privacy:</strong> The signaling server only sees peer IDs and SDP
+    handshake data. It never receives or forwards RUVON heartbeats, transaction data, or
+    any group key payload. All mesh traffic flows directly device-to-device.
+  </div>
+
+  <div class="warn-box">
+    <strong>Note:</strong> PeerJS requires internet access to reach <code>peerjs.com</code>
+    for the initial handshake. Once connected, peers communicate directly via WebRTC —
+    the signaling server is no longer involved. If <code>peerjs.com</code> is unreachable,
+    the demo falls back to BroadcastChannel-only (same-device tabs still work).
+  </div>
+
+  <!-- ── SAF ────────────────────────────────────────────────────────────────── -->
+  <h2 id="saf">9. Store-and-Forward (SAF)</h2>
+
+  <p>
+    SAF simulates one of Rufus's core fintech features: processing payments when the network
+    is unavailable, then syncing when back online.
+  </p>
+
+  <ol class="steps">
+    <li>Pod detects offline state → queues transaction in-memory SAF buffer.</li>
+    <li>SAF depth reflected in score vector (increases queue penalty P).</li>
+    <li>On reconnect → all queued transactions drain in order.</li>
+    <li>Alternatively: if the pod has a Sovereign neighbour, it sends a <code>RELAY_REQUEST</code>
+        so the Sovereign can execute the transaction on its behalf while the local pod is offline.</li>
+  </ol>
+
+  <p>
+    In the browser demo, "online" and "offline" are simulated states — no actual network
+    change occurs. In production Rufus deployments, the SAF layer uses SQLite for durability.
+  </p>
+
+  <!-- ── ARCH ───────────────────────────────────────────────────────────────── -->
+  <h2 id="arch">10. Architecture diagram</h2>
+
+  <div class="arch-diagram"><span class="hi">index.html (main thread)</span>
+  ├── Modal UI + share link
+  ├── <span class="gr">BroadcastChannel("rufus-mesh")</span>  ←── same-device tabs
+  ├── <span class="hi">PeerJS DataChannels</span>             ←── cross-device peers
+  │       └── relay REMOTE_SEND ↔ REMOTE_MSG with worker
+  └── Canvas / peer table / event log renderer
+
+<span class="hi">worker.js (Web Worker)</span>
+  ├── RUVON engine: heartbeat scheduler, peer table, election
+  ├── Workflow runner: SAF queue, relay logic
+  ├── <span class="gr">broadcastAll(msg)</span>
+  │       ├── BroadcastChannel.postMessage(msg)   → local tabs
+  │       └── self.postMessage({type:"REMOTE_SEND", msg}) → main thread → PeerJS
+  └── self.onmessage
+          ├── INIT / STOP / TOGGLE_OFFLINE / RUN_TX
+          └── <span class="ye">REMOTE_MSG</span>  ← arrives from main thread via PeerJS DataChannel</div>
+
+  <p>The worker never touches the DOM or WebRTC APIs — it is a pure logic layer that
+  posts structured messages to the main thread for all I/O.</p>
+
+  <!-- ── SCENARIOS ─────────────────────────────────────────────────────────── -->
+  <h2 id="scenarios">11. Test scenarios</h2>
+
+  <div class="card">
+    <h3>Scenario A — Tier cascade</h3>
+    <p>
+      Open 5 tabs. After ~30 s the tier badges stabilise. Notice how the fastest-gossiping
+      pod (shortest BC interval) tends to win Sovereign. Open DevTools Performance tab on a
+      high-load tab and reduce its CPU budget — watch it drop to T3 and lose Sovereign.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Scenario B — SAF relay</h3>
+    <p>
+      Open 2 tabs. Click <strong>Go Offline</strong> on tab 1 so it has a Sovereign (tab 2).
+      Click <strong>Run Transaction</strong> on tab 1 — observe the RELAY_REQUEST logged in
+      both tabs. Tab 2 executes the transaction and returns the result. Click
+      <strong>Go Online</strong> to drain any queued SAF entries.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Scenario C — Cross-device latency</h3>
+    <p>
+      Join from two devices on the same Wi-Fi. Open the event log on both. Run a transaction
+      on the device with the lower score — it relays to the higher-score Sovereign on the
+      other device. The round-trip latency appears as the gap between RELAY_SENT and
+      RELAY_RECEIVED log entries.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Scenario D — Anchor self-healing</h3>
+    <p>
+      Join 3 devices. Close the tab that became the anchor (the first one to join).
+      Wait ~10 s for stale-peer eviction. Open a new fourth tab with the same group key.
+      It will time out on the missing anchor and claim the anchor role itself — the mesh
+      re-forms without any manual intervention.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Scenario E — GitHub Pages (no server at all)</h3>
+    <p>
+      Push <code>examples/browser_demo_3/</code> to a <code>gh-pages</code> branch.
+      Open the GitHub Pages URL on two different devices. Enter the same group key.
+      The mesh forms via <code>peerjs.com</code> — zero infrastructure required.
+    </p>
+  </div>
+
+  <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border);
+              color: var(--muted); font-size: 11px; line-height: 2;">
+    <strong style="color: var(--text)">Rufus SDK</strong> — Edge-first Python workflow engine.<br>
+    Browser Demo 3 is a standalone static demo of the RUVON gossip layer. No SDK installation required.<br>
+    <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank">github.com/KamikaziD/rufus-sdk</a>
+    &nbsp;·&nbsp;
+    <a href="index.html">← Back to Demo</a>
+  </div>
+
+</div>
+</body>
+</html>

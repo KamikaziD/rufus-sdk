@@ -46,6 +46,14 @@ class LoadTestResults:
     wasm_steps_executed: int = 0
     wasm_step_failures: int = 0
     wasm_execution_latencies: List[float] = field(default_factory=list)
+    # RUVON capability gossip metrics
+    gossip_broadcasts: int = 0
+    gossip_failures: int = 0
+    gossip_broadcast_latencies: List[float] = field(default_factory=list)
+    # NKey patch verification metrics
+    nkey_verifications: int = 0
+    nkey_failures: int = 0
+    nkey_verify_latencies: List[float] = field(default_factory=list)
 
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
@@ -113,6 +121,28 @@ class LoadTestResults:
                 d["wasm_exec_p50_ms"] = f"{wl[idx_p50] * 1000:.1f}"
                 d["wasm_exec_p95_ms"] = f"{wl[idx_p95] * 1000:.1f}"
                 d["wasm_exec_p99_ms"] = f"{wl[idx_p99] * 1000:.1f}"
+        if self.gossip_broadcasts > 0 or self.gossip_failures > 0:
+            total_gossip = self.gossip_broadcasts + self.gossip_failures
+            d["gossip_broadcasts"] = self.gossip_broadcasts
+            d["gossip_failures"] = self.gossip_failures
+            d["gossip_success_rate"] = (
+                f"{self.gossip_broadcasts / total_gossip * 100:.2f}%" if total_gossip else "N/A"
+            )
+            if self.gossip_broadcast_latencies:
+                gl = sorted(self.gossip_broadcast_latencies)
+                d["gossip_p95_ms"] = f"{gl[int(0.95 * (len(gl) - 1))] * 1000:.2f}"
+                d["gossip_p99_ms"] = f"{gl[int(0.99 * (len(gl) - 1))] * 1000:.2f}"
+        if self.nkey_verifications > 0 or self.nkey_failures > 0:
+            total_nkey = self.nkey_verifications + self.nkey_failures
+            d["nkey_verifications"] = self.nkey_verifications
+            d["nkey_failures"] = self.nkey_failures
+            d["nkey_success_rate"] = (
+                f"{self.nkey_verifications / total_nkey * 100:.2f}%" if total_nkey else "N/A"
+            )
+            if self.nkey_verify_latencies:
+                nl = sorted(self.nkey_verify_latencies)
+                d["nkey_verify_p95_ms"] = f"{nl[int(0.95 * (len(nl) - 1))] * 1000:.2f}"
+                d["nkey_verify_p99_ms"] = f"{nl[int(0.99 * (len(nl) - 1))] * 1000:.2f}"
         return d
 
 
@@ -272,12 +302,19 @@ class LoadTestOrchestrator:
                 "No devices available. Call setup_devices() first or set skip_device_setup=False")
         elif not skip_device_setup:
             # Single scenario mode — skip server registration for local-only scenarios
-            _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
+            _local_only = scenario in ("wasm_thundering_herd", "nats_transport", "ruvon_gossip", "nkey_patch")
             await self.setup_devices(
                 num_devices,
                 cleanup_first=True,
                 register_with_server=not _local_only,
             )
+
+        # Reset per-device metrics so each scenario gets a clean slate.
+        # DeviceMetrics accumulates across calls otherwise, making scenario N
+        # include all data from scenarios 1…N-1.
+        for device in self._devices:
+            device.metrics.reset()
+        self._aggregated_metrics.clear()
 
         # Start timer
         start_time = time.time()
@@ -412,6 +449,12 @@ class LoadTestOrchestrator:
                 results.wasm_steps_executed += metrics.wasm_steps_executed
                 results.wasm_step_failures += metrics.wasm_step_failures
                 results.wasm_execution_latencies.extend(metrics.wasm_execution_latencies)
+                results.gossip_broadcasts += metrics.gossip_broadcasts
+                results.gossip_failures += metrics.gossip_failures
+                results.gossip_broadcast_latencies.extend(metrics.gossip_broadcast_latencies)
+                results.nkey_verifications += metrics.nkey_verifications
+                results.nkey_failures += metrics.nkey_failures
+                results.nkey_verify_latencies.extend(metrics.nkey_verify_latencies)
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -436,7 +479,9 @@ class LoadTestOrchestrator:
             async with semaphore:
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as client:
-                        # Check if device already exists (idempotent mode)
+                        # For idempotent mode: delete any pre-existing device so we always
+                        # get a fresh API key back from registration (the GET endpoint never
+                        # returns api_key, so re-use without deletion = 401 on SAF sync).
                         if idempotent:
                             check_response = await client.get(
                                 f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
@@ -444,16 +489,14 @@ class LoadTestOrchestrator:
                             )
 
                             if check_response.status_code == 200:
-                                data = check_response.json()
-                                existing_api_key = data.get("api_key")
-                                if existing_api_key:
-                                    device.config.api_key = existing_api_key
-                                    if device._http_client:
-                                        await device._http_client.aclose()
-                                    device._http_client = None  # Recreate lazily with new api_key
-                                    logger.debug(
-                                        f"Device {device.config.device_id} already registered (using existing)")
-                                    return True
+                                # Delete so re-registration returns a known key
+                                await client.delete(
+                                    f"{self.cloud_url}/api/v1/devices/{device.config.device_id}",
+                                    headers={"X-Registration-Key": registration_key}
+                                )
+                                logger.debug(
+                                    f"Device {device.config.device_id} existed — deleted for fresh key"
+                                )
 
                         # Register new device
                         response = await client.post(

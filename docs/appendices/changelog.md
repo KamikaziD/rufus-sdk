@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0rc6] — 2026-04-05
+
+### Added
+- **WASM sidecar binary** — Pre-built `apply_config.wasm` (CPython WASI, 25MB) committed to
+  repo and distributed in `rufus-sdk-edge` wheel; `fraud_scorer.wasm` Rust binary included
+  in `Dockerfile.rufus-edge-dev`; no toolchain required at runtime
+- **Benchmark suite sections 15/16** — RUVON capability gossip (CapabilityVector
+  serialisation, `find_best_builder()` at N=10–1000 peers, S(Vc) formula cost) and
+  NKey Ed25519 patch verification (valid/invalid/from_env paths)
+- **Standalone `benchmark_ruvon.py`** — dedicated RUVON benchmark with `--quick`,
+  `--iterations`, `--output json` CLI; graceful skip when deps absent
+- **Browser Demo 3 — Tab-to-Tab Pod Mesh** (`examples/browser_demo_3/`) — pure-browser
+  RUVON mesh via BroadcastChannel; each tab = edge pod; Sovereign election, SAF queue,
+  offline→Sovereign relay; no server required
+- **Browser Demo 2 upgrades** — RUVON Capability Gossip panel (T1/T2/T3 distribution,
+  activity feed) and NKey Patch Verification panel (accepted/rejected/rate counters)
+- **Load test scenarios** — `ruvon_gossip` and `nkey_patch` added to device simulator
+  and orchestrator; performance targets: gossip p95 <50ms, nkey accuracy >99.9%
+- **`requirements.txt`** — `msgspec>=0.18.0`, `wasmtime>=12.0.0`, `py2wasm>=2.6.2`
+
+### Fixed
+- `config_applier.py` WASM entry guard was `__name__ == "__wasm__"` — never fires under
+  WASI; corrected to `__name__ == "__main__"`
+- `build_wasm._build_with_py2wasm()` passed non-existent `--entry` flag; removed; added
+  Python 3.11 fallback path (py2wasm 2.6+ requires 3.11+)
+- `test_sidecar_wasm.py` — fixed `WasiFile.from_fileobj` (API doesn't exist); use
+  `WasiConfig.stdin_file`/`stdout_file` with temp files instead
+
+---
+
 ## [1.0.0rc5] — 2026-03-18
 
 ### Added

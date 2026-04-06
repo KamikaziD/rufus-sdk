@@ -204,7 +204,7 @@ async function registerDevice(dev) {
         device_name: `Browser ${dev.deviceType.toUpperCase()} ${dev.index + 1}`,
         merchant_id: "browser-demo-merchant",
         firmware_version: "1.0.0",
-        sdk_version: "1.0.0rc5",
+        sdk_version: "1.0.0rc6",
         capabilities: ["workflow_execution"],
       }),
     });
@@ -486,7 +486,7 @@ async function heartbeat(dev) {
     const bodyObj = {
       device_status: "online",
       pending_saf_count: dev.safQueue.length,
-      sdk_version: "1.0.0rc5",
+      sdk_version: "1.0.0rc6",
     };
     const bodyStr = JSON.stringify(bodyObj);
     // Track wire sizes for benchmark panel
@@ -930,7 +930,7 @@ function startStatsLoop() {
     // Fallback: compute representative wire sizes when no real HB/SAF has fired yet
     if (devices.length > 0 && lastHeartbeatJsonBytes === 0) {
       const dev = devices[0];
-      const sampleHb = { device_status: "online", pending_saf_count: 0, sdk_version: "1.0.0rc5" };
+      const sampleHb = { device_status: "online", pending_saf_count: 0, sdk_version: "1.0.0rc6" };
       lastHeartbeatJsonBytes  = new TextEncoder().encode(JSON.stringify(sampleHb)).length;
       lastHeartbeatProtoBytes = estimateHeartbeatProto(dev);
     }
@@ -1031,6 +1031,55 @@ function startStatsLoop() {
                            index: v.index }));
     postMessage({ type: "LEADERBOARD", heroes });
 
+    // ── RUVON Capability Gossip simulation (PR#28) ─────────────────────────
+    // Each tick, simulate N devices broadcasting their capability vectors.
+    // Tier classification mirrors capability_gossip.py classify_node_tier():
+    //   T1: index % 5 === 0 (constrained, ~20%)
+    //   T3: index % 7 === 0 (server-class, ~14%)
+    //   T2: everything else (gateway, ~66%)
+    const broadcastThisTick = Math.floor(devices.length * 0.2); // 20% broadcast per second
+    const gossipEvents = [];
+    for (let gi = 0; gi < broadcastThisTick; gi++) {
+      const d = devices[(gi * 7) % devices.length];
+      const tier = d.index % 7 === 0 ? 3 : d.index % 5 === 0 ? 1 : 2;
+      const ramMb = tier === 1 ? 128 + (d.index % 4) * 64
+                 : tier === 3 ? 4096 + (d.index % 3) * 2048
+                 : 512 + (d.index % 4) * 256;
+      const cpuLoad = d.state === STATE.OFFLINE ? 0.05
+                    : d.state === STATE.WASM_EXEC ? 0.75 + Math.random() * 0.2
+                    : 0.1 + Math.random() * 0.4;
+      const vecC = d.vectorC !== undefined ? d.vectorC : 1.0;
+      const vecU = d.vectorU !== undefined ? d.vectorU : 0.5;
+      const vecP = d.vectorP !== undefined ? d.vectorP : 0.8;
+      const score = (0.50 * vecC + 0.15 * 1.0 + 0.25 * vecU + 0.10 * vecP).toFixed(3);
+      gossipEvents.push({
+        device_id: `dev-${String(d.index).padStart(4, "0")}`,
+        tier,
+        score,
+        ram_mb: ramMb,
+        cpu_load: parseFloat(cpuLoad.toFixed(3)),
+      });
+    }
+    const tier1Count = devices.filter((_, i) => i % 5 === 0 && i % 7 !== 0).length;
+    const tier3Count = devices.filter((_, i) => i % 7 === 0).length;
+    const tier2Count = devices.length - tier1Count - tier3Count;
+    postMessage({
+      type: "GOSSIP",
+      tier1: tier1Count,
+      tier2: tier2Count,
+      tier3: tier3Count,
+      broadcasts: broadcastThisTick,
+      events: gossipEvents.slice(0, 3),  // max 3 events per tick to keep feed readable
+    });
+
+    // ── NKey patch verification simulation (PR#28) ─────────────────────────
+    // Simulate WASM patch broadcasts arriving at ~1/5 of online devices per tick.
+    // 5% carry bad signatures (mirrors _nkey_patch_scenario in device_simulator.py).
+    const nkeyCount = Math.max(1, Math.floor(onlineCount * 0.2));
+    const nkeyBad = Math.floor(nkeyCount * 0.05);
+    const nkeyGood = nkeyCount - nkeyBad;
+    postMessage({ type: "NKEY_STATS", accepted: nkeyGood, rejected: nkeyBad });
+
     txnCount = 0;
     txnWindowStart = now;
     if (latencyTimings.length > 1000) latencyTimings = latencyTimings.slice(-1000);
@@ -1054,7 +1103,7 @@ function estimateHeartbeatProto(dev) {
   // HeartbeatMsg fields: device_id(1), device_status(2), pending_saf_count(3),
   //                      sdk_version(4), timestamp_ms(5 int64)
   return _protoStr(dev.id) + _protoStr("online") + _protoInt(dev.safQueue.length) +
-         _protoStr("1.0.0rc5") + 9;  // int64: tag(1) + fixed 8 bytes
+         _protoStr("1.0.0rc6") + 9;  // int64: tag(1) + fixed 8 bytes
 }
 
 function estimateSafBatchProto(txns) {

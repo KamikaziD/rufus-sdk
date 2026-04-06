@@ -113,7 +113,7 @@
   .main {
     display: grid;
     grid-template-columns: 1fr 300px;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto auto auto;
     gap: 16px;
     padding: 16px 24px;
     max-width: 1400px;
@@ -290,10 +290,34 @@
   .bar-p { background:#bc8cff; }
   .ruvon-score { font-size:10px; color:#e6edf3; font-weight:700; margin-left:4px; }
 
+  /* ── RUVON gossip + NKey panel ──────────────────────────────────────────── */
+  #ruvon-panel { grid-row: 3; grid-column: 1; }
+  #nkey-panel  { grid-row: 3; grid-column: 2; }
+  .tier-chip {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: 10px; font-weight: 700; font-family: var(--mono); margin-right: 3px;
+  }
+  .tier-1 { background: #2a2000; color: #e3b341; border: 1px solid #e3b341; }
+  .tier-2 { background: #001a2a; color: #58a6ff; border: 1px solid #58a6ff; }
+  .tier-3 { background: #001a00; color: #3fb950; border: 1px solid #3fb950; }
+  #gossip-feed {
+    background: #0a0d12; border: 1px solid var(--border); border-radius: 4px;
+    height: 120px; overflow-y: auto; padding: 6px 10px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.6;
+  }
+  .gossip-t1 { color: #e3b341; }
+  .gossip-t2 { color: #58a6ff; }
+  .gossip-t3 { color: #3fb950; }
+  .tier-dist-row { display: flex; gap: 12px; margin: 8px 0; align-items: center; flex-wrap: wrap; }
+  .nkey-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .nkey-stat { background: #0a0d12; border-radius: 6px; padding: 8px 10px; text-align: center; }
+  .nkey-val  { font-family: var(--mono); font-weight: 700; font-size: 18px; }
+  .nkey-lbl  { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
   /* ── Log panel ───────────────────────────────────────────────────────── */
   #log-panel {
     grid-column: 1 / -1;
-    grid-row: 3;
+    grid-row: 4;
   }
   #log-output {
     background: #0a0d12;
@@ -317,8 +341,12 @@
   /* ── Responsive ──────────────────────────────────────────────────────── */
   @media (max-width: 800px) {
     .main { grid-template-columns: 1fr; }
-    #stats-panel { grid-column: 1; grid-row: 2; }
-    #log-panel   { grid-row: 3; }
+    #stats-panel  { grid-column: 1; grid-row: 2; }
+    #wire-panel   { grid-row: 3; grid-column: 1; }
+    #nats-panel   { grid-row: 4; grid-column: 1; }
+    #ruvon-panel  { grid-row: 5; grid-column: 1; }
+    #nkey-panel   { grid-row: 6; grid-column: 1; }
+    #log-panel    { grid-row: 7; grid-column: 1; }
   }
 </style>
 </head>
@@ -374,6 +402,12 @@
       <div class="legend-item"><div class="swatch" style="background:#1565c0"></div>Syncing SAF</div>
       <div class="legend-item"><div class="swatch" style="background:#4a148c"></div>Workflow done</div>
       <div class="legend-item"><div class="swatch" style="background:#ff7043"></div>Mesh relay</div>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:10px;color:var(--muted)">Node tier:</span>
+      <span class="tier-chip tier-1">T1</span><span style="font-size:10px;color:var(--muted)">Constrained &lt;512 MB</span>
+      <span class="tier-chip tier-2">T2</span><span style="font-size:10px;color:var(--muted)">Gateway ≥512 MB</span>
+      <span class="tier-chip tier-3">T3</span><span style="font-size:10px;color:var(--muted)">Server &gt;4 GB/accel</span>
     </div>
   </div>
 
@@ -536,6 +570,78 @@
     </div>
     <div style="margin-top:8px;font-size:10px;color:var(--muted)">
       Real-time push from cloud control plane (Docker edge-sim + cloud workers)
+    </div>
+  </div>
+
+  <!-- RUVON Capability Gossip Feed -->
+  <div class="panel" id="ruvon-panel">
+    <div class="panel-title" style="display:flex;align-items:center;gap:8px;">
+      RUVON Capability Gossip
+      <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none">
+        (PR#28 — tier classification + vector broadcast)
+      </span>
+    </div>
+    <!-- Tier distribution -->
+    <div class="tier-dist-row">
+      <div>
+        <span class="tier-chip tier-1">T1</span>
+        <span style="font-family:var(--mono);font-size:13px;color:#e3b341" id="tier1-count">0</span>
+        <span style="color:var(--muted);font-size:10px;margin-left:2px">constrained</span>
+      </div>
+      <div>
+        <span class="tier-chip tier-2">T2</span>
+        <span style="font-family:var(--mono);font-size:13px;color:#58a6ff" id="tier2-count">0</span>
+        <span style="color:var(--muted);font-size:10px;margin-left:2px">gateway</span>
+      </div>
+      <div>
+        <span class="tier-chip tier-3">T3</span>
+        <span style="font-family:var(--mono);font-size:13px;color:#3fb950" id="tier3-count">0</span>
+        <span style="color:var(--muted);font-size:10px;margin-left:2px">server</span>
+      </div>
+      <div style="margin-left:auto;font-size:10px;color:var(--muted)">
+        Broadcasts: <span style="font-family:var(--mono);color:#58a6ff" id="gossip-total">0</span>
+      </div>
+    </div>
+    <!-- Activity feed -->
+    <div id="gossip-feed">
+      <span style="font-style:italic">Gossip vectors will appear here once simulation starts…</span>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+      Tier classification: T1 &lt;512 MB · T2 ≥512 MB · T3 &gt;4 GB or accelerator
+    </div>
+  </div>
+
+  <!-- NKey Patch Verification Panel -->
+  <div class="panel" id="nkey-panel">
+    <div class="panel-title" style="display:flex;align-items:center;gap:8px;">
+      NKey Patch Verification
+      <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none">
+        (PR#28 — Ed25519)
+      </span>
+    </div>
+    <div class="nkey-grid">
+      <div class="nkey-stat">
+        <div class="nkey-val" style="color:var(--green)" id="nkey-accepted">0</div>
+        <div class="nkey-lbl">Accepted ✓</div>
+      </div>
+      <div class="nkey-stat">
+        <div class="nkey-val" style="color:var(--red)" id="nkey-rejected">0</div>
+        <div class="nkey-lbl">Rejected ✗</div>
+      </div>
+      <div class="nkey-stat">
+        <div class="nkey-val" style="color:var(--accent)" id="nkey-rate">0</div>
+        <div class="nkey-lbl">verify/sec</div>
+      </div>
+      <div class="nkey-stat">
+        <div class="nkey-val" style="color:var(--amber)" id="nkey-bad-rate">0.0%</div>
+        <div class="nkey-lbl">bad sig rate</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.6;">
+      Simulates receiving WASM patch broadcasts on
+      <code style="color:var(--accent);font-size:10px">ruvon.node.patch</code>.
+      Each broadcast is Ed25519-verified before hot-swapping.
+      5% carry intentionally bad signatures to test rejection.
     </div>
   </div>
 
@@ -842,6 +948,12 @@ function handleWorkerMessage(e) {
   } else if (type === "LEADERBOARD") {
     updateLeaderboard(e.data.heroes);
 
+  } else if (type === "GOSSIP") {
+    updateGossipPanel(e.data);
+
+  } else if (type === "NKEY_STATS") {
+    updateNKeyPanel(e.data);
+
   } else if (type === "RELAY_EDGE") {
     const { from, to, hops, count } = e.data;
     const key = `${from}-${to}`;
@@ -858,6 +970,60 @@ function handleWorkerMessage(e) {
   } else if (type === "REGISTERED") {
     appendLog(`device-${String(e.data.deviceIndex + 1).padStart(3, "0")} registered with control plane`);
   }
+}
+
+// ── RUVON Gossip Panel ─────────────────────────────────────────────────────
+let _gossipTotal = 0;
+const _MAX_GOSSIP_FEED = 40;
+
+function updateGossipPanel(data) {
+  // Update tier counts
+  document.getElementById("tier1-count").textContent = data.tier1 || 0;
+  document.getElementById("tier2-count").textContent = data.tier2 || 0;
+  document.getElementById("tier3-count").textContent = data.tier3 || 0;
+  _gossipTotal += data.broadcasts || 0;
+  document.getElementById("gossip-total").textContent = _gossipTotal.toLocaleString();
+
+  // Append gossip events to feed
+  if (data.events && data.events.length > 0) {
+    const feed = document.getElementById("gossip-feed");
+    // Clear placeholder
+    if (feed.querySelector("[style*='font-style:italic']")) feed.innerHTML = "";
+    for (const evt of data.events) {
+      const div = document.createElement("div");
+      const tierClass = "gossip-t" + evt.tier;
+      div.innerHTML = `<span style="color:#444">${new Date().toLocaleTimeString("en-GB",{hour12:false})}</span> `
+        + `<span class="tier-chip tier-${evt.tier}">T${evt.tier}</span> `
+        + `<span class="${tierClass}">${evt.device_id}</span> `
+        + `<span style="color:var(--muted)">S(Vc)=</span><span style="color:var(--text)">${evt.score}</span> `
+        + `<span style="color:var(--muted)">RAM=${evt.ram_mb}MB CPU=${(evt.cpu_load*100).toFixed(0)}%</span>`;
+      feed.appendChild(div);
+    }
+    // Trim feed
+    while (feed.children.length > _MAX_GOSSIP_FEED) feed.removeChild(feed.firstChild);
+    feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+// ── NKey Panel ─────────────────────────────────────────────────────────────
+let _nkeyAccepted = 0;
+let _nkeyRejected = 0;
+let _nkeyLastSec = 0;
+let _nkeyLastTs = Date.now();
+
+function updateNKeyPanel(data) {
+  _nkeyAccepted += data.accepted || 0;
+  _nkeyRejected += data.rejected || 0;
+  const total = _nkeyAccepted + _nkeyRejected;
+  const now = Date.now();
+  const elapsed = (now - _nkeyLastTs) / 1000;
+  const rate = elapsed > 0 ? Math.round((data.accepted + data.rejected) / elapsed) : 0;
+  _nkeyLastTs = now;
+  const badRate = total > 0 ? ((_nkeyRejected / total) * 100).toFixed(1) + "%" : "0.0%";
+  document.getElementById("nkey-accepted").textContent = _nkeyAccepted.toLocaleString();
+  document.getElementById("nkey-rejected").textContent = _nkeyRejected.toLocaleString();
+  document.getElementById("nkey-rate").textContent = rate;
+  document.getElementById("nkey-bad-rate").textContent = badRate;
 }
 
 // ── Log ────────────────────────────────────────────────────────────────────

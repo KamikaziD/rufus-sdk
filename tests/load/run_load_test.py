@@ -28,15 +28,21 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from tests.load.orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults
 
-# Configure logging
+# Configure logging: INFO to file, WARNING-only to console (suppress httpx per-request noise)
+_file_handler = logging.FileHandler('load_test.log')
+_file_handler.setLevel(logging.INFO)
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.WARNING)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('load_test.log')
-    ]
+    handlers=[_console_handler, _file_handler]
 )
+
+# Suppress per-request httpx/httpcore noise from console
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +240,19 @@ def print_results(results: LoadTestResults, workers: int = 1):
         print(f"Transaction Rate >= {throughput_target} tx/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({tx_per_sec:.1f} tx/s)")
 
     elif results.scenario == "config_poll":
-        # Target: config polling should sustain reasonable rate
-        throughput_target = results.num_devices / 60  # ~1 poll per device per minute
-        throughput_pass = results.requests_per_second >= throughput_target * 0.9
-        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({results.requests_per_second:.1f} req/s)")
+        # Target: ~1 poll per device per minute.
+        # Effective duration subtracts one poll_interval because:
+        #   - startup jitter (0–poll_interval s) delays first poll per device
+        #   - devices sleep poll_interval after their last poll before exiting
+        # This means wall-clock duration is up to 2×poll_interval longer than
+        # the requested test window; subtracting one interval gives the active
+        # polling period (matching the heartbeat / msgspec effective-duration logic).
+        poll_interval = 60  # seconds — matches DeviceConfig default
+        throughput_target = results.num_devices / poll_interval
+        effective_duration = max(results.duration_seconds - poll_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        throughput_pass = effective_rps >= throughput_target * 0.9
+        print(f"Config Poll Rate >= {throughput_target:.1f} req/s: {'✅ PASS' if throughput_pass else '❌ FAIL'} ({effective_rps:.1f} req/s effective)")
 
     elif results.scenario == "cloud_commands":
         # Target: command delivery within heartbeat cycle
@@ -324,11 +339,18 @@ def print_results(results: LoadTestResults, workers: int = 1):
 
     elif results.scenario == "msgspec_codec":
         rps = results.total_requests / results.duration_seconds if results.duration_seconds > 0 else 0
-        rps_pass = rps >= 50.0  # sanity floor — preflight + heartbeat should always clear this
+        # Target: devices / heartbeat_interval (each device sends one heartbeat every 30s).
+        # Effective duration accounts for the stagger ramp (up to heartbeat_interval seconds
+        # before the first device fires), matching the heartbeat scenario accounting.
+        heartbeat_interval = 30
+        rps_target = results.num_devices / heartbeat_interval
+        effective_duration = max(results.duration_seconds - heartbeat_interval, 1)
+        effective_rps = results.total_requests / effective_duration
+        rps_pass = effective_rps >= rps_target * 0.9
         print(f"Devices:              {results.num_devices:,}")
         print(f"Requests:             {results.total_requests:,}")
         print(f"Heartbeats sent:      {results.heartbeats_sent:,}")
-        print(f"Req/sec >= 50:        {'✅ PASS' if rps_pass else '❌ FAIL'} ({rps:.1f} req/sec)")
+        print(f"Req/sec >= {rps_target:.1f}:   {'✅ PASS' if rps_pass else '❌ FAIL'} ({effective_rps:.1f} req/sec effective)")
         print(f"Error rate:           {results.error_rate:.2f}%")
 
     elif results.scenario == "nats_transport":
@@ -363,6 +385,62 @@ def print_results(results: LoadTestResults, workers: int = 1):
         else:
             print("  (no latency samples — is RUFUS_NATS_URL set and NATS server running?)")
 
+    elif results.scenario == "ruvon_gossip":
+        # RUVON capability gossip — measures vector serialise/publish/select pipeline.
+        # Targets:
+        #   - broadcast (encode + optional NATS publish) p95 < 1ms (no NATS) / < 50ms (NATS)
+        #   - error rate < 1%
+        print(f"Devices:              {results.num_devices:,}")
+        total_gossip = results.gossip_broadcasts + results.gossip_failures
+        gossip_success_rate = results.gossip_broadcasts / total_gossip * 100 if total_gossip else 0
+        print(f"Gossip broadcasts:    {results.gossip_broadcasts:,}")
+        print(f"Gossip failures:      {results.gossip_failures:,}")
+        print(f"Error rate:           {results.error_rate:.2f}%")
+        error_pass = results.error_rate < 1.0
+        print(f"Error rate < 1%:      {'✅ PASS' if error_pass else '❌ FAIL'} ({results.error_rate:.2f}%)")
+        if results.gossip_broadcast_latencies:
+            gl = sorted(results.gossip_broadcast_latencies)
+            p50_g = gl[int(0.50 * (len(gl) - 1))] * 1000
+            p95_g = gl[int(0.95 * (len(gl) - 1))] * 1000
+            p99_g = gl[int(0.99 * (len(gl) - 1))] * 1000
+            p95_target = 50.0  # ms (NATS round-trip included)
+            p95_pass = p95_g < p95_target
+            print(f"Broadcast p50:        {p50_g:.2f}ms")
+            print(f"Broadcast p95:        {p95_g:.2f}ms")
+            print(f"Broadcast p99:        {p99_g:.2f}ms")
+            print(f"Broadcast p95 < {p95_target:.0f}ms: {'✅ PASS' if p95_pass else '❌ FAIL'} ({p95_g:.2f}ms)")
+            print(f"Samples:              {len(gl):,}")
+        else:
+            print("  (no latency samples — did gossip run?)")
+
+    elif results.scenario == "nkey_patch":
+        # NKey patch verification — Ed25519 signature verify throughput.
+        # Targets:
+        #   - error rate (incorrect accept or reject) < 0.1%
+        #   - verify p95 < 5ms
+        print(f"Devices:              {results.num_devices:,}")
+        total_nkey = results.nkey_verifications + results.nkey_failures
+        print(f"Total verifications:  {total_nkey:,}")
+        print(f"Correct outcomes:     {results.nkey_verifications:,}")
+        print(f"Incorrect outcomes:   {results.nkey_failures:,}")
+        nkey_error_rate = results.nkey_failures / total_nkey * 100 if total_nkey else 0
+        nkey_pass = nkey_error_rate < 0.1
+        print(f"Verify accuracy > 99.9%: {'✅ PASS' if nkey_pass else '❌ FAIL'} ({100 - nkey_error_rate:.3f}% accurate)")
+        if results.nkey_verify_latencies:
+            nl = sorted(results.nkey_verify_latencies)
+            p50_n = nl[int(0.50 * (len(nl) - 1))] * 1000
+            p95_n = nl[int(0.95 * (len(nl) - 1))] * 1000
+            p99_n = nl[int(0.99 * (len(nl) - 1))] * 1000
+            p95_target_n = 5.0
+            lat_pass = p95_n < p95_target_n
+            print(f"Verify p50:           {p50_n:.2f}ms")
+            print(f"Verify p95:           {p95_n:.2f}ms")
+            print(f"Verify p99:           {p99_n:.2f}ms")
+            print(f"Verify p95 < {p95_target_n:.0f}ms:    {'✅ PASS' if lat_pass else '❌ FAIL'} ({p95_n:.2f}ms)")
+            print(f"Samples:              {len(nl):,}")
+        else:
+            print("  (no latency samples — did nkey_patch run? requires cryptography + rufus-sdk-edge)")
+
     print("=" * 80)
 
 
@@ -388,7 +466,7 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd", "nats_transport")
+        _local_only = scenario in ("wasm_thundering_herd", "nats_transport", "ruvon_gossip", "nkey_patch")
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,
@@ -418,14 +496,19 @@ async def run_all_scenarios(
     num_devices: int,
     output_dir: str,
     workers: int = 4,
+    max_duration_per_scenario: int = None,
 ):
     """
     Run all test scenarios with shared devices.
 
     Devices are registered once at the start, used across all scenarios,
     and cleaned up once at the end. This avoids 401 errors and is more efficient.
+
+    Args:
+        max_duration_per_scenario: If set, caps each scenario duration to this many
+            seconds (e.g. pass --duration 60 for a quick smoke run).
     """
-    scenarios = [
+    _DEFAULT_DURATIONS = [
         ("heartbeat", 600),
         ("saf_sync", 300),
         ("config_poll", 600),
@@ -434,7 +517,17 @@ async def run_all_scenarios(
         ("wasm_thundering_herd", 60),
         ("msgspec_codec", 120),
         ("nats_transport", 120),
+        ("ruvon_gossip", 120),
+        ("nkey_patch", 120),
     ]
+    if max_duration_per_scenario:
+        scenarios = [(s, min(d, max_duration_per_scenario)) for s, d in _DEFAULT_DURATIONS]
+    else:
+        scenarios = _DEFAULT_DURATIONS
+
+    total_sec = sum(d for _, d in scenarios) + 5 * (len(scenarios) - 1)
+    print(f"\nTotal estimated run time: {total_sec // 60}m {total_sec % 60}s "
+          f"({len(scenarios)} scenarios, {num_devices} devices)\n")
 
     # Create single orchestrator for all scenarios
     logger.info("="*80)
@@ -450,10 +543,9 @@ async def run_all_scenarios(
 
     try:
         # Setup devices once (register with control plane)
-        logger.info("\n" + "="*80)
-        logger.info("DEVICE SETUP - Registering devices for all scenarios")
-        logger.info("="*80)
+        print(f"Setting up {num_devices} devices (register once for all scenarios)...", flush=True)
         await orchestrator.setup_devices(num_devices, cleanup_first=True)
+        print(f"Device setup complete.\n", flush=True)
 
         all_results = []
 
@@ -465,10 +557,25 @@ async def run_all_scenarios(
 
             output_file = f"{output_dir}/{scenario}_results.json" if output_dir else None
 
+            idx = next(i for i, (s, _) in enumerate(scenarios) if s == scenario)
+            print(f"[{idx + 1}/{len(scenarios)}] {scenario.upper()} — {duration}s", flush=True)
+
+            def _progress(progress: dict, _s=scenario, _d=duration):
+                elapsed = int(progress.get("elapsed_seconds", 0))
+                pct = min(elapsed / _d * 100, 100) if _d else 0
+                print(
+                    f"  {_s}: {pct:5.1f}%  "
+                    f"req={progress['total_requests']:,}  "
+                    f"err={progress['total_errors']:,}  "
+                    f"{progress['requests_per_second']:.1f} req/s",
+                    flush=True,
+                )
+
             # Run scenario (skip device setup since we already did it)
             results = await orchestrator.run_scenario(
                 scenario=scenario,
                 duration_seconds=duration,
+                progress_callback=_progress,
                 skip_device_setup=True  # Use existing devices
             )
 
@@ -510,10 +617,9 @@ async def run_all_scenarios(
 
     finally:
         # Cleanup devices once at the end
-        logger.info("\n" + "="*80)
-        logger.info("DEVICE TEARDOWN - Cleaning up all devices")
-        logger.info("="*80)
+        print("\nTearing down devices...", flush=True)
         await orchestrator.teardown_devices()
+        print("Done.", flush=True)
         logger.info("Load test complete!")
 
 
@@ -553,6 +659,8 @@ Scenarios:
   wasm_thundering_herd - Coordinated burst of local WASM dispatches (target: >= 0.8 steps/device/sec)
   msgspec_codec      - Heartbeat load with msgspec preflight (validates typed decode fast path)
   nats_transport     - Publish heartbeats directly to NATS JetStream (p99 <10ms @<=100, <25ms @<=1k, <50ms @<=10k, <150ms beyond)
+  ruvon_gossip       - RUVON capability vector gossip (p95 <50ms broadcast, <1% error) [local-only, no server needed]
+  nkey_patch         - NKey Ed25519 patch verification throughput (p95 <5ms, >99.9% accurate) [local-only]
         """
     )
 
@@ -580,6 +688,8 @@ Scenarios:
             "wasm_thundering_herd",
             "msgspec_codec",
             "nats_transport",
+            "ruvon_gossip",
+            "nkey_patch",
         ],
         help="Test scenario to run"
     )
@@ -594,8 +704,11 @@ Scenarios:
     parser.add_argument(
         "--duration",
         type=int,
-        default=600,
-        help="Test duration in seconds (default: 600)"
+        default=None,
+        help=(
+            "Test duration in seconds. With --scenario: sets the run length (default 600). "
+            "With --all: caps each scenario to this duration (default: use scenario defaults)."
+        )
     )
 
     parser.add_argument(
@@ -657,13 +770,14 @@ Scenarios:
                 num_devices=args.devices,
                 output_dir=args.output_dir,
                 workers=args.workers,
+                max_duration_per_scenario=args.duration,
             ))
         else:
             results = asyncio.run(run_single_scenario(
                 cloud_url=args.cloud_url,
                 scenario=args.scenario,
                 num_devices=args.devices,
-                duration=args.duration,
+                duration=args.duration or 600,
                 output_file=args.output
             ))
 
