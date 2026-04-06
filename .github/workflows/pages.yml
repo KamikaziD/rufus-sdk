@@ -37,10 +37,13 @@ jobs:
         run: |
           mkdir -p _site/dist
           cp dist/rufus_sdk-*.whl _site/dist/
-          # Copy all browser demo assets (index.html, worker.js, sw.js, manifest.json, icons/)
+          # Demo 1 — Browser Runtime (Pyodide + WebGPU) at site root
           cp -r examples/browser_demo/. _site/
-          # Remove dev-only files that don't belong in the site
           rm -f _site/serve.py _site/README.md _site/README.pdf
+          # Demo 3 — Regenerative Pod Mesh (serverless PeerJS) at /browser_demo_3/
+          mkdir -p _site/browser_demo_3
+          cp -r examples/browser_demo_3/. _site/browser_demo_3/
+          rm -f _site/browser_demo_3/serve.py _site/browser_demo_3/README.md
 
       - uses: actions/configure-pages@v5
 
