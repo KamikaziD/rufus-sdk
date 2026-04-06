@@ -52,9 +52,6 @@ let isSovereign = false;
 // Group mesh config (set on INIT, null = local BroadcastChannel only)
 // ---------------------------------------------------------------------------
 let groupKey = null;
-let signalingWs = null;
-let wsReconnectTimeout = null;
-const WS_RECONNECT_MS = 3000;
 
 // Peer source: pod_id → "local" | "remote"
 const peerSources = {};
@@ -201,7 +198,9 @@ function buildTransaction() {
 }
 
 // ---------------------------------------------------------------------------
-// Hybrid transport: BroadcastChannel (local) + WebSocket (remote)
+// Hybrid transport: BroadcastChannel (local) + PeerJS DataChannels (remote)
+// Remote path: worker posts REMOTE_SEND → main thread → PeerJS DataChannel fans out
+// Incoming remote messages: main thread posts REMOTE_MSG → worker
 // ---------------------------------------------------------------------------
 const mesh = new BroadcastChannel("rufus-mesh");
 
@@ -209,46 +208,8 @@ function broadcastLocal(msg) { mesh.postMessage(msg); }
 
 function broadcastAll(msg) {
   broadcastLocal(msg);
-  if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-    signalingWs.send(JSON.stringify(msg));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// WebSocket signaling connection
-// ---------------------------------------------------------------------------
-function connectSignaling(gKey) {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const base = self._rufusServerBase || `${proto}//${location.hostname}:8000`;
-  signalingWs = new WebSocket(`${base}/api/v1/signal/${encodeURIComponent(gKey)}`);
-
-  signalingWs.onopen = () => {
-    self.postMessage({ type: "WS_CONNECTED", group_key: gKey });
-    // Announce ourselves to the room immediately
-    broadcastAll({ type: "ANNOUNCE", pod_id: POD_ID, vec: buildCapabilityVector() });
-  };
-  signalingWs.onmessage = (evt) => {
-    try { handleRemoteMessage(JSON.parse(evt.data)); } catch (_) {}
-  };
-  signalingWs.onclose = () => {
-    signalingWs = null;
-    self.postMessage({ type: "WS_DISCONNECTED", group_key: gKey });
-    wsReconnectTimeout = setTimeout(() => connectSignaling(gKey), WS_RECONNECT_MS);
-  };
-  signalingWs.onerror = () => {}; // onclose fires next — reconnect handled there
-}
-
-function disconnectSignaling() {
-  if (wsReconnectTimeout) { clearTimeout(wsReconnectTimeout); wsReconnectTimeout = null; }
-  if (signalingWs) { signalingWs.close(); signalingWs = null; }
-}
-
-function handleRemoteMessage(msg) {
-  if (!msg?.type || !msg.pod_id) return;
-  if (msg.pod_id === POD_ID) return; // echo
-  if (isDuplicate(msg.pod_id, msg.timestamp || msg.vec?.timestamp || 0)) return;
-  peerSources[msg.pod_id] = "remote";
-  processIncomingMsg(msg);
+  // Ask main thread to forward to any connected PeerJS DataChannels
+  self.postMessage({ type: "REMOTE_SEND", msg });
 }
 
 // ---------------------------------------------------------------------------
@@ -471,10 +432,19 @@ self.onmessage = async (evt) => {
   switch (msg.type) {
     case "INIT": {
       groupKey = msg.group_key || null;
-      self._rufusServerBase = msg.server_base || null;
       startAdaptiveGossip();
-      if (groupKey) connectSignaling(groupKey);
       self.postMessage({ type: "READY", pod_id: POD_ID, group_key: groupKey });
+      break;
+    }
+
+    case "REMOTE_MSG": {
+      // Message arrived from a remote pod via PeerJS DataChannel (forwarded by main thread)
+      const m = msg.msg;
+      if (!m?.type || !m.pod_id) break;
+      if (m.pod_id === POD_ID) break;
+      if (isDuplicate(m.pod_id, m.timestamp || m.vec?.timestamp || 0)) break;
+      peerSources[m.pod_id] = "remote";
+      processIncomingMsg(m);
       break;
     }
 
@@ -535,7 +505,6 @@ self.onmessage = async (evt) => {
     case "STOP": {
       broadcastAll({ type: "GOODBYE", pod_id: POD_ID });
       if (_heartbeatInterval) { clearTimeout(_heartbeatInterval); _heartbeatInterval = null; }
-      disconnectSignaling();
       mesh.close();
       break;
     }
