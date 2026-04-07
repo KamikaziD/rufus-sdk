@@ -301,6 +301,160 @@ def bench_vector_scoring(n: int):
 
 
 # ---------------------------------------------------------------------------
+# Benchmark: Adaptive gossip interval computation (Browser Demo 3)
+# ---------------------------------------------------------------------------
+
+def bench_adaptive_interval(n: int):
+    """Score → gossip interval formula used in browser_demo_3/worker.js.
+
+    interval = BASE_INTERVAL_MS / score^1.2  ±25% jitter, clamped [200, 15000]
+    """
+    import random as _rand
+
+    _header("Adaptive Gossip Interval  (BASE / score^1.2 ± jitter)")
+
+    BASE_INTERVAL_MS = 2000.0
+    SCORES = [0.05, 0.10, 0.25, 0.50, 0.75, 0.95]
+
+    def _compute(score: float) -> float:
+        raw = BASE_INTERVAL_MS / (score ** 1.2)
+        raw *= _rand.uniform(0.75, 1.25)
+        return max(200.0, min(raw, 15000.0))
+
+    # Warmup
+    for s in SCORES:
+        for _ in range(50):
+            _compute(s)
+
+    for score in SCORES:
+        times = []
+        for i in range(n):
+            t0 = time.perf_counter()
+            _compute(score)
+            times.append(time.perf_counter() - t0)
+        _row(f"score={score:.2f}  interval≈{BASE_INTERVAL_MS / score**1.2:.0f}ms", _stats(times))
+
+    _note(
+        "Pure arithmetic — expected > 500 000 ops/sec. "
+        "Sovereign Pulse Mode bypasses this and uses BASE_INTERVAL_MS directly."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Benchmark: LRU dedup cache (gossip echo prevention)
+# ---------------------------------------------------------------------------
+
+def bench_dedup_cache(n: int):
+    """50-entry LRU dedup cache used in browser_demo_3/worker.js to prevent echo loops.
+
+    Each received message is checked against the cache before re-broadcasting.
+    Simulates realistic 20% duplicate rate with 50 unique pod IDs.
+    """
+    from collections import OrderedDict
+
+    _header("Gossip Dedup Cache  (LRU 50-entry, 20% dup rate)")
+
+    CACHE_SIZE = 50
+    NUM_PODS = 50
+    DUP_RATE = 0.20
+
+    # Pre-generate a stream of (pod_id, timestamp) tuples
+    import random as _rand
+    pod_ids = [f"pod-{i:04x}" for i in range(NUM_PODS)]
+    timestamps = [float(i * 1000) for i in range(n)]
+    stream = []
+    prev_key = None
+    for i in range(n):
+        if prev_key and _rand.random() < DUP_RATE:
+            stream.append(prev_key)
+        else:
+            k = (pod_ids[i % NUM_PODS], timestamps[i])
+            stream.append(k)
+            prev_key = k
+
+    cache: "OrderedDict[tuple, bool]" = OrderedDict()
+
+    def _check(key: tuple) -> bool:
+        if key in cache:
+            cache.move_to_end(key)
+            return True  # duplicate
+        cache[key] = True
+        if len(cache) > CACHE_SIZE:
+            cache.popitem(last=False)
+        return False
+
+    # Warmup
+    for k in stream[:min(200, n)]:
+        _check(k)
+    cache.clear()
+
+    times_hit, times_miss = [], []
+    dup_count = 0
+    for k in stream:
+        t0 = time.perf_counter()
+        hit = _check(k)
+        elapsed = time.perf_counter() - t0
+        if hit:
+            times_hit.append(elapsed)
+            dup_count += 1
+        else:
+            times_miss.append(elapsed)
+
+    if times_miss:
+        _row("cache miss  (new message, forward)", _stats(times_miss))
+    if times_hit:
+        _row("cache hit   (duplicate, drop)      ", _stats(times_hit))
+    _note(
+        f"Dup rate achieved: {dup_count / n * 100:.1f}% of {n} messages. "
+        "Expected: > 1 000 000 ops/sec for both paths."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Benchmark: Propagation damping (hop-count guard)
+# ---------------------------------------------------------------------------
+
+def bench_propagation_damping(n: int):
+    """Propagation damping check: propagated_count < PROPAGATION_LIMIT=15.
+
+    Every forwarded gossip message increments propagated_count.
+    Messages at or above the limit are dropped to prevent broadcast storms.
+    """
+    import random as _rand
+
+    _header("Propagation Damping  (propagated_count < PROPAGATION_LIMIT=15)")
+
+    PROPAGATION_LIMIT = 15
+
+    counts = [_rand.randint(0, 20) for _ in range(n)]
+
+    # Warmup
+    for c in counts[:min(500, n)]:
+        _ = c < PROPAGATION_LIMIT
+
+    times_pass, times_drop = [], []
+    passed = 0
+    for c in counts:
+        t0 = time.perf_counter()
+        forward = c < PROPAGATION_LIMIT
+        elapsed = time.perf_counter() - t0
+        if forward:
+            times_pass.append(elapsed)
+            passed += 1
+        else:
+            times_drop.append(elapsed)
+
+    if times_pass:
+        _row("forward (count < limit)", _stats(times_pass))
+    if times_drop:
+        _row("drop    (count ≥ limit)", _stats(times_drop))
+    _note(
+        f"Forwarded {passed / n * 100:.1f}% of messages (counts 0–14 of 0–20 range). "
+        "Expected: > 2 000 000 ops/sec — single integer comparison."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Benchmark: NKey patch verification
 # ---------------------------------------------------------------------------
 
@@ -392,6 +546,9 @@ def main():
     bench_classify_tier(n)
     bench_peer_selection(n)
     bench_vector_scoring(n)
+    bench_adaptive_interval(n)
+    bench_dedup_cache(n)
+    bench_propagation_damping(n)
     bench_nkey(n)
 
     print("\n" + "=" * 72)

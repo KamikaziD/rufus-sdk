@@ -2,6 +2,14 @@
 Edge Device Command Handler
 
 Processes commands received from the cloud (via heartbeat or WebSocket).
+
+NOTE — Demonstration stubs:
+Several command handlers below (config_update, restart, backup, cache_clear,
+force_sync, workflow_start, workflow_cancel) contain TODO placeholders. These
+are intentional stubs that show the expected integration point for each command
+type without coupling the example to a specific deployment environment (systemd,
+Docker, Kubernetes, etc.). Replace the stub bodies with environment-appropriate
+implementations when deploying to production edge devices.
 """
 
 import asyncio

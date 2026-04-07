@@ -2015,7 +2015,7 @@ Edge devices installing `rufus-sdk-edge` save ~10.5 MB vs the old monolithic whe
 
 ---
 
-## §15 WASM Execution Environment
+## §25 WASM Execution Environment
 
 ### Overview
 
@@ -2776,3 +2776,138 @@ Sections:
 - Alembic HEAD: `l7m8n9o0p1q2` — adds `relay_server_url` + `mesh_advisory` to `edge_devices`
 - Production DB size at 664k executions: ~1.69 GB total (workflow_executions 1.44 GB dominates)
 - Cleanup lever: purge `workflow_executions WHERE status IN ('COMPLETED','FAILED') AND created_at < now() - interval '30 days'`
+
+---
+
+## §26 Browser Demo 3 — RUVON Browser Gossip & Serverless PeerJS Mesh
+
+### Purpose
+
+Browser Demo 3 (`examples/browser_demo_3/`) runs a live peer-to-peer pod mesh entirely inside
+browser tabs — no backend server required. Each tab is a Rufus pod running a stripped-down edge
+agent in a Web Worker. Pods gossip capacity scores, elect a Sovereign, and relay offline
+transactions via Store-and-Forward.
+
+Live URL: `https://kamikazid.github.io/rufus-sdk/browser_demo_3/`
+Local: `cd examples/browser_demo_3 && python serve.py` → `http://localhost:8083`
+
+Full inline documentation: `examples/browser_demo_3/about.html`
+
+---
+
+### Transport Architecture
+
+Two complementary transports carry RUVON gossip:
+
+| Transport | Scope | Label |
+|-----------|-------|-------|
+| `BroadcastChannel("rufus-mesh")` | Same device (all tabs, same origin) | Green **BC** |
+| PeerJS WebRTC DataChannels | Cross-device (any network) | Blue **P2P** |
+
+The worker cannot use WebRTC directly (`window` is unavailable in workers). The relay pattern:
+
+```
+worker.js                          index.html (main thread)
+  broadcastAll(msg)
+    ├── BroadcastChannel.postMessage(msg)   → local tabs
+    └── self.postMessage({type:"REMOTE_SEND", msg})
+                                      ↓
+                               sendToAllPeers(msg)  → PeerJS DataChannels → remote pods
+                                      ↑
+                   worker.postMessage({type:"REMOTE_MSG", msg})
+                                      ↑
+                    conn.on("data") in setupDataChannel()
+```
+
+---
+
+### RUVON S(Vc) Scoring in the Browser
+
+```
+S(Vc) = 0.50·C + 0.15·(1/H) + 0.25·U + 0.10·P
+```
+
+| Component | Source in browser |
+|-----------|------------------|
+| C — CPU slack | `1 − cpu_usage` (random jitter, `performance.now()` delta) |
+| H — Heap pressure | `performance.memory.usedJSHeapSize / totalJSHeapSize` (Chromium only) |
+| U — Uptime bonus | `min(uptime_s / 120, 1)` |
+| P — Queue penalty | `1 − min(saf_queue / 10, 1)` |
+
+See §24 for the server/edge implementation using `CapabilityVector`.
+
+---
+
+### Adaptive Gossip Interval
+
+```javascript
+// worker.js — scheduleNextHeartbeat()
+const interval = BASE_INTERVAL_MS / Math.pow(score, 1.2);
+const jitter   = interval * (Math.random() * 0.5 - 0.25);   // ±25%
+setTimeout(sendHeartbeat, Math.max(200, Math.min(interval + jitter, 15000)));
+```
+
+| Score | Approx interval |
+|-------|----------------|
+| 0.95 (T1 healthy) | ~300 ms |
+| 0.50 (T2 average) | ~1.8 s |
+| 0.10 (T3 distress) | ~10 s |
+
+**Sovereign Pulse Mode:** the elected Sovereign always uses exactly `BASE_INTERVAL_MS` (2 s)
+regardless of score — required for reliable relay routing.
+
+**Propagation damping:** forwarded heartbeats carry `propagated_count`; re-broadcast stops at
+`PROPAGATION_LIMIT = 15`. LRU dedup cache (50 entries) prevents echo loops.
+
+**Help-push:** if score drops > 0.15 in one cycle or SAF queue ≥ 3, pod sends `HELP_REQUEST`
+to top-3 peers; they reply with `HELP_OFFER`.
+
+---
+
+### PeerJS Anchor Pod Discovery
+
+Discovery without a server uses the anchor pod pattern:
+
+1. Every pod registers as `rufus-{groupKey}-{podId}` on `peerjs.com`.
+2. Every pod attempts to connect to `rufus-{groupKey}-anchor`.
+3. If anchor responds → anchor sends `_MEMBER_LIST` → pod connects to all listed peers.
+4. If no anchor within 2.5 s → this pod registers a second peer as the anchor and relays
+   member lists to newcomers.
+5. If anchor tab closes → next joining pod times out and claims the anchor slot (self-healing).
+
+`peerjs.com` only handles SDP/ICE handshake — RUVON payload never touches the signaling server.
+
+Vendored dependency: `examples/browser_demo_3/peerjs.min.js` (peerjs@1.5.4, 92 KB). No CDN
+at runtime — works offline once loaded and passes GitHub Pages CSP.
+
+---
+
+### Signal Relay Endpoint (local dev fallback)
+
+```
+WS /api/v1/signal/{group_key}
+```
+
+Defined in `src/rufus_server/main.py`. Fan-out relay keyed by group key — all pods in a group
+receive every message broadcast by any member. No auth required (group key provides isolation).
+
+The demo no longer uses this endpoint (replaced by PeerJS), but it remains in `main.py` for
+local full-stack development where a Rufus server is already running.
+
+---
+
+### Running & Deploying
+
+```bash
+# Local development
+cd examples/browser_demo_3 && python serve.py
+# → http://localhost:8083         (this machine)
+# → http://192.168.x.x:8083      (LAN devices)
+
+# Cross-device without a server: enter same group key on each device
+# Share link: click "Share Link" in the header after joining a mesh group
+```
+
+GitHub Pages: `https://kamikazid.github.io/rufus-sdk/browser_demo_3/`
+Deployed via `.github/workflows/pages.yml` — copies `examples/browser_demo_3/` into
+`_site/browser_demo_3/` on every push to `main`.

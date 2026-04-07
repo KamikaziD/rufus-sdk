@@ -185,6 +185,10 @@
       <label for="input-nickname">Nickname (optional)</label>
       <input id="input-nickname" type="text" placeholder="My Pod" maxlength="24" />
     </div>
+    <div>
+      <label for="input-nats-url">NATS WebSocket URL (optional — JetStream Tier 1)</label>
+      <input id="input-nats-url" type="text" placeholder="wss://your-nats-server:4222" maxlength="120" />
+    </div>
     <div class="modal-footer">
       <button onclick="generateGroupKey()" style="margin-right:auto">Generate Key</button>
       <button onclick="joinLocalOnly()">Local Only</button>
@@ -193,6 +197,7 @@
     <div style="font-size:10px; color:var(--muted); line-height:1.6">
       <strong>Local Only</strong>: BroadcastChannel — same device tabs, no server.<br>
       <strong>Join Mesh</strong>: PeerJS WebRTC — cross-device, serverless via peerjs.com.<br>
+      <strong>NATS URL</strong>: optional JetStream transport (fastest, when available).<br>
       <a href="about.html" target="_blank" style="color:var(--accent)">How does this work? →</a>
     </div>
   </div>
@@ -236,11 +241,33 @@
       <table class="peer-table" id="peer-table">
         <thead>
           <tr>
-            <th>Pod ID</th><th>Tier</th><th>Score</th><th>CPU</th><th>RAM (MB)</th><th>Queue</th><th>Age</th><th>Src</th>
+            <th>Pod ID</th><th>Tier</th><th>Score</th><th>CPU</th><th>RAM (MB)</th><th>Run/Q</th><th>Age</th><th>Src</th>
           </tr>
         </thead>
         <tbody id="peer-tbody"></tbody>
       </table>
+    </div>
+
+    <!-- Task Distribution -->
+    <div class="card">
+      <h2>Task Distribution</h2>
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap">
+        <button onclick="submitDemoTask('FIBONACCI',{n:38},'HIGH')" class="primary" style="font-size:11px;padding:4px 10px">
+          🧮 Fibonacci(38)
+        </button>
+        <button onclick="submitDemoTask('HASH_BATCH',{count:1000},'NORMAL')" style="font-size:11px;padding:4px 10px">
+          #️⃣ Hash×1000
+        </button>
+        <button onclick="submitDemoTask('SORT_LARGE',{size:100000},'LOW')" style="font-size:11px;padding:4px 10px">
+          📊 Sort 100k
+        </button>
+        <button onclick="submitTaskBurst()" style="font-size:11px;padding:4px 10px">
+          ⚡ Burst ×5
+        </button>
+      </div>
+      <div id="task-panel" style="font-size:11px; color:var(--muted); max-height:140px; overflow-y:auto; background:#0a0f14; border-radius:5px; padding:6px;">
+        No tasks yet.
+      </div>
     </div>
 
     <!-- Event log -->
@@ -264,6 +291,8 @@
         <div class="stat"><div class="val" id="stat-relayed">0</div><div class="lbl">Relayed Txns</div></div>
         <div class="stat"><div class="val" id="stat-saf">0</div><div class="lbl">SAF Queue Depth</div></div>
         <div class="stat"><div class="val" id="stat-elections">0</div><div class="lbl">Elections</div></div>
+        <div class="stat"><div class="val" id="stat-tasks-done">0</div><div class="lbl">Tasks Done</div></div>
+        <div class="stat"><div class="val" id="stat-tasks-orphaned">0</div><div class="lbl">Tasks Orphaned</div></div>
       </div>
     </div>
 
@@ -317,6 +346,15 @@ let statTx = 0;
 let statRelayed = 0;
 let statSaf = 0;
 let statElections = 0;
+let statTasksDone = 0;
+let statTasksOrphaned = 0;
+let ownRunningTasks = 0;
+let ownQueueLength = 0;
+
+// Task log — last 20 events
+let _taskLog = [];
+// edge-flash: { workerId, sovereignId, until_ms }
+let _edgeFlash = null;
 
 // URL param: ?group=<key> enables auto-join
 const _urlGroupKey = new URLSearchParams(location.search).get("group");
@@ -329,6 +367,14 @@ let anchorPeer = null;   // second Peer if this pod is the mesh anchor
 let dataChannels = {};   // peerId → DataConnection
 let _anchorTimeout = null;
 let _pendingGroupKey = null; // set in joinMesh(), consumed in READY handler
+
+// ---------------------------------------------------------------------------
+// NATS JetStream state (Tier 1 transport — optional)
+// ---------------------------------------------------------------------------
+let _natsConn = null;
+let _natsConnected = false;
+let _currentGroupKey = null;
+let _pendingNatsUrl = null;
 
 // ---------------------------------------------------------------------------
 // Modal controls
@@ -355,17 +401,110 @@ function joinMesh() {
   const key = document.getElementById("input-group-key").value.trim();
   if (!key) { generateGroupKey(); return; }
   const nick = document.getElementById("input-nickname").value.trim() || null;
+  const natsUrl = document.getElementById("input-nats-url").value.trim() || null;
   document.getElementById("group-modal").classList.add("hidden");
 
   document.getElementById("badge-group-name").textContent = key;
   document.getElementById("mesh-group-badge").style.display = "";
   document.getElementById("btn-share-link").style.display = "";
   document.getElementById("transport-desc").textContent =
-    `BroadcastChannel + PeerJS mesh — group: ${key}`;
+    natsUrl ? `JetStream → WebRTC → BC — group: ${key}` : `BroadcastChannel + PeerJS mesh — group: ${key}`;
 
+  _currentGroupKey = key;
   _pendingGroupKey = key;  // consumed in READY handler once we have pod_id
+  if (natsUrl) _pendingNatsUrl = natsUrl;
   initWorker(key, nick);
   log(`Joined mesh group: ${key}`, "good");
+}
+
+// ---------------------------------------------------------------------------
+// NATS JetStream transport (Tier 1 — optional, requires nats.ws)
+// ---------------------------------------------------------------------------
+async function connectNATS(natsUrl, groupKey) {
+  if (!window.NATS) {
+    log("NATS.ws library not loaded — skipping JetStream", "warn");
+    return;
+  }
+  try {
+    const { connect, StringCodec } = window.NATS;
+    _natsConn = await connect({ servers: natsUrl });
+    const sc = StringCodec();
+    const subject = `ruvon.mesh.tasks.${groupKey}`;
+    const sub = _natsConn.subscribe(subject);
+    (async () => {
+      for await (const m of sub) {
+        try {
+          const msg = JSON.parse(sc.decode(m.data));
+          if (msg.pod_id !== myPodId && worker) {
+            worker.postMessage({ type: "REMOTE_MSG", msg });
+          }
+        } catch (_) {}
+      }
+    })();
+    _natsConnected = true;
+    log(`⚡ JetStream connected — ${natsUrl}`, "good");
+    document.getElementById("transport-desc").textContent =
+      `JetStream (Tier 1) → WebRTC → BC — group: ${groupKey}`;
+  } catch (err) {
+    log(`NATS connect failed: ${err.message} — falling back to WebRTC`, "warn");
+    _natsConnected = false;
+  }
+}
+
+function _natsPublish(msg) {
+  if (!_natsConn || !_natsConnected) return false;
+  try {
+    const sc = window.NATS.StringCodec();
+    _natsConn.publish(`ruvon.mesh.tasks.${_currentGroupKey}`, sc.encode(JSON.stringify(msg)));
+    return true;
+  } catch (_) { return false; }
+}
+
+async function destroyNATS() {
+  if (_natsConn) {
+    try { await _natsConn.drain(); } catch (_) {}
+    _natsConn = null;
+  }
+  _natsConnected = false;
+}
+
+// ---------------------------------------------------------------------------
+// Task distribution UI
+// ---------------------------------------------------------------------------
+function submitDemoTask(type, params, priority) {
+  if (!worker) return;
+  worker.postMessage({ type: "RUN_TASK", task_type: type, params, priority: priority || "NORMAL" });
+}
+
+function submitTaskBurst() {
+  const tasks = [
+    ["FIBONACCI", { n: 38 }, "HIGH"],
+    ["HASH_BATCH", { count: 500 }, "NORMAL"],
+    ["SORT_LARGE", { size: 50000 }, "LOW"],
+    ["FIBONACCI", { n: 40 }, "NORMAL"],
+    ["HASH_BATCH", { count: 2000 }, "LOW"],
+  ];
+  tasks.forEach(([t, p, pr], i) => setTimeout(() => submitDemoTask(t, p, pr), i * 120));
+}
+
+function _markTask(taskId, status) {
+  const entry = _taskLog.find(e => e.task_id === taskId);
+  if (entry) entry.status = status;
+}
+
+function renderTaskPanel() {
+  const el = document.getElementById("task-panel");
+  if (_taskLog.length === 0) { el.textContent = "No tasks yet."; return; }
+  const icons = { pending: "⏳", done: "✅", failed: "❌", orphaned: "☠️" };
+  el.innerHTML = _taskLog.map(t => {
+    const icon = icons[t.status] || "⏳";
+    const worker = t.worker_pod_id ? ` → ${t.worker_pod_id.slice(-4)}` : "";
+    const dur = t.duration_ms != null ? ` ${t.duration_ms}ms` : "";
+    return `<div style="padding:2px 0; border-bottom:1px solid #1c2128">
+      ${icon} <span style="color:var(--text)">${t.type}</span>
+      <span style="color:#444"> [${t.task_id.slice(-6)}]</span>${worker}${dur}
+    </div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +651,10 @@ function handleWorkerMessage(evt) {
       updateStats();
       if (_pendingGroupKey) {
         initPeerJS(_pendingGroupKey, myPodId);
+        if (_pendingNatsUrl) {
+          connectNATS(_pendingNatsUrl, _pendingGroupKey);
+          _pendingNatsUrl = null;
+        }
         _pendingGroupKey = null;
       }
       break;
@@ -536,6 +679,8 @@ function handleWorkerMessage(evt) {
 
       peers = msg.peers;
       isSovereign = msg.is_sovereign;
+      if (msg.own_running_tasks != null) ownRunningTasks = msg.own_running_tasks;
+      if (msg.own_queue_length != null) ownQueueLength = msg.own_queue_length;
       renderPeerTable();
       renderMeshCanvas();
       updateRoleBadge();
@@ -600,9 +745,50 @@ function handleWorkerMessage(evt) {
     case "HELP_OFFER_RECEIVED":
       log(`Help offer ← ${msg.from.slice(-6)} (score: ${msg.score.toFixed(3)})`, "good"); break;
 
-    case "REMOTE_SEND":
-      sendToAllPeers(msg.msg);
+    case "TASK_SUBMITTED":
+      _taskLog.unshift({ ...msg.task, status: "pending" });
+      _taskLog = _taskLog.slice(0, 20);
+      renderTaskPanel();
       break;
+
+    case "TASK_EXECUTED":
+      log(`Executed task [${msg.task.task_id.slice(-6)}] ${msg.task.type}`, "info");
+      renderTaskPanel();
+      break;
+
+    case "TASK_COMPLETED": {
+      statTasksDone++;
+      const cls = msg.error ? "err" : "good";
+      const dur = msg.duration_ms != null ? ` in ${msg.duration_ms}ms` : "";
+      const via = msg.worker_pod_id ? ` via …${msg.worker_pod_id.slice(-4)}` : "";
+      log(`${msg.error ? "❌" : "✅"} Task [${msg.task_id.slice(-6)}] ${msg.error || "done"}${dur}${via}`, cls);
+      const entry = _taskLog.find(e => e.task_id === msg.task_id);
+      if (entry) {
+        entry.status = msg.error ? "failed" : "done";
+        entry.worker_pod_id = msg.worker_pod_id;
+        entry.duration_ms = msg.duration_ms;
+      }
+      _triggerEdgeFlash(msg.worker_pod_id);
+      updateStats();
+      renderTaskPanel();
+      break;
+    }
+
+    case "TASK_ORPHANED":
+      statTasksOrphaned++;
+      log(`☠ Task [${msg.task_id.slice(-6)}] orphaned — ${msg.reason}`, "warn");
+      _markTask(msg.task_id, "orphaned");
+      updateStats();
+      renderTaskPanel();
+      break;
+
+    case "REMOTE_SEND": {
+      // Transport hierarchy: JetStream (Tier 1) → WebRTC (Tier 2) → BroadcastChannel (Tier 3)
+      const sent = _natsConnected && _natsPublish(msg.msg);
+      if (!sent) sendToAllPeers(msg.msg);
+      // BroadcastChannel is handled inside worker.js broadcastLocal() already
+      break;
+    }
 
     case "WS_CONNECTED":
     case "WS_DISCONNECTED":
@@ -643,7 +829,7 @@ function renderPeerTable() {
     <td>${myPodId} <strong>(me)</strong></td>
     <td><span class="tier-badge t${myTier}">T${myTier}</span></td>
     <td>${myScore.toFixed(3)} <span class="score-bar" style="width:${Math.round(myScore*80)}px"></span></td>
-    <td>—</td><td>—</td><td>0</td><td>—</td>
+    <td>—</td><td>—</td><td>${ownRunningTasks}/${ownQueueLength}</td><td>—</td>
     <td><span style="color:#3fb950;font-size:10px">BC</span></td>
   `;
   tbody.appendChild(ownRow);
@@ -660,7 +846,7 @@ function renderPeerTable() {
       <td>${p.score.toFixed(3)} <span class="score-bar" style="width:${Math.round(p.score*80)}px"></span></td>
       <td>${(p.cpu_load * 100).toFixed(0)}%</td>
       <td>${p.available_ram_mb.toFixed(0)}</td>
-      <td>${p.task_queue_length}</td>
+      <td>${p.running_tasks != null ? p.running_tasks : 0}/${p.task_queue_length}</td>
       <td>${ageSec}s</td>
       <td>${srcHtml}</td>
     `;
@@ -694,13 +880,20 @@ function renderMeshCanvas() {
   });
 
   // Draw edges (mesh connections)
+  const flashNow = _edgeFlash && Date.now() < _edgeFlash.until_ms;
   for (let i = 0; i < positions.length; i++) {
     for (let j = i + 1; j < positions.length; j++) {
+      const aId = positions[i].pod.pod_id;
+      const bId = positions[j].pod.pod_id;
+      const isFlash = flashNow && (
+        (aId === _edgeFlash.workerId && bId === _edgeFlash.sovereignId) ||
+        (bId === _edgeFlash.workerId && aId === _edgeFlash.sovereignId)
+      );
       ctx.beginPath();
       ctx.moveTo(positions[i].x, positions[i].y);
       ctx.lineTo(positions[j].x, positions[j].y);
-      ctx.strokeStyle = "#1c2a3a";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = isFlash ? "#3fb950" : "#1c2a3a";
+      ctx.lineWidth = isFlash ? 2.5 : 1;
       ctx.stroke();
     }
   }
@@ -745,7 +938,7 @@ function renderMeshCanvas() {
     ctx.font = "8px monospace";
     ctx.fillStyle = col + "aa";
     if (pod.source === "remote") {
-      ctx.fillText("WS", x, y + nodeR + 10);
+      ctx.fillText("P2P", x, y + nodeR + 10);
       // Rough RTT estimate from age_ms
       const rttMs = Math.round((pod.age_ms || 0) / 2);
       ctx.font = "7px monospace";
@@ -797,6 +990,8 @@ function updateStats() {
   document.getElementById("stat-saf").textContent = statSaf;
   document.getElementById("stat-elections").textContent = statElections;
   document.getElementById("stat-score").textContent = computeMyScore().toFixed(3);
+  document.getElementById("stat-tasks-done").textContent = statTasksDone;
+  document.getElementById("stat-tasks-orphaned").textContent = statTasksOrphaned;
 }
 
 // ---------------------------------------------------------------------------
@@ -846,6 +1041,18 @@ function log(msg, cls = "info") {
 
 function clearLog() {
   document.getElementById("log").innerHTML = "";
+}
+
+// ---------------------------------------------------------------------------
+// Canvas edge-flash on task completion
+// ---------------------------------------------------------------------------
+function _triggerEdgeFlash(workerPodId) {
+  if (!workerPodId) return;
+  const sovereignId = getSovereign();
+  if (!sovereignId || workerPodId === sovereignId) return;
+  _edgeFlash = { workerId: workerPodId, sovereignId, until_ms: Date.now() + 300 };
+  renderMeshCanvas();
+  setTimeout(() => { _edgeFlash = null; renderMeshCanvas(); }, 320);
 }
 
 // Resize handler for canvas

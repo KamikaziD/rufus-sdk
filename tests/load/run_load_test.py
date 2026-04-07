@@ -26,7 +26,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from tests.load.orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults
+try:
+    from tests.load.orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults
+except ModuleNotFoundError:
+    from orchestrator import LoadTestOrchestrator, ScenarioRunner, LoadTestResults  # type: ignore[no-redef]
 
 # Configure logging: INFO to file, WARNING-only to console (suppress httpx per-request noise)
 _file_handler = logging.FileHandler('load_test.log')
@@ -441,6 +444,94 @@ def print_results(results: LoadTestResults, workers: int = 1):
         else:
             print("  (no latency samples — did nkey_patch run? requires cryptography + rufus-sdk-edge)")
 
+    elif results.scenario == "mixed":
+        # Mixed workload: heartbeat + gossip + SAF simultaneously.
+        # Targets: SAF p99 < 500ms, gossip error rate < 1%, heartbeat error rate = 0%.
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Heartbeats sent:      {results.heartbeats_sent:,}")
+        print(f"Heartbeat failures:   {results.heartbeat_failures:,}")
+        hb_err = results.heartbeat_failures / (results.heartbeats_sent + results.heartbeat_failures) * 100 \
+            if (results.heartbeats_sent + results.heartbeat_failures) else 0
+        print(f"HB error rate = 0%:   {'✅ PASS' if hb_err == 0 else '❌ FAIL'} ({hb_err:.2f}%)")
+        print(f"Transactions synced:  {results.transactions_synced:,}")
+        print(f"Sync failures:        {results.sync_failures:,}")
+        total_gossip = results.gossip_broadcasts + results.gossip_failures
+        gossip_err_rate = results.gossip_failures / total_gossip * 100 if total_gossip else 0
+        print(f"Gossip broadcasts:    {results.gossip_broadcasts:,}")
+        print(f"Gossip error rate < 1%: {'✅ PASS' if gossip_err_rate < 1.0 else '❌ FAIL'} ({gossip_err_rate:.2f}%)")
+        if results.request_latencies:
+            p99 = results.latency_percentile(0.99)
+            p99_pass = p99 < 500.0
+            print(f"SAF p99 < 500ms:      {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.1f}ms)")
+
+    elif results.scenario == "election_stability":
+        # Leader election stability: local score + re-election loop.
+        # Targets: p95 election latency < 1ms, flap_count = 0, elections/min < 5.
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Elections run:        {results.elections_run:,}")
+        print(f"Flap count:           {results.flap_count}")
+        flap_pass = results.flap_count == 0
+        print(f"Flap count = 0:       {'✅ PASS' if flap_pass else '❌ FAIL'}")
+        if results.duration_seconds > 0:
+            elections_per_min = results.elections_run / results.duration_seconds * 60
+            epm_pass = elections_per_min < 5.0
+            print(f"Elections/min < 5:    {'✅ PASS' if epm_pass else '❌ FAIL'} ({elections_per_min:.1f}/min)")
+        if results.election_latencies:
+            el = sorted(results.election_latencies)
+            p95_e = el[int(0.95 * (len(el) - 1))] * 1000
+            p95_pass = p95_e < 1.0
+            print(f"Election p95 < 1ms:   {'✅ PASS' if p95_pass else '❌ FAIL'} ({p95_e:.3f}ms)")
+            print(f"Samples:              {len(el):,}")
+        if results.leader_tenure_samples:
+            ts = sorted(results.leader_tenure_samples)
+            p50_t = ts[int(0.50 * (len(ts) - 1))]
+            print(f"Tenure p50:           {p50_t:.1f}s")
+
+    elif results.scenario == "payload_variance":
+        # Gossip payload variance: encode+decode at 256B/1KB/4KB/16KB/64KB.
+        # Target: p95 encode+decode < 50ms even at 64KB.
+        print(f"Devices:              {results.num_devices:,}")
+        if results.payload_latencies:
+            all_pass = True
+            for label in ["256B", "1KB", "4KB", "16KB", "64KB"]:
+                lats = results.payload_latencies.get(label, [])
+                if not lats:
+                    print(f"  {label:<6}:  (no samples)")
+                    continue
+                sl = sorted(lats)
+                p95_ms = sl[int(0.95 * (len(sl) - 1))] * 1000
+                p99_ms = sl[int(0.99 * (len(sl) - 1))] * 1000
+                ok = p95_ms < 50.0
+                all_pass = all_pass and ok
+                print(f"  {label:<6}: p95={p95_ms:.2f}ms  p99={p99_ms:.2f}ms  n={len(sl):,}  "
+                      f"{'✅' if ok else '❌'}")
+            print(f"All sizes p95 < 50ms: {'✅ PASS' if all_pass else '❌ FAIL'}")
+        else:
+            print("  (no payload_latencies — did payload_variance run?)")
+
+    elif results.scenario == "e2e_decision":
+        # E2E decision pipeline: telemetry → score → sign → gossip → acks.
+        # Targets: p50 < 50ms, p99 < 200ms.
+        print(f"Devices:              {results.num_devices:,}")
+        print(f"Ack count:            {results.e2e_ack_count:,}")
+        if results.e2e_decision_latencies:
+            el = sorted(results.e2e_decision_latencies)
+            p50_ms = el[int(0.50 * (len(el) - 1))] * 1000
+            p99_ms = el[int(0.99 * (len(el) - 1))] * 1000
+            p50_pass = p50_ms < 50.0
+            p99_pass = p99_ms < 200.0
+            print(f"Decision p50 < 50ms:  {'✅ PASS' if p50_pass else '❌ FAIL'} ({p50_ms:.1f}ms)")
+            print(f"Decision p99 < 200ms: {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99_ms:.1f}ms)")
+            print(f"Samples:              {len(el):,}")
+        if results.e2e_consensus_latencies:
+            cl = sorted(results.e2e_consensus_latencies)
+            p50_c = cl[int(0.50 * (len(cl) - 1))] * 1000
+            p99_c = cl[int(0.99 * (len(cl) - 1))] * 1000
+            print(f"Consensus p50:        {p50_c:.1f}ms")
+            print(f"Consensus p99:        {p99_c:.1f}ms")
+        else:
+            print("  (no e2e_decision_latencies — did e2e_decision run?)")
+
     print("=" * 80)
 
 
@@ -466,7 +557,10 @@ async def run_single_scenario(
 
     try:
         # Local-only scenarios (no HTTP calls) don't need server registration or cleanup
-        _local_only = scenario in ("wasm_thundering_herd", "nats_transport", "ruvon_gossip", "nkey_patch")
+        _local_only = scenario in (
+            "wasm_thundering_herd", "nats_transport", "ruvon_gossip", "nkey_patch",
+            "election_stability", "payload_variance", "e2e_decision",
+        )
         await orchestrator.setup_devices(
             num_devices,
             cleanup_first=not _local_only,
@@ -519,6 +613,10 @@ async def run_all_scenarios(
         ("nats_transport", 120),
         ("ruvon_gossip", 120),
         ("nkey_patch", 120),
+        ("mixed", 300),
+        ("election_stability", 120),
+        ("payload_variance", 120),
+        ("e2e_decision", 120),
     ]
     if max_duration_per_scenario:
         scenarios = [(s, min(d, max_duration_per_scenario)) for s, d in _DEFAULT_DURATIONS]
@@ -690,6 +788,10 @@ Scenarios:
             "nats_transport",
             "ruvon_gossip",
             "nkey_patch",
+            "mixed",
+            "election_stability",
+            "payload_variance",
+            "e2e_decision",
         ],
         help="Test scenario to run"
     )
