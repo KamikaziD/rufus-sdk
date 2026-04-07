@@ -295,6 +295,7 @@ function processIncomingMsg(msg) {
     case "TASK_ASSIGN": {
       if (msg.task.assigned_pod_id !== POD_ID) break;
       _runningTasks++;
+      notifyPeerUpdate();   // show live running count immediately
       broadcastAll({ type: "TASK_ACK", task_id: msg.task.task_id, pod_id: POD_ID, timestamp: Date.now() });
       try {
         const { result, duration_ms } = _executeTask(msg.task);
@@ -319,6 +320,7 @@ function processIncomingMsg(msg) {
         });
       } finally {
         _runningTasks--;
+        notifyPeerUpdate();   // clear running count
         self.postMessage({ type: "TASK_EXECUTED", task: msg.task });
       }
       break;
@@ -552,6 +554,8 @@ function notifyPeerUpdate() {
     own_pod_id: POD_ID,
     is_sovereign: isSovereign,
     group_key: groupKey,
+    own_running_tasks: _runningTasks,
+    own_queue_length: pendingSAF.length,
   });
 }
 

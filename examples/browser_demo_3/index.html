@@ -348,6 +348,8 @@ let statSaf = 0;
 let statElections = 0;
 let statTasksDone = 0;
 let statTasksOrphaned = 0;
+let ownRunningTasks = 0;
+let ownQueueLength = 0;
 
 // Task log — last 20 events
 let _taskLog = [];
@@ -677,6 +679,8 @@ function handleWorkerMessage(evt) {
 
       peers = msg.peers;
       isSovereign = msg.is_sovereign;
+      if (msg.own_running_tasks != null) ownRunningTasks = msg.own_running_tasks;
+      if (msg.own_queue_length != null) ownQueueLength = msg.own_queue_length;
       renderPeerTable();
       renderMeshCanvas();
       updateRoleBadge();
@@ -825,7 +829,7 @@ function renderPeerTable() {
     <td>${myPodId} <strong>(me)</strong></td>
     <td><span class="tier-badge t${myTier}">T${myTier}</span></td>
     <td>${myScore.toFixed(3)} <span class="score-bar" style="width:${Math.round(myScore*80)}px"></span></td>
-    <td>—</td><td>—</td><td>0/0</td><td>—</td>
+    <td>—</td><td>—</td><td>${ownRunningTasks}/${ownQueueLength}</td><td>—</td>
     <td><span style="color:#3fb950;font-size:10px">BC</span></td>
   `;
   tbody.appendChild(ownRow);
