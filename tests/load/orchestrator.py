@@ -765,6 +765,57 @@ class ScenarioRunner:
         )
 
     @staticmethod
+    async def run_ruvon_gossip_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run RUVON capability gossip scenario: local serialise/deserialise + peer selection.
+
+        Pure-local — no HTTP, no server registration required.
+        Pass criteria (enforced in device_simulator):
+        - Broadcast serialise+encode p95 < 1 ms
+        - find_best_builder() on ≤100 peers p95 < 5 ms
+        - Error rate < 1%
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="ruvon_gossip",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_nkey_patch_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run NKey Ed25519 patch verification scenario.
+
+        Pure-local — no HTTP, no server registration required.
+        Devices continuously verify WASM patches (95% valid, 5% bad signature).
+        Pass criteria (enforced in device_simulator):
+        - verify() p95 < 5 ms per verification
+        - Error rate on valid signatures < 0.1%
+        - Rejection rate on bad signatures > 99.9%
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="nkey_patch",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
     async def run_msgspec_codec_test(
         orchestrator: LoadTestOrchestrator,
         num_devices: int = 500,

@@ -179,5 +179,5 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/) for s
 - **Reference** provides technical accuracy
 - **Explanation** builds understanding
 
-**Last Updated:** 2026-02-27
-**Rufus Version:** 0.6.0
+**Last Updated:** 2026-04-07
+**Rufus Version:** 1.0.0rc6

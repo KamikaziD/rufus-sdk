@@ -2797,19 +2797,36 @@ async def update_command_status(
     - completed: Command completed successfully
     - failed: Command execution failed
     """
-    # TODO: Store command execution results
-    # For now, just log it
     import logging
     logger = logging.getLogger(__name__)
 
     status = status_update.get("status")
     result = status_update.get("result")
-    error = status_update.get("error")
+    error  = status_update.get("error")
 
     logger.info(
         f"Device {device_id} - Command {command_id}: {status} "
         f"(result={result}, error={error})"
     )
+
+    # Persist execution result back to device_commands row when the command
+    # reaches a terminal state (completed / failed).
+    if status in ("completed", "failed"):
+        try:
+            async with persistence.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE device_commands
+                       SET executed_at    = NOW(),
+                           result_payload = $1
+                     WHERE id = $2
+                    """,
+                    __import__("json").dumps({"status": status, "result": result, "error": error}),
+                    command_id,
+                )
+        except Exception as exc:
+            # Non-fatal: result storage is best-effort; command was already executed.
+            logger.warning(f"Could not persist command result for {command_id}: {exc}")
 
     return {"ack": True, "received": True}
 
