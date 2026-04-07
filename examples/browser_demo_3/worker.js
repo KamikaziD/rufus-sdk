@@ -295,34 +295,28 @@ function processIncomingMsg(msg) {
     case "TASK_ASSIGN": {
       if (msg.task.assigned_pod_id !== POD_ID) break;
       _runningTasks++;
-      notifyPeerUpdate();   // show live running count immediately
+      notifyPeerUpdate();
       broadcastAll({ type: "TASK_ACK", task_id: msg.task.task_id, pod_id: POD_ID, timestamp: Date.now() });
+      let resultMsg;
       try {
         const { result, duration_ms } = _executeTask(msg.task);
-        broadcastAll({
-          type: "TASK_RESULT",
-          task_id: msg.task.task_id,
-          result, duration_ms,
-          worker_pod_id: POD_ID,
-          submitter_pod_id: msg.task.submitter_pod_id,
-          pod_id: POD_ID,
-          timestamp: Date.now(),
-        });
+        resultMsg = { type: "TASK_RESULT", task_id: msg.task.task_id,
+                      result, duration_ms, worker_pod_id: POD_ID,
+                      submitter_pod_id: msg.task.submitter_pod_id,
+                      pod_id: POD_ID, timestamp: Date.now() };
       } catch (err) {
-        broadcastAll({
-          type: "TASK_RESULT",
-          task_id: msg.task.task_id,
-          error: err.message,
-          worker_pod_id: POD_ID,
-          submitter_pod_id: msg.task.submitter_pod_id,
-          pod_id: POD_ID,
-          timestamp: Date.now(),
-        });
+        resultMsg = { type: "TASK_RESULT", task_id: msg.task.task_id,
+                      error: err.message, worker_pod_id: POD_ID,
+                      submitter_pod_id: msg.task.submitter_pod_id,
+                      pod_id: POD_ID, timestamp: Date.now() };
       } finally {
         _runningTasks--;
-        notifyPeerUpdate();   // clear running count
+        notifyPeerUpdate();
         self.postMessage({ type: "TASK_EXECUTED", task: msg.task });
       }
+      broadcastAll(resultMsg);
+      // BroadcastChannel doesn't echo — Sovereign needs cleanup, submitter needs notification
+      setTimeout(() => processIncomingMsg(resultMsg), 0);
       break;
     }
 
@@ -493,7 +487,12 @@ function _assignNext() {
   }, task.timeout_ms);
 
   _activeTasks.set(task.task_id, { task, timeout_handle });
-  broadcastAll({ type: "TASK_ASSIGN", task, pod_id: POD_ID, timestamp: Date.now() });
+  const assignMsg = { type: "TASK_ASSIGN", task, pod_id: POD_ID, timestamp: Date.now() };
+  broadcastAll(assignMsg);
+  // BroadcastChannel doesn't echo to sender — self-assigned tasks need direct delivery
+  if (task.assigned_pod_id === POD_ID) {
+    setTimeout(() => processIncomingMsg(assignMsg), 0);
+  }
 
   if (!_orphanTimer) {
     _orphanTimer = setInterval(_orphanCheck, ORPHAN_CHECK_MS);
