@@ -218,7 +218,8 @@
       <li><a href="#scoring">Capacity scoring S(Vc)</a></li>
       <li><a href="#gossip">Adaptive gossip intervals</a></li>
       <li><a href="#tiers">Tier system &amp; Sovereign election</a></li>
-      <li><a href="#transport">Transport layer — BroadcastChannel + PeerJS</a></li>
+      <li><a href="#transport">Transport layer — JetStream → WebRTC → BroadcastChannel</a></li>
+      <li><a href="#tasks">Distributed task scheduler — Sovereign-Worker pattern</a></li>
       <li><a href="#peerjs">How PeerJS mesh discovery works</a></li>
       <li><a href="#saf">Store-and-Forward (SAF)</a></li>
       <li><a href="#arch">Architecture diagram</a></li>
@@ -426,36 +427,86 @@
   </p>
 
   <!-- ── TRANSPORT ──────────────────────────────────────────────────────────── -->
-  <h2 id="transport">7. Transport layer — BroadcastChannel + PeerJS</h2>
+  <h2 id="transport">7. Transport layer — JetStream → WebRTC → BroadcastChannel</h2>
 
-  <p>The demo uses two complementary transports:</p>
+  <p>The demo uses a three-tier transport hierarchy, selected at runtime:</p>
 
   <table>
-    <tr><th>Transport</th><th>Scope</th><th>API</th><th>Label</th></tr>
+    <tr><th>Tier</th><th>Transport</th><th>Scope</th><th>When active</th><th>Latency</th></tr>
     <tr>
-      <td><span class="badge b-bc">BC</span> BroadcastChannel</td>
-      <td>Same device (all tabs, same origin)</td>
-      <td>Web standard, zero setup</td>
-      <td>Green <strong>BC</strong> in pod table</td>
+      <td><strong>1</strong></td>
+      <td>NATS JetStream</td>
+      <td>Any network</td>
+      <td>NATS URL entered in modal</td>
+      <td>&lt;5 ms</td>
     </tr>
     <tr>
+      <td><strong>2</strong></td>
       <td><span class="badge b-p2p">P2P</span> PeerJS DataChannels</td>
-      <td>Cross-device (any network)</td>
-      <td>WebRTC via peerjs.com signaling</td>
-      <td>Blue <strong>P2P</strong> in pod table</td>
+      <td>Cross-device</td>
+      <td>Peers connected, no NATS</td>
+      <td>~20–80 ms</td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td><span class="badge b-bc">BC</span> BroadcastChannel</td>
+      <td>Same device only</td>
+      <td>No remote peers</td>
+      <td>&lt;1 ms</td>
     </tr>
   </table>
 
   <p>
     The worker only knows about <code>broadcastAll(msg)</code> — it posts to BroadcastChannel
-    and sends <code>{type:"REMOTE_SEND"}</code> to the main thread. The main thread fans the
-    message out to all open PeerJS DataChannels. Incoming DataChannel messages arrive as
-    <code>{type:"REMOTE_MSG"}</code> and are forwarded to the worker for dedup + processing.
+    locally and sends <code>{type:"REMOTE_SEND"}</code> to the main thread. The main thread
+    chooses the best available wire: JetStream publish → PeerJS DataChannel fan-out → done.
+    Incoming remote messages arrive as <code>{type:"REMOTE_MSG"}</code> and are forwarded to
+    the worker for dedup + processing.
   </p>
 
   <p>
-    This split keeps WebRTC (which needs <code>window</code>) in the main thread and all
-    RUVON logic in the isolated worker — a clean architecture boundary.
+    NATS JetStream is optional. Enter a NATS WebSocket URL (e.g. <code>wss://demo.nats.io:8443</code>)
+    in the Join Mesh modal to activate Tier 1. When NATS is unavailable, the demo falls back
+    seamlessly to WebRTC — no configuration required. All message types — RUVON gossip,
+    HEARTBEAT, and task distribution — travel over whichever tier is active.
+  </p>
+
+  <!-- ── TASKS ──────────────────────────────────────────────────────────────── -->
+  <h2 id="tasks">Task Distribution — Sovereign-Worker Pattern</h2>
+
+  <p>
+    The <strong>Task Distribution</strong> card lets you submit compute tasks to the mesh.
+    The Sovereign pod schedules and assigns work; any pod can be a worker.
+  </p>
+
+  <h3>Message flow</h3>
+  <ol class="steps">
+    <li>Any pod submits a task → <code>TASK_SUBMIT</code> broadcasts to Sovereign.</li>
+    <li>Sovereign selects the highest-RUVON-score pod with spare capacity → <code>TASK_ASSIGN</code>.</li>
+    <li>Worker pod acknowledges (<code>TASK_ACK</code>), executes the task, and broadcasts <code>TASK_RESULT</code>.</li>
+    <li>Sovereign clears the active-task slot and assigns the next queued task.</li>
+    <li>Submitter receives <code>TASK_COMPLETED</code> and logs the result + latency.</li>
+  </ol>
+
+  <h3>Fault tolerance</h3>
+  <p>
+    If a worker tab closes before returning a result, the Sovereign's GOODBYE handler
+    immediately re-enqueues the task. If a worker is throttled (DevTools CPU 4×) and
+    exceeds the 8 s timeout, the task is retried up to 2 times before being marked
+    <code>TASK_ORPHAN</code>.
+  </p>
+
+  <h3>Demo task types</h3>
+  <table>
+    <tr><th>Type</th><th>Params</th><th>~Duration</th><th>Purpose</th></tr>
+    <tr><td>🧮 FIBONACCI</td><td>n=38</td><td>~20–100 ms</td><td>CPU-bound benchmark</td></tr>
+    <tr><td>#️⃣ HASH_BATCH</td><td>count=1000</td><td>~5–30 ms</td><td>Data processing simulation</td></tr>
+    <tr><td>📊 SORT_LARGE</td><td>size=100k</td><td>~10–50 ms</td><td>Memory-intensive sort</td></tr>
+  </table>
+
+  <p>
+    All compute is pure JavaScript — no <code>eval</code>, no binary transfer. Results are
+    sent back as plain numbers in the <code>TASK_RESULT</code> message.
   </p>
 
   <!-- ── PEERJS ─────────────────────────────────────────────────────────────── -->

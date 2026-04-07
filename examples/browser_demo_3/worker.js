@@ -91,6 +91,7 @@ function buildCapabilityVector() {
     cpu_load: parseFloat(cpuLoad.toFixed(3)),
     available_ram_mb: parseFloat(ramMb.toFixed(1)),
     task_queue_length: queue,
+    running_tasks: _runningTasks,
     timestamp: Date.now(),
   };
 }
@@ -181,6 +182,19 @@ function shouldRebroadcast(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Task distribution (Sovereign-side)
+// ---------------------------------------------------------------------------
+const _taskQueue   = [];           // pending tasks waiting for assignment
+const _activeTasks = new Map();    // taskId → { task, timeout_handle, retries }
+const ORPHAN_CHECK_MS = 2000;
+const MAX_TASK_RETRIES = 2;
+let _orphanTimer = null;
+
+// Task distribution (Worker-side)
+const _myTaskSlots = 2;            // max concurrent tasks this pod accepts
+let _runningTasks = 0;
+
+// ---------------------------------------------------------------------------
 // SAF queue (store-and-forward)
 // ---------------------------------------------------------------------------
 const pendingSAF = [];     // transactions pending while offline
@@ -232,8 +246,11 @@ function processIncomingMsg(msg) {
       break;
     }
     case "GOODBYE": {
-      delete peers[msg.pod_id];
-      delete peerSources[msg.pod_id];
+      const leavingId = msg.pod_id;
+      delete peers[leavingId];
+      delete peerSources[leavingId];
+      // Sovereign: immediately re-enqueue any tasks assigned to the leaving pod
+      if (isSovereign) _reEnqueueTasksFor(leavingId);
       notifyPeerUpdate();
       maybeUpdateElection();
       break;
@@ -267,6 +284,65 @@ function processIncomingMsg(msg) {
       self.postMessage({ type: "HELP_OFFER_RECEIVED", from: msg.pod_id, score: msg.own_score });
       break;
     }
+
+    // ── Task Distribution ─────────────────────────────────────────────────
+    case "TASK_SUBMIT": {
+      if (!isSovereign) break;          // only Sovereign schedules
+      _enqueueTask(msg.task);
+      break;
+    }
+
+    case "TASK_ASSIGN": {
+      if (msg.task.assigned_pod_id !== POD_ID) break;
+      _runningTasks++;
+      broadcastAll({ type: "TASK_ACK", task_id: msg.task.task_id, pod_id: POD_ID, timestamp: Date.now() });
+      try {
+        const { result, duration_ms } = _executeTask(msg.task);
+        broadcastAll({
+          type: "TASK_RESULT",
+          task_id: msg.task.task_id,
+          result, duration_ms,
+          worker_pod_id: POD_ID,
+          submitter_pod_id: msg.task.submitter_pod_id,
+          pod_id: POD_ID,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        broadcastAll({
+          type: "TASK_RESULT",
+          task_id: msg.task.task_id,
+          error: err.message,
+          worker_pod_id: POD_ID,
+          submitter_pod_id: msg.task.submitter_pod_id,
+          pod_id: POD_ID,
+          timestamp: Date.now(),
+        });
+      } finally {
+        _runningTasks--;
+        self.postMessage({ type: "TASK_EXECUTED", task: msg.task });
+      }
+      break;
+    }
+
+    case "TASK_RESULT": {
+      if (isSovereign) {
+        const entry = _activeTasks.get(msg.task_id);
+        if (entry) { clearTimeout(entry.timeout_handle); _activeTasks.delete(msg.task_id); }
+        _assignNext();
+      }
+      if (msg.submitter_pod_id === POD_ID) {
+        self.postMessage({ type: "TASK_COMPLETED", ...msg });
+      }
+      break;
+    }
+
+    case "TASK_ACK":
+      // Receipt confirmed — timeout already running, nothing more to do
+      break;
+
+    case "TASK_ORPHAN":
+      self.postMessage({ type: "TASK_ORPHANED", task_id: msg.task_id, reason: msg.reason });
+      break;
   }
 }
 
@@ -318,6 +394,130 @@ function executePaymentWorkflow(tx) {
 }
 
 // ---------------------------------------------------------------------------
+// Task distribution — pure compute functions (no eval, no fetch)
+// ---------------------------------------------------------------------------
+function _fib(n) {
+  if (n <= 1) return n;
+  let a = 0, b = 1;
+  for (let i = 2; i <= n; i++) { const t = a + b; a = b; b = t; }
+  return b;
+}
+
+function _hashBatch(count) {
+  let h = 5381;
+  for (let i = 0; i < count; i++) {
+    const s = "rufus-task-" + i;
+    for (let j = 0; j < s.length; j++) { h = ((h << 5) + h) + s.charCodeAt(j); h |= 0; }
+  }
+  return h >>> 0;
+}
+
+function _sortLarge(size) {
+  const arr = new Float32Array(size);
+  for (let i = 0; i < size; i++) arr[i] = Math.random();
+  arr.sort();
+  return arr[0]; // return first element to prevent dead-code elimination
+}
+
+function _executeTask(task) {
+  const t0 = performance.now();
+  let result;
+  switch (task.type) {
+    case "FIBONACCI":  result = _fib(task.params.n);           break;
+    case "HASH_BATCH": result = _hashBatch(task.params.count); break;
+    case "SORT_LARGE": result = _sortLarge(task.params.size);  break;
+    default: throw new Error("Unknown task type: " + task.type);
+  }
+  return { result, duration_ms: Math.round(performance.now() - t0) };
+}
+
+// ---------------------------------------------------------------------------
+// Task distribution — Sovereign scheduling
+// ---------------------------------------------------------------------------
+function submitTask(type, params, priority) {
+  priority = priority || "NORMAL";
+  const task = {
+    task_id: crypto.randomUUID(),
+    type, params, priority,
+    timeout_ms: 8000,
+    submitter_pod_id: POD_ID,
+    submitted_at: Date.now(),
+    assigned_pod_id: null,
+    assigned_at: null,
+    retries: 0,
+  };
+  if (isSovereign) {
+    _enqueueTask(task);
+  } else {
+    broadcastAll({ type: "TASK_SUBMIT", task, pod_id: POD_ID, timestamp: Date.now() });
+  }
+  self.postMessage({ type: "TASK_SUBMITTED", task });
+}
+
+function _enqueueTask(task) {
+  const priority_order = { HIGH: 0, NORMAL: 1, LOW: 2 };
+  _taskQueue.push(task);
+  _taskQueue.sort((a, b) => (priority_order[a.priority] || 1) - (priority_order[b.priority] || 1));
+  _assignNext();
+}
+
+function _selectWorker() {
+  const self_vec = buildCapabilityVector();
+  const candidates = Object.values(peers)
+    .concat([self_vec])
+    .filter(p => (p.running_tasks || 0) + (p.task_queue_length || 0) < _myTaskSlots * 2)
+    .sort((a, b) => score(b) - score(a));
+  return candidates[0]?.pod_id ?? POD_ID;
+}
+
+function _assignNext() {
+  if (_taskQueue.length === 0) return;
+  const workerId = _selectWorker();
+  const task = _taskQueue.shift();
+  task.assigned_pod_id = workerId;
+  task.assigned_at = Date.now();
+
+  const timeout_handle = setTimeout(() => {
+    _activeTasks.delete(task.task_id);
+    if ((task.retries || 0) < MAX_TASK_RETRIES) {
+      task.retries = (task.retries || 0) + 1;
+      task.assigned_pod_id = null;
+      task.assigned_at = null;
+      _enqueueTask(task);
+    } else {
+      broadcastAll({ type: "TASK_ORPHAN", task_id: task.task_id,
+                     reason: "timeout after " + MAX_TASK_RETRIES + " retries", pod_id: POD_ID, timestamp: Date.now() });
+    }
+  }, task.timeout_ms);
+
+  _activeTasks.set(task.task_id, { task, timeout_handle });
+  broadcastAll({ type: "TASK_ASSIGN", task, pod_id: POD_ID, timestamp: Date.now() });
+
+  if (!_orphanTimer) {
+    _orphanTimer = setInterval(_orphanCheck, ORPHAN_CHECK_MS);
+  }
+}
+
+function _orphanCheck() {
+  if (_activeTasks.size === 0) {
+    clearInterval(_orphanTimer);
+    _orphanTimer = null;
+  }
+}
+
+function _reEnqueueTasksFor(podId) {
+  for (const [taskId, entry] of _activeTasks.entries()) {
+    if (entry.task.assigned_pod_id === podId) {
+      clearTimeout(entry.timeout_handle);
+      _activeTasks.delete(taskId);
+      entry.task.assigned_pod_id = null;
+      entry.task.assigned_at = null;
+      _enqueueTask(entry.task);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Election logic
 // ---------------------------------------------------------------------------
 function maybeUpdateElection() {
@@ -342,6 +542,7 @@ function notifyPeerUpdate() {
     cpu_load: vec.cpu_load,
     available_ram_mb: vec.available_ram_mb,
     task_queue_length: vec.task_queue_length,
+    running_tasks: vec.running_tasks || 0,
     age_ms: Date.now() - vec.timestamp,
     source: peerSources[id] || "local",
   }));
@@ -502,9 +703,17 @@ self.onmessage = async (evt) => {
       break;
     }
 
+    case "RUN_TASK": {
+      submitTask(msg.task_type, msg.params, msg.priority || "NORMAL");
+      break;
+    }
+
     case "STOP": {
       broadcastAll({ type: "GOODBYE", pod_id: POD_ID });
       if (_heartbeatInterval) { clearTimeout(_heartbeatInterval); _heartbeatInterval = null; }
+      if (_orphanTimer) { clearInterval(_orphanTimer); _orphanTimer = null; }
+      for (const { timeout_handle } of _activeTasks.values()) clearTimeout(timeout_handle);
+      _activeTasks.clear();
       mesh.close();
       break;
     }
