@@ -12,7 +12,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 
-from tests.load.device_simulator import SimulatedEdgeDevice, DeviceConfig, DeviceMetrics
+try:
+    from tests.load.device_simulator import SimulatedEdgeDevice, DeviceConfig, DeviceMetrics
+except ModuleNotFoundError:
+    from device_simulator import SimulatedEdgeDevice, DeviceConfig, DeviceMetrics  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,17 @@ class LoadTestResults:
     nkey_verifications: int = 0
     nkey_failures: int = 0
     nkey_verify_latencies: List[float] = field(default_factory=list)
+    # Election stability metrics
+    elections_run: int = 0
+    election_latencies: List[float] = field(default_factory=list)
+    leader_tenure_samples: List[float] = field(default_factory=list)
+    flap_count: int = 0
+    # Payload variance metrics (keyed by size label)
+    payload_latencies: Dict[str, List[float]] = field(default_factory=dict)
+    # E2E decision pipeline metrics
+    e2e_decision_latencies: List[float] = field(default_factory=list)
+    e2e_consensus_latencies: List[float] = field(default_factory=list)
+    e2e_ack_count: int = 0
 
     # Per-device metrics
     device_metrics: Dict[str, DeviceMetrics] = field(default_factory=dict)
@@ -143,6 +157,35 @@ class LoadTestResults:
                 nl = sorted(self.nkey_verify_latencies)
                 d["nkey_verify_p95_ms"] = f"{nl[int(0.95 * (len(nl) - 1))] * 1000:.2f}"
                 d["nkey_verify_p99_ms"] = f"{nl[int(0.99 * (len(nl) - 1))] * 1000:.2f}"
+        if self.elections_run > 0:
+            d["elections_run"] = self.elections_run
+            d["flap_count"] = self.flap_count
+            if self.election_latencies:
+                el = sorted(self.election_latencies)
+                d["election_p95_ms"] = f"{el[int(0.95 * (len(el) - 1))] * 1000:.2f}"
+                d["election_p99_ms"] = f"{el[int(0.99 * (len(el) - 1))] * 1000:.2f}"
+            if self.leader_tenure_samples:
+                ts = sorted(self.leader_tenure_samples)
+                d["tenure_p50_s"] = f"{ts[int(0.50 * (len(ts) - 1))]:.1f}"
+                d["tenure_p95_s"] = f"{ts[int(0.95 * (len(ts) - 1))]:.1f}"
+        if self.payload_latencies:
+            d["payload_latencies"] = {}
+            for label, lats in sorted(self.payload_latencies.items()):
+                sl = sorted(lats)
+                d["payload_latencies"][label] = {
+                    "p95_ms": f"{sl[int(0.95 * (len(sl) - 1))] * 1000:.2f}",
+                    "p99_ms": f"{sl[int(0.99 * (len(sl) - 1))] * 1000:.2f}",
+                    "samples": len(sl),
+                }
+        if self.e2e_decision_latencies:
+            el = sorted(self.e2e_decision_latencies)
+            d["e2e_decision_p50_ms"] = f"{el[int(0.50 * (len(el) - 1))] * 1000:.1f}"
+            d["e2e_decision_p99_ms"] = f"{el[int(0.99 * (len(el) - 1))] * 1000:.1f}"
+            d["e2e_ack_count"] = self.e2e_ack_count
+        if self.e2e_consensus_latencies:
+            cl = sorted(self.e2e_consensus_latencies)
+            d["e2e_consensus_p50_ms"] = f"{cl[int(0.50 * (len(cl) - 1))] * 1000:.1f}"
+            d["e2e_consensus_p99_ms"] = f"{cl[int(0.99 * (len(cl) - 1))] * 1000:.1f}"
         return d
 
 
@@ -455,6 +498,15 @@ class LoadTestOrchestrator:
                 results.nkey_verifications += metrics.nkey_verifications
                 results.nkey_failures += metrics.nkey_failures
                 results.nkey_verify_latencies.extend(metrics.nkey_verify_latencies)
+                results.elections_run += metrics.elections_run
+                results.election_latencies.extend(metrics.election_latencies)
+                results.leader_tenure_samples.extend(metrics.leader_tenure_samples)
+                results.flap_count += metrics.flap_count
+                for label, lats in metrics.payload_latencies.items():
+                    results.payload_latencies.setdefault(label, []).extend(lats)
+                results.e2e_decision_latencies.extend(metrics.e2e_decision_latencies)
+                results.e2e_consensus_latencies.extend(metrics.e2e_consensus_latencies)
+                results.e2e_ack_count += metrics.e2e_ack_count
 
     async def _register_devices(self, idempotent: bool = True):
         """
@@ -811,6 +863,93 @@ class ScenarioRunner:
         )
         return await orchestrator.run_scenario(
             scenario="nkey_patch",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_mixed_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 500,
+        duration_seconds: int = 300,
+    ) -> LoadTestResults:
+        """Run mixed workload: heartbeat + gossip + SAF sync simultaneously on every device.
+
+        Exercises interference between all three subsystems under concurrent load.
+        Requires server registration (HTTP).
+        Pass criteria: SAF p99 < 500ms, gossip error rate < 1%, heartbeat error rate = 0%.
+        """
+        await orchestrator.setup_devices(num_devices)
+        return await orchestrator.run_scenario(
+            scenario="mixed",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_election_stability_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run leader election stability scenario: local-only score + re-election loop.
+
+        Measures elections/min, p95 election latency, tenure distribution, and flap rate.
+        Pure-local — no HTTP, no server registration required.
+        Pass criteria: elections/min < 5, p95 election latency < 1ms, flap_count = 0.
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="election_stability",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_payload_variance_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run gossip payload-variance scenario: encode+decode at 256B/1KB/4KB/16KB/64KB.
+
+        Pure-local — no HTTP, no server registration required.
+        Pass criteria: p95 encode+decode < 50ms even at 64KB.
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="payload_variance",
+            duration_seconds=duration_seconds,
+            skip_device_setup=True,
+        )
+
+    @staticmethod
+    async def run_e2e_decision_test(
+        orchestrator: LoadTestOrchestrator,
+        num_devices: int = 100,
+        duration_seconds: int = 120,
+    ) -> LoadTestResults:
+        """Run end-to-end decision pipeline: telemetry → score → sign → gossip → acks.
+
+        Simulates full pit-wall sovereign decision path without HTTP/NATS calls.
+        Pure-local — no HTTP, no server registration required.
+        Pass criteria: p50 < 50ms, p99 < 200ms end-to-end decision-to-consensus.
+        """
+        await orchestrator.setup_devices(
+            num_devices,
+            cleanup_first=False,
+            register_with_server=False,
+        )
+        return await orchestrator.run_scenario(
+            scenario="e2e_decision",
             duration_seconds=duration_seconds,
             skip_device_setup=True,
         )

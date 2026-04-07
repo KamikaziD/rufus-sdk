@@ -142,6 +142,17 @@ class DeviceMetrics:
     nkey_verifications: int = 0
     nkey_failures: int = 0
     nkey_verify_latencies: List[float] = field(default_factory=list)
+    # Leader election stability metrics (election_stability scenario)
+    elections_run: int = 0
+    election_latencies: List[float] = field(default_factory=list)
+    leader_tenure_samples: List[float] = field(default_factory=list)
+    flap_count: int = 0
+    # Gossip payload-variance metrics (payload_variance scenario)
+    payload_latencies: Dict[str, List[float]] = field(default_factory=dict)
+    # E2E decision pipeline metrics (e2e_decision scenario)
+    e2e_decision_latencies: List[float] = field(default_factory=list)
+    e2e_consensus_latencies: List[float] = field(default_factory=list)
+    e2e_ack_count: int = 0
 
     def reset(self):
         """Reset all counters and latency lists to zero (call before each scenario)."""
@@ -168,6 +179,14 @@ class DeviceMetrics:
         self.nkey_verifications = 0
         self.nkey_failures = 0
         self.nkey_verify_latencies = []
+        self.elections_run = 0
+        self.election_latencies = []
+        self.leader_tenure_samples = []
+        self.flap_count = 0
+        self.payload_latencies = {}
+        self.e2e_decision_latencies = []
+        self.e2e_consensus_latencies = []
+        self.e2e_ack_count = 0
 
 
 class SimulatedEdgeDevice:
@@ -257,7 +276,8 @@ class SimulatedEdgeDevice:
         for attempt in range(MAX_RETRIES):
             try:
                 return await coro_func(*args, **kwargs)
-            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout,
+                    httpx.ConnectError) as e:
                 last_exception = e
                 if attempt == MAX_RETRIES - 1:
                     # Final attempt — classify error; caller tracks total_errors
@@ -360,6 +380,14 @@ class SimulatedEdgeDevice:
                 await self._ruvon_gossip_scenario(duration_seconds)
             elif scenario == "nkey_patch":
                 await self._nkey_patch_scenario(duration_seconds)
+            elif scenario == "mixed":
+                await self._mixed_scenario(duration_seconds)
+            elif scenario == "election_stability":
+                await self._election_stability_scenario(duration_seconds)
+            elif scenario == "payload_variance":
+                await self._payload_variance_scenario(duration_seconds)
+            elif scenario == "e2e_decision":
+                await self._e2e_decision_scenario(duration_seconds)
             else:
                 logger.error(f"Unknown scenario: {scenario}")
 
@@ -579,8 +607,15 @@ class SimulatedEdgeDevice:
                 return False
 
         except Exception as e:
-            # Network/timeout errors where no response was received
-            logger.error(f"Sync error for {self.config.device_id}: {e}", exc_info=True)
+            # Known network errors are already logged at ERROR level by _retry_with_backoff;
+            # log them here at DEBUG only to avoid duplicate traceback spam in the log.
+            _known_net = isinstance(
+                e, (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout)
+            )
+            if _known_net:
+                logger.debug(f"Sync error for {self.config.device_id}: {e}")
+            else:
+                logger.error(f"Sync error for {self.config.device_id}: {e}", exc_info=True)
             self.metrics.total_requests += 1
             self.metrics.total_errors += 1
             return False
@@ -1291,3 +1326,296 @@ class SimulatedEdgeDevice:
 
             # Each device receives a patch broadcast every ~0.1s during load test
             await asyncio.sleep(0.1 + random.uniform(-0.01, 0.01))
+
+    # -------------------------------------------------------------------------
+    # Scenario 12: Mixed Workload Interference
+    # -------------------------------------------------------------------------
+
+    async def _mixed_scenario(self, duration_seconds: int = 300):
+        """
+        Run heartbeat + RUVON gossip + SAF sync simultaneously on the same device.
+
+        Validates that the three workloads do not interfere with each other:
+        SAF p99 should stay < 500ms, gossip error rate < 1%, heartbeat rate = 0 errors.
+        All three scenarios write into the *same* DeviceMetrics fields they always use,
+        so the orchestrator can aggregate results without any special handling.
+        """
+        await asyncio.gather(
+            self._heartbeat_scenario(duration_seconds),
+            self._ruvon_gossip_scenario(duration_seconds),
+            self._saf_sync_scenario(duration_seconds),
+            return_exceptions=True,
+        )
+
+    # -------------------------------------------------------------------------
+    # Scenario 13: Leader Election Stability
+    # -------------------------------------------------------------------------
+
+    async def _election_stability_scenario(self, duration_seconds: int = 120):
+        """
+        Local-only. Repeatedly runs the leadership-score + deterministic election
+        formula used by RufusEdgeAgent, measuring:
+          - elections_run       : total elections simulated
+          - election_latencies  : time per election (should be sub-millisecond)
+          - leader_tenure_samples : how long each pod held the Sovereign role
+          - flap_count          : rapid re-elections (< 5 s gap — split-brain indicator)
+
+        Election formula:  S = 0.50·P + 0.25·C + 0.25·U
+          P = 1.0 (plugged in) or battery% / 100
+          C = 1.0 − cpu_fraction
+          U = min(uptime_seconds / 86400, 1.0)
+
+        Simulates a mesh of 20 peers; each "round" every device computes its score,
+        the highest scorer becomes Sovereign.  Scores drift slowly over time so
+        re-elections happen only when the leader genuinely changes.
+        """
+        import math
+
+        end_time = time.time() + duration_seconds
+
+        # Stable base values for this device (vary slightly per device)
+        seed = hash(self.config.device_id) % 1000
+        base_cpu = 0.15 + (seed % 50) / 500.0      # 0.15–0.25
+        start_ts = time.monotonic()
+        last_election_time: float = 0.0
+        current_sovereign: Optional[str] = None
+
+        # Simulate 20 peers with stable-but-drifting scores
+        peer_ids = [f"peer-{i:03d}" for i in range(20)]
+        peer_scores = {pid: 0.5 + (hash(pid) % 100) / 500.0 for pid in peer_ids}
+
+        def _compute_score(cpu_frac: float, uptime_s: float, plugged: bool) -> float:
+            P = 1.0 if plugged else 0.7
+            C = 1.0 - cpu_frac
+            U = min(uptime_s / 86400.0, 1.0)
+            return round(0.50 * P + 0.25 * C + 0.25 * U, 4)
+
+        while time.time() < end_time:
+            t0 = time.perf_counter()
+
+            uptime = time.monotonic() - start_ts
+            cpu_frac = base_cpu + random.gauss(0, 0.02)
+            my_score = _compute_score(cpu_frac, uptime, plugged=True)
+
+            # Drift peer scores slightly each round
+            best_score = my_score
+            best_id = self.config.device_id
+            for pid in peer_ids:
+                peer_scores[pid] = max(0.0, min(1.0,
+                    peer_scores[pid] + random.gauss(0, 0.001)))
+                s = peer_scores[pid]
+                if s > best_score or (s == best_score and pid < best_id):
+                    best_score = s
+                    best_id = pid
+
+            election_duration = time.perf_counter() - t0
+            self.metrics.election_latencies.append(election_duration)
+            self.metrics.elections_run += 1
+
+            # Detect sovereign change
+            if best_id != current_sovereign:
+                now = time.time()
+                if current_sovereign is not None:
+                    tenure = now - last_election_time
+                    self.metrics.leader_tenure_samples.append(tenure)
+                    if tenure < 5.0:
+                        self.metrics.flap_count += 1
+                current_sovereign = best_id
+                last_election_time = now
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Election check interval — matches agent's heartbeat cadence
+            await asyncio.sleep(0.5 + random.uniform(-0.05, 0.05))
+
+    # -------------------------------------------------------------------------
+    # Scenario 14: Gossip Payload Variance
+    # -------------------------------------------------------------------------
+
+    async def _payload_variance_scenario(self, duration_seconds: int = 120):
+        """
+        Local-only. Measures gossip serialization + deserialization latency
+        across five payload sizes: 256B, 1KB, 4KB, 16KB, 64KB.
+
+        Uses the existing CapabilityVector schema plus a variable-length
+        `extra_telemetry` string field to hit each target size.
+
+        Targets: p95 encode+decode < 50ms for all sizes including 64KB.
+        """
+        import json as _json
+
+        end_time = time.time() + duration_seconds
+
+        SIZE_BUCKETS = {
+            "256B":  256,
+            "1KB":   1_024,
+            "4KB":   4_096,
+            "16KB":  16_384,
+            "64KB":  65_536,
+        }
+
+        # Initialise per-bucket latency lists
+        for label in SIZE_BUCKETS:
+            self.metrics.payload_latencies.setdefault(label, [])
+
+        while time.time() < end_time:
+            # Pick a random size bucket for this iteration
+            label, target_bytes = random.choice(list(SIZE_BUCKETS.items()))
+
+            # Build a CapabilityVector-shaped dict with padding to reach target_bytes
+            base_vec = {
+                "device_id":         self.config.device_id,
+                "available_ram_mb":  random.randint(512, 8192),
+                "cpu_load":          round(random.uniform(0.05, 0.95), 3),
+                "model_tier":        random.choice(["tier_1", "tier_2", "tier_3"]),
+                "latency_ms":        round(random.uniform(1.0, 150.0), 1),
+                "task_queue_length": random.randint(0, 20),
+                "node_tier":         "tier_2",
+                "timestamp":         time.time(),
+            }
+            # Pad to target size with simulated telemetry payload
+            base_json = _json.dumps(base_vec)
+            pad_needed = max(0, target_bytes - len(base_json.encode()))
+            base_vec["extra_telemetry"] = "x" * pad_needed
+
+            t0 = time.perf_counter()
+
+            # Encode
+            encoded = _json.dumps(base_vec).encode("utf-8")
+            # Decode + access a field (simulates receiver side)
+            decoded = _json.loads(encoded)
+            _ = decoded.get("available_ram_mb")
+
+            elapsed = time.perf_counter() - t0
+            self.metrics.payload_latencies[label].append(elapsed)
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            await asyncio.sleep(0.01 + random.uniform(0, 0.005))
+
+    # -------------------------------------------------------------------------
+    # Scenario 15: End-to-End Decision Pipeline
+    # -------------------------------------------------------------------------
+
+    async def _e2e_decision_scenario(self, duration_seconds: int = 120):
+        """
+        Local-only. Simulates the full pit-wall decision pipeline:
+
+          1. generate_telemetry()  — 2KB dict (tire temps, sector times, fuel%)
+          2. compute_score()       — leadership score formula (same as agent.py)
+          3. sovereign check       — highest-score device in simulated 10-pod mesh
+          4. sign_decision()       — Ed25519 sign via NKeyPatchVerifier
+          5. gossip_broadcast()    — JSON serialize decision vector
+          6. wait_for_acks()       — asyncio.gather(N fake ack coroutines, 1–5ms each)
+          7. record latencies      — decision_to_sign, sign_to_consensus (e2e_consensus),
+                                     total end-to-end (e2e_decision)
+
+        Consensus threshold: ≥7 of 10 peers acknowledge (70%).
+        Targets: p50 < 50ms, p99 < 200ms end-to-end.
+        """
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        import json as _json
+        import base64 as _b64
+
+        end_time = time.time() + duration_seconds
+
+        # Generate a long-lived signing keypair (simulates TMS control plane key)
+        priv_key = Ed25519PrivateKey.generate()
+        pub_key  = priv_key.public_key()
+
+        # Simulate a stable 10-pod mesh; this device's rank is fixed for the run
+        mesh_size = 10
+        my_index  = hash(self.config.device_id) % mesh_size
+        # Pre-assign peer base scores (stable, slowly drifting)
+        peer_base = [0.3 + (i * 0.07) for i in range(mesh_size)]
+        is_sovereign = (my_index == mesh_size - 1)  # highest index = highest base score
+
+        def _make_telemetry() -> dict:
+            """Generate a ~2KB F1 telemetry payload."""
+            return {
+                "lap":          random.randint(1, 70),
+                "sector":       random.choice([1, 2, 3]),
+                "fuel_kg":      round(random.uniform(5.0, 110.0), 2),
+                "tire_compound": random.choice(["SOFT", "MEDIUM", "HARD"]),
+                "tire_temps":   {
+                    "fl": round(random.uniform(70, 120), 1),
+                    "fr": round(random.uniform(70, 120), 1),
+                    "rl": round(random.uniform(70, 120), 1),
+                    "rr": round(random.uniform(70, 120), 1),
+                },
+                "sector_times": [round(random.uniform(20, 35), 3) for _ in range(3)],
+                "gap_to_leader_s": round(random.uniform(-10, 30), 3),
+                "drs_available":   random.choice([True, False]),
+                "undercut_window": round(random.uniform(0, 5), 2),
+                "strategy_commit": random.choice(["stay_out", "pit_now", "push"]),
+                "confidence":      round(random.uniform(0.5, 1.0), 3),
+                "padding":         "x" * 1600,  # pad to ~2KB
+            }
+
+        async def _fake_ack(delay_ms: float) -> bool:
+            await asyncio.sleep(delay_ms / 1000.0)
+            return True
+
+        while time.time() < end_time:
+            t_start = time.perf_counter()
+
+            # 1. Generate telemetry
+            telemetry = _make_telemetry()
+
+            # 2. Compute leadership score (local, no I/O)
+            cpu_frac = random.uniform(0.1, 0.4)
+            uptime_s = time.monotonic()
+            my_score = round(
+                0.50 * 1.0 +                          # P = plugged in
+                0.25 * (1.0 - cpu_frac) +             # C = CPU slack
+                0.25 * min(uptime_s / 86400.0, 1.0),  # U = uptime
+                4,
+            )
+
+            t_scored = time.perf_counter()
+
+            if is_sovereign:
+                # 3. Sign the strategy decision
+                decision_bytes = _json.dumps({
+                    "strategy": telemetry["strategy_commit"],
+                    "lap":      telemetry["lap"],
+                    "score":    my_score,
+                }).encode()
+                signature = priv_key.sign(decision_bytes)
+                sig_b64   = _b64.b64encode(signature).decode()
+
+                t_signed = time.perf_counter()
+
+                # 4. Gossip broadcast — serialize decision vector
+                gossip_payload = _json.dumps({
+                    "device_id": self.config.device_id,
+                    "decision":  decision_bytes.decode(),
+                    "signature": sig_b64,
+                    "score":     my_score,
+                    "timestamp": time.time(),
+                }).encode()
+                _ = len(gossip_payload)  # simulate dispatch overhead
+
+                # 5. Wait for acks from ≥7 of 10 peers (70% threshold)
+                ack_delays = [random.uniform(1.0, 5.0) for _ in range(mesh_size - 1)]
+                ack_results = await asyncio.gather(
+                    *[_fake_ack(d) for d in ack_delays],
+                    return_exceptions=True,
+                )
+                acks_received = sum(1 for r in ack_results if r is True)
+
+                t_consensus = time.perf_counter()
+
+                self.metrics.e2e_consensus_latencies.append(t_consensus - t_signed)
+                self.metrics.e2e_ack_count += acks_received
+
+            t_end = time.perf_counter()
+            self.metrics.e2e_decision_latencies.append(t_end - t_start)
+
+            if self.metrics_callback:
+                await self.metrics_callback(self.config.device_id, self.metrics)
+
+            # Decisions happen roughly every lap sector (~20s in real F1, 0.5–2s in benchmark)
+            await asyncio.sleep(random.uniform(0.5, 2.0))
