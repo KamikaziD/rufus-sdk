@@ -477,66 +477,57 @@ class DeviceService:
                 "server_sequence": 0,
             }
 
-        async with self.persistence.pool.acquire() as conn:
-            for txn in transactions:
-                # Verify HMAC if present
-                if "hmac" in txn and txn["hmac"]:
-                    # Reconstruct the signed data (must match edge device format)
-                    hmac_input = (
-                        f"{txn.get('transaction_id', '')}|"
-                        f"{txn.get('encrypted_blob', '')}|"
-                        f"{txn.get('encryption_key_id', 'default')}"
-                    )
-
-                    if not self._verify_hmac(api_key, hmac_input, txn["hmac"]):
-                        logger.warning(
-                            f"HMAC verification failed for transaction {txn.get('transaction_id')} "
-                            f"from device {device_id}"
-                        )
-                        rejected.append({
-                            "transaction_id": txn.get("transaction_id"),
-                            "status": "REJECTED",
-                            "reason": "HMAC verification failed",
-                        })
-                        continue
-                else:
-                    # HMAC required but not present
+        # Phase 1: HMAC verification — CPU only, no DB round-trips
+        valid_txns = []
+        for txn in transactions:
+            if "hmac" in txn and txn["hmac"]:
+                hmac_input = (
+                    f"{txn.get('transaction_id', '')}|"
+                    f"{txn.get('encrypted_blob', '')}|"
+                    f"{txn.get('encryption_key_id', 'default')}"
+                )
+                if not self._verify_hmac(api_key, hmac_input, txn["hmac"]):
                     logger.warning(
-                        f"Transaction {txn.get('transaction_id')} missing HMAC signature"
+                        f"HMAC verification failed for transaction {txn.get('transaction_id')} "
+                        f"from device {device_id}"
                     )
                     rejected.append({
                         "transaction_id": txn.get("transaction_id"),
                         "status": "REJECTED",
-                        "reason": "HMAC signature required",
+                        "reason": "HMAC verification failed",
                     })
-                    continue
+                else:
+                    valid_txns.append(txn)
+            else:
+                logger.warning(
+                    f"Transaction {txn.get('transaction_id')} missing HMAC signature"
+                )
+                rejected.append({
+                    "transaction_id": txn.get("transaction_id"),
+                    "status": "REJECTED",
+                    "reason": "HMAC signature required",
+                })
+
+        # Relay metadata applies to all transactions in the batch
+        relay_device_id = relay_metadata.get("relay_device_id") if relay_metadata else None
+        relay_source_device_id = relay_metadata.get("relay_source_device_id") if relay_metadata else None
+        hop_count = relay_metadata.get("hop_count") if relay_metadata else None
+        relayed_at_raw = relay_metadata.get("relayed_at") if relay_metadata else None
+        relayed_at = None
+        if relayed_at_raw:
+            try:
+                relayed_at = datetime.fromisoformat(str(relayed_at_raw).replace("Z", "+00:00"))
+            except Exception:
+                relayed_at = None
+
+        async with self.persistence.pool.acquire() as conn:
+            # Phase 2: single UNNEST INSERT for all HMAC-verified transactions.
+            # ON CONFLICT (idempotency_key) DO NOTHING silently skips duplicates;
+            # RETURNING tells us which rows were actually inserted vs already present.
+            # This replaces N×(SELECT+INSERT) round-trips with 1 round-trip.
+            if valid_txns:
                 try:
-                    # Check idempotency (use existing connection)
-                    existing = await self._get_transaction_by_idempotency(
-                        txn.get("idempotency_key"),
-                        conn=conn
-                    )
-                    if existing:
-                        accepted.append({
-                            "transaction_id": txn["transaction_id"],
-                            "status": "DUPLICATE",
-                            "server_id": existing["transaction_id"],
-                        })
-                        continue
-
-                    # Insert transaction (idempotent - ignore duplicates from race conditions)
-                    relay_device_id = relay_metadata.get("relay_device_id") if relay_metadata else None
-                    relay_source_device_id = relay_metadata.get("relay_source_device_id") if relay_metadata else None
-                    hop_count = relay_metadata.get("hop_count") if relay_metadata else None
-                    relayed_at_raw = relay_metadata.get("relayed_at") if relay_metadata else None
-                    relayed_at = None
-                    if relayed_at_raw:
-                        try:
-                            relayed_at = datetime.fromisoformat(str(relayed_at_raw).replace("Z", "+00:00"))
-                        except Exception:
-                            relayed_at = None
-
-                    result = await conn.fetchrow(
+                    rows = await conn.fetch(
                         """
                         INSERT INTO saf_transactions (
                             id, transaction_id, idempotency_key, device_id, merchant_id,
@@ -544,56 +535,60 @@ class DeviceService:
                             encrypted_payload, encryption_key_id, workflow_id,
                             relay_device_id, relay_source_device_id, hop_count, relayed_at,
                             status, synced_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'synced', $17)
+                        )
+                        SELECT
+                            gen_random_uuid(),
+                            t.transaction_id, t.idempotency_key,
+                            $1,
+                            t.merchant_id, t.amount_cents, t.currency,
+                            t.card_token, t.card_last_four,
+                            t.encrypted_payload, t.encryption_key_id, t.workflow_id,
+                            $2, $3, $4, $5,
+                            'synced', NOW()
+                        FROM UNNEST(
+                            $6::text[], $7::text[], $8::text[], $9::int[],
+                            $10::text[], $11::text[], $12::text[],
+                            $13::text[], $14::text[], $15::text[]
+                        ) AS t(
+                            transaction_id, idempotency_key, merchant_id, amount_cents,
+                            currency, card_token, card_last_four,
+                            encrypted_payload, encryption_key_id, workflow_id
+                        )
                         ON CONFLICT (idempotency_key) DO NOTHING
                         RETURNING transaction_id
                         """,
-                        str(uuid.uuid4()),
-                        txn["transaction_id"],
-                        txn["idempotency_key"],
                         device_id,
-                        txn.get("merchant_id", ""),
-                        txn.get("amount_cents", 0),
-                        txn.get("currency", "USD"),
-                        txn.get("card_token", ""),
-                        txn.get("card_last_four", ""),
-                        txn.get("encrypted_payload"),
-                        txn.get("encryption_key_id"),
-                        txn.get("workflow_id"),
-                        relay_device_id,
-                        relay_source_device_id,
-                        hop_count,
-                        relayed_at,
-                        datetime.utcnow()
+                        relay_device_id, relay_source_device_id, hop_count, relayed_at,
+                        [t["transaction_id"] for t in valid_txns],
+                        [t.get("idempotency_key", t["transaction_id"]) for t in valid_txns],
+                        [t.get("merchant_id", "") for t in valid_txns],
+                        [t.get("amount_cents", 0) for t in valid_txns],
+                        [t.get("currency", "USD") for t in valid_txns],
+                        [t.get("card_token", "") for t in valid_txns],
+                        [t.get("card_last_four", "") for t in valid_txns],
+                        [t.get("encrypted_payload") for t in valid_txns],
+                        [t.get("encryption_key_id") for t in valid_txns],
+                        [t.get("workflow_id") for t in valid_txns],
                     )
-
-                    # Check if row was actually inserted (result is None if conflict occurred)
-                    if result:
-                        accepted.append({
-                            "transaction_id": txn["transaction_id"],
-                            "status": "ACCEPTED",
-                            "server_id": txn["transaction_id"],
-                        })
-                    else:
-                        # Race condition - transaction was inserted by another request
-                        accepted.append({
-                            "transaction_id": txn["transaction_id"],
-                            "status": "DUPLICATE",
-                            "server_id": txn["transaction_id"],
-                        })
-
+                    inserted_ids = {r["transaction_id"] for r in rows}
+                    for txn in valid_txns:
+                        tid = txn["transaction_id"]
+                        if tid in inserted_ids:
+                            accepted.append({"transaction_id": tid, "status": "ACCEPTED", "server_id": tid})
+                        else:
+                            accepted.append({"transaction_id": tid, "status": "DUPLICATE", "server_id": tid})
                 except Exception as e:
-                    logger.error(f"Failed to sync transaction {txn.get('transaction_id')}: {e}")
-                    rejected.append({
-                        "transaction_id": txn.get("transaction_id"),
-                        "status": "REJECTED",
-                        "reason": str(e),
-                    })
+                    logger.error(f"Batch INSERT failed for device {device_id}: {e}")
+                    for txn in valid_txns:
+                        rejected.append({
+                            "transaction_id": txn.get("transaction_id"),
+                            "status": "REJECTED",
+                            "reason": str(e),
+                        })
 
-            # Update device last_sync_at
             await conn.execute(
                 "UPDATE edge_devices SET last_sync_at = $1 WHERE device_id = $2",
-                datetime.utcnow(), device_id  # Pass datetime object, not string
+                datetime.utcnow(), device_id,
             )
 
         return {
