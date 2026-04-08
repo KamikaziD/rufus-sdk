@@ -38,6 +38,7 @@ tests/load/chaos_test/
 tests/load/load_test_*/
 tests/load/scale_curve/
 tests/load/*.log
+chaos_test.log
 
 # WASM build artifacts
 examples/edge_deployment/fraud_scorer/target/
