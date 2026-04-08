@@ -1,0 +1,50 @@
+workflow_type: "TransactionMonitoring"
+workflow_version: "1.0.0"
+description: "Tazama-inspired rule + typology + WASM ML fraud screening — POS and ATM"
+initial_state_model_path: "txn_monitoring_steps.TransactionMonitoringState"
+
+steps:
+  - name: "Extract_Features"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.extract_features"
+    description: "Build normalised feature vector for ML scoring"
+    automate_next: true
+
+  - name: "Route_By_Type"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.route_by_type"
+    description: "Route to POS or ATM rule evaluation"
+
+  - name: "POS_Rules"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.evaluate_pos_rules"
+    description: "POS fraud rules: velocity, micro-structuring, card-testing (5 rules)"
+
+  - name: "ATM_Rules"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.evaluate_atm_rules"
+    description: "ATM fraud rules: large-cash, after-hours, structuring (5 rules)"
+    automate_next: true
+
+  - name: "Score_With_Wasm"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.score_with_wasm"
+    description: "Rust logistic regression via Wasmtime WASI (Python fallback)"
+    automate_next: true
+
+  - name: "Apply_Typologies"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.apply_typologies"
+    description: "Map rule combinations to named fraud typologies"
+    automate_next: true
+
+  - name: "Monitoring_Verdict"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.monitoring_verdict"
+    description: "Classify risk tier; jump to Flag_Transaction for HIGH/CRITICAL"
+    automate_next: true
+
+  - name: "Flag_Transaction"
+    type: "STANDARD"
+    function: "txn_monitoring_steps.flag_transaction"
+    description: "Create alert record for HIGH/CRITICAL; log PASS otherwise"

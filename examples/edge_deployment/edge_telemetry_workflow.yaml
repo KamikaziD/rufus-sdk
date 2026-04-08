@@ -1,0 +1,28 @@
+workflow_type: "EdgeTelemetry"
+workflow_version: "1.0.0"
+description: "Continuous system telemetry for edge device health monitoring"
+initial_state_model_path: "telemetry_steps.TelemetryState"
+
+steps:
+  - name: "Collect_Telemetry"
+    type: "STANDARD"
+    function: "telemetry_steps.collect_telemetry"
+    description: "Gather CPU/memory/disk/network metrics"
+    automate_next: true
+
+  - name: "Analyse_Metrics"
+    type: "STANDARD"
+    function: "telemetry_steps.analyse_metrics"
+    description: "Check thresholds and classify device health"
+    automate_next: true
+
+  - name: "Sync_Telemetry"
+    type: "STANDARD"
+    function: "telemetry_steps.sync_telemetry"
+    description: "Report to cloud if online; track SAF queue depth if offline"
+    automate_next: true
+
+  - name: "Finalise_Cycle"
+    type: "STANDARD"
+    function: "telemetry_steps.finalise_cycle"
+    description: "Log cycle summary and DB growth projections"
