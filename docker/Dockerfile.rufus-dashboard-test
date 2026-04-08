@@ -1,0 +1,62 @@
+# Rufus Dashboard — Production Image
+# Multi-stage Next.js 14 build
+#
+# Build args:
+#   NEXT_PUBLIC_RUFUS_API_URL  — Backend API URL (baked at build time, default: http://localhost:8000)
+#
+# Runtime env vars (pass at `docker run` time):
+#   NEXTAUTH_URL      — Public URL of this dashboard, e.g. https://dash.example.com
+#   NEXTAUTH_SECRET   — Random secret (openssl rand -base64 32)
+#   KEYCLOAK_ID       — Keycloak client ID (default: rufus-dashboard)
+#   KEYCLOAK_SECRET   — Keycloak client secret
+#   KEYCLOAK_ISSUER   — Keycloak realm URL, e.g. https://sso.example.com/realms/rufus
+
+# ─────────────────────────────────────────────
+# Stage 1 & 2: deps & builder (mostly the same)
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+COPY packages/rufus-dashboard/package*.json ./
+RUN npm ci
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY packages/rufus-dashboard/ .
+
+ARG NEXT_PUBLIC_RUFUS_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_RUFUS_API_URL=$NEXT_PUBLIC_RUFUS_API_URL
+ENV NEXTAUTH_URL=http://localhost:3000
+ENV NEXTAUTH_SECRET=build-placeholder
+
+RUN npm run build
+
+# ─────────────────────────────────────────────
+# Stage 3: Production runner
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# 1. Copy the standalone output (server.js and minimal node_modules)
+COPY --from=builder /app/.next/standalone ./
+
+# 2. Copy the static assets (Next.js expects these at .next/static)
+COPY --from=builder /app/.next/static ./.next/static
+
+# 3. Pre-create cache + public so Next.js never has to mkdir them at runtime,
+#    then fix ownership recursively in one pass (non-recursive chown before
+#    the COPYs is the classic EACCES trap — do it last, do it recursive).
+RUN mkdir -p .next/cache public && chown -R nextjs:nodejs /app
+
+USER nextjs
+EXPOSE 3000
+
+CMD ["node", "server.js"]

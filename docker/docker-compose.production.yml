@@ -144,14 +144,29 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       REDIS_URL: redis://redis:6379/0
       WORKFLOW_STORAGE: postgres
+      RUFUS_CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:8081,http://localhost:8082"
       # CRITICAL: Set this to a persistent key to decrypt workflows across restarts
       RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
+      WORKFLOW_EXECUTION_BACKEND: celery 
+      ENABLE_ENCRYPTION_AT_REST: "false"
+      RUFUS_REGISTRATION_KEY: ${RUFUS_REGISTRATION_KEY:-dev-registration-key}
+      POSTGRES_POOL_MIN_SIZE: "10"
+      POSTGRES_POOL_MAX_SIZE: "100"
+      RUFUS_NATS_URL: nats://nats:4222
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      nats:
         condition: service_healthy
     networks:
       - rufus-network
@@ -164,6 +179,99 @@ services:
         uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
       "
 
+  rufus-dashboard:
+    image: node:22-alpine
+    container_name: test-rufus-dashboard
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rufus-dashboard-prod
+    # working_dir: /app
+    # command: sh -c "npm install --prefer-offline && npx next dev --port 3000"
+    # command: node server.js
+    # volumes:
+    #   - /Users/kim/PycharmProjects/rufus/packages/rufus-dashboard:/app
+    #   - dashboard_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      WATCHPACK_POLLING: "true"
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-rufus-dashboard-2026-x}
+      KEYCLOAK_SECRET: ${KEYCLOAK_SECRET:-}
+      KEYCLOAK_CLIENT_ID: rufus-dashboard
+      # KC_PROXY=edge disables Keycloak's HTTPS-only requirement for non-loopback IPs,
+      # so host.docker.internal (192.168.65.254) can reach OIDC endpoints over HTTP.
+      # On macOS Docker Desktop, host.docker.internal resolves to 127.0.0.1 in the
+      # browser too (Docker Desktop adds it to /etc/hosts), so browser redirects work.
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/rufus
+      NEXT_PUBLIC_RUFUS_API_URL: http://localhost:8000
+      NEXT_PUBLIC_NATS_WS_URL: ws://localhost:8081   # NATS WebSocket — real-time dashboard events
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: test-keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_secret}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-my_app_db}
+      KC_DB_USERNAME: ${POSTGRES_USER:-myapp}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_PROXY: edge
+    command: ["start-dev", "--import-realm"]
+    volumes:
+      - ./keycloak/rufus-realm.json:/opt/keycloak/data/import/rufus-realm.json:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "(echo > /dev/tcp/localhost/8080) 2>/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
+  # NATS JetStream — sub-ms pub/sub for command delivery and workflow events
+  # Monitoring: curl http://localhost:8222/jsz | python3 -m json.tool
+  # Dashboard WS: ws://localhost:8081 (host-mapped; container listens on 8080)
+  # Keycloak owns host port 8080, so NATS WebSocket is exposed on 8081.
+  nats:
+    image: nats:2.10-alpine
+    container_name: test-nats
+    command: ["-c", "/etc/nats/nats.conf"]
+    ports:
+      - "4222:4222"   # NATS client connections (go/python nats-py)
+      - "8222:8222"   # HTTP monitoring
+      - "8081:8080"   # WebSocket for dashboard nats.ws (host 8081 → container 8080)
+    volumes:
+      - nats_data:/data
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rufus-network
+    restart: unless-stopped
+
 networks:
   rufus-network:
     driver: bridge
@@ -171,3 +279,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  nats_data:

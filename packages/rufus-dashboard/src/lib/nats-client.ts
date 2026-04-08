@@ -26,6 +26,8 @@
  *   - nats.ws package is not available
  */
 
+import { NatsConnection } from "nats.ws";
+
 const NATS_WS_URL =
   process.env.NEXT_PUBLIC_NATS_WS_URL || "ws://localhost:8080";
 
@@ -62,7 +64,7 @@ type UnsubscribeFn = () => void;
 
 // Singleton NATS connection shared across all subscriptions
 let _nc: Awaited<ReturnType<typeof import("nats.ws").connect>> | null = null;
-let _connecting: Promise<typeof _nc> | null = null;
+let _connecting: Promise<NatsConnection | null> | null = null;
 
 async function getNatsConnection() {
   if (_nc && !_nc.isClosed()) return _nc;
@@ -76,7 +78,7 @@ async function getNatsConnection() {
       // Reset on close so next call reconnects
       (async () => {
         for await (const s of _nc!.status()) {
-          if (s.type === "disconnect" || s.type === "close") {
+          if (s.type === "disconnect" || s.type.toString() === "close") {
             _nc = null;
             _connecting = null;
           }
@@ -84,7 +86,10 @@ async function getNatsConnection() {
       })();
       return _nc;
     } catch (err) {
-      console.warn("[NATS] Connection failed — real-time updates unavailable:", err);
+      console.warn(
+        "[NATS] Connection failed — real-time updates unavailable:",
+        err,
+      );
       _nc = null;
       _connecting = null;
       return null;
@@ -103,7 +108,7 @@ async function getNatsConnection() {
  */
 export async function subscribeWorkflow(
   workflowId: string,
-  callback: (event: WorkflowEvent) => void
+  callback: (event: WorkflowEvent) => void,
 ): Promise<UnsubscribeFn> {
   const nc = await getNatsConnection();
   if (!nc) return () => {};
@@ -141,7 +146,7 @@ export async function subscribeWorkflow(
  * @returns           Unsubscribe function
  */
 export async function subscribeDeviceFleet(
-  callback: (event: DeviceHeartbeatEvent) => void
+  callback: (event: DeviceHeartbeatEvent) => void,
 ): Promise<UnsubscribeFn> {
   const nc = await getNatsConnection();
   if (!nc) return () => {};
@@ -177,7 +182,7 @@ export async function subscribeDeviceFleet(
  * @returns           Unsubscribe function
  */
 export async function subscribeAllWorkflowEvents(
-  callback: (event: WorkflowEvent) => void
+  callback: (event: WorkflowEvent) => void,
 ): Promise<UnsubscribeFn> {
   const nc = await getNatsConnection();
   if (!nc) return () => {};
@@ -222,5 +227,4 @@ export async function closeNatsConnection(): Promise<void> {
  * Use to conditionally enable real-time features in UI.
  */
 export const isNatsEnabled =
-  typeof process !== "undefined" &&
-  !!process.env.NEXT_PUBLIC_NATS_WS_URL;
+  typeof process !== "undefined" && !!process.env.NEXT_PUBLIC_NATS_WS_URL;

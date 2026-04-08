@@ -23,7 +23,9 @@ WORKDIR /app
 
 # Copy requirements first for layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . /rufus_package
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -e /rufus_package
 
 # Copy application code
 COPY src/ ./src/

@@ -32,3 +32,26 @@ confucius/
 # Proto generated code
 src/rufus/proto/gen/*.py
 !src/rufus/proto/gen/__init__.py
+
+# Load test output
+tests/load/chaos_test/
+tests/load/load_test_*/
+tests/load/scale_curve/
+tests/load/*.log
+chaos_test.log
+
+# WASM build artifacts
+examples/edge_deployment/fraud_scorer/target/
+
+# Databases
+src/**/*.db
+
+# Docker env copies/secrets
+docker/.env*
+!docker/.env.example
+
+# Stray pip/tool output
+=[0-9]*
+
+# Screenshots
+Screenshot*.png

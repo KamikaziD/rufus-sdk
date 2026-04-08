@@ -45,6 +45,10 @@ slowapi>=0.1.9
 
 # PostgreSQL (optional - for cloud control plane)
 asyncpg>=0.27.0
+psycopg2-binary>=2.9.0   # psycopg2 used by worker_registry.py (Celery fleet mgmt)
+
+# Redis (required - used by events.py, observability/events.py, rufus_server/main.py)
+redis>=5.0.0
 
 # Database ORM and Migrations
 sqlalchemy>=2.0.0
@@ -54,9 +58,12 @@ alembic>=1.13.0
 rich>=13.0.0
 
 # NATS JetStream + Protobuf (optional transport layer)
-nats-py>=2.3
+nats-py>=2.3             # PyPI package name; imported as `nats`
 betterproto>=0.9.0
 protobuf>=4.21
+
+# Knowledge base / RAG (optional - builder_ai)
+rank-bm25>=0.2.2         # BM25 re-ranking in KnowledgeBase.retrieve(); falls back gracefully if absent
 
 # Fast typed serialization (optional — used by msgspec codec benchmark/path)
 msgspec>=0.18.0
@@ -81,9 +88,10 @@ jsonschema>=4.17.3,<5.0.0
 
 # Testing
 pytest>=7.0.0
-pytest-asyncio>=0.21.0
+pytest-asyncio>=0.23.0   # 0.21.x breaks with pytest 9+ (AttributeError on FixtureDef.unittest)
 pytest-cov>=4.0.0
 pytest-mock>=3.12.0
+asgi-lifespan>=2.1.0     # ASGI lifespan for integration tests (httpx + FastAPI)
 
 # Type checking
 typing_extensions>=4.0.0

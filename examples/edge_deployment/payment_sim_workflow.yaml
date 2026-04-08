@@ -1,0 +1,48 @@
+workflow_type: "PaymentSimulation"
+workflow_version: "1.1.0"
+description: "Simulated card payment — online approval or offline SAF + fraud screening"
+initial_state_model_path: "payment_sim_steps.PaymentSimState"
+
+steps:
+  - name: "Generate_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.generate_payment"
+    description: "Generate random card payment data"
+    automate_next: true
+
+  - name: "Check_Connectivity"
+    type: "STANDARD"
+    function: "payment_sim_steps.check_connectivity"
+    description: "Simulate connectivity check — 70% online, 30% offline"
+
+  - name: "Authorize_Online"
+    type: "STANDARD"
+    function: "payment_sim_steps.authorize_online"
+    description: "Simulate gateway approval (online path)"
+
+  - name: "Check_Floor_Limit"
+    type: "STANDARD"
+    function: "payment_sim_steps.check_floor_limit"
+    description: "Route by floor limit (offline path)"
+
+  - name: "Approve_Offline"
+    type: "STANDARD"
+    function: "payment_sim_steps.approve_offline"
+    description: "Approve offline and queue into SAF"
+
+  - name: "Decline_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.decline_payment"
+    description: "Decline — exceeds offline floor limit"
+    automate_next: true
+
+  - name: "Launch_Monitoring"
+    type: "STANDARD"
+    function: "payment_sim_steps.launch_monitoring"
+    description: "Run TransactionMonitoring fraud screening sub-workflow"
+    automate_next: true
+
+  - name: "Complete_Payment"
+    type: "STANDARD"
+    function: "payment_sim_steps.complete_payment"
+    description: "Log final outcome"

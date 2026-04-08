@@ -5,17 +5,12 @@ import httpx
 import asyncio
 from typing import AsyncGenerator
 
-# Test server URL
-BASE_URL = "http://localhost:8000"
+from tests.integration.conftest import requires_postgres
+
+# client fixture provided by tests/integration/conftest.py (in-process ASGITransport)
 
 
-@pytest.fixture
-async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Create async HTTP client."""
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
-        yield client
-
-
+@requires_postgres
 @pytest.mark.asyncio
 class TestCommandVersioningIntegration:
     """Integration tests for command versioning API."""
@@ -235,6 +230,7 @@ class TestCommandVersioningIntegration:
         assert isinstance(data["changelog"], list)
 
 
+@requires_postgres
 @pytest.mark.asyncio
 class TestCommandVersioningPerformance:
     """Performance tests for command versioning."""
