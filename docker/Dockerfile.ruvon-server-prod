@@ -1,33 +1,22 @@
-# Production Rufus Server Dockerfile
-# Installs ruvon-sdk from PyPI instead of copying source
-# For pre-built Docker Hub images
-
 FROM python:3.11-slim
 
-LABEL maintainer="Rufus Team <team@ruvon.dev>"
-LABEL description="Rufus Workflow Engine - REST API Server"
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine — REST API Server"
+LABEL version="0.1.0"
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ruvon-sdk packages from TestPyPI (TEMPORARY - for testing)
-# TODO: Switch to production PyPI once published
-
-# Step 1: Install ruvon-sdk + ruvon-server (no extras) from TestPyPI
-# Extras are NOT installed here to avoid TestPyPI's broken FastAPI/Starlette stubs
+# Install ruvon-sdk + ruvon-server from PyPI
 RUN pip install --no-cache-dir \
-    --index-url https://test.pypi.org/simple/ \
-    --extra-index-url https://pypi.org/simple/ \
-    'ruvon-sdk==1.0.0rc6' \
-    'ruvon-server==1.0.0rc6'
+    'ruvon-sdk[postgres,performance,cli]==0.1.0' \
+    'ruvon-server[server,auth]==0.1.0'
 
-# Step 2: Install all optional dependencies from PyPI (avoids TestPyPI broken packages)
+# Install Celery deps separately (keeps image layers cacheable)
 RUN pip install --no-cache-dir \
     'fastapi>=0.100' \
     'uvicorn[standard]>=0.20' \
@@ -35,39 +24,27 @@ RUN pip install --no-cache-dir \
     'slowapi>=0.1' \
     'asyncpg>=0.27' \
     'python-jose[cryptography]>=3.3' \
-    'rich>=13.0' \
     'uvloop>=0.19'
 
-# PRODUCTION VERSION (uncomment when published to PyPI):
-# RUN pip install --no-cache-dir 'ruvon-sdk[postgres,performance,cli]==0.6.1' 'ruvon-server[server,auth]==0.6.1'
-
-# Create directories for user code (will be mounted as volumes)
+# Directories for user code (mounted as volumes in production)
 RUN mkdir -p /app/config /app/user_code
 
-# Copy complete database initialization script
 COPY docker/init-db.sql /app/init-db.sql
 
-# Set Python path to include user code directory
 ENV PYTHONPATH=/app:/app/user_code
-
-# Default environment variables (override in docker-compose)
 ENV DATABASE_URL=postgresql://ruvon:ruvon_secret@postgres:5432/ruvon_production
 ENV CELERY_BROKER_URL=redis://redis:6379/0
 ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
 
-# Expose API port
 EXPOSE 8000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5)" || exit 1
 
-# Run migrations and start server
 CMD sh -c "\
     echo 'Waiting for database...' && \
     sleep 5 && \
     echo 'Running database initialization...' && \
     psql $DATABASE_URL < /app/init-db.sql && \
-    echo 'Database initialized successfully' && \
     echo 'Starting server...' && \
     uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000"

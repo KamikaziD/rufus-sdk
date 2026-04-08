@@ -204,7 +204,7 @@
 <header>
   <h1>Rufus — Demo 3: Regenerative Pod Mesh</h1>
   <a href="index.html">← Back to Demo</a>
-  <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank" style="margin-left:auto">GitHub ↗</a>
+  <a href="https://github.com/KamikaziD/ruvon-sdk" target="_blank" style="margin-left:auto">GitHub ↗</a>
 </header>
 
 <div class="page">
@@ -520,11 +520,11 @@
   <ol class="steps">
     <li>
       Every pod registers with PeerJS using the ID
-      <code>rufus-{groupKey}-{podId}</code>.
+      <code>ruvon-{groupKey}-{podId}</code>.
     </li>
     <li>
       Simultaneously, every pod tries to connect to the <em>well-known anchor</em>
-      <code>rufus-{groupKey}-anchor</code>.
+      <code>ruvon-{groupKey}-anchor</code>.
     </li>
     <li>
       If the anchor responds (room already exists): the anchor sends a
@@ -596,7 +596,7 @@
 
   <div class="arch-diagram"><span class="hi">index.html (main thread)</span>
   ├── Modal UI + share link
-  ├── <span class="gr">BroadcastChannel("rufus-mesh")</span>  ←── same-device tabs
+  ├── <span class="gr">BroadcastChannel("ruvon-mesh")</span>  ←── same-device tabs
   ├── <span class="hi">PeerJS DataChannels</span>             ←── cross-device peers
   │       └── relay REMOTE_SEND ↔ REMOTE_MSG with worker
   └── Canvas / peer table / event log renderer
@@ -669,7 +669,7 @@
               color: var(--muted); font-size: 11px; line-height: 2;">
     <strong style="color: var(--text)">Rufus SDK</strong> — Edge-first Python workflow engine.<br>
     Browser Demo 3 is a standalone static demo of the RUVON gossip layer. No SDK installation required.<br>
-    <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank">github.com/KamikaziD/rufus-sdk</a>
+    <a href="https://github.com/KamikaziD/ruvon-sdk" target="_blank">github.com/KamikaziD/ruvon-sdk</a>
     &nbsp;·&nbsp;
     <a href="index.html">← Back to Demo</a>
   </div>

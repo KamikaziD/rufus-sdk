@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build rufus-sdk wheel
+      - name: Build ruvon-sdk wheel
         run: |
           pip install build
           python -m build --wheel --outdir dist
@@ -36,7 +36,7 @@ jobs:
       - name: Assemble demo site
         run: |
           mkdir -p _site/dist
-          cp dist/rufus_sdk-*.whl _site/dist/
+          cp dist/ruvon_sdk-*.whl _site/dist/
           # Demo 1 — Browser Runtime (Pyodide + WebGPU) at site root
           cp -r examples/browser_demo/. _site/
           rm -f _site/serve.py _site/README.md _site/README.pdf

@@ -243,7 +243,7 @@ class ShardScheduler {
     }
 
     async _ensureShard(idx) {
-        const id = `rufus-shard-${idx}.gguf`;
+        const id = `ruvon-shard-${idx}.gguf`;
         const cached = await _opfsCache.read(id);
         if (cached) return cached;
 
@@ -439,7 +439,7 @@ globalThis.runNERInference = async (text) => {
 };
 
 // ─── IndexedDB helpers (exposed to Python via Pyodide FFI) ───────────────────
-const IDB_NAME    = "rufus-demo";
+const IDB_NAME    = "ruvon-demo";
 const IDB_VERSION = 1;
 
 function openIDB() {
@@ -603,10 +603,10 @@ async function idbPruneOldest() {
 // ─── Python setup string ──────────────────────────────────────────────────────
 const PYTHON_SETUP = `
 import os
-# Disable uvloop and orjson before rufus/__init__.py runs — the mock packages
+# Disable uvloop and orjson before ruvon/__init__.py runs — the mock packages
 # have no attributes, and these optimisations don't apply in Pyodide anyway.
-os.environ["RUFUS_USE_UVLOOP"] = "false"
-os.environ["RUFUS_USE_ORJSON"] = "false"
+os.environ["RUVON_USE_UVLOOP"] = "false"
+os.environ["RUVON_USE_ORJSON"] = "false"
 
 import asyncio
 import json
@@ -617,17 +617,17 @@ import uuid
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.builder import WorkflowBuilder
-from rufus.models import (
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.models import (
     WorkflowStep, ParallelWorkflowStep, ParallelExecutionTask,
     StepContext, WorkflowJumpDirective,
     MergeStrategy, MergeConflictBehavior,
 )
-from rufus.workflow import Workflow
+from ruvon.workflow import Workflow
 
 # ── Global browser function registry (for PARALLEL tasks) ─────────────────────
 _BROWSER_FUNCS: dict = {}
@@ -1639,11 +1639,11 @@ async function init() {
     // when no wheel is found at the same origin (bare two-file share scenario).
     try {
         const probe = await fetch(
-            `${self.location.origin}/dist/rufus_sdk-1.0.0rc6-py3-none-any.whl`,
+            `${self.location.origin}/dist/ruvon_sdk-0.1.0-py3-none-any.whl`,
             { method: "HEAD" }
         );
         if (probe.ok) {
-            _wheelUrl = `${self.location.origin}/dist/rufus_sdk-1.0.0rc6-py3-none-any.whl`;
+            _wheelUrl = `${self.location.origin}/dist/ruvon_sdk-0.1.0-py3-none-any.whl`;
         }
     } catch (_) {
         // network error or CORS block → leave _wheelUrl as null → TestPyPI path
@@ -1651,18 +1651,18 @@ async function init() {
 
     const _usingLocalWheel = _wheelUrl !== null;
     self.postMessage({ type: "status", message: _usingLocalWheel
-        ? "Installing rufus-sdk from local wheel…"
-        : "Installing rufus-sdk from TestPyPI…" });
+        ? "Installing ruvon-sdk from local wheel…"
+        : "Installing ruvon-sdk from PyPI…" });
 
     pyodide.globals.set("_wheel_url", _wheelUrl);
     // Mock native-code packages that have no WASM wheel so micropip's dependency
     // resolver sees them as satisfied without trying to download them.
-    // Then install the rufus-sdk wheel (or fetch from TestPyPI as fallback).
+    // Then install the ruvon-sdk wheel (or fetch from PyPI as fallback).
     await pyodide.runPythonAsync(`
 import micropip
 
 # Stub out the packages that require C extensions / Rust — not used on the
-# in-memory + sync execution path, but listed in rufus-sdk wheel metadata.
+# in-memory + sync execution path, but listed in ruvon-sdk wheel metadata.
 for _pkg, _ver in [
     ("cryptography", "41.0.0"),
     ("orjson",       "3.9.0"),
@@ -1675,16 +1675,13 @@ if _wheel_url:
     # Local dev or Pages deploy: load from co-located wheel (fast, no CDN needed)
     await micropip.install(_wheel_url, keep_going=True)
 else:
-    # Bare two-file share: TestPyPI doesn't carry all transitive deps, so
-    # pre-install the ones that only exist on PyPI, then pull rufus-sdk itself
-    # from TestPyPI (micropip skips deps it already sees as satisfied).
+    # Bare two-file share: pre-install transitive deps then pull ruvon-sdk from PyPI.
     await micropip.install(
         ["anyio", "alembic", "typer", "aiosqlite", "python-dotenv", "croniter"],
         keep_going=True,
     )
     await micropip.install(
-        "rufus-sdk==1.0.0rc6",
-        index_urls=["https://test.pypi.org/simple/", "https://pypi.org/simple/"],
+        "ruvon-sdk==0.1.0",
         keep_going=True,
     )
 `);

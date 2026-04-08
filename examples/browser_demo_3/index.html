@@ -214,7 +214,7 @@
      <span id="badge-remote-count">0</span> remote)
   </span>
   <span style="margin-left:auto; color: var(--muted); font-size:11px" id="transport-desc">
-    BroadcastChannel("rufus-mesh") — no server required
+    BroadcastChannel("ruvon-mesh") — no server required
   </span>
   <button id="btn-share-link" style="display:none; font-size:11px; padding:4px 10px"
           onclick="copyShareLink()">Share Link</button>
@@ -362,7 +362,7 @@ const _urlGroupKey = new URLSearchParams(location.search).get("group");
 // ---------------------------------------------------------------------------
 // PeerJS state (main-thread; PeerJS can't run in a Web Worker)
 // ---------------------------------------------------------------------------
-let myPeer = null;       // this pod's Peer (ID = rufus-{groupKey}-{POD_ID})
+let myPeer = null;       // this pod's Peer (ID = ruvon-{groupKey}-{POD_ID})
 let anchorPeer = null;   // second Peer if this pod is the mesh anchor
 let dataChannels = {};   // peerId → DataConnection
 let _anchorTimeout = null;
@@ -393,7 +393,7 @@ function joinLocalOnly() {
   document.getElementById("group-modal").classList.add("hidden");
   initWorker(null, null);
   document.getElementById("transport-desc").textContent =
-    'BroadcastChannel("rufus-mesh") — local only';
+    'BroadcastChannel("ruvon-mesh") — local only';
   log('Local-only mesh — BroadcastChannel, no server required', "info");
 }
 
@@ -516,8 +516,8 @@ function sanitisePeerId(s) {
 
 function initPeerJS(groupKey, podId) {
   destroyPeerJS();
-  const myPeerId  = sanitisePeerId(`rufus-${groupKey}-${podId}`);
-  const anchorId  = sanitisePeerId(`rufus-${groupKey}-anchor`);
+  const myPeerId  = sanitisePeerId(`ruvon-${groupKey}-${podId}`);
+  const anchorId  = sanitisePeerId(`ruvon-${groupKey}-anchor`);
 
   myPeer = new Peer(myPeerId);
 

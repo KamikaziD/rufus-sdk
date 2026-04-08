@@ -8,8 +8,8 @@ const nextConfig = {
     workerThreads: false,
   },
   env: {
-    NEXT_PUBLIC_RUFUS_API_URL:
-      process.env.NEXT_PUBLIC_RUFUS_API_URL ?? "http://localhost:8000",
+    NEXT_PUBLIC_RUVON_API_URL:
+      process.env.NEXT_PUBLIC_RUVON_API_URL ?? "http://localhost:8000",
   },
   async headers() {
     return [
