@@ -4,10 +4,10 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from rufus.builder_ai import AIWorkflowBuilder
-from rufus.builder_ai.models import BuildResult
-from rufus.builder_ai.stages.schema_validator import SchemaValidator
-from rufus.builder_ai.stages.stub_generator import StubGenerator
+from ruvon.builder_ai import AIWorkflowBuilder
+from ruvon.builder_ai.models import BuildResult
+from ruvon.builder_ai.stages.schema_validator import SchemaValidator
+from ruvon.builder_ai.stages.stub_generator import StubGenerator
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 import importlib
 import pytest
 from unittest.mock import MagicMock, patch
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 from pydantic import BaseModel
 from typing import Dict, Any, List, Callable, Type, ClassVar # Import ClassVar
-from rufus.models import (
+from ruvon.models import (
     WorkflowStep, StepContext, AsyncWorkflowStep, CompensatableStep, HttpWorkflowStep,
     FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelWorkflowStep,
     ParallelExecutionTask, MergeStrategy, MergeConflictBehavior
@@ -151,7 +151,7 @@ def test_discover_marketplace_steps_valid(monkeypatch, mock_providers):
 
     # Mock importlib.metadata.entry_points
     mock_entry_points_map = {
-        'rufus.steps': [mock_entry_point_valid, mock_entry_point_no_step_type_name]
+        'ruvon.steps': [mock_entry_point_valid, mock_entry_point_no_step_type_name]
     }
     monkeypatch.setattr(importlib.metadata, 'entry_points', lambda: mock_entry_points_map)
 
@@ -174,13 +174,13 @@ def test_discover_marketplace_steps_invalid_class(monkeypatch, mock_providers):
     mock_entry_point_invalid.load.return_value = NotAWorkflowStep
 
     mock_entry_points_map = {
-        'rufus.steps': [mock_entry_point_invalid]
+        'ruvon.steps': [mock_entry_point_invalid]
     }
     monkeypatch.setattr(importlib.metadata, 'entry_points', lambda: mock_entry_points_map)
 
     # Clear _marketplace_steps to ensure _discover_marketplace_steps is called by THIS test's builder init
     WorkflowBuilder._marketplace_steps = {}
-    with patch('rufus.builder.logger') as mock_logger:
+    with patch('ruvon.builder.logger') as mock_logger:
         builder = WorkflowBuilder(workflow_registry={}, **mock_providers) # Instantiate INSIDE patch
         assert "not_a_workflow_step" not in builder._marketplace_steps
         mock_logger.warning.assert_called_with(
@@ -198,17 +198,17 @@ def test_discover_marketplace_steps_load_error(monkeypatch, mock_providers):
     mock_entry_point_error.load.side_effect = ImportError("Cannot load module")
 
     mock_entry_points_map = {
-        'rufus.steps': [mock_entry_point_error]
+        'ruvon.steps': [mock_entry_point_error]
     }
     monkeypatch.setattr(importlib.metadata, 'entry_points', lambda: mock_entry_points_map)
 
     # Clear _marketplace_steps to ensure _discover_marketplace_steps is called by THIS test's builder init
     WorkflowBuilder._marketplace_steps = {}
-    with patch('rufus.builder.logger') as mock_logger:
+    with patch('ruvon.builder.logger') as mock_logger:
         builder = WorkflowBuilder(workflow_registry={}, **mock_providers) # Instantiate INSIDE patch
         assert "failing_step" not in builder._marketplace_steps
         mock_logger.error.assert_called_with(
-            f"Failed to load rufus.steps entry point {mock_entry_point_error.name}: Cannot load module"
+            f"Failed to load ruvon.steps entry point {mock_entry_point_error.name}: Cannot load module"
         )
 
 
@@ -370,7 +370,7 @@ async def test_create_workflow():
         workflow_observer=MagicMock()
     )
 
-    from rufus.workflow import Workflow
+    from ruvon.workflow import Workflow
     assert isinstance(workflow, Workflow)
     assert workflow.workflow_type == "test_workflow"
     # Check state type by class name instead of isinstance to avoid module reload issues

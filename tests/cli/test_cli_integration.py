@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 from tests.cli.utils import assert_output_contains
 
 
@@ -169,7 +169,7 @@ class TestCLIConsistency:
 
     def test_list_command_aliases(self, cli_runner, temp_config_dir, mock_persistence):
         """Test that 'rufus list' and 'rufus workflow list' are equivalent."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result1 = cli_runner.invoke(app, ["list"])
             result2 = cli_runner.invoke(app, ["workflow", "list"])
 
@@ -181,7 +181,7 @@ class TestCLIConsistency:
         workflow_id = sample_workflow_data["id"]
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result1 = cli_runner.invoke(app, ["show", workflow_id])
             result2 = cli_runner.invoke(app, ["workflow", "show", workflow_id])
 

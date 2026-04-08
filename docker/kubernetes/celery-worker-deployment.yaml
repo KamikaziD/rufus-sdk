@@ -1,40 +1,40 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-celery-worker
+  name: ruvon-celery-worker
   labels:
-    app: rufus
+    app: ruvon
     component: celery-worker
 spec:
   replicas: 3  # Horizontal scaling - adjust as needed
   selector:
     matchLabels:
-      app: rufus
+      app: ruvon
       component: celery-worker
   template:
     metadata:
       labels:
-        app: rufus
+        app: ruvon
         component: celery-worker
     spec:
       containers:
       - name: celery-worker
-        image: your-registry/rufus-celery-worker:latest
+        image: ruvondev/ruvon-celery-worker:latest
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: rufus-secrets
+              name: ruvon-secrets
               key: database-url
         - name: CELERY_BROKER_URL
           valueFrom:
             configMapKeyRef:
-              name: rufus-config
+              name: ruvon-config
               key: celery-broker-url
         - name: CELERY_RESULT_BACKEND
           valueFrom:
             configMapKeyRef:
-              name: rufus-config
+              name: ruvon-config
               key: celery-result-backend
         - name: WORKER_CONCURRENCY
           value: "4"
@@ -66,7 +66,7 @@ spec:
             command:
             - celery
             - -A
-            - rufus.celery_app
+            - ruvon.celery_app
             - inspect
             - ping
           initialDelaySeconds: 30
@@ -78,7 +78,7 @@ spec:
             command:
             - celery
             - -A
-            - rufus.celery_app
+            - ruvon.celery_app
             - inspect
             - active
           initialDelaySeconds: 10
@@ -88,12 +88,12 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: rufus-celery-worker-hpa
+  name: ruvon-celery-worker-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: rufus-celery-worker
+    name: ruvon-celery-worker
   minReplicas: 3
   maxReplicas: 20
   metrics:

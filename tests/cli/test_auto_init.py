@@ -6,7 +6,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 
 class TestSQLiteAutoInit:
@@ -191,14 +191,14 @@ class TestConfigAutoInit:
 
     def test_config_default_auto_init_true(self):
         """Test that config defaults to auto_init=True"""
-        from rufus_cli.config import Config
+        from ruvon_cli.config import Config
 
         config = Config()
         assert config.persistence.sqlite.auto_init is True
 
     def test_config_set_auto_init(self):
         """Test setting auto_init via config manager"""
-        from rufus_cli.config import ConfigManager
+        from ruvon_cli.config import ConfigManager
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -217,7 +217,7 @@ class TestConfigAutoInit:
 
     def test_config_serialization_includes_auto_init(self):
         """Test that auto_init is serialized to YAML"""
-        from rufus_cli.config import ConfigManager
+        from ruvon_cli.config import ConfigManager
         import tempfile
         import yaml
 

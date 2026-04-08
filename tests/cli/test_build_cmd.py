@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 
 
 runner = CliRunner()
@@ -14,7 +14,7 @@ runner = CliRunner()
 
 def _mock_build_result(yaml_content=None, has_errors=False, needs_clarification=False):
     """Create a mock BuildResult."""
-    from rufus.builder_ai.models import BuildResult, LintReport, LintResult
+    from ruvon.builder_ai.models import BuildResult, LintReport, LintResult
     lint_report = LintReport(results=[
         LintResult(rule_id="GOV-001", severity="ERROR", message="PII check passed", passed=True),
         LintResult(rule_id="GOV-007", severity="WARN", message="Metadata present", passed=True),
@@ -42,7 +42,7 @@ class TestBuildCommand:
 
     def test_single_shot_dry_run(self):
         mock_result = _mock_build_result()
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.build = AsyncMock(return_value=mock_result)
@@ -55,7 +55,7 @@ class TestBuildCommand:
     def test_single_shot_to_file(self, tmp_path):
         out_file = tmp_path / "workflow.yaml"
         mock_result = _mock_build_result()
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.build = AsyncMock(return_value=mock_result)
@@ -69,7 +69,7 @@ class TestBuildCommand:
 
     def test_ollama_backend_flag(self):
         mock_result = _mock_build_result()
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "llama3"
             instance.build = AsyncMock(return_value=mock_result)
@@ -89,7 +89,7 @@ class TestBuildCommand:
 
     def test_schema_errors_exit_code_1(self):
         mock_result = _mock_build_result(has_errors=True)
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.build = AsyncMock(return_value=mock_result)
@@ -103,7 +103,7 @@ class TestBuildCommand:
         workflow_file = tmp_path / "workflow.yaml"
         workflow_file.write_text("name: test\nsteps: []\n")
 
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.explain = AsyncMock(return_value="This workflow handles test data.")
@@ -120,7 +120,7 @@ class TestBuildCommand:
     def test_json_format_output(self, tmp_path):
         out_file = tmp_path / "workflow.json"
         mock_result = _mock_build_result()
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.build = AsyncMock(return_value=mock_result)
@@ -140,7 +140,7 @@ class TestBuildCommand:
         existing_wf.write_text("name: existing\nsteps: []\n")
         mock_result = _mock_build_result()
 
-        with patch("rufus.builder_ai.AIWorkflowBuilder") as MockBuilder:
+        with patch("ruvon.builder_ai.AIWorkflowBuilder") as MockBuilder:
             instance = MockBuilder.return_value
             instance.model = "claude-sonnet-4-6"
             instance.build = AsyncMock(return_value=mock_result)

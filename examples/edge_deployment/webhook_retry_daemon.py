@@ -12,7 +12,7 @@ Environment Variables:
 
 Examples:
     # Start with defaults
-    DATABASE_URL=postgresql://localhost/rufus_edge python webhook_retry_daemon.py
+    DATABASE_URL=postgresql://localhost/ruvon_edge python webhook_retry_daemon.py
 
     # Custom scan interval
     python webhook_retry_daemon.py --scan-interval 30
@@ -36,10 +36,10 @@ import argparse
 # Add project to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus_server.webhook_service import WebhookService
-from rufus_server.webhook_retry_worker import WebhookRetryWorker
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon_server.webhook_service import WebhookService
+from ruvon_server.webhook_retry_worker import WebhookRetryWorker
 
 
 async def main():

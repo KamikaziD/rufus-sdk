@@ -1,7 +1,7 @@
 import time
 import datetime
 from typing import Optional, Any
-from rufus.models import WorkflowJumpDirective, WorkflowPauseDirective, StartSubWorkflowDirective, StepContext
+from ruvon.models import WorkflowJumpDirective, WorkflowPauseDirective, StartSubWorkflowDirective, StepContext
 from state_models import LoanApplicationState, UserProfileState, HumanReviewDecision, KYCState
 
 # NOTE: Celery task decorators commented out for sync execution

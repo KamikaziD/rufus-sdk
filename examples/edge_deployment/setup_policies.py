@@ -23,7 +23,7 @@ from datetime import datetime
 from uuid import uuid4
 
 # Configuration
-CLOUD_URL = os.getenv('RUFUS_CLOUD_URL', 'http://localhost:8000')
+CLOUD_URL = os.getenv('RUVON_CLOUD_URL', 'http://localhost:8000')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sample Policies

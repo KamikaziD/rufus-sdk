@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List
 
-from rufus.models import StepContext, WorkflowJumpDirective
+from ruvon.models import StepContext, WorkflowJumpDirective
 
 from examples.healthcare_wearable.models import (
     AlertSeverity,

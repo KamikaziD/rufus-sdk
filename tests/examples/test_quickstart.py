@@ -33,7 +33,7 @@ class TestQuickstartExample:
         assert result.returncode == 0, f"Quickstart failed with error:\n{result.stderr}"
 
         # Check expected output
-        assert "Rufus SDK Quickstart Example" in result.stdout
+        assert "Ruvon SDK Quickstart Example" in result.stdout
         assert "Workflow Complete!" in result.stdout
         assert ">>> Hello, World! <<<" in result.stdout
         assert "✅ Quickstart example completed successfully!" in result.stdout

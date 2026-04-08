@@ -23,9 +23,9 @@ WORKDIR /app
 
 # Copy requirements first for layer caching
 COPY requirements.txt .
-COPY . /rufus_package
+COPY . /ruvon_package
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -e /rufus_package
+    pip install --no-cache-dir -e /ruvon_package
 
 # Copy application code
 COPY src/ ./src/
@@ -37,8 +37,8 @@ RUN mkdir -p /app/artifacts && \
     chmod 644 /app/artifacts/vision_v2_coreml.pex
 
 # Create non-root user for security
-RUN useradd -m -u 1000 rufus && chown -R rufus:rufus /app
-USER rufus
+RUN useradd -m -u 1000 ruvon && chown -R ruvon:ruvon /app
+USER ruvon
 
 # Expose port
 EXPOSE 8000
@@ -48,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command
-CMD ["uvicorn", "rufus_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "ruvon_server.main:app", "--host", "0.0.0.0", "--port", "8000"]

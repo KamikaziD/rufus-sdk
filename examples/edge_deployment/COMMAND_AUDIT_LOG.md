@@ -576,7 +576,7 @@ INSERT INTO audit_retention_policies (
 ### Manual Cleanup
 
 ```python
-from rufus_server.audit_service import AuditService
+from ruvon_server.audit_service import AuditService
 
 audit_service = AuditService(persistence)
 
@@ -591,7 +591,7 @@ print(f"Deleted: {stats['deleted']}, Archived: {stats['archived']}")
 ```bash
 # Run monthly cleanup
 0 0 1 * * python -c "
-from rufus_server.audit_service import AuditService
+from ruvon_server.audit_service import AuditService
 import asyncio
 audit_service = AuditService(persistence)
 asyncio.run(audit_service.cleanup_old_logs())
@@ -715,7 +715,7 @@ WHERE tablename = 'command_audit_log';
 
 ## Summary
 
-Command Audit Log provides **comprehensive compliance tracking** for Rufus Edge:
+Command Audit Log provides **comprehensive compliance tracking** for Ruvon Edge:
 
 - ✅ PCI-DSS, SOX, GDPR, HIPAA compliant
 - ✅ Immutable audit trails

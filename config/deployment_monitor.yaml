@@ -10,7 +10,7 @@
 
 workflow_type: DeploymentMonitor
 workflow_version: "1.0"
-initial_state_model: rufus_edge.sidecar.metrics:DeviceMetrics
+initial_state_model: ruvon_edge.sidecar.metrics:DeviceMetrics
 
 # Runs on a cron schedule — the CRON_SCHEDULE step type handles this
 trigger:
@@ -21,19 +21,19 @@ steps:
   # Step 1: Collect device metrics (CPU, RAM, SAF queue, latency)
   - name: CollectMetrics
     type: STANDARD
-    function: rufus_edge.sidecar.metrics:collect_device_metrics
+    function: ruvon_edge.sidecar.metrics:collect_device_metrics
     automate_next: true
 
   # Step 2: Score device health (ONNX model or rule-based fallback)
   - name: ScoreHealth
     type: STANDARD
-    function: rufus_edge.sidecar.health_scorer:score_device_health
+    function: ruvon_edge.sidecar.health_scorer:score_device_health
     automate_next: true
 
   # Step 3: Check if we should generate suggestions (skip if healthy)
   - name: CheckShouldSuggest
     type: DECISION
-    function: rufus_edge.sidecar.decisions:check_should_suggest
+    function: ruvon_edge.sidecar.decisions:check_should_suggest
     routes:
       - condition: "state.should_generate_suggestions == False"
         next_step: ReportHealthy
@@ -72,7 +72,7 @@ steps:
         Device metrics: {{ state.metrics | tojson }}
         Health score: {{ state.health_score }}
         Issues detected: {{ state.health_issues | tojson }}
-        Current config snapshot: {{ env.RUFUS_EDGE_CONFIG_SNAPSHOT | default('{}') }}
+        Current config snapshot: {{ env.RUVON_EDGE_CONFIG_SNAPSHOT | default('{}') }}
 
   # Step 5: Human approval gate (HITL via cloud control plane)
   # When offline: stores request in SAF queue, syncs when online
@@ -102,13 +102,13 @@ steps:
     type: WASM
     automate_next: true
     wasm_config:
-      module: rufus_edge/sidecar/wasm/apply_config.wasm
+      module: ruvon_edge/sidecar/wasm/apply_config.wasm
       # WASM module reads approved proposal from stdin, writes outcome to stdout
       # Sandbox limits: 32MB heap, no network, filesystem limited to /config and /tmp
       memory_limit_mb: 32
       timeout_seconds: 60
     # Fallback if WASM not available (non-sandboxed Python)
-    fallback_function: rufus_edge.sidecar.config_applier:apply_config_change
+    fallback_function: ruvon_edge.sidecar.config_applier:apply_config_change
 
   # Step 7: Report outcome to cloud control plane
   - name: ReportOutcome
@@ -116,11 +116,11 @@ steps:
     automate_next: false
     http_config:
       method: POST
-      url: "{{ env.RUFUS_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/deployments"
+      url: "{{ env.RUVON_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/deployments"
       timeout_seconds: 10
       headers:
         Content-Type: application/json
-        Authorization: "Bearer {{ env.RUFUS_DEVICE_TOKEN }}"
+        Authorization: "Bearer {{ env.RUVON_DEVICE_TOKEN }}"
       body: |
         {
           "workflow_id": "{{ state.workflow_id }}",
@@ -140,10 +140,10 @@ steps:
     automate_next: false
     http_config:
       method: POST
-      url: "{{ env.RUFUS_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/heartbeat"
+      url: "{{ env.RUVON_CONTROL_PLANE_URL }}/api/v1/devices/{{ env.DEVICE_ID }}/heartbeat"
       timeout_seconds: 5
       headers:
-        Authorization: "Bearer {{ env.RUFUS_DEVICE_TOKEN }}"
+        Authorization: "Bearer {{ env.RUVON_DEVICE_TOKEN }}"
       body: |
         {
           "health_score": {{ state.health_score }},

@@ -5,7 +5,7 @@ These are async tasks executed by Celery workers.
 """
 import time
 import random
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 
 @celery_app.task

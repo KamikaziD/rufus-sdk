@@ -1,7 +1,7 @@
 """Tests for the deterministic SchemaValidator (Stage 5)."""
 
 import pytest
-from rufus.builder_ai.stages.schema_validator import SchemaValidator
+from ruvon.builder_ai.stages.schema_validator import SchemaValidator
 
 
 def _validator():

@@ -149,7 +149,7 @@ Available profiles: `perfect` | `good` (default) | `lan` | `wan` | `degraded` | 
 **"Connected ✗" / grey badge:** The Docker stack is not running, or `rufus-server` is
 not yet healthy. The demo works fully in simulation mode without a server.
 
-**CORS error in browser console:** Ensure `RUFUS_CORS_ORIGINS` in docker-compose
+**CORS error in browser console:** Ensure `RUVON_CORS_ORIGINS` in docker-compose
 includes `http://localhost:8082`. The current `docker-compose.test-async.yml` already
 includes it.
 

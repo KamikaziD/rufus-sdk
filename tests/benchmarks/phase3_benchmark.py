@@ -14,7 +14,7 @@ import statistics
 import uuid
 from typing import List, Dict
 
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 class BenchmarkResult:

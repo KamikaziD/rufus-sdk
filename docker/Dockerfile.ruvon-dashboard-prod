@@ -1,0 +1,62 @@
+# Rufus Dashboard — Production Image
+# Multi-stage Next.js 14 build
+#
+# Build args:
+#   NEXT_PUBLIC_RUVON_API_URL  — Backend API URL (baked at build time, default: http://localhost:8000)
+#
+# Runtime env vars (pass at `docker run` time):
+#   NEXTAUTH_URL      — Public URL of this dashboard, e.g. https://dash.example.com
+#   NEXTAUTH_SECRET   — Random secret (openssl rand -base64 32)
+#   KEYCLOAK_ID       — Keycloak client ID (default: ruvon-dashboard)
+#   KEYCLOAK_SECRET   — Keycloak client secret
+#   KEYCLOAK_ISSUER   — Keycloak realm URL, e.g. https://sso.example.com/realms/ruvon
+
+# ─────────────────────────────────────────────
+# Stage 1: Install dependencies
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+COPY packages/ruvon-dashboard/package.json packages/ruvon-dashboard/package-lock.json ./
+RUN npm ci
+
+# ─────────────────────────────────────────────
+# Stage 2: Build the Next.js app
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY packages/ruvon-dashboard/ .
+
+# NEXT_PUBLIC_ vars are embedded at build time
+ARG NEXT_PUBLIC_RUVON_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_RUVON_API_URL=$NEXT_PUBLIC_RUVON_API_URL
+
+# next-auth requires these to exist at build time (values replaced at runtime)
+ENV NEXTAUTH_URL=http://localhost:3000
+ENV NEXTAUTH_SECRET=build-placeholder
+
+RUN npm run build
+
+# ─────────────────────────────────────────────
+# Stage 3: Production runner
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy build output and dependencies
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+
+USER nextjs
+EXPOSE 3000
+
+CMD ["npm", "run", "start"]

@@ -1,0 +1,1306 @@
+from pydantic import BaseModel, ValidationError
+from typing import Dict, Any, Optional, List, Callable, Type
+import uuid
+import os
+import importlib
+import asyncio
+import traceback  # For saga rollback error logging
+import time
+
+from ruvon.models import (
+    WorkflowStep, CompensatableStep, AsyncWorkflowStep, HttpWorkflowStep,
+    FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask,
+    ParallelWorkflowStep, WorkflowJumpDirective, WorkflowNextStepDirective,
+    WorkflowPauseDirective, SagaWorkflowException, StartSubWorkflowDirective, StepContext, WorkflowFailedException,
+    MergeStrategy, MergeConflictBehavior, HumanWorkflowStep, WasmWorkflowStep,
+    AIInferenceWorkflowStep,
+    AILLMInferenceWorkflowStep, HumanApprovalWorkflowStep, AuditEmitWorkflowStep,
+    ComplianceCheckWorkflowStep, EdgeModelCallWorkflowStep, WorkflowBuilderMetaStep,
+)
+
+
+class _MissingWasmResolver:
+    """Sentinel resolver used when no persistence connection is available.
+
+    Raises a helpful error rather than silently failing at resolve time.
+    """
+
+    def __init__(self, step_name: str) -> None:
+        self._step_name = step_name
+
+    async def resolve(self, binary_hash: str) -> bytes:
+        raise RuntimeError(
+            f"WASM step '{self._step_name}' requires a WasmBinaryResolver. "
+            "Pass a WasmRuntime or ComponentStepRuntime instance via wasm_runtime= "
+            "when creating the Workflow, or ensure the persistence provider exposes "
+            "a .conn attribute (SQLitePersistenceProvider does this automatically)."
+        )
+
+
+def _resolve_state_path(state_dict: dict, path: str):
+    """Resolve a dot-notation path against a state dict.
+
+    Example: 'devices.active' -> state_dict['devices']['active']
+    """
+    current = state_dict
+    for key in path.split('.'):
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            current = getattr(current, key, None)
+        if current is None:
+            return None
+    return current
+
+# Use string literal type hints for providers to avoid circular import issues
+# from ruvon.providers.persistence import PersistenceProvider
+# from ruvon.providers.execution import ExecutionProvider
+# from ruvon.providers.observer import WorkflowObserver
+# from ruvon.providers.expression_evaluator import ExpressionEvaluator
+# from ruvon.providers.template_engine import TemplateEngine
+# Removed: from ruvon.builder import WorkflowBuilder # For builder._import_from_string
+
+class Workflow:
+    def __init__(self,
+                 workflow_id: str = None,
+                 workflow_steps: List[WorkflowStep] = None,
+                 initial_state_model: BaseModel = None,
+                 workflow_type: str = None,
+                 workflow_version: Optional[str] = None,
+                 definition_snapshot: Optional[Dict[str, Any]] = None,
+                 steps_config: List[Dict[str, Any]] = None,
+                 state_model_path: str = None,
+                 owner_id: str = None,
+                 org_id: Optional[str] = None,
+                 data_region: Optional[str] = None,
+                 priority: Optional[int] = None,
+                 idempotency_key: Optional[str] = None,
+                 metadata: Optional[Dict[str, Any]] = None,
+                 automate_start: bool = False,
+                 persistence_provider: 'PersistenceProvider' = None, # Use string literal
+                 execution_provider: 'ExecutionProvider' = None, # Use string literal
+                 workflow_builder: 'WorkflowBuilder' = None, # Still need type hint for mypy
+                 expression_evaluator_cls: Type['ExpressionEvaluator'] = None, # Use string literal
+                 template_engine_cls: Type['TemplateEngine'] = None, # Use string literal
+                 workflow_observer: 'WorkflowObserver' = None, # Use string literal
+                 wasm_runtime=None,  # Optional WasmRuntime or ComponentStepRuntime; auto-created for WASM steps
+                 inference_provider=None  # Optional InferenceProvider; required for AI_INFERENCE steps
+                 ):
+        self.id = workflow_id or str(uuid.uuid4())
+        self.workflow_steps = workflow_steps or []
+        self.current_step = 0  # Index of current step
+        self.state = initial_state_model
+        self.status = "ACTIVE"
+        self.workflow_type = workflow_type
+        self.workflow_version = workflow_version
+        self.definition_snapshot = definition_snapshot
+        self.steps_config = steps_config or []
+        self.state_model_path = state_model_path
+
+        # RBAC
+        self.owner_id = owner_id
+        self.org_id = org_id
+
+        # Regional data sovereignty
+        self.data_region = data_region
+
+        # Priority for task queuing
+        self.priority = priority if priority is not None else 5
+
+        # Idempotency
+        self.idempotency_key = idempotency_key
+
+        # Metadata
+        self.metadata = metadata if metadata is not None else {}
+
+        # Auto-start: trigger first step immediately on start
+        self.automate_start = automate_start
+
+        # Saga pattern support
+        self.saga_mode = False
+        self.completed_steps_stack = []  # Track completed steps for rollback
+
+        # Sub-workflow support
+        self.parent_execution_id = None
+        self.blocked_on_child_id = None
+
+        # Injected providers (Dependency Injection)
+        if persistence_provider is None:
+            raise ValueError(
+                "PersistenceProvider must be injected into Workflow")
+        self.persistence: 'PersistenceProvider' = persistence_provider # Use string literal
+
+        if execution_provider is None:
+            raise ValueError(
+                "ExecutionProvider must be injected into Workflow")
+        self.execution: 'ExecutionProvider' = execution_provider # Use string literal
+
+        if workflow_builder is None:
+            raise ValueError(
+                "WorkflowBuilder must be injected into Workflow")
+        self.builder: 'WorkflowBuilder' = workflow_builder
+
+        if expression_evaluator_cls is None:
+            raise ValueError(
+                "ExpressionEvaluator class must be injected into Workflow")
+        self.expression_evaluator_cls = expression_evaluator_cls
+
+        if template_engine_cls is None:
+            raise ValueError(
+                "TemplateEngine class must be injected into Workflow")
+        self.template_engine_cls = template_engine_cls
+
+        if workflow_observer is None:
+            raise ValueError(
+                "WorkflowObserver must be injected into Workflow")
+        self.observer: 'WorkflowObserver' = workflow_observer # Use string literal
+
+        # Optional WASM runtime — only needed when workflow contains WASM steps
+        self.wasm_runtime = wasm_runtime
+
+        # Optional inference provider — only needed when workflow contains AI_INFERENCE steps
+        self.inference_provider = inference_provider
+
+    @property
+    def current_step_name(self) -> Optional[str]:
+        if 0 <= self.current_step < len(self.workflow_steps):
+            return self.workflow_steps[self.current_step].name
+        return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "workflow_type": self.workflow_type,
+            "workflow_version": self.workflow_version,
+            "definition_snapshot": self.definition_snapshot,
+            "current_step": self.current_step_name,  # Convert index to step name for storage
+            "status": self.status,
+            "state": self.state.model_dump() if self.state else {},
+            "steps_config": self.steps_config,
+            "state_model_path": self.state_model_path,
+            "owner_id": self.owner_id,
+            "org_id": self.org_id,
+            "data_region": self.data_region,
+            "priority": self.priority,
+            "idempotency_key": self.idempotency_key,
+            "metadata": self.metadata,
+            "saga_mode": self.saga_mode,
+            "completed_steps_stack": self.completed_steps_stack,
+            "parent_execution_id": self.parent_execution_id,
+            "blocked_on_child_id": self.blocked_on_child_id
+        }
+
+    @classmethod
+    def from_dict(cls, data,
+                  persistence_provider: 'PersistenceProvider', # Use string literal
+                  execution_provider: 'ExecutionProvider', # Use string literal
+                  workflow_builder: 'WorkflowBuilder', # Still need type hint for mypy
+                  expression_evaluator_cls: Type['ExpressionEvaluator'], # Use string literal
+                  template_engine_cls: Type['TemplateEngine'], # Use string literal
+                  workflow_observer: 'WorkflowObserver' # Use string literal
+                  ) -> 'Workflow':
+        # Accept both plain dicts and msgspec.Struct instances (WorkflowRecord)
+        if not isinstance(data, dict):
+            import msgspec
+            data = msgspec.to_builtins(data)
+
+        workflow_type = data.get("workflow_type")
+        state_model_path = data.get("state_model_path")
+        if not workflow_type or not state_model_path:
+            raise ValueError(
+                "Missing workflow_type or state_model_path in data.")
+
+        # Import WorkflowBuilder locally to avoid circular import
+        from ruvon.builder import WorkflowBuilder # Local import
+
+        try:
+            state_model_class = WorkflowBuilder._import_from_string(state_model_path)
+            steps_config = data.get('steps_config', [])
+
+            workflow_steps = WorkflowBuilder._build_steps_from_config(
+                steps_config)
+        except (ValueError, ImportError) as e:
+            raise ValueError(
+                f"Could not load workflow configuration for type '{workflow_type}': {e}")
+
+        instance = cls(
+            workflow_id=data["id"],
+            workflow_steps=workflow_steps,
+            workflow_type=workflow_type,
+            steps_config=steps_config,
+            state_model_path=state_model_path,
+            persistence_provider=persistence_provider,
+            execution_provider=execution_provider,
+            workflow_builder=workflow_builder,
+            expression_evaluator_cls=expression_evaluator_cls,
+            template_engine_cls=template_engine_cls,
+            workflow_observer=workflow_observer
+        )
+        # Convert current_step from name (string) back to index (int)
+        current_step_value = data.get("current_step")
+        if current_step_value is None:
+            instance.current_step = 0
+        elif isinstance(current_step_value, int):
+            # Old format (index) - use directly
+            instance.current_step = current_step_value
+        else:
+            # New format (step name) - convert to index
+            try:
+                instance.current_step = next(
+                    i for i, step in enumerate(instance.workflow_steps)
+                    if step.name == current_step_value
+                )
+            except StopIteration:
+                # Step name not found, default to 0
+                instance.current_step = 0
+
+        instance.status = data["status"]
+
+        if "state" in data and data["state"]:
+            instance.state = state_model_class(**data["state"])
+        elif state_model_class:  # If state is missing or empty, but we have a model class, instantiate with defaults
+            instance.state = state_model_class()
+
+        # RBAC
+        instance.owner_id = data.get("owner_id")
+        instance.org_id = data.get("org_id")
+
+        # Regional data sovereignty
+        instance.data_region = data.get("data_region")
+
+        # Priority for task queuing
+        instance.priority = data.get("priority", 5)
+
+        # Idempotency
+        instance.idempotency_key = data.get("idempotency_key")
+
+        # Metadata
+        instance.metadata = data.get("metadata", {})
+
+        # Restore saga and sub-workflow fields
+        instance.saga_mode = data.get("saga_mode", False)
+        instance.completed_steps_stack = data.get("completed_steps_stack", [])
+        instance.parent_execution_id = data.get("parent_execution_id")
+        instance.blocked_on_child_id = data.get("blocked_on_child_id")
+        
+
+        return instance
+
+    async def _notify_status_change(self, old_status: str, new_status: str, current_step_name: Optional[str], final_result: Optional[Dict[str, Any]] = None):
+        """Helper to centralize status change notifications."""
+        _STATUS_TO_EVENT = {
+            'COMPLETED':        'WORKFLOW_COMPLETED',
+            'FAILED':           'WORKFLOW_FAILED',
+            'FAILED_ROLLED_BACK': 'WORKFLOW_FAILED',
+            'CANCELLED':        'WORKFLOW_CANCELLED',
+            'PAUSED':           'WORKFLOW_PAUSED',
+            'WAITING_HUMAN':    'WORKFLOW_PAUSED',
+            'PENDING':          'WORKFLOW_CREATED',
+        }
+        event_type = _STATUS_TO_EVENT.get(new_status, 'STATUS_CHANGED')
+        try:
+            await self.persistence.log_audit_event(
+                self.id, event_type, step_name=current_step_name,
+                old_state={'status': old_status}, new_state={'status': new_status}
+            )
+        except Exception:
+            pass  # audit is non-fatal
+        await self.observer.on_workflow_status_changed(
+            self.id, old_status, new_status, current_step_name)
+        if self.parent_execution_id:
+            # If this is a child workflow, report its status change to the parent
+            await self.execution.report_child_status_to_parent(
+                child_id=self.id,
+                parent_id=self.parent_execution_id,
+                child_new_status=new_status,
+                child_current_step_name=current_step_name,
+                child_result=final_result
+            )
+
+    async def enable_saga_mode(self):
+        """Activate saga mode for automatic rollback on failure"""
+        self.saga_mode = True
+        print(f"[SAGA] Saga mode enabled for workflow {self.id}")
+
+    async def _log_execution(self, level: str, message: str, step_name: str = None, metadata: Dict[str, Any] = None):
+        """Helper to log execution details using injected persistence provider"""
+        await self.persistence.log_execution(
+            workflow_id=self.id,
+            log_level=level,
+            message=message,
+            step_name=step_name,
+            metadata=metadata
+        )
+
+    async def _execute_ai_inference_step(self, step: 'AIInferenceWorkflowStep', context: StepContext) -> Dict[str, Any]:
+        """Execute an AI_INFERENCE step using the injected InferenceProvider."""
+        cfg = step.ai_config
+        if self.inference_provider is None:
+            if cfg.fallback_on_error == "skip":
+                return {}
+            if cfg.fallback_on_error == "default" and cfg.default_result:
+                return {cfg.output_key: cfg.default_result}
+            raise RuntimeError(
+                f"InferenceProvider is not configured but step '{step.name}' requires it. "
+                "Pass an inference_provider= when creating the Workflow."
+            )
+
+        # Resolve input from state using dot-notation path
+        # Support both "state.field" and bare "field" paths
+        path = cfg.input_source
+        if path.startswith("state."):
+            path = path[len("state."):]
+        inputs = _resolve_state_path(self.state.model_dump(), path)
+        if inputs is None:
+            inputs = ""
+
+        try:
+            # Load model if not already loaded
+            if not self.inference_provider.is_model_loaded(cfg.model_name):
+                await self.inference_provider.load_model(
+                    path=cfg.model_path,
+                    name=cfg.model_name,
+                    version=cfg.model_version,
+                )
+
+            # Run inference
+            result = await self.inference_provider.run_inference(
+                model_name=cfg.model_name,
+                inputs=inputs,
+            )
+            output = result.outputs if hasattr(result, "outputs") else result
+
+            # Apply postprocessing hint (providers may handle this internally)
+            return {cfg.output_key: output}
+
+        except Exception as e:
+            if cfg.fallback_on_error == "skip":
+                return {}
+            if cfg.fallback_on_error == "default" and cfg.default_result:
+                return {cfg.output_key: cfg.default_result}
+            raise
+
+    async def _execute_ai_llm_inference_step(self, step: 'AILLMInferenceWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an AI_LLM_INFERENCE step (Anthropic cloud, Ollama local, or BitNet edge)."""
+        import re as _re
+        cfg = step.llm_config
+
+        # Resolve $.steps.X.output style selectors in user_prompt against workflow state
+        state_dict = self.state.model_dump()
+        def _replace_selector(m):
+            path = m.group(1).replace("$.steps.", "").replace(".", "_")
+            # Try simple dot-path resolution
+            val = _resolve_state_path(state_dict, m.group(1).lstrip("$."))
+            return str(val) if val is not None else m.group(0)
+        rendered_prompt = _re.sub(r'(\$\.[^\s}]+)', _replace_selector, cfg.user_prompt)
+
+        if cfg.model_location in ("cloud", "auto"):
+            try:
+                import anthropic
+            except ImportError:
+                raise RuntimeError(
+                    "anthropic package is required for AI_LLM_INFERENCE with model_location='cloud'. "
+                    "Install it with: pip install anthropic"
+                )
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            msg = client.messages.create(
+                model=cfg.model,
+                max_tokens=cfg.max_tokens,
+                system=cfg.system_prompt,
+                messages=[{"role": "user", "content": rendered_prompt}],
+            )
+            return {"llm_result": msg.content[0].text}
+
+        elif cfg.model_location == "ollama":
+            import httpx
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.post(
+                    f"{cfg.ollama_base_url}/api/chat",
+                    json={
+                        "model": cfg.model,
+                        "messages": [
+                            {"role": "system", "content": cfg.system_prompt},
+                            {"role": "user", "content": rendered_prompt},
+                        ],
+                        "stream": False,
+                    },
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+                return {"llm_result": resp.json()["message"]["content"]}
+
+        else:  # "edge" → delegate to inference_provider (BitNet)
+            if self.inference_provider is None:
+                raise RuntimeError(
+                    f"InferenceProvider is not configured but step '{step.name}' requires it for edge model_location."
+                )
+            result = await self.inference_provider.run_inference(model_name=cfg.model, inputs=rendered_prompt)
+            output = result.outputs if hasattr(result, "outputs") else result
+            return {"llm_result": output}
+
+    async def _execute_audit_emit_step(self, step: 'AuditEmitWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an AUDIT_EMIT step — writes an immutable record to the audit trail."""
+        cfg = step.audit_config
+        await self.persistence.log_audit_event(
+            workflow_id=self.id,
+            event_type=cfg.event_type,
+            step_name=step.name,
+            metadata={
+                "severity": cfg.severity,
+                "payload": cfg.payload,
+                "retention_days": cfg.retention_days,
+                "tags": cfg.tags,
+                "pii_fields": cfg.pii_fields,
+            },
+        )
+        return {"audit_emitted": True, "event_type": cfg.event_type}
+
+    async def _execute_compliance_check_step(self, step: 'ComplianceCheckWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute a COMPLIANCE_CHECK step — evaluates a declarative ruleset against workflow state."""
+        import yaml as _yaml
+        cfg = step.compliance_config
+        try:
+            with open(cfg.ruleset) as f:
+                ruleset = _yaml.safe_load(f)
+        except FileNotFoundError:
+            raise RuntimeError(f"Compliance ruleset not found: {cfg.ruleset}")
+        state_dict = self.state.model_dump()
+        violations = []
+        rules = ruleset.get("rules", []) if isinstance(ruleset, dict) else []
+        for rule in rules:
+            condition = rule.get("condition", "True")
+            try:
+                passed = bool(eval(condition, {"__builtins__": {}}, {"state": state_dict}))  # noqa: S307
+            except Exception:
+                passed = False
+            if not passed:
+                violations.append({"rule_id": rule.get("id", "unknown"), "message": rule.get("message", "")})
+        num_rules = max(len(rules), 1)
+        score = round(1.0 - len(violations) / num_rules, 3)
+        return {"passed": len(violations) == 0, "score": score, "violations": violations}
+
+    async def _execute_edge_model_call_step(self, step: 'EdgeModelCallWorkflowStep', context: 'StepContext') -> Dict[str, Any]:
+        """Execute an EDGE_MODEL_CALL step — local inference with data sovereignty guarantee."""
+        if self.inference_provider is None:
+            raise RuntimeError(
+                f"InferenceProvider is not configured but step '{step.name}' requires it for EDGE_MODEL_CALL."
+            )
+        cfg = step.edge_config
+        result = await self.inference_provider.run_inference(model_name=cfg.model_id, inputs=cfg.prompt)
+        output = result.outputs if hasattr(result, "outputs") else result
+        return {"edge_result": output}
+
+    async def _execute_loop_step(self, step: LoopStep, state: BaseModel, context: StepContext) -> Dict[str, Any]:
+        """Execute a LOOP step in either ITERATE or WHILE mode."""
+        print(f"[LOOP] Executing loop step: {step.name}, mode={step.mode}")
+
+        if step.mode == "ITERATE":
+            items = _resolve_state_path(self.state.model_dump(), step.iterate_over) if step.iterate_over else []
+            if not isinstance(items, list):
+                raise ValueError(
+                    f"LOOP step '{step.name}': iterate_over '{step.iterate_over}' "
+                    f"did not resolve to a list (got {type(items).__name__})"
+                )
+            results = []
+            for i, item in enumerate(items):
+                if i >= step.max_iterations:
+                    break
+                loop_context = StepContext(
+                    workflow_id=context.workflow_id,
+                    step_name=context.step_name,
+                    loop_item=item,
+                    loop_index=i,
+                )
+                step_result = {}
+                for body_step in step.loop_body:
+                    step_result = await self.execution.execute_sync_step_function(
+                        body_step.func, self.state, loop_context
+                    )
+                    if step_result:
+                        self._apply_merge_strategy(
+                            self.state, step_result,
+                            MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW
+                        )
+                results.append(step_result or {})
+            return {
+                "loop_results": results,
+                "loop_iterations": min(len(items), step.max_iterations),
+            }
+
+        elif step.mode == "WHILE":
+            iteration = 0
+            while (
+                self.expression_evaluator_cls(self.state.model_dump()).evaluate(step.while_condition)
+                and iteration < step.max_iterations
+            ):
+                for body_step in step.loop_body:
+                    step_result = await self.execution.execute_sync_step_function(
+                        body_step.func, self.state, context
+                    )
+                    if step_result:
+                        self._apply_merge_strategy(
+                            self.state, step_result,
+                            MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW
+                        )
+                iteration += 1
+            return {"loop_iterations": iteration}
+
+        else:
+            raise ValueError(f"LOOP step '{step.name}': unknown mode '{step.mode}'. Must be ITERATE or WHILE.")
+
+    async def _execute_saga_rollback(self):
+        """Compensate all completed steps in reverse order"""
+        print(
+            f"[SAGA] Rolling back {len(self.completed_steps_stack)} steps for workflow {self.id}...")
+
+        # Save state before starting rollback
+        await self.persistence.save_workflow(self.id, self.to_dict())
+
+        for entry in reversed(self.completed_steps_stack):
+            step_index = entry['step_index']
+            step_name = entry['step_name']
+            state_snapshot = entry.get('state_snapshot', {})
+
+            # Create a context for the compensation function
+            context = StepContext(workflow_id=self.id, step_name=step_name)
+
+            if 0 <= step_index < len(self.workflow_steps):
+                step = self.workflow_steps[step_index]
+
+                if isinstance(step, CompensatableStep):
+                    await self.observer.on_compensation_started(
+                        self.id, step_name, step_index)
+                    try:
+                        print(
+                            f"[SAGA] Compensating step {step_index}: {step_name}")
+                        # Compensate is an async method
+                        compensation_result = await step.compensate(
+                            self.state, context=context)
+                        print(
+                            f"[SAGA] Compensated {step_name}: {compensation_result}")
+
+                        # Log compensation to DB
+                        await self.persistence.log_compensation(
+                            execution_id=self.id,
+                            step_name=step_name,
+                            step_index=step_index,
+                            action_type='COMPENSATE',
+                            action_result=compensation_result,
+                            state_before=state_snapshot,
+                            state_after=self.state.model_dump() if self.state else {}
+                        )
+                        await self.observer.on_compensation_completed(
+                            self.id, step_name, success=True)
+
+                    except Exception as comp_error:
+                        print(
+                            f"[SAGA] Compensation failed for {step.name}: {comp_error}")
+
+                        # Log failed compensation to DB
+                        await self.persistence.log_compensation(
+                            execution_id=self.id,
+                            step_name=step_name,
+                            step_index=step_index,
+                            action_type='COMPENSATE_FAILED',
+                            action_result={},
+                            error_message=str(comp_error),
+                            state_before=state_snapshot
+                        )
+                        await self.observer.on_compensation_completed(
+                            self.id, step_name, success=False, error=str(comp_error))
+
+                else:
+                    print(
+                        f"[SAGA] Step {step_name} is not compensatable, skipping")
+
+        # Save final state after rollback
+        old_status = self.status
+        self.status = "FAILED_ROLLED_BACK"
+        await self.persistence.save_workflow(self.id, self.to_dict())
+        await self.observer.on_workflow_rolled_back(
+            self.id, self.workflow_type, "Saga rollback completed", self.state, self.completed_steps_stack)
+        await self._notify_status_change(
+            old_status, self.status, self.current_step_name)
+        print(f"[SAGA] Rollback complete for workflow {self.id}")
+
+    async def _handle_sub_workflow(self, directive: StartSubWorkflowDirective):
+        """Launch child workflow and pause parent"""
+        print(
+            f"[SUB-WORKFLOW] Starting {directive.workflow_type} as child of {self.id}")
+
+        # Import WorkflowBuilder locally to avoid circular import
+        from ruvon.builder import WorkflowBuilder # Local import
+
+        try:
+            # Use injected builder to create child workflow
+            child_workflow = await self.builder.create_workflow(
+                workflow_type=directive.workflow_type,
+                initial_data=directive.initial_data,
+                persistence_provider=self.persistence,
+                execution_provider=self.execution,
+                workflow_builder=self.builder,
+                expression_evaluator_cls=self.expression_evaluator_cls,
+                template_engine_cls=self.template_engine_cls,
+                workflow_observer=self.observer
+            )
+            child_workflow.parent_execution_id = self.id
+
+            # Inherit or set data region
+            if directive.data_region:
+                child_workflow.data_region = directive.data_region
+            else:
+                child_workflow.data_region = self.data_region
+
+            # Pause parent workflow
+            old_status = self.status
+            self.status = "PENDING_SUB_WORKFLOW"
+            self.blocked_on_child_id = child_workflow.id
+
+            # Save both workflows
+            await self.persistence.save_workflow(self.id, self.to_dict())
+            await self.persistence.save_workflow(
+                child_workflow.id, child_workflow.to_dict())
+            await self._notify_status_change(
+                old_status, self.status, self.current_step_name)
+            await self.observer.on_child_workflow_started(
+                self.id, child_workflow.id, directive.workflow_type)
+
+            print(
+                f"[SUB-WORKFLOW] Created child workflow {child_workflow.id}, parent {self.id} is now paused")
+
+            # Dispatch child execution using injected execution provider
+            await self.execution.dispatch_sub_workflow(child_workflow.id, self.id, child_workflow.workflow_type, child_workflow.state.model_dump())
+
+            return {
+                "message": f"Sub-workflow {directive.workflow_type} started",
+                "child_workflow_id": child_workflow.id,
+                "parent_workflow_id": self.id
+            }, None
+
+        except Exception as e:
+            print(f"[SUB-WORKFLOW] Error creating sub-workflow: {e}")
+            raise
+
+    def _get_nested_state_value(self, key_path: str):
+        keys = key_path.split('.')
+        value = self.state
+        for key in keys:
+            if hasattr(value, key):
+                value = getattr(value, key)
+            elif isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
+
+    def _process_dynamic_injection(self):
+        # The WorkflowBuilder now contains _build_steps_from_config as a static method
+        # so this line is no longer necessary.
+        # _build_steps_from_config = self.builder.build_steps_from_config
+
+        if not (0 <= self.current_step < len(self.steps_config)):
+            return False
+
+        current_step_config = self.steps_config[self.current_step]
+        injection_block = current_step_config.get('dynamic_injection')
+        if not injection_block:
+            return False
+
+        injection_occurred = False
+        rules = injection_block.get('rules', [])
+        for rule in rules:
+            condition_key = rule.get('condition_key')
+            expected_value = rule.get('value_match')
+            excluded_values = rule.get('value_is_not')
+
+            action = rule.get('action')
+            steps_to_insert_config = rule.get('steps_to_insert')
+
+            if not all([condition_key, action, steps_to_insert_config]):
+                continue
+
+            actual_value = self._get_nested_state_value(condition_key)
+
+            print(
+                f"[DYNAMIC INJECTION] Checking rule: {condition_key} == {expected_value} (Actual: {actual_value})")
+
+            condition_met = False
+            if expected_value is not None:
+                if actual_value == expected_value:
+                    condition_met = True
+            elif excluded_values is not None:
+                if actual_value not in excluded_values:
+                    condition_met = True
+
+            if condition_met:
+                print(f"[DYNAMIC INJECTION] Rule met. Injecting steps...")
+                # Import WorkflowBuilder locally to avoid circular import
+                from ruvon.builder import WorkflowBuilder
+                new_steps = WorkflowBuilder._build_steps_from_config(
+                    steps_to_insert_config)
+                print(f"[DYNAMIC INJECTION] Built {len(new_steps)} new steps.")
+
+                if action == 'INSERT_AFTER_CURRENT':
+                    insert_at = self.current_step + 1
+                    self.steps_config[insert_at:insert_at] = steps_to_insert_config
+                    self.workflow_steps[insert_at:insert_at] = new_steps
+                    injection_occurred = True
+
+        return injection_occurred
+
+    def evaluate_routes(self, routes: List[Dict[str, str]]) -> Optional[str]:
+        """Evaluates a list of routes and returns the target step name if a match is found."""
+        evaluator = self.expression_evaluator_cls(self.state.model_dump())
+
+        for route in routes:
+            if 'condition' in route and 'next_step' in route:
+                if evaluator.evaluate(route['condition']):
+                    print(
+                        f"[ROUTING] Route matched: {route['condition']} -> {route['next_step']}")
+                    return route['next_step']
+
+            elif 'default' in route:
+                print(f"[ROUTING] Default route matched: {route['default']}")
+                return route['default']
+
+        return None
+
+    def _apply_merge_strategy(self, current_state: BaseModel, result: Dict[str, Any], strategy: MergeStrategy, conflict_behavior: MergeConflictBehavior):
+        """Applies the specified merge strategy to incorporate step results into the workflow state."""
+        if strategy == MergeStrategy.REPLACE:
+            # Reconstruct the entire state with the result
+            self.state = current_state.__class__(**result)
+            return
+
+        state_dict = current_state.model_dump()
+
+        if strategy == MergeStrategy.DEEP:
+            def deep_merge(target, source):
+                for k, v in source.items():
+                    if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+                        deep_merge(target[k], v)
+                    elif k in target and isinstance(target[k], list) and isinstance(v, list) and strategy == MergeStrategy.APPEND:
+                        target[k].extend(v)
+                    elif k in target and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                        pass # Preserve existing value
+                    else:
+                        target[k] = v
+            deep_merge(state_dict, result)
+        elif strategy == MergeStrategy.SHALLOW:
+            for k, v in result.items():
+                if k in state_dict and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                    pass # Preserve existing value
+                else:
+                    state_dict[k] = v
+        elif strategy == MergeStrategy.APPEND:
+            for k, v in result.items():
+                if k in state_dict and isinstance(state_dict[k], list) and isinstance(v, list):
+                    state_dict[k].extend(v)
+                elif k in state_dict and conflict_behavior == MergeConflictBehavior.PREFER_EXISTING:
+                    pass
+                else:
+                    state_dict[k] = v
+        elif strategy == MergeStrategy.OVERWRITE_EXISTING:
+            state_dict.update(result)
+        elif strategy == MergeStrategy.PRESERVE_EXISTING:
+            for k, v in result.items():
+                if k not in state_dict:
+                    state_dict[k] = v
+        
+        # Reconstruct the Pydantic model from the merged dictionary
+        self.state = current_state.__class__(**state_dict)
+
+    async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
+        # Track whether we are re-executing a HumanWorkflowStep on resume
+        # (vs the legacy pattern where we advance past the pause step)
+        _resuming_from_human = False
+
+        # Handle resumption from WAITING_HUMAN status
+        if self.status == "WAITING_HUMAN":
+            old_status = self.status
+            self.status = "ACTIVE"
+            current_paused_step = self.workflow_steps[self.current_step]
+            if isinstance(current_paused_step, (HumanWorkflowStep, HumanApprovalWorkflowStep)):
+                # New path: do NOT increment — resume executes the same HITL step with user_input
+                _resuming_from_human = True
+            else:
+                # Legacy path: advance past the pause step to the next one
+                self.current_step += 1
+            await self.persistence.save_workflow(self.id, self.to_dict())
+            await self._notify_status_change(old_status, self.status, self.current_step_name)
+            print(f"[RESUME] Workflow resumed from human input, advancing to step: {self.current_step_name}")
+
+        if self.current_step >= len(self.workflow_steps):
+            old_status = self.status
+            self.status = "COMPLETED"
+            await self.observer.on_workflow_completed(
+                self.id, self.workflow_type, self.state)
+            final_completion_result = {"status": "Workflow completed"}
+            await self._notify_status_change(
+                old_status, self.status, self.current_step_name, final_result=final_completion_result)
+            return final_completion_result, None
+
+        step = self.workflow_steps[self.current_step]
+
+        await self._log_execution(
+            "INFO", f"Starting step: {step.name}", step_name=step.name)
+
+        validated_model = None
+        try:
+            if step.input_schema:
+                # Skip validation on HumanWorkflowStep auto-pause (no input yet)
+                if isinstance(step, HumanWorkflowStep) and not _resuming_from_human:
+                    pass
+                else:
+                    validated_model = step.input_schema(**user_input)
+        except ValidationError as e:
+            raise ValueError(f"Invalid input for step '{step.name}': {e}")
+
+        context = StepContext(
+            workflow_id=self.id,
+            step_name=step.name,
+            validated_input=validated_model,
+            previous_step_result=_previous_step_result
+        )
+
+        try:
+            step_index_before_jump = self.current_step # Capture current step index before potential jump
+            old_status = self.status
+            # Save state snapshot BEFORE execution for potential rollback
+            state_snapshot_before = None
+            if self.saga_mode and isinstance(step, CompensatableStep):
+                state_snapshot_before = self.state.model_dump()
+
+            # Auto-pause for HumanWorkflowStep / HumanApprovalWorkflowStep on first call
+            if isinstance(step, HumanWorkflowStep) and not user_input and not _resuming_from_human:
+                raise WorkflowPauseDirective(result={})
+            if isinstance(step, HumanApprovalWorkflowStep) and not user_input and not _resuming_from_human:
+                raise WorkflowPauseDirective(result={"approval_config": step.approval_config.model_dump()})
+
+            result = {}
+            _step_start: Optional[float] = None  # monotonic start for sync steps only
+            is_sync_step = not isinstance(step, (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
+                                                 FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
+                                                 WasmWorkflowStep, AIInferenceWorkflowStep,
+                                                 AILLMInferenceWorkflowStep, ComplianceCheckWorkflowStep,
+                                                 EdgeModelCallWorkflowStep))
+
+            if is_sync_step:
+                _step_start = time.monotonic()
+                if isinstance(step, HumanWorkflowStep):
+                    # Call func with user_input, or merge user_input directly into state
+                    if step.func:
+                        if asyncio.iscoroutinefunction(step.func):
+                            result = await step.func(state=self.state, context=context, **user_input)
+                        else:
+                            result = step.func(state=self.state, context=context, **user_input)
+                        result = result if isinstance(result, dict) else {}
+                    else:
+                        # No func: treat user_input as the result to merge into state
+                        result = user_input.copy()
+                    self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, HumanApprovalWorkflowStep):
+                    # Resume path: merge user_input (decision, approver_id, notes, etc.) into state
+                    result = user_input.copy()
+                    self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, AuditEmitWorkflowStep):
+                    result = await self._execute_audit_emit_step(step, context)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif isinstance(step, WorkflowBuilderMetaStep):
+                    # No-op at runtime: provenance metadata is stored in the workflow
+                    # definition YAML; it does not modify runtime state.
+                    result = {}
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+                elif step.func:
+                    result = await self.execution.execute_sync_step_function(
+                        step.func, self.state, context)
+                    # Apply merge strategy for sync step results
+                    if isinstance(result, dict):
+                        self._apply_merge_strategy(self.state, result, MergeStrategy.SHALLOW, MergeConflictBehavior.PREFER_NEW) # Default merge for sync steps
+                    await self.persistence.save_workflow(self.id, self.to_dict()) # Persist state after sync step and merge
+
+                if step.routes:
+                    target_step = self.evaluate_routes(step.routes)
+                    if target_step:
+                        raise WorkflowJumpDirective(
+                            target_step_name=target_step)
+
+            elif isinstance(step, AsyncWorkflowStep):
+                # AsyncWorkflowStep uses the ExecutionProvider
+                result = await self.execution.dispatch_async_task(
+                    func_path=step.func_path,
+                    state_data=self.state.model_dump(),  # Pass state as dict for tasks
+                    workflow_id=self.id,
+                    current_step_index=self.current_step,
+                    data_region=self.data_region,
+                    # Pass merge strategy and conflict behavior to the async task handler
+                    merge_strategy=step.merge_strategy.value,
+                    merge_conflict_behavior=step.merge_conflict_behavior.value,
+                    **user_input,  # Pass user_input as additional kwargs to the task
+                    _previous_step_result=_previous_step_result  # Pass previous result
+                )
+                # Merge result into state if SyncExecutor returned immediately
+                # (for Celery, result would be {"_async_dispatch": True} and merge happens on resume)
+                if isinstance(result, dict) and "_async_dispatch" not in result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+            elif isinstance(step, HttpWorkflowStep):
+                # HttpWorkflowStep uses the ExecutionProvider
+                result = await self.execution.dispatch_async_task(
+                    func_path=step.func_path,
+                    state_data=self.state.model_dump(),
+                    workflow_id=self.id,
+                    current_step_index=self.current_step,
+                    data_region=self.data_region,
+                    http_config=step.http_config,  # Pass http_config for the task
+                    # Pass merge strategy and conflict behavior to the async task handler
+                    merge_strategy=step.merge_strategy.value,
+                    merge_conflict_behavior=step.merge_conflict_behavior.value,
+                    **user_input,
+                    _previous_step_result=_previous_step_result
+                )
+
+            elif isinstance(step, ParallelWorkflowStep):
+                # Resolve dynamic fan-out at runtime if iterate_over is configured
+                if step.iterate_over and step.task_function:
+                    items = _resolve_state_path(self.state.model_dump(), step.iterate_over)
+                    if not isinstance(items, list):
+                        raise ValueError(
+                            f"PARALLEL step '{step.name}': iterate_over '{step.iterate_over}' "
+                            f"did not resolve to a list (got {type(items).__name__})"
+                        )
+                    resolved_tasks = [
+                        ParallelExecutionTask(
+                            name=f"{step.name}_{i}",
+                            func_path=step.task_function,
+                            kwargs={step.item_var_name: item},
+                        )
+                        for i, item in enumerate(items)
+                    ]
+                else:
+                    resolved_tasks = step.tasks
+
+                use_batching = step.batch_size > 0 and step.iterate_over and resolved_tasks
+                if use_batching:
+                    try:
+                        from ruvon.implementations.execution.celery import CeleryExecutionProvider
+                        is_celery = isinstance(self.execution, CeleryExecutionProvider)
+                    except ImportError:
+                        is_celery = False
+
+                    if is_celery:
+                        logger.warning(
+                            f"PARALLEL step '{step.name}': batch_size is not supported with "
+                            "CeleryExecutionProvider — dispatching all tasks at once."
+                        )
+                        use_batching = False
+
+                if use_batching:
+                    for chunk_start in range(0, len(resolved_tasks), step.batch_size):
+                        chunk = resolved_tasks[chunk_start: chunk_start + step.batch_size]
+                        batch_result = await self.execution.dispatch_parallel_tasks(
+                            tasks=chunk,
+                            state_data=self.state.model_dump(),
+                            workflow_id=self.id,
+                            current_step_index=self.current_step,
+                            merge_function_path=step.merge_function_path,
+                            data_region=self.data_region,
+                            merge_strategy=step.merge_strategy.value,
+                            merge_conflict_behavior=step.merge_conflict_behavior.value,
+                            allow_partial_success=step.allow_partial_success
+                        )
+                        if isinstance(batch_result, dict) and "_sync_parallel_result" in batch_result:
+                            self._apply_merge_strategy(
+                                self.state, batch_result["_sync_parallel_result"],
+                                step.merge_strategy, step.merge_conflict_behavior
+                            )
+                    result = {}  # merges already applied per batch above
+                else:
+                    result = await self.execution.dispatch_parallel_tasks(
+                        tasks=resolved_tasks,
+                        state_data=self.state.model_dump(),
+                        workflow_id=self.id,
+                        current_step_index=self.current_step,
+                        merge_function_path=step.merge_function_path,
+                        data_region=self.data_region,
+                        merge_strategy=step.merge_strategy.value,
+                        merge_conflict_behavior=step.merge_conflict_behavior.value,
+                        allow_partial_success=step.allow_partial_success
+                    )
+                    # Apply merge strategy if parallel tasks return results synchronously (e.g., in SyncExecutor)
+                    if isinstance(result, dict) and "_sync_parallel_result" in result:
+                        merged_result = result["_sync_parallel_result"]
+                        self._apply_merge_strategy(self.state, merged_result, step.merge_strategy, step.merge_conflict_behavior)
+
+            elif isinstance(step, WasmWorkflowStep):
+                # Use explicitly supplied runtime when present (backward compat).
+                # Otherwise auto-build a ComponentStepRuntime: back it with
+                # SqliteWasmBinaryResolver when persistence exposes .conn
+                # (edge devices), or fall back to _MissingWasmResolver which
+                # gives a clear error at resolve time rather than silently failing.
+                if self.wasm_runtime is not None:
+                    _wasm_executor = self.wasm_runtime
+                else:
+                    try:
+                        from ruvon.implementations.execution.component_runtime import ComponentStepRuntime
+                        from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+                        _wasm_executor = ComponentStepRuntime(
+                            SqliteWasmBinaryResolver(self.persistence.conn)
+                            if hasattr(self.persistence, "conn")
+                            else _MissingWasmResolver(step.name)
+                        )
+                    except Exception as _e:
+                        raise RuntimeError(
+                            f"No WasmRuntime configured for step '{step.name}' and "
+                            f"ComponentStepRuntime could not be initialised: {_e}"
+                        )
+                result = await _wasm_executor.execute(step.wasm_config, self.state.model_dump())
+                if isinstance(result, dict):
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, AIInferenceWorkflowStep):
+                result = await self._execute_ai_inference_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                    await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, FireAndForgetWorkflowStep):
+                # FireAndForget uses the WorkflowEngine's builder and ExecutionProvider
+                template_engine = self.template_engine_cls(
+                    self.state.model_dump())
+                initial_data = template_engine.render(
+                    step.initial_data_template)
+
+                spawned_workflow = await self.builder.create_workflow( # Changed to await
+                    workflow_type=step.target_workflow_type,
+                    initial_data=initial_data,
+                    persistence_provider=self.persistence,
+                    execution_provider=self.execution,
+                    workflow_builder=self.builder,
+                    expression_evaluator_cls=self.expression_evaluator_cls,
+                    template_engine_cls=self.template_engine_cls,
+                    workflow_observer=self.observer
+                )
+                spawned_workflow.parent_execution_id = self.id
+                spawned_workflow.data_region = self.data_region  # Inherit region
+                spawned_workflow.metadata["spawned_by"] = self.id
+                spawned_workflow.metadata["spawn_reason"] = step.name
+                await self.persistence.save_workflow( # Changed to await
+                    spawned_workflow.id, spawned_workflow.to_dict())
+                await self.execution.dispatch_independent_workflow( # Changed to await
+                    spawned_workflow.id)
+
+                spawn_record = {
+                    "workflow_id": spawned_workflow.id,
+                    "workflow_type": step.target_workflow_type,
+                    "status": spawned_workflow.status,
+                    "spawned_at": time.time(),  # Use current time for simplicity
+                    "spawned_by_step": step.name
+                }
+                if hasattr(self.state, "spawned_workflows"):
+                    if self.state.spawned_workflows is None:
+                        self.state.spawned_workflows = []
+                    self.state.spawned_workflows.append(spawn_record)
+                result = {"spawned_workflow_id": spawned_workflow.id,
+                          "message": f"Independent workflow {step.target_workflow_type} spawned."}
+
+            elif isinstance(step, LoopStep):
+                # Loop step logic directly in WorkflowEngine
+                result = await self._execute_loop_step(step, self.state, context)
+
+            elif isinstance(step, CronScheduleWorkflowStep):
+                # Register schedule using ExecutionProvider
+                template_context = self.state.model_dump()
+                template_context['workflow_id'] = self.id
+                template_engine = self.template_engine_cls(template_context)
+                initial_data = template_engine.render(
+                    step.initial_data_template)
+                schedule_name = template_engine.render(
+                    step.schedule_name or f"sched_{step.target_workflow_type}_{self.id}")
+
+                await self.execution.register_scheduled_workflow( # Changed to await
+                    schedule_name=schedule_name,
+                    workflow_type=step.target_workflow_type,
+                    cron_expression=step.cron_expression,
+                    initial_data=initial_data
+                )
+                result = {"message": f"Workflow {step.target_workflow_type} scheduled as {schedule_name}",
+                          "schedule_name": schedule_name}
+
+            elif isinstance(step, AILLMInferenceWorkflowStep):
+                result = await self._execute_ai_llm_inference_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, ComplianceCheckWorkflowStep):
+                result = await self._execute_compliance_check_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
+
+            elif isinstance(step, EdgeModelCallWorkflowStep):
+                result = await self._execute_edge_model_call_step(step, context)
+                if isinstance(result, dict) and result:
+                    self._apply_merge_strategy(self.state, result, step.merge_strategy, step.merge_conflict_behavior)
+                await self.persistence.save_workflow(self.id, self.to_dict())
+
+            # --- Post-Execution Logic ---
+            is_async_dispatch = isinstance(
+                result, dict) and result.get("_async_dispatch")
+
+            if is_async_dispatch:
+                self.status = "PENDING_ASYNC"
+                await self.persistence.save_workflow( # Changed to await
+                    self.id, self.to_dict())  # Save status change
+                await self._notify_status_change( # Changed to await
+                    old_status, self.status, self.current_step_name)
+
+                # In testing mode, force synchronous execution path for easy testing
+                if os.environ.get("TESTING", "False").lower() == "true":
+                    # This needs to be handled by a test harness that explicitly calls resume
+                    # For now, it will simply return and expect the test to simulate resumption.
+                    return result, None
+                return result, None
+
+            # Record successful step for saga rollback
+            if self.saga_mode and isinstance(step, CompensatableStep) and state_snapshot_before is not None:
+                self.completed_steps_stack.append({
+                    'step_index': self.current_step,
+                    'step_name': step.name,
+                    'state_snapshot': state_snapshot_before
+                })
+
+            _step_duration_ms: Optional[float] = (
+                (time.monotonic() - _step_start) * 1000.0 if _step_start is not None else None
+            )
+            if _step_duration_ms is not None:
+                await self.persistence.record_metric(
+                    self.id, self.workflow_type or "", "step_duration_ms",
+                    _step_duration_ms, unit="ms", step_name=step.name
+                )
+            await self.observer.on_step_executed( # Changed to await
+                self.id, step.name, self.current_step, "COMPLETED", result, self.state,
+                duration_ms=_step_duration_ms)
+
+            injection_occurred = self._process_dynamic_injection()
+            if injection_occurred and isinstance(result, dict):
+                result.setdefault("message", "")
+                result["message"] += " (Note: Dynamic steps were injected.)"
+
+            just_completed_step_index = self.current_step
+            self.current_step += 1
+
+            if self.current_step >= len(self.workflow_steps):
+                old_status = self.status
+                self.status = "COMPLETED"
+                await self.persistence.save_workflow(self.id, self.to_dict())
+                await self.observer.on_workflow_completed( # Changed to await
+                    self.id, self.workflow_type, self.state)
+                final_completion_result = {"status": "Workflow completed"}
+                await self._notify_status_change(
+                    old_status, self.status, self.current_step_name, final_result=final_completion_result)
+                return final_completion_result, None
+
+            next_step_name = self.workflow_steps[self.current_step].name
+
+            should_automate = self.workflow_steps[just_completed_step_index].automate_next
+            if self.parent_execution_id:
+                # If this is a sub-workflow, it should generally auto-advance until it blocks
+                should_automate = True
+
+            # Save state after current step is done and before auto-advancing
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
+            if self.status == "ACTIVE" and not (self.current_step >= len(self.workflow_steps)): # Only notify if not completing or not about to complete
+                await self._notify_status_change( # Changed to await
+                    old_status, self.status, self.current_step_name)
+
+            if should_automate and self.status == "ACTIVE":
+                next_input = result if isinstance(result, dict) else {}
+                return await self.next_step(user_input={}, _previous_step_result=next_input) # Changed to await
+
+            return result, next_step_name
+
+        except WorkflowJumpDirective as e:
+            try:
+                target_index = next(i for i, s in enumerate(
+                    self.workflow_steps) if s.name == e.target_step_name)
+                # Track any steps that were skipped over by this jump
+                skipped_names = [
+                    self.workflow_steps[i].name
+                    for i in range(step_index_before_jump + 1, target_index)
+                ]
+                if skipped_names:
+                    if not self.metadata:
+                        self.metadata = {}
+                    existing = self.metadata.get("skipped_steps", [])
+                    self.metadata["skipped_steps"] = existing + skipped_names
+                self.current_step = target_index  # Keep as index internally
+                await self.persistence.save_workflow( # Changed to await
+                    self.id, self.to_dict())
+                await self.observer.on_step_executed(self.id, step.name, step_index_before_jump, "JUMPED", { # Changed to await
+                                               "target": e.target_step_name}, self.state)
+                await self._notify_status_change(
+                    old_status, self.status, self.current_step_name)
+                return {"message": f"Jumped to step {e.target_step_name}"}, self.current_step_name
+            except StopIteration:
+                raise ValueError(
+                    f"Jump target step '{e.target_step_name}' not found.")
+
+        except WorkflowPauseDirective as e:
+            old_status = self.status
+            self.status = "WAITING_HUMAN"
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
+            await self._notify_status_change( # Changed to await
+                old_status, self.status, self.current_step_name)
+            await self.observer.on_step_executed( # Changed to await
+                self.id, step.name, self.current_step, "PAUSED_HUMAN", e.result, self.state)
+            await self.observer.on_workflow_paused(
+                self.id, step.name, "HUMAN_IN_LOOP")
+            raise e
+
+
+        except StartSubWorkflowDirective as sub_directive:
+
+            # Save state before pausing for sub-workflow
+            await self.persistence.save_workflow(self.id, self.to_dict()) # Changed to await
+
+            await self.observer.on_step_executed(self.id, step.name, self.current_step, "DISPATCHED_SUB_WORKFLOW", { # Changed to await
+                                           "child_type": sub_directive.workflow_type}, self.state)
+
+            return await self._handle_sub_workflow(sub_directive) # Changed to await
+
+        except SagaWorkflowException as e:  # This is raised by _execute_saga_rollback
+            raise e  # Re-raise after status is set
+
+        except Exception as e:
+            log_message = f"Step failed: {e}"
+            await self._log_execution("ERROR", log_message,
+                                step_name=step.name, metadata={"error": str(e)})
+            await self.observer.on_step_failed( # Changed to await
+                self.id, step.name, self.current_step, str(e), self.state)
+            old_status = self.status
+            if self.saga_mode:
+                if self.completed_steps_stack:
+                    await self._execute_saga_rollback() # Changed to await
+                    self.status = "FAILED_ROLLED_BACK"
+                else:
+                    self.status = "FAILED"
+                await self.persistence.save_workflow( # Changed to await
+                    self.id, self.to_dict())
+                await self._notify_status_change(
+                    old_status, self.status, self.current_step_name)
+                raise SagaWorkflowException(step.name, e)
+            else:
+                self.status = "FAILED"
+                await self.persistence.save_workflow( # Changed to await
+                    self.id, self.to_dict())
+                await self.observer.on_workflow_failed( # Changed to await
+                    self.id, self.workflow_type, str(e), self.state)
+                await self._notify_status_change(
+                    old_status, self.status, self.current_step_name)
+                raise WorkflowFailedException(
+                    step_name=step.name, original_exception=e, workflow_id=self.id)

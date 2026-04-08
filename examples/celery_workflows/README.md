@@ -243,7 +243,7 @@ WORKER_ZONE=us-east-1a
 ### Defining an Async Task
 ```python
 # tasks/payment_tasks.py
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 @celery_app.task
 def process_payment_task(state: dict, workflow_id: str):
@@ -284,7 +284,7 @@ steps:
 ### Sub-Workflow
 ```python
 # In step function
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def trigger_notifications(state: OrderState, context: StepContext):
     raise StartSubWorkflowDirective(
@@ -327,7 +327,7 @@ psql $DATABASE_URL -c "
 
 ### View Workflow History
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(db_url)
 await persistence.initialize()
@@ -360,7 +360,7 @@ docker-compose down
 celery -A rufus.celery_app worker --loglevel=debug
 
 # Verify imports
-python -c "from rufus.celery_app import celery_app; print(celery_app)"
+python -c "from ruvon.celery_app import celery_app; print(celery_app)"
 ```
 
 ### Workflows stuck

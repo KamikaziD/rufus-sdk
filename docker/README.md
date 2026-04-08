@@ -9,7 +9,7 @@ docker/
 ├── README.md                          # This file
 ├── SCALING.md                         # Comprehensive scaling guide
 ├── Dockerfile.celery-worker           # Celery worker image
-├── Dockerfile.rufus-server            # API server image
+├── Dockerfile.ruvon-server            # API server image
 ├── docker-compose.production.yml      # Production deployment
 ├── .env.example                       # Environment template
 ├── quick-start.sh                     # One-command deployment
@@ -86,7 +86,7 @@ docker-compose -f docker-compose.production.yml down
 
 # Database backup
 docker-compose -f docker-compose.production.yml exec postgres \
-    pg_dump -U rufus rufus_production > backup.sql
+    pg_dump -U ruvon ruvon_production > backup.sql
 ```
 
 ---

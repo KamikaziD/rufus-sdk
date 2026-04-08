@@ -1,7 +1,7 @@
 """
 Device Simulator for Load Testing.
 
-Simulates edge device behavior for load testing the Rufus Edge control plane.
+Simulates edge device behavior for load testing the Ruvon Edge control plane.
 """
 
 import asyncio
@@ -790,8 +790,8 @@ class SimulatedEdgeDevice:
         hash verification, JSON encode/decode, bridge call) — not a fake sleep.
         """
         try:
-            from rufus.implementations.execution.component_runtime import ComponentStepRuntime
-            from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+            from ruvon.implementations.execution.component_runtime import ComponentStepRuntime
+            from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
         except ImportError:
             self._wasm_runtime = None
             self._wasm_config = None
@@ -1069,11 +1069,11 @@ class SimulatedEdgeDevice:
           - p99 publish latency < 10ms  (vs 50-300ms HTTP heartbeat)
           - error rate < 1%
 
-        Requires RUFUS_NATS_URL or NATS_URL env var and nats-py installed.
+        Requires RUVON_NATS_URL or NATS_URL env var and nats-py installed.
         """
         import os
         import json as _json
-        nats_url = os.getenv("RUFUS_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
+        nats_url = os.getenv("RUVON_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
 
         # Stagger startup so 100k coroutines don't simultaneously race the lock
         await asyncio.sleep(random.uniform(0, 1.0))
@@ -1144,19 +1144,19 @@ class SimulatedEdgeDevice:
         import os as _os
         import json as _json
 
-        # Lazy import — graceful no-op if rufus-sdk-edge not installed
+        # Lazy import — graceful no-op if ruvon-edge not installed
         try:
-            from rufus_edge.capability_gossip import (
+            from ruvon_edge.capability_gossip import (
                 CapabilityVector, NodeTier, _tier_to_int,
             )
         except ImportError:
             logger.warning(
-                "[ruvon_gossip] rufus-sdk-edge not installed — "
-                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+                "[ruvon_gossip] ruvon-edge not installed — "
+                "pip install -e 'packages/ruvon-edge[edge]'"
             )
             return
 
-        nats_url = _os.getenv("RUFUS_NATS_URL") or _os.getenv("NATS_URL", "nats://localhost:4222")
+        nats_url = _os.getenv("RUVON_NATS_URL") or _os.getenv("NATS_URL", "nats://localhost:4222")
         nc, js, sem = await _get_shared_nats(nats_url)
         nats_available = nc is not None and not nc.is_closed
 
@@ -1259,14 +1259,14 @@ class SimulatedEdgeDevice:
           - rejection rate on bad signatures > 99.9%
         """
         try:
-            from rufus_edge.nkey_verifier import NKeyPatchVerifier
+            from ruvon_edge.nkey_verifier import NKeyPatchVerifier
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
             import base64 as _b64
         except ImportError as exc:
             logger.warning(
                 f"[nkey_patch] Skipping — missing dependency: {exc}\n"
                 "  Fix: pip install cryptography && "
-                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+                "pip install -e 'packages/ruvon-edge[edge]'"
             )
             return
 

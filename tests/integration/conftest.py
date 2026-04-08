@@ -17,13 +17,13 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 os.environ.setdefault("WORKFLOW_STORAGE", "memory")
-os.environ.setdefault("RUFUS_WORKFLOW_REGISTRY_PATH", "tests/fixtures/test_registry.yaml")
-os.environ.setdefault("RUFUS_CONFIG_DIR", "tests/fixtures")
+os.environ.setdefault("RUVON_WORKFLOW_REGISTRY_PATH", "tests/fixtures/test_registry.yaml")
+os.environ.setdefault("RUVON_CONFIG_DIR", "tests/fixtures")
 
 try:
     import httpx
     from asgi_lifespan import LifespanManager
-    from rufus_server.main import app
+    from ruvon_server.main import app
     _DEPS_AVAILABLE = True
 except Exception:
     _DEPS_AVAILABLE = False

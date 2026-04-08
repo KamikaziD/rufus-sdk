@@ -303,7 +303,7 @@ class TestSchemaCompiler:
         migration_sql = compiler.compile_migration('postgres')
 
         # Check header
-        assert "Rufus SDK - POSTGRES Schema" in migration_sql
+        assert "Ruvon SDK - POSTGRES Schema" in migration_sql
         assert "Generated from" in migration_sql
 
         # Check extensions
@@ -328,7 +328,7 @@ class TestSchemaCompiler:
         migration_sql = compiler.compile_migration('sqlite')
 
         # Check header
-        assert "Rufus SDK - SQLITE Schema" in migration_sql
+        assert "Ruvon SDK - SQLITE Schema" in migration_sql
         assert "Generated from" in migration_sql
 
         # Check table with type conversions

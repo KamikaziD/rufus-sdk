@@ -15,8 +15,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from rufus.workflow import Workflow
-from rufus.models import CompensatableStep
+from ruvon.workflow import Workflow
+from ruvon.models import CompensatableStep
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ async def test_apply_change_triggers_rollback_on_failure(mock_providers):
       3. The saga engine should call rollback_change (ApplyChange's compensate_func) in reverse.
       4. Workflow status must become FAILED_ROLLED_BACK.
     """
-    from rufus.models import WorkflowStep
+    from ruvon.models import WorkflowStep
 
     rollback_calls: list[dict] = []
 

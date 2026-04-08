@@ -13,10 +13,10 @@ Environment variables:
     DEVICE_ID             Unique device identifier (default: sim-device-001)
     DEVICE_TYPE           "pos" or "atm" — controls payment amounts and fraud rules (default: pos)
     FLOOR_LIMIT           Offline approval floor limit in USD (default: 1000.0 for POS, 500 for ATM)
-    RUFUS_API_KEY         API key returned after registration (leave blank; set after register)
-    RUFUS_ENCRYPTION_KEY  Encryption key for workflow state (optional)
+    RUVON_API_KEY         API key returned after registration (leave blank; set after register)
+    RUVON_ENCRYPTION_KEY  Encryption key for workflow state (optional)
     DB_PATH               SQLite database path (default: /tmp/edge_sim.db)
-    RUFUS_REGISTRATION_KEY  Key required for /api/v1/devices/register (default: test-registration-key)
+    RUVON_REGISTRATION_KEY  Key required for /api/v1/devices/register (default: test-registration-key)
     TELEMETRY_INTERVAL    Seconds between telemetry cycles (default: 30)
     PAYMENT_INTERVAL      Seconds between payment simulation cycles (default: 20)
     EDGE_WORKFLOW_SYNC    Push completed workflows to cloud + purge SQLite (default: true)
@@ -53,8 +53,8 @@ DEVICE_TYPE = os.getenv("DEVICE_TYPE", "pos")   # "pos" or "atm"
 _default_floor = "500.0" if DEVICE_TYPE == "atm" else "1000.0"
 FLOOR_LIMIT = float(os.getenv("FLOOR_LIMIT", _default_floor))
 DB_PATH = os.getenv("DB_PATH", "/tmp/edge_sim.db")
-ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
-REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "test-registration-key")
+ENCRYPTION_KEY = os.getenv("RUVON_ENCRYPTION_KEY", "") or None
+REGISTRATION_KEY = os.getenv("RUVON_REGISTRATION_KEY", "test-registration-key")
 TELEMETRY_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "30"))
 PAYMENT_INTERVAL = int(os.getenv("PAYMENT_INTERVAL", "20"))
 EDGE_WORKFLOW_SYNC = os.getenv("EDGE_WORKFLOW_SYNC", "true").lower() == "true"
@@ -299,8 +299,8 @@ async def _run_workflow_direct(agent, workflow_type: str, data: dict) -> dict:
     Workflows registered via handle_update_workflow_command() live in
     workflow_builder._workflow_configs, which create_workflow() looks up directly.
     """
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
     workflow = await agent.workflow_builder.create_workflow(
         workflow_type=workflow_type,
@@ -449,7 +449,7 @@ async def main():
         except Exception as e:
             logger.warning(f"Could not PATCH sdk_version: {e}")
 
-    from rufus_edge import RufusEdgeAgent
+    from ruvon_edge import RufusEdgeAgent
 
     agent = RufusEdgeAgent(
         device_id=DEVICE_ID,

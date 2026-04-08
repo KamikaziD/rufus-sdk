@@ -16,9 +16,9 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from rufus_edge.sync_manager import SyncManager
-from rufus_edge.models import SAFTransaction
-from rufus_server.device_service import DeviceService
+from ruvon_edge.sync_manager import SyncManager
+from ruvon_edge.models import SAFTransaction
+from ruvon_server.device_service import DeviceService
 
 
 class TestHMACAuthentication:
@@ -158,7 +158,7 @@ class TestHMACAuthentication:
         )
 
         # SyncManager now uses _adapter.http_post (not _http_client.post)
-        from rufus_edge.platform.base import HttpResponse
+        from ruvon_edge.platform.base import HttpResponse
         mock_response = HttpResponse(
             status_code=200,
             body=json.dumps({"accepted": [], "rejected": []}).encode(),

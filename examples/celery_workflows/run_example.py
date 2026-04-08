@@ -16,12 +16,12 @@ from pathlib import Path
 # Add example directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def run_order_processing_example():

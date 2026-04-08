@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ---------------------------------------------------------------------------
 
 def _make_chunk(chunk_type: str = "yaml_example", score: float = 0.8):
-    from rufus.builder_ai.knowledge.indexer import Chunk
+    from ruvon.builder_ai.knowledge.indexer import Chunk
     return Chunk(
         id="chunk-1",
         text="workflow_type: BidEvaluation\nsteps:\n  - name: Validate\n    type: STANDARD",
@@ -28,7 +28,7 @@ def _make_chunk(chunk_type: str = "yaml_example", score: float = 0.8):
 
 def _make_kb(chunks=None):
     """Return a MagicMock KnowledgeBase that returns given chunks on retrieve."""
-    from rufus.builder_ai.knowledge.indexer import KnowledgeBase
+    from ruvon.builder_ai.knowledge.indexer import KnowledgeBase
     kb = MagicMock(spec=KnowledgeBase)
     kb.retrieve = AsyncMock(return_value=chunks or [_make_chunk()])
     kb.retrieve_fast = AsyncMock(return_value=chunks or [_make_chunk()])
@@ -37,7 +37,7 @@ def _make_kb(chunks=None):
 
 def _make_rag_decision(strategy: str = "rag", chunks=None):
     """Return a RetrievalDecision with the given strategy."""
-    from rufus.builder_ai.knowledge.raft_router import (
+    from ruvon.builder_ai.knowledge.raft_router import (
         RetrievalDecision, RetrievalStrategy, PrivacyLevel
     )
     return RetrievalDecision(
@@ -57,7 +57,7 @@ def _make_rag_decision(strategy: str = "rag", chunks=None):
 
 def test_with_knowledge_returns_builder_with_raft_router():
     """with_knowledge() should wire a RAFTRouter onto the builder."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
 
     kb = _make_kb()
     builder = AIWorkflowBuilder(backend="anthropic", knowledge_base=kb)
@@ -67,7 +67,7 @@ def test_with_knowledge_returns_builder_with_raft_router():
 
 def test_builder_without_knowledge_has_no_raft_router():
     """Without a KnowledgeBase, raft_router should be None."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
 
     builder = AIWorkflowBuilder(backend="anthropic")
     assert builder.raft_router is None
@@ -75,11 +75,11 @@ def test_builder_without_knowledge_has_no_raft_router():
 
 def test_with_knowledge_classmethod_uses_existing_index(tmp_path):
     """AIWorkflowBuilder.with_knowledge() loads existing KB without rebuilding."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
-    from rufus.builder_ai.knowledge.indexer import KnowledgeBase
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.knowledge.indexer import KnowledgeBase
 
     # Patch KnowledgeBase so it doesn't try to open LanceDB
-    with patch("rufus.builder_ai.pipeline._try_import_knowledge") as mock_import:
+    with patch("ruvon.builder_ai.pipeline._try_import_knowledge") as mock_import:
         MockKB = MagicMock()
         mock_instance = _make_kb()
         mock_instance.db_path = tmp_path / "knowledge.lance"
@@ -104,7 +104,7 @@ def test_with_knowledge_classmethod_uses_existing_index(tmp_path):
 @pytest.mark.asyncio
 async def test_build_result_has_retrieval_decision_when_kb_present():
     """result.retrieval_decision should be set when a KnowledgeBase is wired."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
 
     decision = _make_rag_decision("rag")
     kb = _make_kb()
@@ -127,7 +127,7 @@ async def test_build_result_has_retrieval_decision_when_kb_present():
 @pytest.mark.asyncio
 async def test_build_result_retrieval_decision_none_without_kb():
     """result.retrieval_decision should be None when no KnowledgeBase is wired."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
 
     builder = AIWorkflowBuilder(backend="anthropic")
     _mock_all_stages(builder)
@@ -144,8 +144,8 @@ async def test_build_result_retrieval_decision_none_without_kb():
 @pytest.mark.asyncio
 async def test_raft_strategy_overrides_model_on_all_stages():
     """When strategy=RAFT, all stage .model attrs should be updated to model_override."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
-    from rufus.builder_ai.knowledge.raft_router import (
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.knowledge.raft_router import (
         RetrievalDecision, RetrievalStrategy, PrivacyLevel
     )
 
@@ -181,8 +181,8 @@ async def test_raft_strategy_overrides_model_on_all_stages():
 @pytest.mark.asyncio
 async def test_none_strategy_does_not_inject_knowledge():
     """NONE strategy: _inject_knowledge should return the system prompt unchanged."""
-    from rufus.builder_ai.stages.base import LLMStageMixin
-    from rufus.builder_ai.knowledge.raft_router import (
+    from ruvon.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.knowledge.raft_router import (
         RetrievalDecision, RetrievalStrategy, PrivacyLevel
     )
 
@@ -205,7 +205,7 @@ async def test_none_strategy_does_not_inject_knowledge():
 
 def test_inject_knowledge_with_none_decision_unchanged():
     """_inject_knowledge(decision=None) must return system unchanged."""
-    from rufus.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.stages.base import LLMStageMixin
 
     mixin = LLMStageMixin(backend="anthropic")
     original = "Base system prompt."
@@ -219,8 +219,8 @@ def test_inject_knowledge_with_none_decision_unchanged():
 @pytest.mark.asyncio
 async def test_build_result_privacy_fields_from_decision():
     """privacy_level, pii_redactions, chunks_sent_to_cloud should mirror the decision."""
-    from rufus.builder_ai.pipeline import AIWorkflowBuilder
-    from rufus.builder_ai.knowledge.raft_router import (
+    from ruvon.builder_ai.pipeline import AIWorkflowBuilder
+    from ruvon.builder_ai.knowledge.raft_router import (
         RetrievalDecision, RetrievalStrategy, PrivacyLevel
     )
 

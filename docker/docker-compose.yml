@@ -10,7 +10,7 @@
 #   - See .env.example for full configuration options
 #
 # Services:
-#   - rufus-server: FastAPI control plane (port 8000)
+#   - ruvon-server: FastAPI control plane (port 8000)
 #   - postgres: PostgreSQL database (port 5433)
 #
 # Access:
@@ -24,11 +24,11 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   postgres:
     image: postgres:15-alpine
-    container_name: rufus-postgres
+    container_name: ruvon-postgres
     command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-1000} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB} -c max_wal_size=${POSTGRES_MAX_WAL_SIZE:-2GB}
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-rufus}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+      POSTGRES_USER: ${POSTGRES_USER:-ruvon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ruvon_secret_2024}
       POSTGRES_DB: ${POSTGRES_DB:-rufus_cloud}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -37,24 +37,24 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rufus} -d ${POSTGRES_DB:-rufus_cloud}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ruvon} -d ${POSTGRES_DB:-rufus_cloud}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - rufus-network
+      - ruvon-network
 
   # ─────────────────────────────────────────────────────────────────────────
   # Rufus Cloud Control Plane
   # ─────────────────────────────────────────────────────────────────────────
-  rufus-server:
+  ruvon-server:
     build:
       context: ..
       dockerfile: docker/Dockerfile.server
-    container_name: rufus-cloud
+    container_name: ruvon-cloud
     environment:
       # Database
-      DATABASE_URL: postgresql://${POSTGRES_USER:-rufus}:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/${POSTGRES_DB:-rufus_cloud}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ruvon}:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/${POSTGRES_DB:-rufus_cloud}
       WORKFLOW_STORAGE: ${WORKFLOW_STORAGE:-postgres}
 
       # PostgreSQL Connection Pool (optimized for high-load testing)
@@ -65,10 +65,10 @@ services:
       POSTGRES_POOL_MAX_INACTIVE_LIFETIME: ${POSTGRES_POOL_MAX_INACTIVE_LIFETIME:-600}
 
       # Server settings
-      RUFUS_REGISTRATION_KEY: ${RUFUS_REGISTRATION_KEY:-demo-registration-key-2024}
+      RUVON_REGISTRATION_KEY: ${RUVON_REGISTRATION_KEY:-demo-registration-key-2024}
 
       # Encryption (CRITICAL: Use same key for all containers to decrypt workflows)
-      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
+      RUVON_ENCRYPTION_KEY: ${RUVON_ENCRYPTION_KEY:-}
 
       # Artifacts
       ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
@@ -78,7 +78,7 @@ services:
     volumes:
       - artifacts_data:/app/artifacts
     ports:
-      - "${RUFUS_SERVER_PORT:-8000}:8000"
+      - "${RUVON_SERVER_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,7 +88,7 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -96,30 +96,30 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
-    container_name: rufus-keycloak
+    container_name: ruvon-keycloak
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_secret}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-rufus_cloud}
-      KC_DB_USERNAME: ${POSTGRES_USER:-rufus}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+      KC_DB_USERNAME: ${POSTGRES_USER:-ruvon}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ruvon_secret_2024}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
     command: ["start-dev", "--import-realm"]
     volumes:
-      - ./keycloak/rufus-realm.json:/opt/keycloak/data/import/rufus-realm.json:ro
+      - ./keycloak/ruvon-realm.json:/opt/keycloak/data/import/ruvon-realm.json:ro
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
 networks:
-  rufus-network:
+  ruvon-network:
     driver: bridge
 
 volumes:

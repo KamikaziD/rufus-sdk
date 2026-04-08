@@ -14,8 +14,8 @@ from typing import List, Dict
 import asyncpg
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from rufus.db_schema import workflow_executions
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.db_schema import workflow_executions
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 class HybridBenchmark:

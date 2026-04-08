@@ -9,8 +9,8 @@ import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus_edge.agent import RufusEdgeAgent
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon_edge.agent import RufusEdgeAgent
 
 
 @pytest_asyncio.fixture

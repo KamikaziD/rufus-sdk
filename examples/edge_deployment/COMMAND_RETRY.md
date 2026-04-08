@@ -133,8 +133,8 @@ POST /api/v1/devices/macbook-m4-001/commands
 ### Python SDK
 
 ```python
-from rufus_server.device_service import DeviceService
-from rufus_server.retry_policy import RetryPolicy
+from ruvon_server.device_service import DeviceService
+from ruvon_server.retry_policy import RetryPolicy
 
 # Create retry policy
 retry_policy = RetryPolicy(
@@ -225,23 +225,23 @@ retry_count = max_retries
 
 **As Daemon** (runs continuously):
 ```bash
-python -m rufus_server.retry_worker \
+python -m ruvon_server.retry_worker \
   --db-url postgresql://rufus:rufus@localhost:5433/rufus \
   --interval 60
 ```
 
 **One-Shot** (process once and exit):
 ```bash
-python -m rufus_server.retry_worker --once
+python -m ruvon_server.retry_worker --once
 ```
 
 **Custom Interval**:
 ```bash
 # Check every 30 seconds
-python -m rufus_server.retry_worker --interval 30
+python -m ruvon_server.retry_worker --interval 30
 
 # Check every 5 minutes
-python -m rufus_server.retry_worker --interval 300
+python -m ruvon_server.retry_worker --interval 300
 ```
 
 ### Systemd Service
@@ -256,7 +256,7 @@ Type=simple
 User=rufus
 WorkingDirectory=/opt/rufus
 Environment="DATABASE_URL=postgresql://rufus:rufus@localhost/rufus"
-ExecStart=/usr/bin/python3 -m rufus_server.retry_worker --interval 60
+ExecStart=/usr/bin/python3 -m ruvon_server.retry_worker --interval 60
 Restart=always
 RestartSec=10
 
@@ -277,7 +277,7 @@ sudo systemctl status rufus-retry-worker
 services:
   retry-worker:
     build: .
-    command: python -m rufus_server.retry_worker --interval 60
+    command: python -m ruvon_server.retry_worker --interval 60
     environment:
       DATABASE_URL: postgresql://rufus:rufus@postgres:5432/rufus
     depends_on:

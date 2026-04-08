@@ -4,8 +4,8 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from rufus.builder_ai import AIWorkflowBuilder
-from rufus.builder_ai.models import BuildResult
+from ruvon.builder_ai import AIWorkflowBuilder
+from ruvon.builder_ai.models import BuildResult
 
 
 # ---------------------------------------------------------------------------

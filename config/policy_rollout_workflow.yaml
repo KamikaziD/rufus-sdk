@@ -1,21 +1,21 @@
 workflow_type: "PolicyRollout"
 workflow_version: "1.0.0"
 description: "Durable policy creation with saga compensation"
-initial_state_model_path: "rufus_server.steps.policy_rollout_steps.PolicyRolloutState"
+initial_state_model_path: "ruvon_server.steps.policy_rollout_steps.PolicyRolloutState"
 saga_enabled: true
 
 steps:
   - name: "Validate_Policy"
     type: "STANDARD"
-    function: "rufus_server.steps.policy_rollout_steps.validate_policy"
+    function: "ruvon_server.steps.policy_rollout_steps.validate_policy"
     automate_next: true
 
   - name: "Persist_Policy"
     type: "STANDARD"
-    function: "rufus_server.steps.policy_rollout_steps.persist_policy"
-    compensate_function: "rufus_server.steps.policy_rollout_steps.compensate_persist_policy"
+    function: "ruvon_server.steps.policy_rollout_steps.persist_policy"
+    compensate_function: "ruvon_server.steps.policy_rollout_steps.compensate_persist_policy"
     automate_next: true
 
   - name: "Finalize_Policy_Rollout"
     type: "STANDARD"
-    function: "rufus_server.steps.policy_rollout_steps.finalize_policy_rollout"
+    function: "ruvon_server.steps.policy_rollout_steps.finalize_policy_rollout"

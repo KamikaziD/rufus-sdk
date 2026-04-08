@@ -8,8 +8,8 @@ multiple calls, even when interleaved across conceptual sync calls.
 import pytest
 import pytest_asyncio
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus_edge.sync_manager import SyncManager
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon_edge.sync_manager import SyncManager
 
 
 @pytest_asyncio.fixture

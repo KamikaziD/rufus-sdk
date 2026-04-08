@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rufus.implementations.execution.wasm_runtime import WasmRuntime  # noqa: F401 (legacy compat)
-from rufus.implementations.execution.component_runtime import (
+from ruvon.implementations.execution.wasm_runtime import WasmRuntime  # noqa: F401 (legacy compat)
+from ruvon.implementations.execution.component_runtime import (
     ComponentStepRuntime,
     WasmComponentPool,
     is_component,
@@ -91,7 +91,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_component_binary_returns_merged_dict(self):
         import hashlib
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -114,7 +114,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_state_mapping_filters_input(self):
         import hashlib
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -143,7 +143,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_fallback_skip_on_error(self):
         import hashlib
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -164,7 +164,7 @@ class TestComponentStepRuntimeComponentPath:
     @pytest.mark.asyncio
     async def test_fallback_default_on_error(self):
         import hashlib
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()
@@ -216,7 +216,7 @@ class TestComponentStepRuntimeLegacyPath:
         runtime = ComponentStepRuntime(resolver)
 
         with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
+            "ruvon.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
             return_value=b'{"legacy": true}',
         ):
             config = make_config(wasm_hash=wasm_hash)
@@ -240,7 +240,7 @@ class TestWasmRuntimeCMDelegation:
 
         runtime = WasmRuntime(resolver)
 
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         with patch.object(_crt, "_get_wasm_pool", side_effect=ImportError("wasmtime not available")):
             with patch.object(
                 ComponentStepRuntime,
@@ -265,7 +265,7 @@ class TestWasmRuntimeCMDelegation:
         # Patch both the wasmtime import guard and _execute_wasi so wasmtime
         # doesn't need to be installed in the test environment
         with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._run_with_binary",
+            "ruvon.implementations.execution.wasm_runtime.WasmRuntime._run_with_binary",
             new=AsyncMock(return_value={"legacy": True}),
         ):
             config = make_config(wasm_hash=wasm_hash)
@@ -308,7 +308,7 @@ class TestComponentStepRuntimeBridgeIntegration:
     async def test_cloud_path_unchanged_when_bridge_is_none(self):
         """Without a bridge, the default _call_component (wasmtime) path runs."""
         import hashlib
-        from rufus.implementations.execution import component_runtime as _crt
+        from ruvon.implementations.execution import component_runtime as _crt
         binary = CM_MAGIC_8
         wasm_hash = hashlib.sha256(binary).hexdigest()
         resolver = MagicMock()

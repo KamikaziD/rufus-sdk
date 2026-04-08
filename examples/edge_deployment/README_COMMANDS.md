@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rufus Edge platform now supports **remote command execution** for device management. Commands are delivered using a hybrid approach:
+The Ruvon Edge platform now supports **remote command execution** for device management. Commands are delivered using a hybrid approach:
 
 - **Routine commands** (restart, backup, config) → Heartbeat delivery (0-30s latency)
 - **Critical commands** (emergency stop, fraud alert) → WebSocket delivery (<1s latency)

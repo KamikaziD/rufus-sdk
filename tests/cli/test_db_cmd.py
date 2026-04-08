@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 from tests.cli.utils import assert_output_contains
 
 

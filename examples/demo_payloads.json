@@ -94,7 +94,7 @@
       "scenarios": {
         "fintech_press_release": {
           "_note": "Short press release — fast path on all platforms",
-          "raw_text": "Rufus Edge today announced the general availability of its v1.0 workflow engine for fintech edge devices. The platform enables banks and payment processors to deploy fraud detection, KYC, and transaction monitoring workflows directly onto POS terminals, ATMs, and mobile readers — running identically on-device and in the cloud. The air-gap triage demo shows a full HITL fraud review round-trip: an on-device WASM scorer flags a suspicious transaction, the cloud analyst approves or blocks via the dashboard, and the decision reaches the device within 30 seconds over WebSocket. Rufus Edge is available on PyPI as rufus-sdk, rufus-sdk-edge, and rufus-sdk-server.",
+          "raw_text": "Ruvon Edge today announced the general availability of its v1.0 workflow engine for fintech edge devices. The platform enables banks and payment processors to deploy fraud detection, KYC, and transaction monitoring workflows directly onto POS terminals, ATMs, and mobile readers — running identically on-device and in the cloud. The air-gap triage demo shows a full HITL fraud review round-trip: an on-device WASM scorer flags a suspicious transaction, the cloud analyst approves or blocks via the dashboard, and the decision reaches the device within 30 seconds over WebSocket. Ruvon Edge is available on PyPI as ruvon-sdk, ruvon-edge, and ruvon-server.",
           "doc_type": "press_release"
         },
         "compliance_report": {

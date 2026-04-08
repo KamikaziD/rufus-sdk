@@ -1,13 +1,13 @@
 workflow_type: "FraudScreening"
 workflow_version: "1.0.0"
 description: "Real-time fraud screening for payment transactions"
-initial_state_model: "rufus_server.steps.fraud_steps.FraudScreeningState"
+initial_state_model: "ruvon_server.steps.fraud_steps.FraudScreeningState"
 
 steps:
   # Step 1: Validate and enrich the transaction
   - name: "Validate_Transaction"
     type: "STANDARD"
-    function: "rufus_server.steps.fraud_steps.validate_transaction"
+    function: "ruvon_server.steps.fraud_steps.validate_transaction"
     description: "Validate transaction fields and enrich with device metadata"
     automate_next: true
 
@@ -17,25 +17,25 @@ steps:
     description: "Run velocity check, device fingerprint, and geo-risk in parallel"
     tasks:
       - name: "Velocity_Check"
-        function: "rufus_server.steps.fraud_steps.velocity_check"
+        function: "ruvon_server.steps.fraud_steps.velocity_check"
       - name: "Device_Fingerprint"
-        function: "rufus_server.steps.fraud_steps.device_fingerprint"
+        function: "ruvon_server.steps.fraud_steps.device_fingerprint"
       - name: "Geo_Risk"
-        function: "rufus_server.steps.fraud_steps.geo_risk"
+        function: "ruvon_server.steps.fraud_steps.geo_risk"
     merge_strategy: "merge"
     next: "Score_Risk"
 
   # Step 3: Aggregate signals into a composite risk score
   - name: "Score_Risk"
     type: "STANDARD"
-    function: "rufus_server.steps.fraud_steps.score_risk"
+    function: "ruvon_server.steps.fraud_steps.score_risk"
     description: "Aggregate fraud signals into a composite risk score (0–100)"
     automate_next: true
 
   # Step 4: Route based on risk score
   - name: "Risk_Decision"
     type: "DECISION"
-    function: "rufus_server.steps.fraud_steps.risk_decision"
+    function: "ruvon_server.steps.fraud_steps.risk_decision"
     description: "Route transaction to approve, review, or decline based on score"
     routes:
       - condition: "state.risk_score >= 75"
@@ -48,9 +48,9 @@ steps:
   # Step 5a: Low risk — auto-approve
   - name: "Approve_Transaction"
     type: "STANDARD"
-    function: "rufus_server.steps.fraud_steps.approve_transaction"
+    function: "ruvon_server.steps.fraud_steps.approve_transaction"
     description: "Automatically approve low-risk transaction"
-    compensate_function: "rufus_server.steps.fraud_steps.void_approval"
+    compensate_function: "ruvon_server.steps.fraud_steps.void_approval"
     next: "Send_Notification"
 
   # Step 5b: Medium risk — escalate to human analyst
@@ -62,14 +62,14 @@ steps:
   # Step 5c: High risk — auto-decline
   - name: "Decline_Transaction"
     type: "STANDARD"
-    function: "rufus_server.steps.fraud_steps.decline_transaction"
+    function: "ruvon_server.steps.fraud_steps.decline_transaction"
     description: "Automatically decline high-risk transaction"
     next: "Send_Notification"
 
   # Step 6: Notify merchant and cardholder
   - name: "Send_Notification"
     type: "FIRE_AND_FORGET"
-    function: "rufus_server.steps.fraud_steps.send_notification"
+    function: "ruvon_server.steps.fraud_steps.send_notification"
     description: "Emit result event to merchant webhook and audit log"
     timeout_seconds: 5
     on_error: "ignore"

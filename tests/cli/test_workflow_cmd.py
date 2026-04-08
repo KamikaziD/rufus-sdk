@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 from tests.cli.utils import assert_output_contains
 
 
@@ -17,7 +17,7 @@ class TestWorkflowList:
 
     def test_list_empty(self, cli_runner, temp_config_dir, mock_persistence):
         """Test listing workflows when none exist."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["list"])
 
             assert result.exit_code == 0
@@ -27,7 +27,7 @@ class TestWorkflowList:
         """Test listing workflows with data."""
         mock_persistence.list_workflows.return_value = [sample_workflow_data]
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["list"])
 
             assert result.exit_code == 0
@@ -37,7 +37,7 @@ class TestWorkflowList:
 
     def test_list_filter_by_status(self, cli_runner, temp_config_dir, mock_persistence):
         """Test filtering workflows by status."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["list", "--status", "RUNNING"])
 
             assert result.exit_code == 0
@@ -46,7 +46,7 @@ class TestWorkflowList:
 
     def test_list_filter_by_type(self, cli_runner, temp_config_dir, mock_persistence):
         """Test filtering workflows by type."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["list", "--type", "OrderProcessing"])
 
             assert result.exit_code == 0
@@ -55,7 +55,7 @@ class TestWorkflowList:
         """Test JSON output format."""
         mock_persistence.list_workflows.return_value = [sample_workflow_data]
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["list", "--json"])
 
             assert result.exit_code == 0
@@ -66,7 +66,7 @@ class TestWorkflowList:
 
     def test_list_via_workflow_subcommand(self, cli_runner, temp_config_dir, mock_persistence):
         """Test 'rufus workflow list' subcommand syntax."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["workflow", "list"])
 
             assert result.exit_code == 0
@@ -111,7 +111,7 @@ class TestWorkflowShow:
         workflow_id = sample_workflow_data["id"]
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["show", workflow_id])
 
             assert result.exit_code == 0
@@ -123,7 +123,7 @@ class TestWorkflowShow:
         workflow_id = sample_workflow_data["id"]
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["show", workflow_id, "--state"])
 
             assert result.exit_code == 0
@@ -143,7 +143,7 @@ class TestWorkflowShow:
             }
         ]
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["show", workflow_id, "--logs"])
 
             assert result.exit_code == 0
@@ -152,7 +152,7 @@ class TestWorkflowShow:
         """Test showing non-existent workflow."""
         mock_persistence.load_workflow.return_value = None
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["show", "non-existent-id"])
 
             # Should fail with error message
@@ -163,7 +163,7 @@ class TestWorkflowShow:
         workflow_id = sample_workflow_data["id"]
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["show", workflow_id, "--json"])
 
             assert result.exit_code == 0
@@ -182,7 +182,7 @@ class TestWorkflowResume:
         sample_workflow_data["status"] = "WAITING_HUMAN"
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(
                 app,
                 ["resume", workflow_id, "--input", '{"approved": true}']
@@ -195,7 +195,7 @@ class TestWorkflowResume:
         """Test resuming non-existent workflow."""
         mock_persistence.load_workflow.return_value = None
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["resume", "non-existent-id"])
 
             # Should fail with error message
@@ -216,7 +216,7 @@ class TestWorkflowRetry:
         }
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["retry", workflow_id])
 
             # May fail in test env due to async mock issues, but command works
@@ -236,7 +236,7 @@ class TestWorkflowRetry:
         }
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["retry", workflow_id, "--from-step", "Step_2"])
 
             assert result.exit_code == 0
@@ -258,7 +258,7 @@ class TestWorkflowLogs:
             }
         ]
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["logs", workflow_id])
 
             assert result.exit_code == 0
@@ -267,7 +267,7 @@ class TestWorkflowLogs:
         """Test filtering logs by step."""
         workflow_id = "test-workflow-id"
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["logs", workflow_id, "--step", "Step_1"])
 
             assert result.exit_code == 0
@@ -276,7 +276,7 @@ class TestWorkflowLogs:
         """Test filtering logs by level."""
         workflow_id = "test-workflow-id"
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["logs", workflow_id, "--level", "ERROR"])
 
             assert result.exit_code == 0
@@ -287,7 +287,7 @@ class TestWorkflowLogs:
         mock_persistence.load_workflow.return_value = {"id": workflow_id, "workflow_type": "Test"}
         mock_persistence.get_workflow_logs.return_value = []  # Fixed: use get_workflow_logs
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["logs", workflow_id, "--json"])
 
             assert result.exit_code == 0
@@ -301,7 +301,7 @@ class TestWorkflowLogs:
         workflow_id = "test-workflow-id"
         mock_persistence.get_workflow_logs.return_value = []
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["logs", workflow_id, "--follow"])
 
         assert result.exit_code == 0
@@ -315,7 +315,7 @@ class TestWorkflowMetrics:
         """Test viewing workflow metrics."""
         mock_persistence.get_workflow_metrics.return_value = []
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["metrics"])
 
             assert result.exit_code == 0
@@ -324,7 +324,7 @@ class TestWorkflowMetrics:
         """Test viewing metrics for specific workflow."""
         workflow_id = "test-workflow-id"
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["metrics", "--workflow-id", workflow_id])
 
             assert result.exit_code == 0
@@ -333,7 +333,7 @@ class TestWorkflowMetrics:
         """Test JSON output format."""
         mock_persistence.get_workflow_metrics.return_value = []
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["metrics", "--json"])
 
             assert result.exit_code == 0
@@ -352,7 +352,7 @@ class TestWorkflowCancel:
         sample_workflow_data["status"] = "ACTIVE"
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             # Provide 'y' for confirmation
             result = cli_runner.invoke(app, ["cancel", workflow_id], input="y\n")
 
@@ -365,7 +365,7 @@ class TestWorkflowCancel:
         sample_workflow_data["status"] = "ACTIVE"
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["cancel", workflow_id, "--force"])
 
             assert result.exit_code == 0
@@ -377,7 +377,7 @@ class TestWorkflowCancel:
         sample_workflow_data["status"] = "ACTIVE"
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(
                 app,
                 ["cancel", workflow_id, "--force", "--reason", "User requested"]
@@ -408,7 +408,7 @@ class TestWorkflowAutoExecute:
 
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["resume", workflow_id, "--auto"])
 
             # Should attempt auto-execute (may fail due to mock limitations)
@@ -435,7 +435,7 @@ class TestWorkflowAutoExecute:
 
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["retry", workflow_id, "--auto"])
 
             # Should attempt auto-execute (may fail due to mock limitations)
@@ -449,7 +449,7 @@ class TestWorkflowAutoExecute:
 
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["resume", workflow_id, "--auto"])
 
             # Should warn about missing snapshot

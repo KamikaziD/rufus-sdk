@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Rufus Edge Runner for Raspberry Pi 5
+Ruvon Edge Runner for Raspberry Pi 5
 
-This script runs a Rufus Edge agent on a Raspberry Pi 5,
+This script runs a Ruvon Edge agent on a Raspberry Pi 5,
 demonstrating:
 - ARM64 hardware detection
 - CPU-only inference (no GPU)
@@ -47,21 +47,21 @@ logger = logging.getLogger('rufus.edge.rpi')
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Rufus Edge Agent for Raspberry Pi 5'
+        description='Ruvon Edge Agent for Raspberry Pi 5'
     )
     parser.add_argument(
         '--cloud-url',
-        default=os.getenv('RUFUS_CLOUD_URL', 'http://localhost:8000'),
-        help='URL of the Rufus Cloud Control Plane'
+        default=os.getenv('RUVON_CLOUD_URL', 'http://localhost:8000'),
+        help='URL of the Ruvon Cloud Control Plane'
     )
     parser.add_argument(
         '--device-id',
-        default=os.getenv('RUFUS_DEVICE_ID', f'rpi5-{platform.node()[:8]}'),
+        default=os.getenv('RUVON_DEVICE_ID', f'rpi5-{platform.node()[:8]}'),
         help='Unique device identifier'
     )
     parser.add_argument(
         '--api-key',
-        default=os.getenv('RUFUS_API_KEY', 'demo-api-key-rpi'),
+        default=os.getenv('RUVON_API_KEY', 'demo-api-key-rpi'),
         help='API key for cloud authentication'
     )
     parser.add_argument(

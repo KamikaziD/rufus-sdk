@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    --index-url https://test.pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'ruvon-edge[edge]==1.0.0rc6'
+
+RUN pip install --no-cache-dir 'httpx>=0.24' 'aiosqlite>=0.19'
+
+COPY examples/edge_deployment/edge_device_sim.py /app/edge_device_sim.py
+
+# Pre-built WASM binaries (committed to repo; no toolchain required at runtime)
+COPY src/ruvon_edge/sidecar/wasm/apply_config.wasm /app/ruvon_edge/sidecar/wasm/apply_config.wasm
+COPY src/ruvon_edge/sidecar/wasm/apply_config.sha256 /app/ruvon_edge/sidecar/wasm/apply_config.sha256
+COPY examples/edge_deployment/fraud_scorer.wasm /app/fraud_scorer.wasm
+
+CMD ["python", "edge_device_sim.py"]

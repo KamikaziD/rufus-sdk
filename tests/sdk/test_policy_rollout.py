@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any, Dict
 
-from rufus_server.steps.policy_rollout_steps import (
+from ruvon_server.steps.policy_rollout_steps import (
     PolicyRolloutState,
     validate_policy,
     persist_policy,
@@ -22,7 +22,7 @@ from rufus_server.steps.policy_rollout_steps import (
     finalize_policy_rollout,
     init_services,
 )
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 # ---------------------------------------------------------------------------

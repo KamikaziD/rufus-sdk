@@ -8,7 +8,7 @@ Usage:
     cd examples/browser_demo_3 && python serve.py
     # Open the printed URL on this machine or any LAN device.
     # For cross-device mesh: start the Rufus server first:
-    #   uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+    #   uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
 """
 
 import os
@@ -52,7 +52,7 @@ print(f"  This machine : http://localhost:{DEMO_PORT}")
 print(f"  Other devices: http://{ip}:{DEMO_PORT}")
 print()
 print("  Cross-device mesh requires the Rufus server:")
-print(f"    uvicorn rufus_server.main:app --host 0.0.0.0 --port {SERVER_PORT}")
+print(f"    uvicorn ruvon_server.main:app --host 0.0.0.0 --port {SERVER_PORT}")
 print()
 print("  Tip: share this link to add a remote pod to your mesh:")
 print(f"    http://{ip}:{DEMO_PORT}?group=<your-group-key>")

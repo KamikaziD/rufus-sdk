@@ -15,7 +15,7 @@ Tests:
 import pytest
 from pydantic import BaseModel
 
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
 
 
 # ---------------------------------------------------------------------------

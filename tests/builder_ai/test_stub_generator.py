@@ -1,7 +1,7 @@
 """Tests for Stage 8 — StubGenerator."""
 
 import pytest
-from rufus.builder_ai.stages.stub_generator import StubGenerator, _snake
+from ruvon.builder_ai.stages.stub_generator import StubGenerator, _snake
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ class TestStubGeneratorGenerate:
     def test_import_line_present(self):
         steps = [{"name": "X", "type": "STANDARD", "function": "m.x"}]
         result = self._gen(steps)
-        assert "from rufus.models import StepContext" in result
+        assert "from ruvon.models import StepContext" in result
 
     def test_mixed_step_types_only_standard_get_stubs(self):
         steps = [
@@ -109,7 +109,7 @@ class TestStubGeneratorValidate:
 
     def test_valid_stubs_pass(self):
         stubs = (
-            "from rufus.models import StepContext\n\n"
+            "from ruvon.models import StepContext\n\n"
             "def parse_bid(state, context: StepContext):\n"
             "    return {}\n"
         )
@@ -123,7 +123,7 @@ class TestStubGeneratorValidate:
 
     def test_wrong_return_type_caught(self):
         stubs = (
-            "from rufus.models import StepContext\n\n"
+            "from ruvon.models import StepContext\n\n"
             "def bad_return(state, context):\n"
             "    return 'not a dict'\n"
         )
@@ -132,7 +132,7 @@ class TestStubGeneratorValidate:
 
     def test_exec_error_caught(self):
         stubs = (
-            "from rufus.models import StepContext\n\n"
+            "from ruvon.models import StepContext\n\n"
             "def crasher(state, context):\n"
             "    raise RuntimeError('boom')\n"
         )

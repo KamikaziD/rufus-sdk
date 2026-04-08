@@ -18,11 +18,11 @@ import tempfile
 import os
 import uuid
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 # Try to import PostgreSQL provider
 try:
-    from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+    from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
@@ -212,8 +212,8 @@ class PersistenceBenchmark:
         """Benchmark load_workflow returning WorkflowRecord struct vs raw dict decode."""
         try:
             import msgspec
-            from rufus.providers.dtos import WorkflowRecord
-            from rufus.utils.serialization import encode_struct, decode_typed
+            from ruvon.providers.dtos import WorkflowRecord
+            from ruvon.utils.serialization import encode_struct, decode_typed
         except ImportError:
             return
 
@@ -342,7 +342,7 @@ async def main():
 
     args = parser.parse_args()
 
-    postgres_url = args.postgres or os.environ.get("RUFUS_POSTGRES_URL")
+    postgres_url = args.postgres or os.environ.get("RUVON_POSTGRES_URL")
 
     # Set up SQLite (in-memory for fair comparison)
     print("Initializing SQLite provider (in-memory)...")

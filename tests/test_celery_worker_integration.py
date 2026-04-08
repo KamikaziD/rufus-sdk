@@ -21,7 +21,7 @@ def test_imports():
     """Test that celery_app can be imported"""
     print("Testing imports...")
     try:
-        from rufus.celery_app import celery_app, workflow_builder, discovered_task_modules
+        from ruvon.celery_app import celery_app, workflow_builder, discovered_task_modules
         print("  ✅ Imports successful")
         return celery_app, workflow_builder, discovered_task_modules
     except ImportError as e:
@@ -49,7 +49,7 @@ def test_celery_config(celery_app):
     # Check includes
     includes = celery_app.conf.include
     print(f"  Celery includes: {includes}")
-    assert 'rufus.tasks' in includes, "rufus.tasks not in includes!"
+    assert 'ruvon.tasks' in includes, "ruvon.tasks not in includes!"
     print("  ✅ rufus.tasks included")
 
     # Check broker/backend
@@ -110,9 +110,9 @@ def test_task_registration(celery_app):
     try:
         # Note: This requires a running worker, so we'll just check task names
         core_tasks = [
-            'rufus.tasks.trigger_scheduled_workflow',
-            'rufus.tasks.resume_from_async_task',
-            'rufus.tasks.execute_sub_workflow',
+            'ruvon.tasks.trigger_scheduled_workflow',
+            'ruvon.tasks.resume_from_async_task',
+            'ruvon.tasks.execute_sub_workflow',
         ]
 
         print("  Expected core tasks:")

@@ -18,13 +18,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rufus_edge.capability_gossip import (
+from ruvon_edge.capability_gossip import (
     CapabilityGossipManager,
     CapabilityVector,
     NodeTier,
     classify_node_tier,
 )
-from rufus_edge.nkey_verifier import NKeyPatchVerifier
+from ruvon_edge.nkey_verifier import NKeyPatchVerifier
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +72,10 @@ def test_classify_tier2_sufficient_ram():
 def test_classify_tier3_cuda_accel():
     """Any RAM + CUDA accelerator → TIER_3 regardless of RAM."""
     try:
-        from rufus.utils.platform import AcceleratorType
+        from ruvon.utils.platform import AcceleratorType
         cuda = AcceleratorType.CUDA
     except ImportError:
-        pytest.skip("rufus.utils.platform not available")
+        pytest.skip("ruvon.utils.platform not available")
 
     tier = classify_node_tier(ram_total_mb=256.0, accelerators=[cuda])
     assert tier == NodeTier.TIER_3
@@ -103,7 +103,7 @@ def test_capability_vector_roundtrip():
 
 def test_capability_vector_is_stale():
     """Vectors older than _PEER_STALE_SECS are detected as stale."""
-    from rufus_edge.capability_gossip import _PEER_STALE_SECS
+    from ruvon_edge.capability_gossip import _PEER_STALE_SECS
 
     old_ts = (datetime.now(tz=timezone.utc) - timedelta(seconds=_PEER_STALE_SECS + 10)).isoformat()
     vec = _make_vector(timestamp=old_ts)
@@ -161,8 +161,8 @@ def test_nkey_verifier_invalid_signature():
 # ---------------------------------------------------------------------------
 
 def test_nkey_verifier_from_env_missing(monkeypatch):
-    """from_env() returns None when RUFUS_NKEY_PUBLIC_KEY is not set."""
-    monkeypatch.delenv("RUFUS_NKEY_PUBLIC_KEY", raising=False)
+    """from_env() returns None when RUVON_NKEY_PUBLIC_KEY is not set."""
+    monkeypatch.delenv("RUVON_NKEY_PUBLIC_KEY", raising=False)
     result = NKeyPatchVerifier.from_env()
     assert result is None
 
@@ -206,7 +206,7 @@ async def test_gossip_manager_receives_peer_vector():
 def test_mesh_router_gossip_supplements_p_for_new_peer():
     """When gossip data is available for a peer with no relay history, P is
     derived from gossip capacity rather than the self-reported relay_load."""
-    from rufus_edge.peer_relay import MeshRouter, PeerStatus
+    from ruvon_edge.peer_relay import MeshRouter, PeerStatus
 
     mock_sync = MagicMock()
     mock_gossip = MagicMock()

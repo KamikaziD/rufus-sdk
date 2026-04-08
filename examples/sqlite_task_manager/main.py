@@ -1,7 +1,7 @@
 """
 SQLite Task Manager Example
 
-Demonstrates using Rufus SDK with SQLite persistence for a task approval workflow.
+Demonstrates using Ruvon SDK with SQLite persistence for a task approval workflow.
 
 Usage:
     python examples/sqlite_task_manager/main.py
@@ -12,12 +12,12 @@ import asyncio
 import argparse
 from pathlib import Path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def initialize_database(db_path: str):
@@ -166,7 +166,7 @@ async def main():
     initial_data = {
         "task_id": "TASK-001",
         "title": "Implement SQLite persistence layer",
-        "description": "Add SQLite support to Rufus SDK for development and testing",
+        "description": "Add SQLite support to Ruvon SDK for development and testing",
         "priority": "high",
         "category": "development",
         "requires_approval": True,

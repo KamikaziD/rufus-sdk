@@ -1,5 +1,5 @@
 """
-Performance Benchmarks for Rufus SDK
+Performance Benchmarks for Ruvon SDK
 
 This script benchmarks key performance metrics:
 - Workflow throughput (workflows/sec)
@@ -15,8 +15,8 @@ from typing import List, Dict, Any
 from pydantic import BaseModel
 
 # Test if optimizations are enabled
-from rufus.utils.serialization import get_backend
-import rufus
+from ruvon.utils.serialization import get_backend
+import ruvon
 
 
 class BenchmarkState(BaseModel):
@@ -36,8 +36,8 @@ def benchmark_msgspec(iterations: int = 10000):
     """Benchmark msgspec typed encode/decode vs orjson dict round-trip."""
     try:
         import msgspec
-        from rufus.providers.dtos import WorkflowRecord
-        from rufus.utils.serialization import decode_typed, encode_struct
+        from ruvon.providers.dtos import WorkflowRecord
+        from ruvon.utils.serialization import decode_typed, encode_struct
     except ImportError:
         return {"skipped": True, "reason": "msgspec not available"}
 
@@ -73,7 +73,7 @@ def benchmark_msgspec(iterations: int = 10000):
     typed_decode_time = time.perf_counter() - start
 
     # Compare: orjson dict round-trip (current path without msgspec)
-    from rufus.utils.serialization import deserialize, serialize_bytes
+    from ruvon.utils.serialization import deserialize, serialize_bytes
     sample_dict = msgspec.to_builtins(sample_record)
     sample_dict_bytes = serialize_bytes(sample_dict)
     start = time.perf_counter()
@@ -95,7 +95,7 @@ def benchmark_msgspec(iterations: int = 10000):
 
 def benchmark_serialization(iterations: int = 10000):
     """Benchmark JSON serialization performance"""
-    from rufus.utils.serialization import serialize, deserialize
+    from ruvon.utils.serialization import serialize, deserialize
 
     test_data = {
         "workflow_id": "test_123",
@@ -144,13 +144,13 @@ def benchmark_serialization(iterations: int = 10000):
 
 def benchmark_import_caching(iterations: int = 1000):
     """Benchmark import caching effectiveness"""
-    from rufus.builder import WorkflowBuilder
+    from ruvon.builder import WorkflowBuilder
 
     # NOTE: intentional use of private API for caching benchmark
     WorkflowBuilder._import_cache.clear()
 
     # Use a real rufus function for testing
-    test_path = "rufus.utils.serialization.serialize"
+    test_path = "ruvon.utils.serialization.serialize"
 
     # First import (cache miss)
     start = time.perf_counter()
@@ -247,7 +247,7 @@ async def benchmark_workflow_throughput(num_workflows: int = 1000):
     Note: This is a simplified benchmark using in-memory execution.
     For realistic benchmarks, use the full WorkflowBuilder with persistence.
     """
-    from rufus.models import StepContext
+    from ruvon.models import StepContext
 
     # Simulate workflow executions
     workflows = []

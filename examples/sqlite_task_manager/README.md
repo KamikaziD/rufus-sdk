@@ -1,6 +1,6 @@
 # SQLite Task Manager Example
 
-A simple task management workflow using Rufus SDK with SQLite persistence.
+A simple task management workflow using Ruvon SDK with SQLite persistence.
 
 ## Overview
 
@@ -81,7 +81,7 @@ The example creates a task approval workflow with the following steps:
 To use PostgreSQL instead (for production):
 
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(
     db_url="postgresql://user:pass@localhost/rufus"

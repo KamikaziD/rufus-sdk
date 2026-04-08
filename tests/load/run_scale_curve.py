@@ -315,8 +315,8 @@ def main():
     )
     parser.add_argument(
         "--cloud-url",
-        default=os.getenv("RUFUS_CLOUD_URL", "http://localhost:8000"),
-        help="Cloud control-plane URL (default: RUFUS_CLOUD_URL or http://localhost:8000)",
+        default=os.getenv("RUVON_CLOUD_URL", "http://localhost:8000"),
+        help="Cloud control-plane URL (default: RUVON_CLOUD_URL or http://localhost:8000)",
     )
     parser.add_argument(
         "--output-dir",

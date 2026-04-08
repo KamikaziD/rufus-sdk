@@ -1,4 +1,4 @@
-# Rufus SDK Examples
+# Ruvon SDK Examples
 
 Complete working examples demonstrating Rufus workflows across different industries and use cases.
 
@@ -339,7 +339,7 @@ python -m http.server 8080
 
 All examples require:
 ```bash
-# Install Rufus SDK
+# Install Ruvon SDK
 pip install -r requirements.txt
 ```
 
@@ -389,7 +389,7 @@ See [Contributing Guide](../docs/appendices/contributing.md) for details.
 - **General questions:** See [Documentation](../docs/index.md)
 - **Example-specific:** Check the example's README.md
 - **Stuck?** Try the [Troubleshooting Guide](../docs/how-to-guides/troubleshooting.md)
-- **Still stuck?** Open an issue on [GitHub](https://github.com/KamikaziD/rufus-sdk/issues)
+- **Still stuck?** Open an issue on [GitHub](https://github.com/KamikaziD/ruvon-sdk/issues)
 
 ---
 

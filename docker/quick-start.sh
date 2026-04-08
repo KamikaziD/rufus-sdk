@@ -34,7 +34,7 @@ docker-compose -f docker-compose.production.yml up -d postgres redis
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL..."
 sleep 5
-until docker-compose -f docker-compose.production.yml exec -T postgres pg_isready -U rufus > /dev/null 2>&1; do
+until docker-compose -f docker-compose.production.yml exec -T postgres pg_isready -U ruvon > /dev/null 2>&1; do
     echo "   Still waiting for PostgreSQL..."
     sleep 2
 done
@@ -42,9 +42,9 @@ echo "✅ PostgreSQL is ready"
 
 # Create database if it doesn't exist
 echo "🗄️  Creating database if needed..."
-docker-compose -f docker-compose.production.yml exec -T postgres psql -U rufus -d postgres -tc \
-    "SELECT 1 FROM pg_database WHERE datname = 'rufus_production'" | grep -q 1 || \
-    docker-compose -f docker-compose.production.yml exec -T postgres createdb -U rufus rufus_production
+docker-compose -f docker-compose.production.yml exec -T postgres psql -U ruvon -d postgres -tc \
+    "SELECT 1 FROM pg_database WHERE datname = 'ruvon_production'" | grep -q 1 || \
+    docker-compose -f docker-compose.production.yml exec -T postgres createdb -U ruvon ruvon_production
 echo "✅ Database ready"
 
 # Wait for Redis to be ready
@@ -58,8 +58,8 @@ echo "✅ Redis is ready"
 # Apply database migrations
 echo ""
 echo "📦 Applying database migrations..."
-docker-compose -f docker-compose.production.yml run --rm rufus-server \
-    sh -c "cd src/rufus && alembic upgrade head"
+docker-compose -f docker-compose.production.yml run --rm ruvon-server \
+    sh -c "cd src/ruvon && alembic upgrade head"
 echo "✅ Migrations applied"
 
 # Start workers
@@ -71,7 +71,7 @@ docker-compose -f docker-compose.production.yml up -d --scale celery-worker=$WOR
 # Start monitoring and API
 echo ""
 echo "📊 Starting Flower monitoring and API server..."
-docker-compose -f docker-compose.production.yml up -d flower rufus-server
+docker-compose -f docker-compose.production.yml up -d flower ruvon-server
 
 # Wait a bit for workers to register
 echo ""

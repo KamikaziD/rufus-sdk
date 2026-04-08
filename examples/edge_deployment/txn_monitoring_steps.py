@@ -27,7 +27,7 @@ from collections import defaultdict
 
 from pydantic import BaseModel
 
-from rufus.models import WorkflowJumpDirective
+from ruvon.models import WorkflowJumpDirective
 
 logger = logging.getLogger(__name__)
 
@@ -368,8 +368,8 @@ async def score_with_wasm(state, context, **kw) -> dict:
     # Only attempt WASM if binary is present and non-empty (placeholder is 0 bytes)
     if os.path.exists(wasm_path) and os.path.getsize(wasm_path) > 0:
         try:
-            from rufus.implementations.execution.wasm_runtime import WasmRuntime
-            from rufus.models import WasmConfig
+            from ruvon.implementations.execution.wasm_runtime import WasmRuntime
+            from ruvon.models import WasmConfig
 
             wasm_bytes = open(wasm_path, "rb").read()
             wasm_hash = hashlib.sha256(wasm_bytes).hexdigest()

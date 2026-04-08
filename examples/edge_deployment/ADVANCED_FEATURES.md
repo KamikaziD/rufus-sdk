@@ -1,10 +1,10 @@
 # Advanced & Enterprise Features
 
-Complete guide to Tier 4 (Advanced) and Tier 5 (Enterprise) features for Rufus Edge.
+Complete guide to Tier 4 (Advanced) and Tier 5 (Enterprise) features for Ruvon Edge.
 
 ## Overview
 
-This document covers 6 advanced capabilities that extend the Rufus Edge command system for enterprise deployments:
+This document covers 6 advanced capabilities that extend the Ruvon Edge command system for enterprise deployments:
 
 **Tier 4 - Advanced Features** (Production-Ready):
 1. **Command Versioning** - Track command definition changes over time
@@ -920,7 +920,7 @@ http://localhost:8000/graphql
 
 ## 5. Multi-Cloud Deployment
 
-Deploy Rufus Edge across AWS, Azure, and GCP for redundancy and regional presence.
+Deploy Ruvon Edge across AWS, Azure, and GCP for redundancy and regional presence.
 
 ### Architecture
 
@@ -954,7 +954,7 @@ provider "aws" {
 }
 
 # VPC
-resource "aws_vpc" "rufus" {
+resource "aws_vpc" "ruvon" {
   cidr_block = "10.0.0.0/16"
 
   tags = {
@@ -963,20 +963,20 @@ resource "aws_vpc" "rufus" {
 }
 
 # ECS Cluster
-resource "aws_ecs_cluster" "rufus" {
+resource "aws_ecs_cluster" "ruvon" {
   name = "rufus-edge-cluster"
 }
 
 # RDS PostgreSQL
-resource "aws_db_instance" "rufus" {
+resource "aws_db_instance" "ruvon" {
   identifier        = "rufus-edge-db"
   engine            = "postgres"
   engine_version    = "15.3"
   instance_class    = "db.t3.medium"
   allocated_storage = 100
 
-  db_name  = "rufus"
-  username = "rufus"
+  db_name  = "ruvon"
+  username = "ruvon"
   password = var.db_password
 
   vpc_security_group_ids = [aws_security_group.db.id]
@@ -991,7 +991,7 @@ resource "aws_db_instance" "rufus" {
 }
 
 # Application Load Balancer
-resource "aws_lb" "rufus" {
+resource "aws_lb" "ruvon" {
   name               = "rufus-edge-alb"
   internal           = false
   load_balancer_type = "application"
@@ -1000,7 +1000,7 @@ resource "aws_lb" "rufus" {
 }
 
 # ECS Service
-resource "aws_ecs_service" "rufus" {
+resource "aws_ecs_service" "ruvon" {
   name            = "rufus-edge-service"
   cluster         = aws_ecs_cluster.rufus.id
   task_definition = aws_ecs_task_definition.rufus.arn
@@ -1021,7 +1021,7 @@ resource "aws_ecs_service" "rufus" {
 }
 
 # Task Definition
-resource "aws_ecs_task_definition" "rufus" {
+resource "aws_ecs_task_definition" "ruvon" {
   family                   = "rufus-edge"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -1134,7 +1134,7 @@ resource "aws_ecs_task_definition" "rufus" {
       "properties": {
         "createMode": "Default",
         "version": "11",
-        "administratorLogin": "rufus",
+        "administratorLogin": "ruvon",
         "administratorLoginPassword": "[parameters('dbPassword')]",
         "storageProfile": {
           "storageMB": 102400,
@@ -1176,7 +1176,7 @@ steps:
       - '--set-env-vars=DATABASE_URL=postgresql://rufus@/rufus?host=/cloudsql/$PROJECT_ID:us-central1:rufus-edge-db'
 
 # Terraform for Cloud SQL
-resource "google_sql_database_instance" "rufus" {
+resource "google_sql_database_instance" "ruvon" {
   name             = "rufus-edge-db"
   database_version = "POSTGRES_15"
   region           = "us-central1"
@@ -1648,4 +1648,4 @@ This document covers 6 advanced features:
 5. ✅ Multi-Cloud - AWS/Azure/GCP deployment (configs provided)
 6. ✅ AI Anomaly Detection - ML-based fraud detection (framework provided)
 
-All features are designed to scale with the Rufus Edge platform and integrate seamlessly with the existing command system.
+All features are designed to scale with the Ruvon Edge platform and integrate seamlessly with the existing command system.

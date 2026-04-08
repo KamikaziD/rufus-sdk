@@ -15,8 +15,8 @@ import tempfile
 import subprocess
 from pathlib import Path
 
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 
 async def test_postgres_fresh_setup():

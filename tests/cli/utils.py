@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 import yaml
 
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 # Test state model for sample workflows

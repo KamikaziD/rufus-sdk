@@ -1,6 +1,6 @@
-# Rufus Edge Deployment Demo
+# Ruvon Edge Deployment Demo
 
-This directory contains everything you need to demo the Rufus Cloud Policy Engine
+This directory contains everything you need to demo the Ruvon Cloud Policy Engine
 with a heterogeneous device fleet.
 
 ## Architecture

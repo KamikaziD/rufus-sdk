@@ -1,10 +1,10 @@
-# Rufus CLI Tests
+# Ruvon CLI Tests
 
-Comprehensive tests for the Rufus CLI tool covering all 21+ commands across 4 command groups.
+Comprehensive tests for the Ruvon CLI tool covering all 21+ commands across 4 command groups.
 
 ## Overview
 
-The Rufus CLI has the following command structure:
+The Ruvon CLI has the following command structure:
 
 **Config Commands** (`rufus config *`):
 - `show` - Display current configuration
@@ -50,7 +50,7 @@ pytest tests/cli/test_config_cmd.py
 pytest tests/cli/ -v
 
 # Run with coverage
-pytest tests/cli/ --cov=rufus_cli --cov-report=html
+pytest tests/cli/ --cov=ruvon_cli --cov-report=html
 
 # Run single test
 pytest tests/cli/test_config_cmd.py::TestConfigShow::test_config_show_default
@@ -125,7 +125,7 @@ Test end-to-end workflows with real SQLite databases:
 
 ### Auto-used Fixtures
 
-- `set_test_config_path` - Automatically sets `RUFUS_CONFIG_DIR` env var
+- `set_test_config_path` - Automatically sets `RUVON_CONFIG_DIR` env var
 
 ## Testing Patterns
 
@@ -145,7 +145,7 @@ def test_config_show(cli_runner):
 def test_list_workflows(cli_runner, mock_persistence):
     mock_persistence.list_workflows.return_value = []
 
-    with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+    with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
         result = cli_runner.invoke(app, ["list"])
 
     assert result.exit_code == 0
@@ -157,7 +157,7 @@ def test_list_workflows(cli_runner, mock_persistence):
 def test_list_json_output(cli_runner, mock_persistence):
     mock_persistence.list_workflows.return_value = [...]
 
-    with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+    with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
         result = cli_runner.invoke(app, ["list", "--json"])
 
     workflows = json.loads(result.stdout)
@@ -258,10 +258,10 @@ These tests are designed to run in CI/CD pipelines:
 pip install -r requirements.txt
 
 # Run tests with coverage
-pytest tests/cli/ --cov=rufus_cli --cov-report=xml --cov-report=term
+pytest tests/cli/ --cov=ruvon_cli --cov-report=xml --cov-report=term
 
 # Check coverage threshold
-pytest tests/cli/ --cov=rufus_cli --cov-fail-under=80
+pytest tests/cli/ --cov=ruvon_cli --cov-fail-under=80
 ```
 
 ## Troubleshooting
@@ -291,7 +291,7 @@ pytest tests/cli/ --cov=rufus_cli --cov-fail-under=80
 **Fix**: Patch the factory function where it's used, not where it's defined:
 ```python
 # ✅ Correct
-with patch('rufus_cli.providers.create_persistence_provider', return_value=mock):
+with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock):
 
 # ❌ Wrong
 with patch('rufus.implementations.persistence.sqlite.SQLitePersistenceProvider', return_value=mock):
@@ -327,5 +327,5 @@ tests/cli/test_workflow_cmd.py::TestWorkflowList::test_list_with_workflows PASSE
 - [Typer Testing Docs](https://typer.tiangolo.com/tutorial/testing/)
 - [pytest Documentation](https://docs.pytest.org/)
 - [pytest-mock](https://pytest-mock.readthedocs.io/)
-- [Rufus CLI Source](../../src/rufus_cli/)
-- [Rufus SDK Tests](../sdk/) - Good patterns for async testing
+- [Ruvon CLI Source](../../src/ruvon_cli/)
+- [Ruvon SDK Tests](../sdk/) - Good patterns for async testing

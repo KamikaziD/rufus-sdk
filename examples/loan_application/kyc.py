@@ -1,6 +1,6 @@
 import time
 from typing import Any
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from state_models import KYCState
 
 # NOTE: Celery task decorators commented out for sync execution

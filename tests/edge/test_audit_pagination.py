@@ -10,7 +10,7 @@ import pytest_asyncio
 import uuid
 import json
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 
 @pytest_asyncio.fixture

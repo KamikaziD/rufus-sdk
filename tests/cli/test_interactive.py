@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from typer.testing import CliRunner
-from rufus_cli.main import app
+from ruvon_cli.main import app
 
 
 class TestInteractiveRun:
@@ -73,7 +73,7 @@ class TestInputCollector:
 
     def test_collect_from_schema_string(self):
         """Test collecting string input from schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -87,13 +87,13 @@ class TestInputCollector:
         ]
 
         # Mock Prompt.ask to return a value
-        with patch('rufus_cli.input_collector.Prompt.ask', return_value="testuser"):
+        with patch('ruvon_cli.input_collector.Prompt.ask', return_value="testuser"):
             result = collector.collect_from_schema(schema)
             assert result == {"username": "testuser"}
 
     def test_collect_from_schema_boolean(self):
         """Test collecting boolean input from schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -106,13 +106,13 @@ class TestInputCollector:
             }
         ]
 
-        with patch('rufus_cli.input_collector.Confirm.ask', return_value=True):
+        with patch('ruvon_cli.input_collector.Confirm.ask', return_value=True):
             result = collector.collect_from_schema(schema)
             assert result == {"approved": True}
 
     def test_collect_from_schema_integer(self):
         """Test collecting integer input from schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -125,13 +125,13 @@ class TestInputCollector:
             }
         ]
 
-        with patch('rufus_cli.input_collector.IntPrompt.ask', return_value=42):
+        with patch('ruvon_cli.input_collector.IntPrompt.ask', return_value=42):
             result = collector.collect_from_schema(schema)
             assert result == {"count": 42}
 
     def test_collect_from_schema_choice(self):
         """Test collecting choice input from schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -145,13 +145,13 @@ class TestInputCollector:
             }
         ]
 
-        with patch('rufus_cli.input_collector.Prompt.ask', return_value="high"):
+        with patch('ruvon_cli.input_collector.Prompt.ask', return_value="high"):
             result = collector.collect_from_schema(schema)
             assert result == {"priority": "high"}
 
     def test_collect_from_schema_json(self):
         """Test collecting JSON input from schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -164,13 +164,13 @@ class TestInputCollector:
             }
         ]
 
-        with patch('rufus_cli.input_collector.Prompt.ask', return_value='{"key": "value"}'):
+        with patch('ruvon_cli.input_collector.Prompt.ask', return_value='{"key": "value"}'):
             result = collector.collect_from_schema(schema)
             assert result == {"metadata": {"key": "value"}}
 
     def test_collect_from_schema_optional(self):
         """Test collecting optional field."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -184,34 +184,34 @@ class TestInputCollector:
             }
         ]
 
-        with patch('rufus_cli.input_collector.Prompt.ask', return_value=""):
+        with patch('ruvon_cli.input_collector.Prompt.ask', return_value=""):
             result = collector.collect_from_schema(schema)
             # Should return default or None
             assert "optional_field" in result or result == {}
 
     def test_collect_free_form(self):
         """Test collecting free-form JSON input."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
 
-        with patch('rufus_cli.input_collector.Prompt.ask', return_value='{"test": "data"}'):
+        with patch('ruvon_cli.input_collector.Prompt.ask', return_value='{"test": "data"}'):
             result = collector.collect_free_form()
             assert result == {"test": "data"}
 
     def test_confirm_action(self):
         """Test action confirmation."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
 
-        with patch('rufus_cli.input_collector.Confirm.ask', return_value=True):
+        with patch('ruvon_cli.input_collector.Confirm.ask', return_value=True):
             result = collector.confirm_action("Delete workflow")
             assert result is True
 
-        with patch('rufus_cli.input_collector.Confirm.ask', return_value=False):
+        with patch('ruvon_cli.input_collector.Confirm.ask', return_value=False):
             result = collector.confirm_action("Delete workflow")
             assert result is False
 
@@ -221,7 +221,7 @@ class TestInputCollectorEdgeCases:
 
     def test_empty_schema(self):
         """Test with empty schema."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
 
         collector = InputCollector()
         result = collector.collect_from_schema([])
@@ -229,7 +229,7 @@ class TestInputCollectorEdgeCases:
 
     def test_choice_without_choices(self):
         """Test choice type without choices list."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
 
         collector = InputCollector()
         schema = [
@@ -246,7 +246,7 @@ class TestInputCollectorEdgeCases:
 
     def test_keyboard_interrupt(self):
         """Test handling of KeyboardInterrupt during input collection."""
-        from rufus_cli.input_collector import InputCollector
+        from ruvon_cli.input_collector import InputCollector
         from unittest.mock import patch
 
         collector = InputCollector()
@@ -259,6 +259,6 @@ class TestInputCollectorEdgeCases:
             }
         ]
 
-        with patch('rufus_cli.input_collector.Prompt.ask', side_effect=KeyboardInterrupt):
+        with patch('ruvon_cli.input_collector.Prompt.ask', side_effect=KeyboardInterrupt):
             with pytest.raises(KeyboardInterrupt):
                 collector.collect_from_schema(schema)

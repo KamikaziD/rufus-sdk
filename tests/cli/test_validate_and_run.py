@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
-from rufus_cli.validation import WorkflowValidator
+from ruvon_cli.main import app
+from ruvon_cli.validation import WorkflowValidator
 
 
 class TestValidateCommand:
@@ -293,7 +293,7 @@ class TestRunCommand:
         mock_builder.create_workflow = AsyncMock(return_value=mock_workflow)
 
         with patch(
-            "rufus_cli.main._create_providers_for_run",
+            "ruvon_cli.main._create_providers_for_run",
             new=AsyncMock(return_value=(mock_persistence, mock_execution, mock_observer, mock_builder))
         ):
             result = cli_runner.invoke(app, ["run", str(yaml_file), "--data", "{}"])

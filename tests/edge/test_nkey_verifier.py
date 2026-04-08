@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rufus.implementations.security.nkey_verifier import NKeyPatchVerifier
+from ruvon.implementations.security.nkey_verifier import NKeyPatchVerifier
 
 
 FAKE_BINARY = b"\x00asm\x0e\x00\x01\x00" + b"\xab" * 64
@@ -44,7 +44,7 @@ def test_verify_empty_sig_with_key_rejects():
     verifier = NKeyPatchVerifier(trusted_public_key="AXXXXXX")
 
     # Patch _check_nkeys to return True so we enter the nkeys path
-    import rufus.implementations.security.nkey_verifier as _mod
+    import ruvon.implementations.security.nkey_verifier as _mod
     with patch.object(_mod, "_NKEYS_AVAILABLE", True):
         result = verifier.verify(FAKE_BINARY, "")
 
@@ -57,7 +57,7 @@ def test_verify_empty_sig_with_key_rejects():
 
 def test_verify_nkeys_not_installed_accepts(monkeypatch):
     """When nkeys is not installed and a key is configured, accept with warning."""
-    import rufus.implementations.security.nkey_verifier as _mod
+    import ruvon.implementations.security.nkey_verifier as _mod
 
     verifier = NKeyPatchVerifier(trusted_public_key="AXXXXXXX")
 
@@ -74,7 +74,7 @@ def test_verify_nkeys_not_installed_accepts(monkeypatch):
 
 def test_verify_valid_signature_via_mock():
     """verify() returns True when nkeys.verify_signature does not raise."""
-    import rufus.implementations.security.nkey_verifier as _mod
+    import ruvon.implementations.security.nkey_verifier as _mod
 
     # Build a mock nkeys module
     fake_kp = MagicMock()
@@ -100,7 +100,7 @@ def test_verify_valid_signature_via_mock():
 
 def test_verify_invalid_signature_via_mock():
     """verify() returns False when nkeys.verify raises (bad signature)."""
-    import rufus.implementations.security.nkey_verifier as _mod
+    import ruvon.implementations.security.nkey_verifier as _mod
 
     fake_kp = MagicMock()
     fake_kp.verify = MagicMock(side_effect=Exception("invalid signature"))

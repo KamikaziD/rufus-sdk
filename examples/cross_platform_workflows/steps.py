@@ -24,7 +24,7 @@ from cross_platform_workflows.state_models import (
     FieldTechState,
     PagedReasoningState,
 )
-from rufus.models import StepContext, WorkflowJumpDirective
+from ruvon.models import StepContext, WorkflowJumpDirective
 
 
 # ══════════════════════════════════════════════════════════════════════════════

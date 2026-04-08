@@ -1,6 +1,6 @@
 ## Command Scheduling
 
-One-time and recurring command execution with cron-style scheduling for Rufus Edge devices.
+One-time and recurring command execution with cron-style scheduling for Ruvon Edge devices.
 
 ## Overview
 
@@ -501,7 +501,7 @@ The scheduler daemon runs in the background and processes due schedules.
 
 **As a Service**:
 ```bash
-python -m rufus_server.scheduler_daemon \
+python -m ruvon_server.scheduler_daemon \
   --db-url postgresql://user:pass@localhost/rufus \
   --interval 60
 
@@ -512,7 +512,7 @@ python -m rufus_server.scheduler_daemon \
 
 **Run Once** (Testing):
 ```bash
-python -m rufus_server.scheduler_daemon \
+python -m ruvon_server.scheduler_daemon \
   --db-url postgresql://user:pass@localhost/rufus \
   --run-once
 
@@ -537,7 +537,7 @@ After=network.target postgresql.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python -m rufus_server.scheduler_daemon \
+ExecStart=/usr/bin/python -m ruvon_server.scheduler_daemon \
   --db-url postgresql://localhost/rufus \
   --interval 60
 Restart=always
@@ -551,7 +551,7 @@ WantedBy=multi-user.target
 ```yaml
 scheduler:
   image: myapp/rufus:latest
-  command: python -m rufus_server.scheduler_daemon --db-url postgresql://postgres/rufus --interval 60
+  command: python -m ruvon_server.scheduler_daemon --db-url postgresql://postgres/rufus --interval 60
   restart: always
   depends_on:
     - postgres
@@ -573,7 +573,7 @@ spec:
         command:
         - python
         - -m
-        - rufus_server.scheduler_daemon
+        - ruvon_server.scheduler_daemon
         - --db-url
         - postgresql://postgres/rufus
         - --interval

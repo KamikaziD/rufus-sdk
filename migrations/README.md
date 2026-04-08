@@ -1,10 +1,10 @@
 # Database Migrations
 
-This directory contains database schema definitions and migrations for Rufus SDK.
+This directory contains database schema definitions and migrations for Ruvon SDK.
 
 ## Overview
 
-Rufus uses a **unified migration system** where all database initialization (CLI `rufus db init` and SQLite auto-init) applies the same migration files. This eliminates schema drift and ensures consistency across all initialization methods.
+Ruvon uses a **unified migration system** where all database initialization (CLI `rufus db init` and SQLite auto-init) applies the same migration files. This eliminates schema drift and ensures consistency across all initialization methods.
 
 ## Files
 
@@ -120,15 +120,15 @@ python tools/validate_schema.py --all
 
 ### 4. Apply Migrations
 
-**Option A: Using Rufus CLI (Recommended)**
+**Option A: Using Ruvon CLI (Recommended)**
 
 ```bash
 # Initialize database with all migrations
 rufus db init
 
 # Or specify database URL
-rufus db init --db-url postgresql://user:pass@localhost/rufus
-rufus db init --db-url sqlite:///rufus.db
+rufus db init --db-url postgresql://user:pass@localhost/ruvon
+rufus db init --db-url sqlite:///ruvon.db
 
 # Check migration status
 rufus db status

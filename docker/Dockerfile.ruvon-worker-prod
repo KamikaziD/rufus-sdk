@@ -1,0 +1,67 @@
+# Production Rufus Worker Dockerfile
+# Installs ruvon-sdk from PyPI instead of copying source
+# For pre-built Docker Hub images
+
+FROM python:3.11-slim
+
+LABEL maintainer="Rufus Team <team@ruvon.dev>"
+LABEL description="Rufus Workflow Engine - Celery Worker"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ruvon-sdk packages from TestPyPI (TEMPORARY - for testing)
+# TODO: Switch to production PyPI once published
+
+# Step 1: Install ruvon-sdk + ruvon-server (no extras) from TestPyPI
+RUN pip install --no-cache-dir \
+    --index-url https://test.pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'ruvon-sdk==1.0.0rc6' \
+    'ruvon-server==1.0.0rc6'
+
+# Step 2: Install optional dependencies from PyPI (avoids TestPyPI broken packages)
+RUN pip install --no-cache-dir \
+    'asyncpg>=0.27' \
+    'uvloop>=0.19' \
+    'celery[redis]>=5.3' \
+    'redis>=5.0' \
+    'psycopg2-binary>=2.9' \
+    'prometheus-client>=0.19'
+
+# PRODUCTION VERSION (uncomment when published to PyPI):
+# RUN pip install --no-cache-dir 'ruvon-sdk[postgres,performance]==0.6.1' 'ruvon-server[celery]==0.6.1'
+
+# Create directories for user code (will be mounted as volumes)
+RUN mkdir -p /app/config /app/user_code
+
+# Set Python path to include user code directory
+ENV PYTHONPATH=/app:/app/user_code
+
+# Default environment variables (override in docker-compose)
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+ENV DATABASE_URL=postgresql://ruvon:ruvon_secret@postgres:5432/ruvon_production
+ENV WORKER_CONCURRENCY=4
+ENV WORKER_POOL=prefork
+ENV WORKER_LOG_LEVEL=info
+ENV WORKER_REGION=default
+ENV WORKER_ZONE=default
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD celery -A ruvon.celery_app inspect ping -d celery@${HOSTNAME} || exit 1
+
+# Run Celery worker
+CMD celery -A ruvon.celery_app worker \
+    --loglevel=${WORKER_LOG_LEVEL} \
+    --concurrency=${WORKER_CONCURRENCY} \
+    --pool=${WORKER_POOL} \
+    --hostname=worker@${HOSTNAME} \
+    -Q default,high_priority,low_priority

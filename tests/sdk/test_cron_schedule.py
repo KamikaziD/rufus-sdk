@@ -92,7 +92,7 @@ def test_register_schedule_inserts_row():
     CeleryExecutionProvider.register_scheduled_workflow calls pool.execute
     with the correct INSERT statement and parameters.
     """
-    from rufus.implementations.execution.celery import CeleryExecutionProvider
+    from ruvon.implementations.execution.celery import CeleryExecutionProvider
 
     # Build a fake provider with a mock pool
     conn_mock = AsyncMock()
@@ -115,9 +115,9 @@ def test_register_schedule_inserts_row():
     conn_mock.execute = fake_execute
 
     # Patch tasks._persistence_provider and pg_executor
-    with patch("rufus.tasks._persistence_provider", fake_persistence), \
-         patch("rufus.utils.postgres_executor.pg_executor") as mock_pg_exec, \
-         patch("rufus.implementations.execution.celery.pg_executor", mock_pg_exec):
+    with patch("ruvon.tasks._persistence_provider", fake_persistence), \
+         patch("ruvon.utils.postgres_executor.pg_executor") as mock_pg_exec, \
+         patch("ruvon.implementations.execution.celery.pg_executor", mock_pg_exec):
 
         def run_sync(coro):
             import asyncio
@@ -148,7 +148,7 @@ def test_poll_triggers_due_workflows():
     poll_scheduled_workflows triggers trigger_scheduled_workflow.delay for each
     row with next_run_at <= now(), then updates next_run_at.
     """
-    from rufus.tasks import poll_scheduled_workflows
+    from ruvon.tasks import poll_scheduled_workflows
 
     now = datetime.now(timezone.utc)
     due_row = {
@@ -173,9 +173,9 @@ def test_poll_triggers_due_workflows():
 
     triggered = []
 
-    with patch("rufus.tasks._persistence_provider", fake_persistence), \
-         patch("rufus.tasks.pg_executor") as mock_pg_exec, \
-         patch("rufus.tasks.trigger_scheduled_workflow") as mock_trigger:
+    with patch("ruvon.tasks._persistence_provider", fake_persistence), \
+         patch("ruvon.tasks.pg_executor") as mock_pg_exec, \
+         patch("ruvon.tasks.trigger_scheduled_workflow") as mock_trigger:
 
         mock_trigger.delay = MagicMock(side_effect=lambda wf_type, data: triggered.append(wf_type))
 
@@ -204,7 +204,7 @@ def test_poll_skips_future_workflows():
     in the future (the SQL WHERE clause handles this, but we verify no dispatch
     when the DB returns an empty result set).
     """
-    from rufus.tasks import poll_scheduled_workflows
+    from ruvon.tasks import poll_scheduled_workflows
 
     conn_mock = AsyncMock()
     conn_mock.__aenter__ = AsyncMock(return_value=conn_mock)
@@ -220,9 +220,9 @@ def test_poll_skips_future_workflows():
 
     triggered = []
 
-    with patch("rufus.tasks._persistence_provider", fake_persistence), \
-         patch("rufus.tasks.pg_executor") as mock_pg_exec, \
-         patch("rufus.tasks.trigger_scheduled_workflow") as mock_trigger:
+    with patch("ruvon.tasks._persistence_provider", fake_persistence), \
+         patch("ruvon.tasks.pg_executor") as mock_pg_exec, \
+         patch("ruvon.tasks.trigger_scheduled_workflow") as mock_trigger:
 
         mock_trigger.delay = MagicMock(side_effect=lambda wf_type, data: triggered.append(wf_type))
 

@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Dict, Any
 import uuid
 
-from rufus.models import StepContext, WorkflowJumpDirective
+from ruvon.models import StepContext, WorkflowJumpDirective
 
 logger = logging.getLogger(__name__)
 

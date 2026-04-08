@@ -129,7 +129,7 @@ alembic upgrade head
 pip install -e "../../.[celery]"
 
 # Check imports
-python -c "from rufus.celery_app import celery_app; print('OK')"
+python -c "from ruvon.celery_app import celery_app; print('OK')"
 ```
 
 ---

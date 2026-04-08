@@ -2,7 +2,7 @@
 """
 Rufus Load Test Runner.
 
-Command-line interface for running load tests against Rufus Edge control plane.
+Command-line interface for running load tests against Ruvon Edge control plane.
 
 Usage:
     python run_load_test.py --scenario heartbeat --devices 1000 --duration 600
@@ -386,7 +386,7 @@ def print_results(results: LoadTestResults, workers: int = 1):
             print(f"Publish p99 < {p99_threshold:.0f}ms:  {'✅ PASS' if p99_pass else '❌ FAIL'} ({p99:.2f}ms)")
             print(f"Samples:              {len(results.request_latencies):,}")
         else:
-            print("  (no latency samples — is RUFUS_NATS_URL set and NATS server running?)")
+            print("  (no latency samples — is RUVON_NATS_URL set and NATS server running?)")
 
     elif results.scenario == "ruvon_gossip":
         # RUVON capability gossip — measures vector serialise/publish/select pipeline.
@@ -442,7 +442,7 @@ def print_results(results: LoadTestResults, workers: int = 1):
             print(f"Verify p95 < {p95_target_n:.0f}ms:    {'✅ PASS' if lat_pass else '❌ FAIL'} ({p95_n:.2f}ms)")
             print(f"Samples:              {len(nl):,}")
         else:
-            print("  (no latency samples — did nkey_patch run? requires cryptography + rufus-sdk-edge)")
+            print("  (no latency samples — did nkey_patch run? requires cryptography + ruvon-edge)")
 
     elif results.scenario == "mixed":
         # Mixed workload: heartbeat + gossip + SAF simultaneously.
@@ -723,7 +723,7 @@ async def run_all_scenarios(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rufus Edge Load Testing Tool",
+        description="Ruvon Edge Load Testing Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

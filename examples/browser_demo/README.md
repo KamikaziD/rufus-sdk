@@ -1,6 +1,6 @@
 # Rufus Browser Demo
 
-A step-by-step guide to running the Rufus SDK entirely in the browser — no backend, no
+A step-by-step guide to running the Ruvon SDK entirely in the browser — no backend, no
 Node.js, no cloud. The same Python `WorkflowBuilder` + `Workflow` step functions that run on
 a POS terminal or cloud worker execute here via Pyodide (Python 3.12 compiled to WebAssembly).
 Workflow 3 adds WebGPU-accelerated AI inference via Transformers.js, called from Python through
@@ -15,7 +15,7 @@ index.html (main thread)
   │
   ├── spawns Worker(worker.js)
   │     ├── Pyodide v0.27 — Python 3.12 runtime (WASM)
-  │     │     ├── rufus-sdk 0.8.0 wheel (served from /dist/)
+  │     │     ├── ruvon-sdk 0.8.0 wheel (served from /dist/)
   │     │     ├── IndexedDBPersistence  — InMemoryPersistence + IDB mirror
   │     │     ├── BrowserSyncExecutor   — thread-free SyncExecutor subclass
   │     │     ├── BrowserObserver       — WorkflowObserver → postMessage bridge
@@ -41,7 +41,7 @@ Four demo workflows, each illustrating different SDK patterns:
 ## Prerequisites
 
 - Python ≥ 3.10 (to serve the wheel locally)
-- The repo cloned and the `rufus-sdk` wheel built (see step 1)
+- The repo cloned and the `ruvon-sdk` wheel built (see step 1)
 - Chrome 113+ recommended (best WebGPU support); Firefox works (WASM fallback for Workflow 3)
 
 ---
@@ -51,7 +51,7 @@ Four demo workflows, each illustrating different SDK patterns:
 ### Option A — Public URL (no setup required)
 
 Open or share:
-**<https://kamikazid.github.io/rufus-sdk/>**
+**<https://kamikazid.github.io/ruvon-sdk/>**
 
 The demo is hosted on GitHub Pages and auto-deploys on every push to `main`.
 Nothing to install, no server to run.
@@ -65,14 +65,14 @@ to any static host:
 - **Vercel**: `npx vercel --public` in the folder containing the two files
 - **itch.io / GitHub Gist**: upload as an HTML project
 
-Without a co-located wheel the demo automatically installs `rufus-sdk==0.8.0`
+Without a co-located wheel the demo automatically installs `ruvon-sdk==0.8.0`
 from TestPyPI on first load (~5–10 s extra). All other dependencies (pydantic,
 jinja2, etc.) come from PyPI as normal.
 
 ### Option C — Local server (for developers)
 
 ```bash
-cd /path/to/rufus-sdk
+cd /path/to/ruvon-sdk
 python examples/browser_demo/serve.py 8080
 # open http://localhost:8080/examples/browser_demo/
 ```
@@ -108,22 +108,22 @@ The demo lives in two files: `worker.js` and `index.html`. Nothing in the SDK is
 
 ### Step 1 — Build and serve the wheel
 
-The browser fetches the `rufus-sdk` wheel from the same origin as the page.
+The browser fetches the `ruvon-sdk` wheel from the same origin as the page.
 
 ```bash
 # From repo root
 python -m build --wheel --outdir dist
-# produces dist/rufus_sdk-0.8.0-py3-none-any.whl
+# produces dist/ruvon_sdk-0.8.0-py3-none-any.whl
 
 python -m http.server 8080  # serve from repo root
-# wheel reachable at http://localhost:8080/dist/rufus_sdk-0.8.0-py3-none-any.whl
+# wheel reachable at http://localhost:8080/dist/ruvon_sdk-0.8.0-py3-none-any.whl
 ```
 
 The worker derives the wheel URL from `self.location.origin` at runtime:
 
 ```js
 const BASE = self.location.origin;
-_wheelUrl = `${BASE}/dist/rufus_sdk-0.8.0-py3-none-any.whl`;
+_wheelUrl = `${BASE}/dist/ruvon_sdk-0.8.0-py3-none-any.whl`;
 ```
 
 ### Step 2 — Load Pyodide in a Web Worker
@@ -148,7 +148,7 @@ async function init() {
 
 ### Step 3 — Install the SDK wheel via micropip
 
-`rufus-sdk` depends on `cryptography`, `orjson`, `uvloop`, and `asyncpg` which have no
+`ruvon-sdk` depends on `cryptography`, `orjson`, `uvloop`, and `asyncpg` which have no
 pure-Python WASM wheels. Register them as mocks so micropip's resolver sees them as
 satisfied, then install the SDK wheel normally:
 
@@ -171,8 +171,8 @@ tries to call `uvloop.EventLoopPolicy()` on the mock:
 
 ```python
 import os
-os.environ["RUFUS_USE_UVLOOP"] = "false"
-os.environ["RUFUS_USE_ORJSON"] = "false"
+os.environ["RUVON_USE_UVLOOP"] = "false"
+os.environ["RUVON_USE_ORJSON"] = "false"
 ```
 
 ### Step 4 — Create browser-adapted providers
@@ -616,7 +616,7 @@ No SDK files are modified by the demo.
 → Do not use `deps=False` — use `add_mock_package` for native-extension packages (see step 3).
 
 **`AttributeError: module 'uvloop' has no attribute 'EventLoopPolicy'`**
-→ Set `RUFUS_USE_UVLOOP=false` before importing rufus (see step 3).
+→ Set `RUVON_USE_UVLOOP=false` before importing rufus (see step 3).
 
 **`SyntaxError: Missing } in template expression` in worker.js**
 → A Python f-string inside `PYTHON_SETUP` contains `${`. Remove the `$`.
@@ -628,7 +628,7 @@ No SDK files are modified by the demo.
 → The server must be started from the **repo root**, not from `examples/browser_demo/`:
 ```bash
 cd /path/to/rufus
-python -m http.server 8080   # correct — wheel at /dist/rufus_sdk-0.8.0-py3-none-any.whl
+python -m http.server 8080   # correct — wheel at /dist/ruvon_sdk-0.8.0-py3-none-any.whl
 ```
 
 **Storage quota toast appears immediately**

@@ -1,5 +1,5 @@
 """
-Healthcare Wearable Demo - Rufus Edge AI Inference
+Healthcare Wearable Demo - Ruvon Edge AI Inference
 
 Demonstrates on-device AI for patient vital signs monitoring:
 - Heart rate anomaly detection
