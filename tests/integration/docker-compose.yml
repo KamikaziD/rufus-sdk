@@ -3,24 +3,24 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: rufus-test-postgres
+    container_name: ruvon-test-postgres
     environment:
-      POSTGRES_DB: rufus_test
-      POSTGRES_USER: rufus
-      POSTGRES_PASSWORD: rufus_secret_2024
+      POSTGRES_DB: ruvon_test
+      POSTGRES_USER: ruvon
+      POSTGRES_PASSWORD: ruvon_secret_2024
     ports:
       - "5434:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rufus -d rufus_test"]
+      test: ["CMD-SHELL", "pg_isready -U ruvon -d ruvon_test"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: rufus-test-redis
+    container_name: ruvon-test-redis
     ports:
       - "6380:6379"
     command: redis-server --appendonly yes

@@ -1,6 +1,6 @@
 # Running Tests
 
-All commands run from the repo root: `/Users/kim/PycharmProjects/rufus`
+All commands run from the repo root: `/Users/kim/PycharmProjects/ruvon`
 
 ---
 
@@ -9,8 +9,8 @@ All commands run from the repo root: `/Users/kim/PycharmProjects/rufus`
 ```bash
 # Install all dev dependencies
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 
 # Optional extras used by benchmarks / load tests
 pip install cryptography uvloop orjson httpx psutil python-dotenv
@@ -100,7 +100,7 @@ python tests/benchmarks/persistence_benchmark.py \
     --postgres "postgresql://myapp:change_me_in_production@localhost:5432/my_app_db"
 
 # Via environment variable
-export RUFUS_POSTGRES_URL="postgresql://myapp:change_me_in_production@localhost:5432/my_app_db"
+export RUVON_POSTGRES_URL="postgresql://myapp:change_me_in_production@localhost:5432/my_app_db"
 python tests/benchmarks/persistence_benchmark.py
 
 # Custom iteration count
@@ -114,8 +114,8 @@ python tests/benchmarks/persistence_benchmark.py --iterations 500
 Requires the Docker stack running at `http://localhost:8000`.
 
 ```bash
-# Start the stack (from rufus_test directory)
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml up -d
+# Start the stack (from ruvon_test directory)
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml up -d
 ```
 
 ### Single scenario
@@ -177,21 +177,21 @@ python tests/load/run_load_test.py --all --devices 100 --output-dir /tmp/load_re
 
 ```bash
 # Start all services
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml up -d
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml up -d
 
 # Stop all services
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml down
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml down
 
 # Restart server only (after code changes — hot-reload is off in 4-worker mode)
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml \
-    restart rufus-server
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml \
+    restart ruvon-server
 
 # Tail server logs
-docker logs test-rufus-server -f
+docker logs test-ruvon-server -f
 
 # Tail all logs
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml logs -f
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml logs -f
 
 # Check service health
-docker compose -f /Users/kim/PycharmProjects/rufus_test/docker-compose.test-async.yml ps
+docker compose -f /Users/kim/PycharmProjects/ruvon_test/docker-compose.test-async.yml ps
 ```

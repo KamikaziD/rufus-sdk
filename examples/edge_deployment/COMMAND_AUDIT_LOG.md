@@ -420,7 +420,7 @@ Find authentication failures and API key operations:
 - 10.5: Secure audit trails
 - 10.7: Retain audit trail history for at least one year
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```bash
 # 1. Verify 7-year retention policy is active
 SELECT * FROM audit_retention_policies WHERE policy_name = 'pci_compliance_default';
@@ -445,7 +445,7 @@ python cloud_admin.py audit-stats \
 - Document who made changes and when
 - Retain evidence of control effectiveness
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```bash
 # 1. Query all configuration changes
 python cloud_admin.py audit-query \
@@ -469,7 +469,7 @@ python cloud_admin.py audit-export \
 - Track data processing activities
 - Support right to access (Article 15)
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```json
 {
   "event_types": ["device_registered", "device_updated", "device_deleted"],

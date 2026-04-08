@@ -1,4 +1,4 @@
-# Rufus Debug UI
+# Ruvon Debug UI
 
 Visual workflow inspection and debugging interface, ported from Confucius.
 
@@ -158,12 +158,12 @@ debug_ui/
 
 ### Ported from Confucius
 
-This Debug UI was originally developed for the Confucius workflow engine and has been ported to Rufus with minimal changes:
+This Debug UI was originally developed for the Confucius workflow engine and has been ported to Ruvon with minimal changes:
 
 **Changes Made:**
-- Updated branding: "Confucius" → "Rufus"
+- Updated branding: "Confucius" → "Ruvon"
 - Updated tagline to reflect fintech focus
-- API endpoints remain compatible (Rufus preserved Confucius API structure)
+- API endpoints remain compatible (Ruvon preserved Confucius API structure)
 
 **Not Changed:**
 - Core functionality (workflow execution, state inspection)
@@ -173,7 +173,7 @@ This Debug UI was originally developed for the Confucius workflow engine and has
 
 ### Future Enhancements
 
-Potential improvements for Rufus-specific features:
+Potential improvements for Ruvon-specific features:
 
 - **WebSocket support** for real-time workflow updates (no polling)
 - **Workflow graph visualization** (DAG rendering)

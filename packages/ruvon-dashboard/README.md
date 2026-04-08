@@ -18,13 +18,13 @@ A production-grade React/Next.js 14 management UI for the Ruvon Edge control pla
 
 ### Prerequisites
 - Node.js 20+
-- Rufus API server running at `localhost:8000`
+- Ruvon API server running at `localhost:8000`
 - Keycloak running at `localhost:8080` (see `docker/docker-compose.yml`)
 
 ### Local Dev
 
 ```bash
-cd packages/rufus-dashboard
+cd packages/ruvon-dashboard
 cp .env.example .env.local
 # Edit .env.local — set NEXTAUTH_SECRET + confirm URLs
 npm install
@@ -36,8 +36,8 @@ npm run dev
 
 ```bash
 cd docker
-docker compose up -d    # starts postgres + keycloak + rufus-server
-cd ../packages/rufus-dashboard
+docker compose up -d    # starts postgres + keycloak + ruvon-server
+cd ../packages/ruvon-dashboard
 npm run dev             # Next.js dev server
 ```
 
@@ -47,19 +47,19 @@ npm run dev             # Next.js dev server
 |----------|----------|-------------|
 | `NEXTAUTH_URL` | Yes | Dashboard base URL (e.g. `http://localhost:3000`) |
 | `NEXTAUTH_SECRET` | Yes | Random 32-byte secret for JWT signing |
-| `KEYCLOAK_CLIENT_ID` | Yes | `rufus-dashboard` |
-| `KEYCLOAK_ISSUER` | Yes | `http://localhost:8080/realms/rufus` |
-| `NEXT_PUBLIC_RUVON_API_URL` | Yes | Rufus API URL (e.g. `http://localhost:8000`) |
+| `KEYCLOAK_CLIENT_ID` | Yes | `ruvon-dashboard` |
+| `KEYCLOAK_ISSUER` | Yes | `http://localhost:8080/realms/ruvon` |
+| `NEXT_PUBLIC_RUVON_API_URL` | Yes | Ruvon API URL (e.g. `http://localhost:8000`) |
 
 ## Seed Users (dev)
 
 | Username | Password | Role |
 |----------|----------|------|
-| `admin` | `rufus-dev` | `SUPER_ADMIN` |
-| `fleet` | `rufus-dev` | `FLEET_MANAGER` |
-| `operator` | `rufus-dev` | `WORKFLOW_OPERATOR` |
-| `auditor` | `rufus-dev` | `AUDITOR` |
-| `readonly` | `rufus-dev` | `READ_ONLY` |
+| `admin` | `ruvon-dev` | `SUPER_ADMIN` |
+| `fleet` | `ruvon-dev` | `FLEET_MANAGER` |
+| `operator` | `ruvon-dev` | `WORKFLOW_OPERATOR` |
+| `auditor` | `ruvon-dev` | `AUDITOR` |
+| `readonly` | `ruvon-dev` | `READ_ONLY` |
 
 ## RBAC
 

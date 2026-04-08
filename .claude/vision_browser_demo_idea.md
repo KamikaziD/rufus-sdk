@@ -2,7 +2,7 @@ The question: Would we for demonstration purposes be able to update the browser-
 
 If you open a 1x browser tab and open another browser tab on another device while on the same local network be able to ping each other?
 
-Absolutely. This is the "Eureka moment" for the **Rufus SDK**. By leveraging **WASI 0.3** and the **WebRTC Data Channel** (bridged through the Rust Muscle), we can turn standard browser tabs into local mesh nodes that skip the cloud entirely.
+Absolutely. This is the "Eureka moment" for the **Ruvon SDK**. By leveraging **WASI 0.3** and the **WebRTC Data Channel** (bridged through the Rust Muscle), we can turn standard browser tabs into local mesh nodes that skip the cloud entirely.
 
 Since the **Muscle** handles the low-level networking, it can use **mDNS (Multicast DNS)** or a local signaling "handshake" to discover other tabs on the same WiFi/LAN.
 
@@ -34,7 +34,7 @@ To make this "Great" for your March 2026 demo, we shouldn't just show a "Ping." 
 Here is how the **Sovereign Provider** handles the environment detection for this demo. It needs to know whether to look for a Cloud API or a Local Peer.
 
 ```python
-# rufus_sdk/core/detection.py
+# ruvon_sdk/core/detection.py
 
 async def discover_peers():
     """
@@ -61,7 +61,7 @@ async def discover_peers():
 
 This exact demonstration is what the **Bill & Melinda Gates Foundation** needs to see for **Financial Inclusion**. 
 
-> **The Scenario:** A merchant and a customer are in a market with no cell reception. Both open the Rufus-powered PWA. Their phones "Ping" each other via the local mesh. The transaction is signed by the **Vault**, verified by the **Muscle**, and stored in the **Brain**. When one of them eventually gets a signal, the whole mesh syncs to the cloud.
+> **The Scenario:** A merchant and a customer are in a market with no cell reception. Both open the Ruvon-powered PWA. Their phones "Ping" each other via the local mesh. The transaction is signed by the **Vault**, verified by the **Muscle**, and stored in the **Brain**. When one of them eventually gets a signal, the whole mesh syncs to the cloud.
 
 ### **The Technical Trade-off**
 * **Pro:** Total privacy and 0ms latency for local interactions.

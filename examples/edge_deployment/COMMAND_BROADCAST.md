@@ -594,7 +594,7 @@ python cloud_admin.py broadcast-status broadcast-abc123
 ps aux | grep broadcast
 
 # Check logs
-tail -f /var/log/rufus/broadcast.log
+tail -f /var/log/ruvon/broadcast.log
 ```
 
 ## Database Schema
@@ -627,7 +627,7 @@ ADD COLUMN broadcast_id VARCHAR(100) REFERENCES command_broadcasts(broadcast_id)
 ## Migration
 
 ```bash
-psql -U rufus -d rufus < docker/migrations/add_command_broadcast_support.sql
+psql -U ruvon -d ruvon < docker/migrations/add_command_broadcast_support.sql
 ```
 
 ## Performance Considerations

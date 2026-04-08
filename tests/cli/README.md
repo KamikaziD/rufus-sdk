@@ -6,7 +6,7 @@ Comprehensive tests for the Ruvon CLI tool covering all 21+ commands across 4 co
 
 The Ruvon CLI has the following command structure:
 
-**Config Commands** (`rufus config *`):
+**Config Commands** (`ruvon config *`):
 - `show` - Display current configuration
 - `set-persistence` - Configure persistence provider (SQLite/PostgreSQL/memory)
 - `set-execution` - Configure execution provider (sync/thread_pool/celery)
@@ -14,7 +14,7 @@ The Ruvon CLI has the following command structure:
 - `reset` - Reset configuration to defaults
 - `path` - Show configuration file path
 
-**Workflow Commands** (`rufus workflow *` or top-level aliases):
+**Workflow Commands** (`ruvon workflow *` or top-level aliases):
 - `list` - List workflows with filtering
 - `start` - Start new workflow
 - `show` - Show workflow details
@@ -24,7 +24,7 @@ The Ruvon CLI has the following command structure:
 - `metrics` - View performance metrics
 - `cancel` - Cancel running workflow
 
-**Database Commands** (`rufus db *`):
+**Database Commands** (`ruvon db *`):
 - `init` - Initialize database schema
 - `migrate` - Apply database migrations
 - `status` - Show migration status
@@ -109,7 +109,7 @@ Test end-to-end workflows with real SQLite databases:
 ### Core Fixtures (conftest.py)
 
 - `cli_runner` - CliRunner for invoking Typer commands
-- `temp_config_dir` - Temporary `.rufus` config directory
+- `temp_config_dir` - Temporary `.ruvon` config directory
 - `temp_db` - Temporary SQLite database path
 - `initialized_db` - SQLite database with schema initialized
 - `sample_config` - Pre-configured config file
@@ -232,7 +232,7 @@ To add tests for a new CLI command:
 2. **Add test class** to appropriate test file:
    ```python
    class TestNewCommand:
-       """Tests for 'rufus new-command' command."""
+       """Tests for 'ruvon new-command' command."""
 
        def test_new_command_basic(self, cli_runner):
            result = cli_runner.invoke(app, ["new-command"])
@@ -294,7 +294,7 @@ pytest tests/cli/ --cov=ruvon_cli --cov-fail-under=80
 with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock):
 
 # ❌ Wrong
-with patch('rufus.implementations.persistence.sqlite.SQLitePersistenceProvider', return_value=mock):
+with patch('ruvon.implementations.persistence.sqlite.SQLitePersistenceProvider', return_value=mock):
 ```
 
 ## Example Test Run Output

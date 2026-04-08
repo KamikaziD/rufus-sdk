@@ -2,15 +2,15 @@
 
 ## Overview
 
-Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach:
+Ruvon uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach:
 
 - **SQLAlchemy** — schema definition (single source of truth)
 - **Alembic** — migration generation and management
 - **Raw SQL** — all runtime queries (45% faster than SQLAlchemy Core)
 
-**Single Source of Truth:** `src/rufus/db_schema/database.py`
-**Edge Schema Constants:** `src/rufus/db_schema/edge_database.py`
-**Migrations:** `src/rufus/alembic/versions/`
+**Single Source of Truth:** `src/ruvon/db_schema/database.py`
+**Edge Schema Constants:** `src/ruvon/db_schema/edge_database.py`
+**Migrations:** `src/ruvon/alembic/versions/`
 
 ---
 
@@ -30,7 +30,7 @@ Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach
 
 ```bash
 # Apply all pending migrations (PostgreSQL)
-cd src/rufus
+cd src/ruvon
 alembic upgrade head
 
 # Check current migration state
@@ -322,7 +322,7 @@ Cloud-to-device commands with retry and batch support.
 Add custom tables by importing the shared `metadata` object from `database.py`:
 
 ```python
-from rufus.db_schema.database import metadata
+from ruvon.db_schema.database import metadata
 from sqlalchemy import Table, Column, String, DateTime, func
 
 my_events = Table(
@@ -336,13 +336,13 @@ my_events = Table(
 Then generate and apply the migration:
 
 ```bash
-cd src/rufus
+cd src/ruvon
 alembic revision --autogenerate -m "add_my_custom_events"
 # Review the generated file in alembic/versions/
 alembic upgrade head
 ```
 
-For custom API routes that query your new tables, see `RUFUS_CUSTOM_ROUTERS` in [Configuration](configuration.md).
+For custom API routes that query your new tables, see `RUVON_CUSTOM_ROUTERS` in [Configuration](configuration.md).
 
 ---
 
@@ -350,17 +350,17 @@ For custom API routes that query your new tables, see `RUFUS_CUSTOM_ROUTERS` in 
 
 ```bash
 # Initialize schema (applies all migrations)
-rufus db init
+ruvon db init
 
 # Check migration status
 alembic current
 alembic history
 
 # Validate schema matches SQLAlchemy definitions
-rufus db validate
+ruvon db validate
 
 # Show database statistics
-rufus db stats
+ruvon db stats
 ```
 
 ---
@@ -414,6 +414,6 @@ Both PostgreSQL and SQLite enforce foreign keys (SQLite via `PRAGMA foreign_keys
 
 ## See Also
 
-- [Configuration](configuration.md) — Environment variables including `RUFUS_ENCRYPTION_KEY`
-- [Extending Rufus](../advanced/extending-rufus.md) — Custom tables and custom API routes
+- [Configuration](configuration.md) — Environment variables including `RUVON_ENCRYPTION_KEY`
+- [Extending Ruvon](../advanced/extending-ruvon.md) — Custom tables and custom API routes
 - [Providers](../api/providers.md) — PersistenceProvider interface

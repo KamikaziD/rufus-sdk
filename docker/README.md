@@ -1,6 +1,6 @@
-# Rufus Docker Deployment
+# Ruvon Docker Deployment
 
-Complete Docker and Kubernetes deployment for Rufus workflow engine with distributed Celery workers.
+Complete Docker and Kubernetes deployment for Ruvon workflow engine with distributed Celery workers.
 
 ## 📁 Directory Structure
 

@@ -4,12 +4,12 @@ This guide covers implementing polyglot workflows using HTTP steps to call exter
 
 ## Overview
 
-HTTP steps enable Rufus workflows to orchestrate services written in any programming language. The Python-based workflow engine makes HTTP/REST calls to external services (Go, Rust, Node.js, Java, etc.).
+HTTP steps enable Ruvon workflows to orchestrate services written in any programming language. The Python-based workflow engine makes HTTP/REST calls to external services (Go, Rust, Node.js, Java, etc.).
 
 ## Architecture
 
 ```
-Rufus Engine (Python) → HTTP/REST → External Services (Go/Rust/Node.js/Java)
+Ruvon Engine (Python) → HTTP/REST → External Services (Go/Rust/Node.js/Java)
 ```
 
 ## Basic HTTP step
@@ -457,7 +457,7 @@ Mock external services in tests:
 ```python
 import pytest
 from unittest.mock import Mock, patch
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 
 @pytest.mark.asyncio
 async def test_http_step():

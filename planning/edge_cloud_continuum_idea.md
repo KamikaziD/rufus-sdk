@@ -12,7 +12,7 @@ In a standard vector search (like in AI embeddings), you are looking for the nea
 * **Node Capacity:** Does the target device (whether a browser, server, or controller board) have the compute or bandwidth to accept the payload?
 
 ### Why This Validates the Name
-This concept perfectly cements **Rufus Vector Optimised Networking** as the brand name. 
+This concept perfectly cements **Ruvon Vector Optimised Networking** as the brand name. 
 
 "Vector" isn't just an AI buzzword here; it describes the literal mathematical mechanism the software uses. Instead of relying on a centralized registry (which fails offline), each node calculates a vector representing the "cost" or "distance" to a required service and routes the data to the closest mathematical match within its 3-hop radius.
 
@@ -93,7 +93,7 @@ For organizations like BMGF or Tazama, **data integrity is non-negotiable.** If 
 ---
 
 ## The Elevator Pitch
-> "RUVON (Rufus Vector Optimised Networking) is an agentic orchestration platform that ensures mission-critical data—like banking transactions—always finds a path home. By treating network routing as a 'vector search' between local devices, we create a resilient, green, and offline-first 'Fog Network' that functions where the traditional cloud cannot reach."
+> "RUVON (Ruvon Vector Optimised Networking) is an agentic orchestration platform that ensures mission-critical data—like banking transactions—always finds a path home. By treating network routing as a 'vector search' between local devices, we create a resilient, green, and offline-first 'Fog Network' that functions where the traditional cloud cannot reach."
 
 ---
 
@@ -192,7 +192,7 @@ To make the RUVON mesh work in a true "dead zone," the SDK needs to leverage loc
 * **LoRa (Long Range):** If you are running the Rust port on controller boards in remote areas, LoRa allows low-bandwidth communication over kilometers without any cellular or internet provider.
 * **Local LAN (No WAN):** Devices plugged into the same unmanaged switch, or on a local Wi-Fi router that has lost its uplink to the ISP.
 
-If you are running the Rufus browser runtime (PWA), you are currently constrained by browser security models, meaning you would likely rely on **WebRTC** (which requires an initial signaling server, complicating true offline startup) or emerging **Web Bluetooth** APIs for local discovery.
+If you are running the Ruvon browser runtime (PWA), you are currently constrained by browser security models, meaning you would likely rely on **WebRTC** (which requires an initial signaling server, complicating true offline startup) or emerging **Web Bluetooth** APIs for local discovery.
 
 ---
 
@@ -251,7 +251,7 @@ Effectively, the cloud control plane stops acting like a dictator that *commands
 
 That is a powerful roadmap. By decoupling the **Cloud Mesh** (the control plane) from the **Device Mesh** (the edge execution), you are essentially building a "Double-Layer Safety Net." 
 
-If the top layer (Cloud) is severed, the bottom layer (Device Mesh) remains structurally sound and continues to execute. This is the ultimate expression of **Rufus Vector Optimised Networking**.
+If the top layer (Cloud) is severed, the bottom layer (Device Mesh) remains structurally sound and continues to execute. This is the ultimate expression of **Ruvon Vector Optimised Networking**.
 
 ---
 

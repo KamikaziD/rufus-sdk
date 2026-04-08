@@ -4,7 +4,7 @@
 
 `StepContext` provides contextual information to step functions during execution.
 
-**Module:** `rufus.models`
+**Module:** `ruvon.models`
 
 ## Class Definition
 

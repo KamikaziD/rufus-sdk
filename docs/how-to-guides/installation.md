@@ -1,18 +1,18 @@
-# How to install Rufus
+# How to install Ruvon
 
-This guide covers installing Rufus for different scenarios.
+This guide covers installing Ruvon for different scenarios.
 
 ## Package structure (v0.6.0+)
 
-Rufus ships as three separate wheels so each deployment target only installs what it needs:
+Ruvon ships as three separate wheels so each deployment target only installs what it needs:
 
 | Package | Contents | Install command |
 |---------|----------|----------------|
-| `rufus-sdk` | Core engine + CLI | `pip install rufus-sdk` |
-| `rufus-sdk-edge` | Edge agent (`rufus_edge`) | `pip install rufus-sdk-edge` |
-| `rufus-sdk-server` | Cloud control plane (`rufus_server`) | `pip install rufus-sdk-server` |
+| `ruvon-sdk` | Core engine + CLI | `pip install ruvon-sdk` |
+| `ruvon-edge` | Edge agent (`ruvon_edge`) | `pip install ruvon-edge` |
+| `ruvon-server` | Cloud control plane (`ruvon_server`) | `pip install ruvon-server` |
 
-`rufus-sdk-edge` and `rufus-sdk-server` each declare `rufus-sdk` as a dependency, so installing either sub-package also installs the core.
+`ruvon-edge` and `ruvon-server` each declare `ruvon-sdk` as a dependency, so installing either sub-package also installs the core.
 
 ## Prerequisites
 
@@ -30,10 +30,10 @@ Best for: POS terminals, ATMs, kiosks, and other resource-constrained hardware
 
 ```bash
 # Minimal (offline payment, SAF queue, SQLite — ~25 MB on disk)
-pip install rufus-sdk-edge
+pip install ruvon-edge
 
 # With WebSocket commands + system health metrics (~40 MB)
-pip install 'rufus-sdk-edge[edge]'
+pip install 'ruvon-edge[edge]'
 ```
 
 ### Path 2: Cloud server install
@@ -42,13 +42,13 @@ Best for: Running the REST API + Celery workers in production
 
 ```bash
 # REST API server
-pip install 'rufus-sdk-server[server,auth]'
+pip install 'ruvon-server[server,auth]'
 
 # Celery workers
-pip install 'rufus-sdk-server[celery]'
+pip install 'ruvon-server[celery]'
 
 # Everything (API + workers + auth)
-pip install 'rufus-sdk-server[all]'
+pip install 'ruvon-server[all]'
 ```
 
 ### Path 3: Core SDK only (SQLite)
@@ -59,13 +59,13 @@ Install the SDK with SQLite support (no external database required):
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/your-org/ruvon-sdk.git
+cd ruvon-sdk
 
 # Install in development mode
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 
 # Install core dependencies
 pip install aiosqlite orjson uvloop
@@ -75,20 +75,20 @@ Verify installation:
 
 ```bash
 # Test CLI
-rufus --help
+ruvon --help
 
 # Test SDK import
-python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus SDK ready!')"
+python -c "from ruvon.builder import WorkflowBuilder; print('✅ Ruvon SDK ready!')"
 ```
 
 Configure SQLite persistence:
 
 ```bash
-rufus config set-persistence
+ruvon config set-persistence
 # Choose: SQLite
 # Database path: workflow.db
 
-rufus db init
+ruvon db init
 ```
 
 ### Path 2: Docker with PostgreSQL
@@ -111,19 +111,19 @@ pip install -r requirements.txt
 Initialize database with Alembic migrations:
 
 ```bash
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 ```
 
 Verify connection:
 
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 import asyncio
 
 async def test():
-    p = PostgresPersistenceProvider('postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud')
+    p = PostgresPersistenceProvider('postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud')
     await p.initialize()
     workflows = await p.list_workflows()
     print(f'✅ PostgreSQL ready! Found {len(workflows)} workflows')
@@ -147,7 +147,7 @@ Verify services:
 
 ```bash
 docker compose ps
-# Expected: postgres (healthy), rufus-server (healthy)
+# Expected: postgres (healthy), ruvon-server (healthy)
 
 curl http://localhost:8000/health
 # Expected: {"status": "healthy"}
@@ -156,7 +156,7 @@ curl http://localhost:8000/health
 The database is automatically seeded with demo workflows and edge devices.
 
 **Ports:**
-- `8000` - Rufus API server
+- `8000` - Ruvon API server
 - `5433` - PostgreSQL database
 
 ## Optional dependencies
@@ -170,11 +170,11 @@ pip install celery redis
 docker run -d --name redis-server -p 6379:6379 redis
 
 # Start Celery worker
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 
-celery -A rufus.celery_app worker --loglevel=info
+celery -A ruvon.celery_app worker --loglevel=info
 ```
 
 ### PostgreSQL support
@@ -222,7 +222,7 @@ Expected output:
 
 ## Common issues
 
-### Import error: "No module named 'rufus'"
+### Import error: "No module named 'ruvon'"
 
 Install the SDK in editable mode:
 
@@ -235,16 +235,16 @@ pip install -e .
 For PostgreSQL:
 
 ```bash
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 ```
 
 For SQLite (auto-creates schema):
 
 ```bash
-rufus config set-persistence  # Choose SQLite
-rufus db init
+ruvon config set-persistence  # Choose SQLite
+ruvon db init
 ```
 
 ### Missing dependencies
@@ -267,18 +267,18 @@ As of v0.6.0 each wheel only ships the code you actually need:
 
 | Wheel | On-disk size | Contents |
 |-------|:-----------:|---------|
-| `rufus-sdk` | ~2.5 MB | Core engine (`rufus/`) + CLI (`rufus_cli/`) |
-| `rufus-sdk-edge` | ~250 KB | Edge agent (`rufus_edge/`) |
-| `rufus-sdk-server` | ~9.5 MB | Cloud control plane (`rufus_server/`) |
+| `ruvon-sdk` | ~2.5 MB | Core engine (`ruvon/`) + CLI (`ruvon_cli/`) |
+| `ruvon-edge` | ~250 KB | Edge agent (`ruvon_edge/`) |
+| `ruvon-server` | ~9.5 MB | Cloud control plane (`ruvon_server/`) |
 
 **Total installed footprint** (wheel + core dependencies):
 
 | Scenario | Command | Disk | RAM |
 |----------|---------|:----:|:---:|
-| Edge, minimal | `pip install rufus-sdk-edge` | ~15–20 MB | ~50 MB |
-| Edge + WebSocket/metrics | `pip install 'rufus-sdk-edge[edge]'` | ~30–35 MB | ~65 MB |
+| Edge, minimal | `pip install ruvon-edge` | ~15–20 MB | ~50 MB |
+| Edge + WebSocket/metrics | `pip install 'ruvon-edge[edge]'` | ~30–35 MB | ~65 MB |
 | Edge + ONNX fraud scoring | above + `pip install onnxruntime` | ~80–600 MB* | ~115–165 MB |
-| Cloud server (full) | `pip install 'rufus-sdk-server[all]'` | ~35–45 MB | — |
+| Cloud server (full) | `pip install 'ruvon-server[all]'` | ~35–45 MB | — |
 
 \* Varies by model file size. Model files are downloaded separately.
 

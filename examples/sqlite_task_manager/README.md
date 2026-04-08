@@ -84,7 +84,7 @@ To use PostgreSQL instead (for production):
 from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(
-    db_url="postgresql://user:pass@localhost/rufus"
+    db_url="postgresql://user:pass@localhost/ruvon"
 )
 ```
 

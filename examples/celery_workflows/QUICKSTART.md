@@ -18,7 +18,7 @@ Starts:
 cp .env.example .env
 
 # Apply migrations
-cd ../../src/rufus
+cd ../../src/ruvon
 source ../examples/celery_workflows/.env
 alembic upgrade head
 cd -
@@ -107,7 +107,7 @@ chmod +x start_worker.sh
 echo $PYTHONPATH
 
 # Try manual start
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 ```
 
 **Database error?**
@@ -116,10 +116,10 @@ celery -A rufus.celery_app worker --loglevel=debug
 docker-compose ps
 
 # Test connection
-psql postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example -c "SELECT 1"
+psql postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example -c "SELECT 1"
 
 # Re-run migrations
-cd ../../src/rufus
+cd ../../src/ruvon
 alembic upgrade head
 ```
 

@@ -73,7 +73,7 @@ schedule:
 **Benefits**:
 - ✅ CRON_SCHEDULE workflows execute on schedule automatically
 - ✅ No manual beat schedule configuration needed
-- ✅ Workflows are triggered via `rufus.tasks.trigger_scheduled_workflow` task
+- ✅ Workflows are triggered via `ruvon.tasks.trigger_scheduled_workflow` task
 - ✅ Supports cron expressions and interval-based schedules
 
 ---
@@ -138,7 +138,7 @@ EOF
 # Create user module
 mkdir -p my_app
 cat > my_app/steps.py <<EOF
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 @celery_app.task
 def process_data(state: dict, context):
@@ -150,7 +150,7 @@ EOF
 ```bash
 # Start worker with debug logging
 export WORKFLOW_CONFIG_DIR="config"
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 
 # Look for log output:
 # "Loaded workflow registry from config/workflow_registry.yaml"
@@ -176,13 +176,13 @@ workflows:
 **Test**:
 ```bash
 # Start Celery Beat
-celery -A rufus.celery_app beat --loglevel=info
+celery -A ruvon.celery_app beat --loglevel=info
 
 # Look for log output:
 # "Registered scheduled workflow: DailyReport with cron '*/5 * * * *'"
 
 # Start worker
-celery -A rufus.celery_app worker --loglevel=info
+celery -A ruvon.celery_app worker --loglevel=info
 
 # Wait 5 minutes, look for:
 # "[SCHEDULER] Triggering scheduled workflow: DailyReport"
@@ -204,7 +204,7 @@ import os
 os.environ['WORKFLOW_CONFIG_DIR'] = 'config'
 os.environ['WORKFLOW_REGISTRY_FILE'] = 'workflow_registry.yaml'
 
-from rufus.celery_app import celery_app, workflow_builder, discovered_task_modules
+from ruvon.celery_app import celery_app, workflow_builder, discovered_task_modules
 
 def test_task_discovery():
     """Test that user modules are discovered"""
@@ -278,7 +278,7 @@ celery_app.conf.update(
 )
 ```
 
-**Rufus** (now):
+**Ruvon** (now):
 ```python
 # New way - automatic discovery
 # Just set WORKFLOW_CONFIG_DIR and it works!
@@ -301,7 +301,7 @@ export WORKFLOW_CONFIG_DIR="$(pwd)/config"
 export WORKFLOW_REGISTRY_FILE="workflow_registry.yaml"
 
 # Check worker logs
-celery -A rufus.celery_app worker --loglevel=debug | grep "Discovered task modules"
+celery -A ruvon.celery_app worker --loglevel=debug | grep "Discovered task modules"
 ```
 
 **Problem**: "Scheduled workflows not triggering"
@@ -309,13 +309,13 @@ celery -A rufus.celery_app worker --loglevel=debug | grep "Discovered task modul
 **Solution**:
 ```bash
 # Check Beat logs
-celery -A rufus.celery_app beat --loglevel=info | grep "Registered scheduled workflow"
+celery -A ruvon.celery_app beat --loglevel=info | grep "Registered scheduled workflow"
 
 # Verify cron expression
-celery -A rufus.celery_app inspect scheduled
+celery -A ruvon.celery_app inspect scheduled
 
 # Check worker can import trigger_scheduled_workflow
-celery -A rufus.celery_app inspect registered | grep trigger_scheduled_workflow
+celery -A ruvon.celery_app inspect registered | grep trigger_scheduled_workflow
 ```
 
 **Problem**: "WorkflowBuilder not initialized in worker"
@@ -326,7 +326,7 @@ celery -A rufus.celery_app inspect registered | grep trigger_scheduled_workflow
 export WORKFLOW_CONFIG_DIR="/absolute/path/to/config"
 
 # Check worker initialization logs
-celery -A rufus.celery_app worker --loglevel=info | grep "Worker loaded workflow registry"
+celery -A ruvon.celery_app worker --loglevel=info | grep "Worker loaded workflow registry"
 ```
 
 ---
@@ -340,7 +340,7 @@ celery -A rufus.celery_app worker --loglevel=info | grep "Worker loaded workflow
 │ 1. Load WorkflowBuilder(config_dir, registry_path)             │
 │ 2. Discover task modules → get_all_task_modules()              │
 │    → ['my_app.steps', 'other_app.tasks']                       │
-│ 3. Register with Celery → include=['rufus.tasks', 'my_app...'] │
+│ 3. Register with Celery → include=['ruvon.tasks', 'my_app...'] │
 │ 4. Discover scheduled workflows → get_scheduled_workflows()    │
 │ 5. Register with Beat → beat_schedule['trigger-DailyReport']   │
 └─────────────────────────────────────────────────────────────────┘
@@ -367,7 +367,7 @@ celery -A rufus.celery_app worker --loglevel=info | grep "Worker loaded workflow
 ├─────────────────────────────────────────────────────────────────┤
 │ beat_schedule = {                                               │
 │   'trigger-DailyReport': {                                      │
-│     'task': 'rufus.tasks.trigger_scheduled_workflow',           │
+│     'task': 'ruvon.tasks.trigger_scheduled_workflow',           │
 │     'schedule': crontab(minute='0', hour='9'),                  │
 │     'args': ('DailyReport', {})                                 │
 │   }                                                             │
@@ -381,7 +381,7 @@ celery -A rufus.celery_app worker --loglevel=info | grep "Worker loaded workflow
 
 ## Summary of Confucius Feature Parity
 
-| Feature | Confucius | Rufus (Before) | Rufus (After) |
+| Feature | Confucius | Ruvon (Before) | Ruvon (After) |
 |---------|-----------|----------------|---------------|
 | **Task Module Discovery** | ✅ Automatic | ❌ Manual/TODO | ✅ Automatic |
 | **Beat Schedule Population** | ✅ Automatic | ❌ TODO | ✅ Automatic |
@@ -396,8 +396,8 @@ celery -A rufus.celery_app worker --loglevel=info | grep "Worker loaded workflow
 
 ## Files Changed
 
-1. `src/rufus/celery_app.py` - Task discovery and beat schedule (130 lines changed)
-2. `src/rufus/tasks.py` - Completed `trigger_scheduled_workflow` (45 lines changed)
+1. `src/ruvon/celery_app.py` - Task discovery and beat schedule (130 lines changed)
+2. `src/ruvon/tasks.py` - Completed `trigger_scheduled_workflow` (45 lines changed)
 
 **Total**: ~175 lines of code
 

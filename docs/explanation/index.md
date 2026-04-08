@@ -1,21 +1,21 @@
-# Explanation: Understanding Rufus SDK
+# Explanation: Understanding Ruvon SDK
 
-Explanation documents help you understand **why** and **how** Rufus works. These are conceptual guides that build understanding, not step-by-step instructions.
+Explanation documents help you understand **why** and **how** Ruvon works. These are conceptual guides that build understanding, not step-by-step instructions.
 
 ## System Understanding
 
 ### [Architecture](architecture.md)
-Learn how Rufus is structured internally: the four-layer architecture (API, Engine, Persistence, Execution), component interactions, and deployment patterns.
+Learn how Ruvon is structured internally: the four-layer architecture (API, Engine, Persistence, Execution), component interactions, and deployment patterns.
 
 **Read this when**: You want to understand the big picture.
 
 ### [Provider Pattern](provider-pattern.md)
-Understand why Rufus uses providers, what they abstract, and how to swap implementations (PostgreSQL ↔ SQLite, Celery ↔ ThreadPool).
+Understand why Ruvon uses providers, what they abstract, and how to swap implementations (PostgreSQL ↔ SQLite, Celery ↔ ThreadPool).
 
-**Read this when**: You want to customize Rufus's behavior.
+**Read this when**: You want to customize Ruvon's behavior.
 
 ### [Design Decisions](design-decisions.md)
-Discover why Rufus is designed the way it is: YAML vs code-first, provider pattern vs monolithic, async/await vs callbacks, and more.
+Discover why Ruvon is designed the way it is: YAML vs code-first, provider pattern vs monolithic, async/await vs callbacks, and more.
 
 **Read this when**: You're wondering "why did they do it this way?"
 
@@ -39,7 +39,7 @@ Understand distributed transaction compensation: why it's needed, how it works, 
 ## Advanced Features
 
 ### [Parallel Execution](parallel-execution.md)
-Explore how Rufus executes multiple tasks concurrently: merge strategies, conflict handling, partial success, and performance considerations.
+Explore how Ruvon executes multiple tasks concurrently: merge strategies, conflict handling, partial success, and performance considerations.
 
 **Read this when**: You want to speed up workflows with parallelism.
 
@@ -49,7 +49,7 @@ Discover hierarchical workflow composition: parent-child relationships, status p
 **Read this when**: You want to break complex workflows into reusable pieces.
 
 ### [Zombie Recovery](zombie-recovery.md)
-Learn how Rufus detects and recovers from worker crashes: heartbeat mechanism, detection thresholds, and deployment strategies.
+Learn how Ruvon detects and recovers from worker crashes: heartbeat mechanism, detection thresholds, and deployment strategies.
 
 **Read this when**: You need production reliability.
 
@@ -66,14 +66,14 @@ Explore offline-first workflows for fintech edge devices: POS terminals, ATMs, k
 **Read this when**: You're building workflows for offline devices.
 
 ### [Performance](performance.md)
-Understand Rufus's performance model: uvloop, orjson, connection pooling, import caching, benchmarks, and tuning guidelines.
+Understand Ruvon's performance model: uvloop, orjson, connection pooling, import caching, benchmarks, and tuning guidelines.
 
 **Read this when**: You need to optimize for throughput or latency.
 
 ### [Confucius Heritage](confucius-heritage.md)
-Learn Rufus's evolution from Confucius: what was preserved, what was improved, feature parity analysis, and migration guide.
+Learn Ruvon's evolution from Confucius: what was preserved, what was improved, feature parity analysis, and migration guide.
 
-**Read this when**: You're migrating from Confucius or curious about Rufus's history.
+**Read this when**: You're migrating from Confucius or curious about Ruvon's history.
 
 ## Reading Paths
 
@@ -116,7 +116,7 @@ Learn Rufus's evolution from Confucius: what was preserved, what was improved, f
 - **Goal**: Solve specific problems
 - **Audience**: Developers with tasks
 - **Focus**: Step-by-step procedures
-- **Example**: "How to deploy Rufus to Kubernetes"
+- **Example**: "How to deploy Ruvon to Kubernetes"
 
 **Tutorials** (`docs/tutorials/`):
 - **Goal**: Learn by doing
@@ -140,17 +140,17 @@ Found a concept that's unclear? Want to add an explanation?
 4. Submit PR: Follow existing style
 
 **Good topics**:
-- Why Rufus uses async/await
+- Why Ruvon uses async/await
 - How heartbeats detect zombies
 - Trade-offs between PostgreSQL and SQLite
 
 **Not explanation**:
-- How to install Rufus (tutorial)
+- How to install Ruvon (tutorial)
 - How to configure connection pool (how-to)
 - PersistenceProvider API methods (reference)
 
 ## Feedback
 
 Questions? Confusion? Let us know:
-- GitHub Issues: https://github.com/your-org/rufus/issues
-- Discussions: https://github.com/your-org/rufus/discussions
+- GitHub Issues: https://github.com/your-org/ruvon/issues
+- Discussions: https://github.com/your-org/ruvon/discussions

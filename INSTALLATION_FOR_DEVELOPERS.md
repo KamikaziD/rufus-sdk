@@ -1,6 +1,6 @@
 # Installation Guide for Developers
 
-This guide explains how to install Rufus SDK directly from GitHub for testing and development.
+This guide explains how to install Ruvon SDK directly from GitHub for testing and development.
 
 ---
 
@@ -10,27 +10,27 @@ This guide explains how to install Rufus SDK directly from GitHub for testing an
 
 ```bash
 # Install core package
-pip install git+https://github.com/KamikaziD/rufus-sdk.git
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git
 
 # Install with all optional dependencies
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 ```
 
 ### Method 2: Install Specific Branch (e.g., feature branch)
 
 ```bash
 # Install from feature/alembic-migration branch
-pip install git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git@feature/alembic-migration
 
 # With extras
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git@feature/alembic-migration"
 ```
 
 ### Method 3: Install Specific Version/Tag
 
 ```bash
 # Once you create tagged releases
-pip install git+https://github.com/KamikaziD/rufus-sdk.git@v0.1.0
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git@v0.1.0
 ```
 
 ---
@@ -41,19 +41,19 @@ The package supports optional feature sets via extras:
 
 ```bash
 # Server features (FastAPI, Uvicorn)
-pip install "rufus[server] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[server] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # PostgreSQL support
-pip install "rufus[postgres] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[postgres] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # CLI enhancements (Rich formatting)
-pip install "rufus[cli] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[cli] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # Performance optimizations (uvloop)
-pip install "rufus[performance] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[performance] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # Everything
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 ```
 
 **What each extra includes:**
@@ -83,7 +83,7 @@ If the repository becomes private, testers will need authentication:
 
 3. **Install package**:
    ```bash
-   pip install git+ssh://git@github.com/KamikaziD/rufus-sdk.git
+   pip install git+ssh://git@github.com/KamikaziD/ruvon-sdk.git
    ```
 
 ### Option B: Personal Access Token (HTTPS)
@@ -96,12 +96,12 @@ If the repository becomes private, testers will need authentication:
 
 2. **Install package**:
    ```bash
-   pip install git+https://<USERNAME>:<TOKEN>@github.com/KamikaziD/rufus-sdk.git
+   pip install git+https://<USERNAME>:<TOKEN>@github.com/KamikaziD/ruvon-sdk.git
    ```
 
    Example:
    ```bash
-   pip install git+https://john:ghp_xxxxxxxxxxxx@github.com/KamikaziD/rufus-sdk.git
+   pip install git+https://john:ghp_xxxxxxxxxxxx@github.com/KamikaziD/ruvon-sdk.git
    ```
 
 ### Option C: GitHub CLI (gh)
@@ -113,7 +113,7 @@ If the repository becomes private, testers will need authentication:
    ```
 3. **Install package** (gh handles auth automatically):
    ```bash
-   pip install git+https://github.com/KamikaziD/rufus-sdk.git
+   pip install git+https://github.com/KamikaziD/ruvon-sdk.git
    ```
 
 ---
@@ -124,11 +124,11 @@ After installation, verify everything works:
 
 ```bash
 # Check CLI is available
-rufus --version
-rufus --help
+ruvon --version
+ruvon --help
 
 # Test Python import
-python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus SDK ready!')"
+python -c "from ruvon.builder import WorkflowBuilder; print('✅ Ruvon SDK ready!')"
 
 # Run simple workflow (if you have examples)
 cd examples/sqlite_task_manager
@@ -141,13 +141,13 @@ python simple_demo.py
 
 ```bash
 # Uninstall old version
-pip uninstall rufus -y
+pip uninstall ruvon -y
 
 # Install latest
-pip install git+https://github.com/KamikaziD/rufus-sdk.git
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git
 
 # Or force reinstall
-pip install --force-reinstall git+https://github.com/KamikaziD/rufus-sdk.git
+pip install --force-reinstall git+https://github.com/KamikaziD/ruvon-sdk.git
 ```
 
 ---
@@ -158,14 +158,14 @@ For teams, create a `requirements.txt`:
 
 ```text
 # requirements.txt
-# Install Rufus SDK from GitHub
-rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@main
+# Install Ruvon SDK from GitHub
+ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git@main
 
 # Or specific branch for testing
-# rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
+# ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git@feature/alembic-migration
 
 # Or with SSH (for private repo)
-# git+ssh://git@github.com/KamikaziD/rufus-sdk.git#egg=rufus[all]
+# git+ssh://git@github.com/KamikaziD/ruvon-sdk.git#egg=ruvon[all]
 ```
 
 Then install:
@@ -183,11 +183,11 @@ If you want to distribute as a Docker image:
 # Dockerfile
 FROM python:3.11-slim
 
-# Install Rufus SDK from GitHub
-RUN pip install rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git
+# Install Ruvon SDK from GitHub
+RUN pip install ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git
 
 # Verify installation
-RUN rufus --version
+RUN ruvon --version
 
 WORKDIR /app
 CMD ["bash"]
@@ -195,9 +195,9 @@ CMD ["bash"]
 
 Build and distribute:
 ```bash
-docker build -t rufus-sdk:latest .
-docker tag rufus-sdk:latest your-registry/rufus-sdk:latest
-docker push your-registry/rufus-sdk:latest
+docker build -t ruvon-sdk:latest .
+docker tag ruvon-sdk:latest your-registry/ruvon-sdk:latest
+docker push your-registry/ruvon-sdk:latest
 ```
 
 ---
@@ -209,10 +209,10 @@ docker push your-registry/rufus-sdk:latest
 Right now, developers install from branches:
 ```bash
 # Main branch (most stable)
-pip install git+https://github.com/KamikaziD/rufus-sdk.git@main
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git@main
 
 # Feature branch (testing new features)
-pip install git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git@feature/alembic-migration
 ```
 
 ### Future (Production Phase)
@@ -225,7 +225,7 @@ git tag -a v0.1.0 -m "Release v0.1.0 - Initial beta"
 git push origin v0.1.0
 
 # Users install specific version
-pip install git+https://github.com/KamikaziD/rufus-sdk.git@v0.1.0
+pip install git+https://github.com/KamikaziD/ruvon-sdk.git@v0.1.0
 ```
 
 **Recommended versioning:**
@@ -242,8 +242,8 @@ For developers who want to modify the code:
 
 ```bash
 # Clone repository
-git clone https://github.com/KamikaziD/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/KamikaziD/ruvon-sdk.git
+cd ruvon-sdk
 
 # Install in editable mode (changes reflect immediately)
 pip install -e .
@@ -263,7 +263,7 @@ poetry install --with dev
 
 **Solution**: Make sure you're using the correct syntax with quotes:
 ```bash
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 #          ↑ quotes are important!              ↑
 ```
 
@@ -271,25 +271,25 @@ pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
 
 **Solution**: Set up SSH keys or use HTTPS with token (see Private Repository Access above)
 
-### Error: "No module named 'rufus'"
+### Error: "No module named 'ruvon'"
 
-**Solution**: The package installs as `rufus` but imports as `rufus`:
+**Solution**: The package installs as `ruvon` but imports as `ruvon`:
 ```python
 # Correct
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 
 # Wrong
-from rufus_edge.builder import WorkflowBuilder  # This won't work
+from ruvon_edge.builder import WorkflowBuilder  # This won't work
 ```
 
-### Error: "Command 'rufus' not found"
+### Error: "Command 'ruvon' not found"
 
 **Solution**: The CLI might not be in your PATH. Try:
 ```bash
-python -m rufus_cli.main --help
+python -m ruvon_cli.main --help
 
 # Or reinstall with --force-reinstall
-pip install --force-reinstall git+https://github.com/KamikaziD/rufus-sdk.git
+pip install --force-reinstall git+https://github.com/KamikaziD/ruvon-sdk.git
 ```
 
 ---
@@ -300,19 +300,19 @@ If you encounter issues:
 
 1. **Check installed version**:
    ```bash
-   pip show rufus
+   pip show ruvon
    ```
 
 2. **Check installed files**:
    ```bash
-   pip show -f rufus
+   pip show -f ruvon
    ```
 
 3. **Reinstall from scratch**:
    ```bash
-   pip uninstall rufus -y
+   pip uninstall ruvon -y
    pip cache purge
-   pip install git+https://github.com/KamikaziD/rufus-sdk.git
+   pip install git+https://github.com/KamikaziD/ruvon-sdk.git
    ```
 
 4. **Report issue**: Open GitHub issue with:
@@ -329,23 +329,23 @@ If you encounter issues:
 
 1. **Install package**:
    ```bash
-   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+   pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
    ```
 
 2. **Verify it works**:
    ```bash
-   rufus --version
-   python -c "from rufus.builder import WorkflowBuilder; print('✅ Works!')"
+   ruvon --version
+   python -c "from ruvon.builder import WorkflowBuilder; print('✅ Works!')"
    ```
 
 3. **Run examples** (if available in repo):
    ```bash
-   git clone https://github.com/KamikaziD/rufus-sdk.git
-   cd rufus-sdk/examples/sqlite_task_manager
+   git clone https://github.com/KamikaziD/ruvon-sdk.git
+   cd ruvon-sdk/examples/sqlite_task_manager
    python simple_demo.py
    ```
 
-That's it! You're ready to test the Rufus SDK.
+That's it! You're ready to test the Ruvon SDK.
 
 ---
 

@@ -88,8 +88,8 @@ workflows:
     config_file: "order_processing.yaml"
     initial_state_model_path: "my_app.models.OrderState"
     requires:
-      - rufus-payment-gateway
-      - rufus-inventory
+      - ruvon-payment-gateway
+      - ruvon-inventory
 
   - type: "UserOnboarding"
     description: "New user onboarding workflow"
@@ -97,7 +97,7 @@ workflows:
     initial_state_model: "my_app.models.UserState"
 
 requires:
-  - rufus-notifications
+  - ruvon-notifications
 ```
 
 ---

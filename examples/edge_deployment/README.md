@@ -9,7 +9,7 @@ with a heterogeneous device fleet.
 ┌─────────────────────────────────────────────────────────────────┐
 │              Docker (localhost:8000)                             │
 │  ┌──────────────────┐    ┌──────────────────┐                   │
-│  │  rufus-server    │────│   PostgreSQL     │                   │
+│  │  ruvon-server    │────│   PostgreSQL     │                   │
 │  │  Policy Engine   │    │   (persistence)  │                   │
 │  └────────┬─────────┘    └──────────────────┘                   │
 └───────────┼─────────────────────────────────────────────────────┘
@@ -128,7 +128,7 @@ The Policy Engine evaluates rules in priority order:
 docker compose ps
 
 # Check logs
-docker compose logs rufus-server
+docker compose logs ruvon-server
 ```
 
 ### Policy not matching

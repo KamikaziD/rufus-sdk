@@ -1,6 +1,6 @@
-# Contributing to Rufus SDK
+# Contributing to Ruvon SDK
 
-Thank you for your interest in contributing to Rufus! This guide will help you get started.
+Thank you for your interest in contributing to Ruvon! This guide will help you get started.
 
 ---
 
@@ -41,7 +41,7 @@ We are committed to providing a welcoming and inclusive environment for all cont
 
 ### Reporting
 
-If you experience or witness unacceptable behavior, please contact the maintainers at [conduct@rufus-sdk.dev].
+If you experience or witness unacceptable behavior, please contact the maintainers at [conduct@ruvon-sdk.dev].
 
 ---
 
@@ -113,8 +113,8 @@ If you experience or witness unacceptable behavior, please contact the maintaine
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/your-org/ruvon-sdk.git
+cd ruvon-sdk
 
 # Create virtual environment
 python -m venv .venv
@@ -124,11 +124,11 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-# Install Rufus in editable mode
+# Install Ruvon in editable mode
 pip install -e .
 
 # Verify installation
-rufus --version
+ruvon --version
 pytest --version
 ```
 
@@ -138,16 +138,16 @@ pytest --version
 
 ```bash
 # Via Docker
-docker run -d --name rufus-postgres \
-  -e POSTGRES_USER=rufus \
-  -e POSTGRES_PASSWORD=rufus_secret_2024 \
-  -e POSTGRES_DB=rufus_cloud \
+docker run -d --name ruvon-postgres \
+  -e POSTGRES_USER=ruvon \
+  -e POSTGRES_PASSWORD=ruvon_secret_2024 \
+  -e POSTGRES_DB=ruvon_cloud \
   -p 5433:5432 \
   postgres:14
 
 # Apply migrations
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
-cd src/rufus
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
+cd src/ruvon
 alembic upgrade head
 cd ../..
 ```
@@ -155,7 +155,7 @@ cd ../..
 **Redis (for Celery):**
 
 ```bash
-docker run -d --name rufus-redis -p 6379:6379 redis:7
+docker run -d --name ruvon-redis -p 6379:6379 redis:7
 ```
 
 ### IDE Setup
@@ -179,7 +179,7 @@ docker run -d --name rufus-redis -p 6379:6379 redis:7
 pytest
 
 # Run with coverage
-pytest --cov=rufus --cov-report=html
+pytest --cov=ruvon --cov-report=html
 
 # Run specific test file
 pytest tests/sdk/test_workflow.py
@@ -215,8 +215,8 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 # Local imports
-from rufus.models import WorkflowStep, StepContext
-from rufus.providers.persistence import PersistenceProvider
+from ruvon.models import WorkflowStep, StepContext
+from ruvon.providers.persistence import PersistenceProvider
 ```
 
 ### Type Hints
@@ -295,7 +295,7 @@ isort src/ tests/
 # Check code quality
 flake8 src/ tests/
 mypy src/
-pylint src/rufus/
+pylint src/ruvon/
 ```
 
 **Pre-commit hooks** (recommended):
@@ -315,7 +315,7 @@ pre-commit install
 
 ```bash
 # Check coverage
-pytest --cov=rufus --cov-report=term-missing
+pytest --cov=ruvon --cov-report=term-missing
 ```
 
 ### Test Types
@@ -364,7 +364,7 @@ Test complete user scenarios:
 @pytest.mark.e2e
 def test_cli_workflow_lifecycle():
     """Test complete workflow lifecycle via CLI."""
-    result = subprocess.run(["rufus", "start", "TestWorkflow", "--data", '{"user_id":"123"}'])
+    result = subprocess.run(["ruvon", "start", "TestWorkflow", "--data", '{"user_id":"123"}'])
     assert result.returncode == 0
     # ... test resume, show, logs, cancel ...
 ```
@@ -386,7 +386,7 @@ def test_cli_workflow_lifecycle():
 @pytest.fixture
 async def in_memory_persistence():
     """Provide in-memory persistence for testing."""
-    from rufus.implementations.persistence.memory import InMemoryPersistenceProvider
+    from ruvon.implementations.persistence.memory import InMemoryPersistenceProvider
     provider = InMemoryPersistenceProvider()
     await provider.initialize()
     yield provider
@@ -580,7 +580,7 @@ When you need to...
 
 ```python
 # Simple example
-from rufus import ...
+from ruvon import ...
 ```
 
 ## Advanced Usage
@@ -643,9 +643,9 @@ Common issues and solutions...
 
 **Questions about contributing?**
 
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 - 📖 [Development Docs](/docs/)
-- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+- 🐛 [Report Issues](https://github.com/your-org/ruvon-sdk/issues)
 
 **Want to chat?**
 
@@ -666,13 +666,13 @@ Common issues and solutions...
 
 ## License
 
-By contributing to Rufus SDK, you agree that your contributions will be licensed under the MIT License.
+By contributing to Ruvon SDK, you agree that your contributions will be licensed under the MIT License.
 
 ---
 
-**Thank you for contributing to Rufus!**
+**Thank you for contributing to Ruvon!**
 
-Your time and expertise help make Rufus better for everyone. We look forward to working with you!
+Your time and expertise help make Ruvon better for everyone. We look forward to working with you!
 
 ---
 

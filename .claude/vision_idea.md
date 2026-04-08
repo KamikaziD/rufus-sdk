@@ -1,4 +1,4 @@
-## 🌟 **Rufus SDK v2.0 — Explained Like You're 5 (or 50, or Just Not a Coder)**
+## 🌟 **Ruvon SDK v2.0 — Explained Like You're 5 (or 50, or Just Not a Coder)**
 
 Imagine you're organizing a **neighborhood potluck**.
 
@@ -13,7 +13,7 @@ Your benchmark proved it: 20,000 devices trying to sync at once = **67 seconds o
 
 ---
 
-### 🚀 **The Rufus Way (What You're Building)**
+### 🚀 **The Ruvon Way (What You're Building)**
 Instead of one table, you give every neighbor **three superpowers**:
 
 #### 🧠 **The Brain** (The Planner)
@@ -31,9 +31,9 @@ This keeps secrets safe, even if the rest of the system is running in a public p
 ---
 
 ### 🔁 **"The Workflow Dictates the Rails" — Simply Put**
-> **You decide what you want to do. Rufus figures out the best way to make it happen.**
+> **You decide what you want to do. Ruvon figures out the best way to make it happen.**
 
-| You Say… | Rufus Does… |
+| You Say… | Ruvon Does… |
 |----------|-------------|
 | *"Send $5 to Maria offline"* | → Uses nearby phones as messengers + locks the transaction in a crypto-box |
 | *"Check if this person is who they say"* | → Uses your phone's brain to verify locally, no internet needed |
@@ -51,24 +51,24 @@ This keeps secrets safe, even if the rest of the system is running in a public p
 
 #### 🏥 **For a Nurse in a Rural Village**
 > *"I need to log a patient's symptoms, but there's no internet."*  
-✅ Rufus lets her save it on her phone. When she walks near a neighbor with signal, it quietly passes the data along—like a relay race. No cloud needed.
+✅ Ruvon lets her save it on her phone. When she walks near a neighbor with signal, it quietly passes the data along—like a relay race. No cloud needed.
 
 #### 🌾 **For a Farmer Receiving Aid**
 > *"I should get a subsidy, but my village has no cell service."*  
-✅ Rufus lets a neighbor's phone receive the payment notification and pass it to the farmer—securely, with a digital signature. The money arrives, even in a "dark zone."
+✅ Ruvon lets a neighbor's phone receive the payment notification and pass it to the farmer—securely, with a digital signature. The money arrives, even in a "dark zone."
 
 #### 🆘 **For a Disaster Responder**
 > *"The cell towers are down. How do we coordinate?"*  
-✅ Rufus turns every phone into a walkie-talkie + map + secure notebook. They form a mesh network automatically. Help finds people faster.
+✅ Ruvon turns every phone into a walkie-talkie + map + secure notebook. They form a mesh network automatically. Help finds people faster.
 
 #### 👩‍💻 **For a Local Developer**
 > *"I want to build an app for my community, but I'm not a systems engineer."*  
-✅ Rufus lets them code in Python (a beginner-friendly language). When the app needs to scale, Rufus *quietly* adds the high-performance parts. No rewrites. No stress.
+✅ Ruvon lets them code in Python (a beginner-friendly language). When the app needs to scale, Ruvon *quietly* adds the high-performance parts. No rewrites. No stress.
 
 ---
 
 ### 🧩 **The Big Picture, One Sentence**
-> **Rufus lets people define what they need to do—and then builds the right infrastructure, on the fly, to make it happen—anywhere, even offline, even at massive scale.**
+> **Ruvon lets people define what they need to do—and then builds the right infrastructure, on the fly, to make it happen—anywhere, even offline, even at massive scale.**
 
 It's not about faster code.  
 It's about **freedom**:  

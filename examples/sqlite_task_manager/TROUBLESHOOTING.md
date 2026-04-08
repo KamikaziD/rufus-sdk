@@ -534,7 +534,7 @@ async def persistence():
 ```python
 # 1. Use absolute path
 persistence = SQLitePersistenceProvider(
-    db_path="/var/lib/rufus/workflows.db",
+    db_path="/var/lib/ruvon/workflows.db",
     timeout=30.0
 )
 
@@ -545,7 +545,7 @@ from datetime import datetime
 def backup_database():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = f"/backups/workflows_{timestamp}.db"
-    shutil.copy("/var/lib/rufus/workflows.db", backup_path)
+    shutil.copy("/var/lib/ruvon/workflows.db", backup_path)
     print(f"Backup created: {backup_path}")
 
 # Run backup daily via cron

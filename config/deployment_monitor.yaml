@@ -47,7 +47,7 @@ steps:
       model: llama3
       data_sovereignty: local        # Never send metrics to cloud LLM
       system_prompt: |
-        You are a Rufus edge device performance analyst.
+        You are a Ruvon edge device performance analyst.
         Analyze the device metrics and health issues provided.
         Identify the SINGLE most impactful performance issue.
         Propose ONE specific, safe configuration change to address it.

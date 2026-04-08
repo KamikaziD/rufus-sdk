@@ -1,5 +1,5 @@
 # B Bidding System - AI Pilot Implementation Plan
-## Rufus SDK + FastAPI Architecture
+## Ruvon SDK + FastAPI Architecture
 
 **Document Version**: 1.0
 **Date**: 2026-02-11
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document outlines the implementation plan for the **B Bidding Master** system - an AI-powered RFP intake, bid decisioning, and sub-consultant management platform built on **Rufus SDK** with **FastAPI**. This represents a production-ready pilot demonstrating advanced AI orchestration for architecture/engineering firms.
+This document outlines the implementation plan for the **B Bidding Master** system - an AI-powered RFP intake, bid decisioning, and sub-consultant management platform built on **Ruvon SDK** with **FastAPI**. This represents a production-ready pilot demonstrating advanced AI orchestration for architecture/engineering firms.
 
 ### Strategic Value
 - **Proven AI Use Case**: End-to-end automation of complex, multi-party RFP workflows
@@ -18,7 +18,7 @@ This document outlines the implementation plan for the **B Bidding Master** syst
 - **Auditability**: Full workflow history for compliance and continuous improvement
 
 ### Technology Stack
-- **Workflow Engine**: Rufus SDK (Python-native, production-tested)
+- **Workflow Engine**: Ruvon SDK (Python-native, production-tested)
 - **API Layer**: FastAPI (async, OpenAPI, high performance)
 - **Execution**: Celery + Redis (distributed task queue)
 - **Persistence**: PostgreSQL (JSONB, full-text search, audit logs)
@@ -76,7 +76,7 @@ This document outlines the implementation plan for the **B Bidding Master** syst
 │  │  WorkflowBuilder  │  Workflow  │  ExecutionProvider          │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Custom Step Types (rufus-bidding-steps):                    │   │
+│  │  Custom Step Types (ruvon-bidding-steps):                    │   │
 │  │  • AI_EXTRACTION      • AI_SCORING      • AI_CONTRACT_REVIEW │   │
 │  │  • FILE_PROCESSOR     • EMAIL_NOTIFIER  • TEMPLATE_GENERATOR │   │
 │  └──────────────────────────────────────────────────────────────┘   │
@@ -103,7 +103,7 @@ This document outlines the implementation plan for the **B Bidding Master** syst
 | Service | Technology | Responsibility | Scaling |
 |---------|-----------|----------------|---------|
 | **API Gateway** | FastAPI | REST endpoints, auth, request routing | Horizontal (3+ instances) |
-| **Workflow Manager** | Rufus SDK + FastAPI | Workflow orchestration, state management | Stateless (3+ instances) |
+| **Workflow Manager** | Ruvon SDK + FastAPI | Workflow orchestration, state management | Stateless (3+ instances) |
 | **Celery Workers** | Celery + Python | Async task execution (AI, file processing) | Horizontal (5-10 workers) |
 | **Document Processor** | Python + LangChain | PDF/Excel/Word extraction, OCR | Dedicated worker pool (2-3) |
 | **AI Service** | OpenAI/Anthropic | LLM-based extraction, scoring, analysis | API calls (rate-limited) |
@@ -117,7 +117,7 @@ This document outlines the implementation plan for the **B Bidding Master** syst
    │
    ├─► FastAPI: POST /api/v1/rfps/upload
    │    ├─► S3: Store ZIP file (rfps/2026-02-11/rfp_12345.zip)
-   │    └─► Rufus: Start "RFP_Intake" workflow
+   │    └─► Ruvon: Start "RFP_Intake" workflow
    │
 2. Workflow Step: FILE_PROCESSOR (ASYNC, Celery worker)
    │    ├─► Unzip archive (100+ files)
@@ -142,7 +142,7 @@ This document outlines the implementation plan for the **B Bidding Master** syst
 6. User approves/overrides decision
    │
    ├─► FastAPI: POST /api/v1/workflows/{id}/resume
-   │    └─► Rufus: Resume workflow with {"approved": true, "override_reason": null}
+   │    └─► Ruvon: Resume workflow with {"approved": true, "override_reason": null}
    │
 7. Workflow Step: DECISION (immediate)
    │    ├─► If approved: Jump to "INVITE_CONSULTANTS"
@@ -158,13 +158,13 @@ This document outlines the implementation plan for the **B Bidding Master** syst
 
 ## 2. Custom Step Types (Marketplace Extension)
 
-To support the B Bidding domain, we'll create **`rufus-bidding-steps`** as a separate Python package with custom step types.
+To support the B Bidding domain, we'll create **`ruvon-bidding-steps`** as a separate Python package with custom step types.
 
 ### 2.1 Package Structure
 
 ```
-rufus-bidding-steps/
-├── pyproject.toml  # Entry points for Rufus discovery
+ruvon-bidding-steps/
+├── pyproject.toml  # Entry points for Ruvon discovery
 ├── src/
 │   └── rufus_bidding/
 │       ├── __init__.py
@@ -192,7 +192,7 @@ rufus-bidding-steps/
 
 ```python
 # src/rufus_bidding/models.py
-from rufus.models import WorkflowStep
+from ruvon.models import WorkflowStep
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 
@@ -251,7 +251,7 @@ class AIExtractionStep(WorkflowStep):
 elif isinstance(step, AIExtractionStep):
     # Dispatch to Celery worker (long-running)
     result = await self.execution_provider.dispatch_async_task(
-        func_path="rufus_bidding.steps.ai_extraction.execute",
+        func_path="ruvon_bidding.steps.ai_extraction.execute",
         state_data=self.state.model_dump(),
         workflow_id=self.id,
         context_data=context.model_dump(),
@@ -485,29 +485,29 @@ class TemplateGeneratorStep(WorkflowStep):
 
 **pyproject.toml**:
 ```toml
-[project.entry-points."rufus.steps"]
-ai_extraction = "rufus_bidding.models:AIExtractionStep"
-ai_scoring = "rufus_bidding.models:AIScoringStep"
-ai_contract_review = "rufus_bidding.models:AIContractReviewStep"
-file_processor = "rufus_bidding.models:FileProcessorStep"
-email_notifier = "rufus_bidding.models:EmailNotifierStep"
-template_generator = "rufus_bidding.models:TemplateGeneratorStep"
+[project.entry-points."ruvon.steps"]
+ai_extraction = "ruvon_bidding.models:AIExtractionStep"
+ai_scoring = "ruvon_bidding.models:AIScoringStep"
+ai_contract_review = "ruvon_bidding.models:AIContractReviewStep"
+file_processor = "ruvon_bidding.models:FileProcessorStep"
+email_notifier = "ruvon_bidding.models:EmailNotifierStep"
+template_generator = "ruvon_bidding.models:TemplateGeneratorStep"
 
-[project.entry-points."rufus.providers"]
-llm_provider = "rufus_bidding.providers:LLMProvider"
-storage_provider = "rufus_bidding.providers:StorageProvider"
+[project.entry-points."ruvon.providers"]
+llm_provider = "ruvon_bidding.providers:LLMProvider"
+storage_provider = "ruvon_bidding.providers:StorageProvider"
 ```
 
 **Installation**:
 ```bash
 # Development
-pip install -e rufus-bidding-steps/
+pip install -e ruvon-bidding-steps/
 
 # Production
-pip install rufus-bidding-steps
+pip install ruvon-bidding-steps
 ```
 
-**Rufus Auto-Discovery**: WorkflowBuilder automatically loads entry points on initialization.
+**Ruvon Auto-Discovery**: WorkflowBuilder automatically loads entry points on initialization.
 
 ---
 
@@ -574,7 +574,7 @@ answer = {
 
 **Step Definition**:
 ```python
-# In rufus-bidding-steps/src/rufus_bidding/models.py
+# In ruvon-bidding-steps/src/rufus_bidding/models.py
 
 class RLMConfig(BaseModel):
     """Configuration for RLM-based multi-document analysis."""
@@ -629,14 +629,14 @@ class RLMQueryStep(WorkflowStep):
     merge_strategy: MergeStrategy = MergeStrategy.SHALLOW
 ```
 
-#### Integration with Rufus SDK
+#### Integration with Ruvon SDK
 
 **Execution Handler** (in `Workflow.next_step()`):
 ```python
 elif isinstance(step, RLMQueryStep):
     # Dispatch to Celery worker (long-running recursive analysis)
     result = await self.execution_provider.dispatch_async_task(
-        func_path="rufus_bidding.steps.rlm_query.execute",
+        func_path="ruvon_bidding.steps.rlm_query.execute",
         state_data=self.state.model_dump(),
         workflow_id=self.id,
         rlm_config=step.rlm_config.model_dump(),
@@ -1387,7 +1387,7 @@ metadata: {
 ```python
 # src/b_bidding_api/routes/rfps.py
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 from b_bidding_api.dependencies import get_workflow_builder
 from b_bidding_api.storage import upload_to_s3
 import uuid
@@ -1409,7 +1409,7 @@ async def upload_rfp(
         key=f"rfps/{datetime.now().strftime('%Y-%m-%d')}/{rfp_id}.zip"
     )
 
-    # Start Rufus workflow
+    # Start Ruvon workflow
     workflow = await workflow_builder.create_workflow(
         workflow_type="RFP_Intake",
         initial_data={
@@ -2182,7 +2182,7 @@ export const useAuthStore = create<AuthState>()(
 
 ## 6. Database Schema
 
-### 6.1 Core Tables (Beyond Rufus SDK Tables)
+### 6.1 Core Tables (Beyond Ruvon SDK Tables)
 
 ```sql
 -- RFPs table
@@ -2554,7 +2554,7 @@ services:
     image: postgres:15
     environment:
       POSTGRES_DB: b_bidding
-      POSTGRES_USER: rufus
+      POSTGRES_USER: ruvon
       POSTGRES_PASSWORD: rufus_password
     ports:
       - "5432:5432"
@@ -2583,7 +2583,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      DATABASE_URL: postgresql://rufus:rufus_password@postgres:5432/b_bidding
+      DATABASE_URL: postgresql://ruvon:rufus_password@postgres:5432/b_bidding
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minio_admin
@@ -2603,7 +2603,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      DATABASE_URL: postgresql://rufus:rufus_password@postgres:5432/b_bidding
+      DATABASE_URL: postgresql://ruvon:rufus_password@postgres:5432/b_bidding
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minio_admin
@@ -2621,7 +2621,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      DATABASE_URL: postgresql://rufus:rufus_password@postgres:5432/b_bidding
+      DATABASE_URL: postgresql://ruvon:rufus_password@postgres:5432/b_bidding
       REDIS_URL: redis://redis:6379/0
     depends_on:
       - postgres
@@ -2750,7 +2750,7 @@ spec:
           containers:
           - name: scanner
             image: your-registry/b-bidding-api:latest
-            command: ["rufus", "scan-zombies", "--db", "$(DATABASE_URL)", "--fix"]
+            command: ["ruvon", "scan-zombies", "--db", "$(DATABASE_URL)", "--fix"]
             env:
             - name: DATABASE_URL
               valueFrom:
@@ -2775,7 +2775,7 @@ spec:
 1. **Backend**:
    - FastAPI application scaffolding
    - PostgreSQL database setup with schema
-   - Rufus SDK integration
+   - Ruvon SDK integration
    - Basic auth (JWT)
    - S3 file storage integration
    - Celery worker setup
@@ -3013,7 +3013,7 @@ spec:
 **Plan C: Database Outage**
 - RDS Multi-AZ automatic failover
 - Read replicas for queries
-- Rufus workflows resume after recovery (state persisted)
+- Ruvon workflows resume after recovery (state persisted)
 
 ---
 
@@ -3058,7 +3058,7 @@ spec:
 ### Immediate Actions (This Week)
 
 1. **Technical Setup**:
-   - [ ] Create project repositories (backend, frontend, rufus-bidding-steps)
+   - [ ] Create project repositories (backend, frontend, ruvon-bidding-steps)
    - [ ] Set up development environment (Docker Compose)
    - [ ] Initialize PostgreSQL database with schema
    - [ ] Configure S3/MinIO for file storage
@@ -3098,7 +3098,7 @@ spec:
 
 ## Appendix A: Technology Justifications
 
-### Why Rufus SDK?
+### Why Ruvon SDK?
 
 1. **Workflow-Native**: Built for complex, multi-step workflows with human-in-the-loop
 2. **Production-Ready**: Saga pattern, zombie recovery, definition snapshots
@@ -3109,9 +3109,9 @@ spec:
 
 ### Why FastAPI?
 
-1. **Async-First**: Matches Rufus SDK's async architecture
+1. **Async-First**: Matches Ruvon SDK's async architecture
 2. **High Performance**: On par with Node.js and Go
-3. **Type Safety**: Pydantic models align with Rufus state models
+3. **Type Safety**: Pydantic models align with Ruvon state models
 4. **Auto-Documentation**: OpenAPI/Swagger out-of-the-box
 5. **Ecosystem**: Rich ecosystem for auth, validation, testing
 
@@ -3121,7 +3121,7 @@ spec:
 2. **Mature**: Battle-tested in production (10+ years)
 3. **Monitoring**: Flower UI for task monitoring
 4. **Flexibility**: Priority queues, retries, rate limiting
-5. **Rufus Integration**: ExecutionProvider already designed for Celery
+5. **Ruvon Integration**: ExecutionProvider already designed for Celery
 
 ### Why React + TypeScript?
 
@@ -3224,7 +3224,7 @@ curl -X GET "http://localhost:8000/api/v1/workflows/550e8400-e29b-41d4-a716-4466
 
 ## Conclusion
 
-This implementation plan outlines a comprehensive, production-ready AI pilot for the B Bidding Master system. By leveraging **Rufus SDK's workflow orchestration**, **FastAPI's high performance**, and **custom AI-powered step types**, we can deliver:
+This implementation plan outlines a comprehensive, production-ready AI pilot for the B Bidding Master system. By leveraging **Ruvon SDK's workflow orchestration**, **FastAPI's high performance**, and **custom AI-powered step types**, we can deliver:
 
 1. **60-80% reduction** in manual RFP processing time
 2. **Automated sub-consultant coordination** with real-time tracking
@@ -3233,7 +3233,7 @@ This implementation plan outlines a comprehensive, production-ready AI pilot for
 
 The phased approach ensures incremental delivery of value, with Phase 1 (Foundation) delivering core functionality in 3 weeks. The architecture is designed for **scalability** (100+ RFPs/day), **reliability** (zombie recovery, Saga pattern), and **extensibility** (marketplace-based custom steps).
 
-**Recommendation**: Proceed with Phase 1 implementation immediately. The technical stack (Rufus SDK + FastAPI + React) is well-suited for this use case and represents a proven, production-ready AI architecture.
+**Recommendation**: Proceed with Phase 1 implementation immediately. The technical stack (Ruvon SDK + FastAPI + React) is well-suited for this use case and represents a proven, production-ready AI architecture.
 
 ---
 

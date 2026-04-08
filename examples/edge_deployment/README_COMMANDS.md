@@ -264,5 +264,5 @@ python cloud_admin.py command-status macbook-m4-001 <command-id>
 
 For issues or questions:
 - Review logs on edge device: Check console output
-- Review logs on cloud: `docker compose logs -f rufus-server`
+- Review logs on cloud: `docker compose logs -f ruvon-server`
 - Check database: Command records in `device_commands` table

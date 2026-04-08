@@ -1,6 +1,6 @@
 # Saga Pattern: Distributed Transaction Compensation
 
-The Saga pattern is Rufus's solution to the distributed transaction problem: how do you maintain consistency across multiple independent operations when you can't use a traditional database transaction?
+The Saga pattern is Ruvon's solution to the distributed transaction problem: how do you maintain consistency across multiple independent operations when you can't use a traditional database transaction?
 
 ## The Problem
 
@@ -34,7 +34,7 @@ Charge Payment      ←──────  Refund Payment (if charged)
 
 Example: You can't cancel the flight until you've released the hotel, because both might share the same booking reference.
 
-## How Rufus Implements Sagas
+## How Ruvon Implements Sagas
 
 ### 1. Define Compensatable Steps
 
@@ -191,7 +191,7 @@ def cancel_flight(state: BookingState, context: StepContext) -> dict:
 ```
 
 **What happens if compensation fails?**
-- Rufus logs the failure to audit log
+- Ruvon logs the failure to audit log
 - Continues with remaining compensations
 - Final state: `FAILED_ROLLED_BACK` (even if some compensations failed)
 - Ops team investigates and manually fixes

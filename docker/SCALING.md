@@ -1,4 +1,4 @@
-# Scaling Rufus Celery Workers with Docker
+# Scaling Ruvon Celery Workers with Docker
 
 Complete guide for distributed deployment and horizontal scaling of Celery workers.
 
@@ -66,7 +66,7 @@ docker-compose -f docker-compose.production.yml exec celery-worker \
 │  └─────────────────────────────────────────────────┘        │
 │         │                                                    │
 │  ┌──────┴──────────┐                                        │
-│  │  Rufus Server   │                                        │
+│  │  Ruvon Server   │                                        │
 │  │  (API/UI)       │                                        │
 │  └─────────────────┘                                        │
 └─────────────────────────────────────────────────────────────┘
@@ -195,16 +195,16 @@ docker push your-registry/ruvon-server:latest
 **2. Create namespace:**
 
 ```bash
-kubectl create namespace rufus-production
+kubectl create namespace ruvon-production
 ```
 
 **3. Create secrets:**
 
 ```bash
 # Database credentials
-kubectl create secret generic rufus-secrets \
-    --from-literal=database-url='postgresql://user:password@postgres-host:5432/rufus' \
-    -n rufus-production
+kubectl create secret generic ruvon-secrets \
+    --from-literal=database-url='postgresql://user:password@postgres-host:5432/ruvon' \
+    -n ruvon-production
 
 # Or use a secret file
 cat > secret.yaml <<EOF
@@ -212,10 +212,10 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: ruvon-secrets
-  namespace: rufus-production
+  namespace: ruvon-production
 type: Opaque
 stringData:
-  database-url: "postgresql://user:password@postgres-host:5432/rufus"
+  database-url: "postgresql://user:password@postgres-host:5432/ruvon"
 EOF
 
 kubectl apply -f secret.yaml
@@ -224,33 +224,33 @@ kubectl apply -f secret.yaml
 **4. Deploy Redis:**
 
 ```bash
-kubectl apply -f docker/kubernetes/redis-deployment.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/redis-deployment.yaml -n ruvon-production
 ```
 
 **5. Deploy ConfigMap:**
 
 ```bash
-kubectl apply -f docker/kubernetes/configmap.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/configmap.yaml -n ruvon-production
 ```
 
 **6. Deploy Celery workers:**
 
 ```bash
 # Update image in celery-worker-deployment.yaml first
-kubectl apply -f docker/kubernetes/celery-worker-deployment.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/celery-worker-deployment.yaml -n ruvon-production
 ```
 
 **7. Verify deployment:**
 
 ```bash
 # Check pods
-kubectl get pods -n rufus-production
+kubectl get pods -n ruvon-production
 
 # Check worker logs
-kubectl logs -f -l component=celery-worker -n rufus-production
+kubectl logs -f -l component=celery-worker -n ruvon-production
 
 # Check autoscaling
-kubectl get hpa -n rufus-production
+kubectl get hpa -n ruvon-production
 ```
 
 ### Kubernetes Scaling
@@ -259,7 +259,7 @@ kubectl get hpa -n rufus-production
 
 ```bash
 # Scale to 10 replicas
-kubectl scale deployment rufus-celery-worker --replicas=10 -n rufus-production
+kubectl scale deployment ruvon-celery-worker --replicas=10 -n ruvon-production
 ```
 
 **Auto-scaling:**
@@ -273,16 +273,16 @@ The HorizontalPodAutoscaler is configured to:
 **Monitor autoscaling:**
 
 ```bash
-kubectl get hpa rufus-celery-worker-hpa -n rufus-production --watch
+kubectl get hpa ruvon-celery-worker-hpa -n ruvon-production --watch
 ```
 
 **Update HPA:**
 
 ```bash
 # Change max replicas to 50
-kubectl patch hpa rufus-celery-worker-hpa \
+kubectl patch hpa ruvon-celery-worker-hpa \
     --patch '{"spec":{"maxReplicas":50}}' \
-    -n rufus-production
+    -n ruvon-production
 ```
 
 ---
@@ -406,10 +406,10 @@ services:
 
 ```bash
 # Scale up during business hours (9 AM)
-0 9 * * * kubectl scale deployment rufus-celery-worker --replicas=20
+0 9 * * * kubectl scale deployment ruvon-celery-worker --replicas=20
 
 # Scale down at night (6 PM)
-0 18 * * * kubectl scale deployment rufus-celery-worker --replicas=5
+0 18 * * * kubectl scale deployment ruvon-celery-worker --replicas=5
 ```
 
 ---
@@ -425,7 +425,7 @@ services:
 open http://localhost:5555
 
 # Kubernetes port-forward
-kubectl port-forward svc/ruvon-flower 5555:5555 -n rufus-production
+kubectl port-forward svc/ruvon-flower 5555:5555 -n ruvon-production
 open http://localhost:5555
 ```
 
@@ -585,7 +585,7 @@ STOPSIGNAL SIGTERM
 lifecycle:
   preStop:
     exec:
-      command: ["celery", "-A", "rufus.celery_app", "control", "shutdown"]
+      command: ["celery", "-A", "ruvon.celery_app", "control", "shutdown"]
 terminationGracePeriodSeconds: 60
 ```
 

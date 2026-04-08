@@ -82,7 +82,7 @@ steps:
       max_tokens: 512
       temperature: 0.1
     prompt_template: |
-      You are an expert Rufus edge device operator. Analyse the following
+      You are an expert Ruvon edge device operator. Analyse the following
       device metrics and identify the single most impactful config change.
 
       Device metrics:

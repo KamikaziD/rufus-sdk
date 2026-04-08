@@ -1,4 +1,4 @@
-# Rufus Edge Cloud Platform - Docker Compose
+# Ruvon Edge Cloud Platform - Docker Compose
 #
 # Usage:
 #   cd docker
@@ -29,7 +29,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ruvon}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ruvon_secret_2024}
-      POSTGRES_DB: ${POSTGRES_DB:-rufus_cloud}
+      POSTGRES_DB: ${POSTGRES_DB:-ruvon_cloud}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Removed init-db.sql - using Alembic migrations instead
@@ -37,7 +37,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ruvon} -d ${POSTGRES_DB:-rufus_cloud}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ruvon} -d ${POSTGRES_DB:-ruvon_cloud}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,7 +45,7 @@ services:
       - ruvon-network
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Rufus Cloud Control Plane
+  # Ruvon Cloud Control Plane
   # ─────────────────────────────────────────────────────────────────────────
   ruvon-server:
     build:
@@ -54,7 +54,7 @@ services:
     container_name: ruvon-cloud
     environment:
       # Database
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ruvon}:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/${POSTGRES_DB:-rufus_cloud}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ruvon}:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/${POSTGRES_DB:-ruvon_cloud}
       WORKFLOW_STORAGE: ${WORKFLOW_STORAGE:-postgres}
 
       # PostgreSQL Connection Pool (optimized for high-load testing)
@@ -101,7 +101,7 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_secret}
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-rufus_cloud}
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ruvon_cloud}
       KC_DB_USERNAME: ${POSTGRES_USER:-ruvon}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ruvon_secret_2024}
       KC_HTTP_ENABLED: "true"

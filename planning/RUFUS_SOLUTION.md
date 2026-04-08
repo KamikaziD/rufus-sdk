@@ -1,6 +1,6 @@
-# Rufus: Infrastructure That Was Impossible Yesterday
+# Ruvon: Infrastructure That Was Impossible Yesterday
 
-**A comprehensive research document positioning Rufus as the solution to five infrastructure problems that were previously too expensive, out of reach, or impossible for most companies.**
+**A comprehensive research document positioning Ruvon as the solution to five infrastructure problems that were previously too expensive, out of reach, or impossible for most companies.**
 
 ---
 
@@ -16,17 +16,17 @@
    - [Problem #5: Distributed Transaction Compensation](#problem-5-distributed-transaction-compensation)
 4. [Cost Comparison Matrix](#cost-comparison-matrix)
 5. [Technical Differentiators](#technical-differentiators)
-6. [Rufus SDK and Modules](#rufus-sdk-and-modules)
+6. [Ruvon SDK and Modules](#ruvon-sdk-and-modules)
 7. [Real-World Case Studies](#real-world-case-studies)
 8. [Production Validation](#production-validation)
-9. [How Rufus Improves Existing Methods](#how-rufus-improves-existing-methods)
+9. [How Ruvon Improves Existing Methods](#how-ruvon-improves-existing-methods)
 10. [Getting Started](#getting-started)
 
 ---
 
 ## Executive Summary
 
-**What Rufus Unlocks**: Five infrastructure capabilities previously reserved for tech giants with million-dollar budgets:
+**What Ruvon Unlocks**: Five infrastructure capabilities previously reserved for tech giants with million-dollar budgets:
 
 1. **Offline Payment Processing** - Process payments without network connectivity, sync when online
 2. **Hot-Deploy Config Updates** - Update business logic across thousands of devices without firmware deployments
@@ -38,13 +38,13 @@
 
 **Target Audience**: SMBs, mid-market companies, and fintech startups that need enterprise-grade infrastructure without enterprise budgets.
 
-**What Changed**: Rufus is an **embeddable Python SDK** - not a cloud service, not a complex platform. Drop it into your existing Python application and you're running production-grade workflows in 30 seconds.
+**What Changed**: Ruvon is an **embeddable Python SDK** - not a cloud service, not a complex platform. Drop it into your existing Python application and you're running production-grade workflows in 30 seconds.
 
 ---
 
 ## The Infrastructure Gap
 
-### The Binary Choice (Before Rufus)
+### The Binary Choice (Before Ruvon)
 
 Companies building fintech, IoT, or edge computing solutions faced an impossible choice:
 
@@ -68,14 +68,14 @@ Companies building fintech, IoT, or edge computing solutions faced an impossible
 | **Stripe/Square** | Cloud-dependent APIs | Cannot approve transactions offline, limited customization |
 | **Custom Solutions** | Reinventing the wheel | 6-12 months, expensive, risky |
 
-### What Changed: Rufus as Embeddable SDK
+### What Changed: Ruvon as Embeddable SDK
 
-**Rufus is NOT**:
+**Ruvon is NOT**:
 - ❌ A cloud service you pay per transaction
 - ❌ A complex platform requiring 4+ services
 - ❌ A vendor lock-in ecosystem
 
-**Rufus IS**:
+**Ruvon IS**:
 - ✅ A **Python SDK** you embed in your application
 - ✅ **Zero infrastructure** (SQLite for edge, PostgreSQL optional)
 - ✅ **30-second setup** (pip install, that's it)
@@ -120,7 +120,7 @@ Companies building fintech, IoT, or edge computing solutions faced an impossible
 - **Cost to build**: $200,000-$500,000 (6-12 months of development)
 - **Compliance**: $20,000-$100,000/year for penetration testing, vulnerability scans
 
-#### The Rufus Solution
+#### The Ruvon Solution
 
 **Technical Implementation**:
 
@@ -154,13 +154,13 @@ steps:
 **Python Implementation** (Edge Device):
 
 ```python
-from rufus_edge.agent import RufusEdgeAgent
-from rufus_edge.sync_manager import SyncManager
+from ruvon_edge.agent import RuvonEdgeAgent
+from ruvon_edge.sync_manager import SyncManager
 
 # Initialize edge agent with SQLite
-agent = RufusEdgeAgent(
+agent = RuvonEdgeAgent(
     device_id="pos-store-42-terminal-3",
-    db_path="/var/lib/rufus/pos.db",  # SQLite WAL mode
+    db_path="/var/lib/ruvon/pos.db",  # SQLite WAL mode
     control_plane_url="https://control.mycompany.com"
 )
 
@@ -200,17 +200,17 @@ transaction = await agent.execute_workflow(
 | **Idempotency** | 100% (zero duplicate key errors) |
 
 **What This Proves**:
-- Rufus can sync **99,000 offline transactions in under 16 seconds**
+- Ruvon can sync **99,000 offline transactions in under 16 seconds**
 - Zero errors across 1,000 concurrent devices
 - Idempotency prevents duplicate charges (critical for payment systems)
 
 #### Economic Impact
 
-**Before Rufus**:
+**Before Ruvon**:
 - Stripe/Square: $220,000-$600,000/year
 - Custom build: $200,000-$500,000 upfront + $20,000-$100,000/year
 
-**With Rufus**:
+**With Ruvon**:
 - SDK cost: $0 (embed in your app)
 - Infrastructure: Self-hosted PostgreSQL ($500/year)
 - Compliance: PCI-DSS ready architecture (reduces audit scope)
@@ -251,7 +251,7 @@ transaction = await agent.execute_workflow(
 - No gradual rollout (canary/staged deployment)
 - No automatic rollback on failure
 
-#### The Rufus Solution
+#### The Ruvon Solution
 
 **Technical Implementation**:
 
@@ -292,7 +292,7 @@ steps:
 **Python Implementation** (Control Plane):
 
 ```python
-from rufus_server.policy_engine import PolicyEngine
+from ruvon_server.policy_engine import PolicyEngine
 
 # Push config with gradual rollout
 policy = PolicyEngine()
@@ -315,12 +315,12 @@ await policy.deploy_config(
 **Python Implementation** (Edge Device):
 
 ```python
-from rufus_edge.config_manager import ConfigManager
+from ruvon_edge.config_manager import ConfigManager
 
 # ConfigManager polls every 60 seconds
 config_manager = ConfigManager(
     control_plane_url="https://control.bank.com",
-    cache_db="/var/lib/rufus/config.db",  # SQLite cache
+    cache_db="/var/lib/ruvon/config.db",  # SQLite cache
     poll_interval_seconds=60
 )
 
@@ -349,12 +349,12 @@ config_manager = ConfigManager(
 
 #### Economic Impact
 
-**Before Rufus**:
+**Before Ruvon**:
 - Downtime costs: $37M/year (industry average)
 - Technician dispatch: $1.5M per major update
 - OTA failures: $300K/year (1% failure rate × 10,000 devices)
 
-**With Rufus**:
+**With Ruvon**:
 - Zero downtime (hot-reload)
 - Zero technician dispatch
 - Auto-rollback on failure
@@ -394,7 +394,7 @@ Traditional cloud IoT platforms charge **per device**, making this prohibitively
 - No command versioning or audit trails
 - Steep learning curve (AWS-specific)
 
-#### The Rufus Solution
+#### The Ruvon Solution
 
 **Architecture**:
 
@@ -420,8 +420,8 @@ Traditional cloud IoT platforms charge **per device**, making this prohibitively
 **Technical Implementation**:
 
 ```python
-from rufus_server.device_service import DeviceService
-from rufus_server.policy_engine import PolicyEngine
+from ruvon_server.device_service import DeviceService
+from ruvon_server.policy_engine import PolicyEngine
 
 # Register 100,000 devices
 device_service = DeviceService()
@@ -446,7 +446,7 @@ await policy_engine.deploy_config(
 )
 
 # Send broadcast command to all devices in region
-from rufus_server.broadcast_service import BroadcastService
+from ruvon_server.broadcast_service import BroadcastService
 
 broadcast = BroadcastService()
 await broadcast.send_command(
@@ -494,12 +494,12 @@ await broadcast.send_command(
 
 #### Economic Impact
 
-**Before Rufus**:
+**Before Ruvon**:
 - AWS IoT Greengrass: $336,000-$486,000/year
 - Still need to build workflow orchestration
 - Vendor lock-in to AWS ecosystem
 
-**With Rufus**:
+**With Ruvon**:
 - Self-hosted control plane: $6,000/year (PostgreSQL + hosting)
 - Full workflow orchestration included
 - No per-device fees
@@ -542,7 +542,7 @@ Traditional solutions:
   - Multi-runtime support (TFLite, ONNX, CoreML)
   - Resource management (prevent OOM crashes)
 
-#### The Rufus Solution
+#### The Ruvon Solution
 
 **Technical Implementation**:
 
@@ -585,7 +585,7 @@ steps:
 **Python Implementation**:
 
 ```python
-from rufus_edge.inference_executor import InferenceExecutor
+from ruvon_edge.inference_executor import InferenceExecutor
 
 # Initialize inference executor
 inference_executor = InferenceExecutor(
@@ -628,7 +628,7 @@ await inference_executor.load_model(
 | **Error Rate** | **0%** |
 
 **What This Proves**:
-- Rufus can orchestrate **8,500+ workflows/second** on 1,000 devices
+- Ruvon can orchestrate **8,500+ workflows/second** on 1,000 devices
 - Edge AI inference as a workflow step is architecturally sound
 - Workflow engine overhead is negligible (sub-millisecond per step)
 
@@ -639,12 +639,12 @@ await inference_executor.load_model(
 
 #### Economic Impact
 
-**Before Rufus**:
+**Before Ruvon**:
 - Cloud inference: $10,000-$100,000/year (high-volume predictions)
 - Custom build: $100,000-$300,000 upfront
 - Privacy compliance: Additional auditing/certification
 
-**With Rufus**:
+**With Ruvon**:
 - Edge inference: $0 (runs on existing hardware)
 - Workflow orchestration: $0 (embedded SDK)
 - Privacy compliance: Easier (data stays on device)
@@ -684,7 +684,7 @@ Traditional solutions:
 - Must handle partial failures (network drops mid-transaction)
 - Must provide exactly-once semantics (no double charges/refunds)
 
-#### The Rufus Solution
+#### The Ruvon Solution
 
 **Technical Implementation**:
 
@@ -776,12 +776,12 @@ def mark_failed_dispense(state: WithdrawalState, context: StepContext):
 
 #### Economic Impact
 
-**Before Rufus**:
+**Before Ruvon**:
 - Temporal Saga: Variable cost, requires cloud
 - Custom 2PC: $50,000-$150,000 to build
 - Manual reversal: Fraud risk, compliance issues
 
-**With Rufus**:
+**With Ruvon**:
 - Saga pattern: $0 (built into workflow engine)
 - Works offline: Critical for edge devices
 - Exactly-once semantics: Prevents double charges/refunds
@@ -794,7 +794,7 @@ def mark_failed_dispense(state: WithdrawalState, context: StepContext):
 
 ### Comprehensive Cost Analysis
 
-| Capability | Traditional Cost | Rufus Cost | Year 1 Savings |
+| Capability | Traditional Cost | Ruvon Cost | Year 1 Savings |
 |------------|------------------|------------|----------------|
 | **Offline Payment Processing** | $220K-$600K | $0 | **$220K-$600K** |
 | **Hot-Deploy Config Updates** | $37M downtime | $0 downtime | **Millions** |
@@ -815,7 +815,7 @@ def mark_failed_dispense(state: WithdrawalState, context: StepContext):
 | Limited offline support (liability risk) | Variable |
 | **TOTAL** | **$220,000/year** |
 
-**Rufus (Self-Hosted)**:
+**Ruvon (Self-Hosted)**:
 | Component | Annual Cost |
 |-----------|-------------|
 | SDK cost | $0 |
@@ -835,7 +835,7 @@ def mark_failed_dispense(state: WithdrawalState, context: StepContext):
 | FTE for management | $150,000-$300,000 |
 | **TOTAL** | **$336,000-$486,000/year** |
 
-**Rufus (Self-Hosted)**:
+**Ruvon (Self-Hosted)**:
 | Component | Annual Cost |
 |-----------|-------------|
 | PostgreSQL hosting (high availability) | $3,000/year |
@@ -851,7 +851,7 @@ def mark_failed_dispense(state: WithdrawalState, context: StepContext):
 
 ### vs Temporal
 
-| Feature | Temporal | Rufus | Advantage |
+| Feature | Temporal | Ruvon | Advantage |
 |---------|----------|-------|-----------|
 | **Setup Time** | 2-4 hours | 30 seconds | **99% faster** |
 | **Network Calls/Step** | 4 calls | 0-2 calls | **50-100% fewer** |
@@ -892,7 +892,7 @@ Total: 0-2 network calls per step (no orchestrator hop)
 
 ### vs AWS IoT Greengrass
 
-| Feature | AWS IoT Greengrass | Rufus | Advantage |
+| Feature | AWS IoT Greengrass | Ruvon | Advantage |
 |---------|-------------------|-------|-----------|
 | **Per-Device Cost** | $0.16/device/month | $0 | **100% savings** |
 | **Workflow Engine** | ❌ No (data sync only) | ✅ Yes | **Built-in orchestration** |
@@ -902,11 +902,11 @@ Total: 0-2 network calls per step (no orchestrator hop)
 
 **Cost Example (100,000 Devices)**:
 - AWS IoT Greengrass: $192,000/year
-- Rufus: $0 (no per-device fees)
+- Ruvon: $0 (no per-device fees)
 
 ### vs Stripe/Square
 
-| Feature | Stripe/Square | Rufus | Advantage |
+| Feature | Stripe/Square | Ruvon | Advantage |
 |---------|---------------|-------|-----------|
 | **Offline Support** | Limited (24-72h liability) | Full (indefinite) | **True offline** |
 | **Transaction Fees** | 2.6-2.7% + $0.10 | $0 | **100% savings** |
@@ -916,11 +916,11 @@ Total: 0-2 network calls per step (no orchestrator hop)
 
 **Cost Example ($5M Annual Revenue)**:
 - Stripe: $130,000/year (2.6% fees)
-- Rufus: $0 (self-hosted)
+- Ruvon: $0 (self-hosted)
 
 ### vs Custom Build
 
-| Feature | Custom Build | Rufus | Advantage |
+| Feature | Custom Build | Ruvon | Advantage |
 |---------|--------------|-------|-----------|
 | **Development Time** | 6-12 months | 0 months | **Immediate** |
 | **Upfront Cost** | $200K-$500K | $0 | **100% savings** |
@@ -930,9 +930,9 @@ Total: 0-2 network calls per step (no orchestrator hop)
 
 ---
 
-## Rufus SDK and Modules
+## Ruvon SDK and Modules
 
-### Core SDK (`src/rufus/`)
+### Core SDK (`src/ruvon/`)
 
 **Workflow Class** (`workflow.py`):
 - Main class managing workflow lifecycle, state, and execution
@@ -943,7 +943,7 @@ Total: 0-2 network calls per step (no orchestrator hop)
 **WorkflowBuilder** (`builder.py`):
 - Loads workflow definitions from YAML files
 - Resolves function/model paths using `importlib`
-- Manages workflow registry and auto-discovers `rufus-*` packages
+- Manages workflow registry and auto-discovers `ruvon-*` packages
 - Creates `Workflow` instances with proper dependency injection
 - **Key Method**: `create_workflow()` - Instantiates workflows
 
@@ -969,9 +969,9 @@ Total: 0-2 network calls per step (no orchestrator hop)
 8. **CRON_SCHEDULER** - Scheduled recurring workflows
 9. **AI_INFERENCE** - Edge AI inference (design spec)
 
-### Edge Agent (`src/rufus_edge/`)
+### Edge Agent (`src/ruvon_edge/`)
 
-**RufusEdgeAgent** (`agent.py`):
+**RuvonEdgeAgent** (`agent.py`):
 - Main orchestrator for edge devices
 - **Heartbeat reporting**: Sends device metrics every 60s
 - **Cloud command handling**: Processes force_sync, reload_config, update_model
@@ -996,7 +996,7 @@ Total: 0-2 network calls per step (no orchestrator hop)
 - **Resource management**: Prevent OOM with model unloading (design spec)
 - **Key Method**: `run_inference()` - Execute ML model
 
-### Cloud Control Plane (`src/rufus_server/`)
+### Cloud Control Plane (`src/ruvon_server/`)
 
 **Device Registry** (`device_service.py`):
 - **Registration**: Device enrollment with API key generation
@@ -1024,7 +1024,7 @@ Total: 0-2 network calls per step (no orchestrator hop)
 8. **Broadcast Commands** (`broadcast_service.py`) - Send to device groups
 9. **Command Templates** (`template_service.py`) - Reusable patterns
 
-### CLI Tool (`src/rufus_cli/`)
+### CLI Tool (`src/ruvon_cli/`)
 
 **21 Commands Across 5 Categories**:
 
@@ -1036,11 +1036,11 @@ Total: 0-2 network calls per step (no orchestrator hop)
 
 **Example Usage**:
 ```bash
-rufus list --status ACTIVE
-rufus start OrderProcessing -d '{"order_id": "123"}'
-rufus show <workflow-id> --state --logs
-rufus db init
-rufus scan-zombies --fix
+ruvon list --status ACTIVE
+ruvon start OrderProcessing -d '{"order_id": "123"}'
+ruvon show <workflow-id> --state --logs
+ruvon db init
+ruvon scan-zombies --fix
 ```
 
 ---
@@ -1060,7 +1060,7 @@ rufus scan-zombies --fix
 - Stripe Terminal couldn't authorize payments offline
 - Manual fallback (write down card numbers) created fraud risk
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 
 ```yaml
 # Coffee shop POS workflow
@@ -1104,7 +1104,7 @@ steps:
 - Firmware update would take **2 weeks** (certification + deployment)
 - Estimated loss: **$2M+** during vulnerability window
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 
 ```yaml
 # Updated fraud detection (hot-deployed in 30 minutes)
@@ -1150,12 +1150,12 @@ steps:
 - Still needed to build workflow orchestration
 - Wanted to reduce vendor lock-in
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 
 **Architecture**:
 - Self-hosted control plane (Kubernetes)
 - PostgreSQL for device registry
-- Rufus Edge Agent on each kiosk (Raspberry Pi 5)
+- Ruvon Edge Agent on each kiosk (Raspberry Pi 5)
 
 **Features Deployed**:
 1. Heartbeat monitoring (device health every 60s)
@@ -1362,7 +1362,7 @@ steps:
 
 ---
 
-## How Rufus Improves Existing Methods
+## How Ruvon Improves Existing Methods
 
 ### Workflow Orchestration (vs Temporal/Airflow)
 
@@ -1372,7 +1372,7 @@ steps:
 - High operational overhead (Kubernetes, monitoring, scaling)
 - Expensive ($25/million actions for Temporal)
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **Zero infrastructure** (embedded SDK)
 - **30-second setup** (pip install)
 - **Zero operational overhead** (no external services)
@@ -1391,7 +1391,7 @@ steps:
 - AWS vendor lock-in
 - Steep learning curve
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **Zero per-device fees** (self-hosted control plane)
 - **Full workflow orchestration** (embedded engine)
 - **No vendor lock-in** (deploy anywhere)
@@ -1409,7 +1409,7 @@ steps:
 - Limited customization
 - Merchant liability during offline window
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **True offline support** (indefinite, not 24-72h)
 - **Zero transaction fees** (self-hosted)
 - **Full customization** (Python step functions)
@@ -1426,7 +1426,7 @@ steps:
 - Technician dispatch ($150/device)
 - OTA failure risk (1% = 1,000 bricked devices at 100K scale)
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **Hot-deploy via ETag** (30 minutes vs 2-4 weeks)
 - **Zero downtime** (hot-reload)
 - **No technician dispatch** (remote update)
@@ -1443,7 +1443,7 @@ steps:
 - Cost: $0.01-$0.10 per prediction
 - No workflow integration (standalone)
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **Edge inference**: Sub-20ms latency (10-25× faster)
 - **Privacy compliant**: Data never leaves device (GDPR/HIPAA)
 - **Zero cost**: Runs on existing hardware
@@ -1459,7 +1459,7 @@ steps:
 - Custom 2PC: Complex, error-prone, doesn't work offline
 - Manual reversal: Slow, fraud risk
 
-**Rufus Improvement**:
+**Ruvon Improvement**:
 - **Saga pattern built-in** (automatic compensation)
 - **Works offline** (SQLite-backed)
 - **Exactly-once semantics** (prevents double charges)
@@ -1475,7 +1475,7 @@ steps:
 
 ### Evaluation Checklist
 
-Ask yourself these questions to see if Rufus is right for your use case:
+Ask yourself these questions to see if Ruvon is right for your use case:
 
 - [ ] **Do we process payments offline or in unreliable networks?**
 - [ ] **Do we manage 100+ edge devices across distributed locations?**
@@ -1485,13 +1485,13 @@ Ask yourself these questions to see if Rufus is right for your use case:
 - [ ] **Do we need saga pattern for distributed transaction compensation?**
 - [ ] **Are we building custom workflow orchestration?**
 
-**If you answered YES to any of these**, Rufus can likely save you **$100,000-$1,000,000+ in year 1**.
+**If you answered YES to any of these**, Ruvon can likely save you **$100,000-$1,000,000+ in year 1**.
 
 ### Next Steps
 
 #### 1. Review Technical Documentation
 
-Start with the core documentation to understand Rufus architecture:
+Start with the core documentation to understand Ruvon architecture:
 
 - **[README.md](README.md)** - Use cases and quick start
 - **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
@@ -1500,12 +1500,12 @@ Start with the core documentation to understand Rufus architecture:
 
 #### 2. Run Load Tests on Your Infrastructure
 
-Validate Rufus performance on your hardware:
+Validate Ruvon performance on your hardware:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourcompany/rufus.git
-cd rufus
+git clone https://github.com/yourcompany/ruvon.git
+cd ruvon
 
 # Install dependencies
 pip install -r requirements.txt
@@ -1539,15 +1539,15 @@ Start with a small pilot deployment:
 
 **Edge Devices**:
 ```bash
-# Install Rufus Edge Agent
+# Install Ruvon Edge Agent
 pip install -r requirements.txt
 
 # Configure
-export RUFUS_CONTROL_PLANE_URL="https://control.yourcompany.com"
-export RUFUS_DEVICE_ID="pilot-device-001"
+export RUVON_CONTROL_PLANE_URL="https://control.yourcompany.com"
+export RUVON_DEVICE_ID="pilot-device-001"
 
 # Start agent
-python -m rufus_edge.agent
+python -m ruvon_edge.agent
 ```
 
 **Control Plane**:
@@ -1556,7 +1556,7 @@ python -m rufus_edge.agent
 docker compose up -d
 
 # Or Kubernetes
-kubectl apply -f k8s/rufus-control-plane.yaml
+kubectl apply -f k8s/ruvon-control-plane.yaml
 
 # Register devices
 curl -X POST https://control.yourcompany.com/api/v1/devices \
@@ -1574,7 +1574,7 @@ curl -X POST https://control.yourcompany.com/api/v1/devices \
 
 **Metrics to Track**:
 
-| Metric | Before Rufus | With Rufus | Improvement |
+| Metric | Before Ruvon | With Ruvon | Improvement |
 |--------|--------------|------------|-------------|
 | **Transaction Fees** | $X/month | $0 | X% savings |
 | **Per-Device Fees** | $X/month | $0 | X% savings |
@@ -1587,14 +1587,14 @@ curl -X POST https://control.yourcompany.com/api/v1/devices \
 
 ### Quick Start (30 Seconds)
 
-For developers who want to try Rufus immediately:
+For developers who want to try Ruvon immediately:
 
 ```bash
 # Install
 pip install -r requirements.txt
 
 # Run your first workflow
-rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
+ruvon run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
 
 # Output:
 # Workflow ID: wf_abc123
@@ -1621,15 +1621,15 @@ rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
 - [examples/loan_application/](examples/loan_application/) - Business workflows
 
 **Community**:
-- GitHub: [github.com/yourcompany/rufus](https://github.com/yourcompany/rufus)
-- Issues: [github.com/yourcompany/rufus/issues](https://github.com/yourcompany/rufus/issues)
-- Discussions: [github.com/yourcompany/rufus/discussions](https://github.com/yourcompany/rufus/discussions)
+- GitHub: [github.com/yourcompany/ruvon](https://github.com/yourcompany/ruvon)
+- Issues: [github.com/yourcompany/ruvon/issues](https://github.com/yourcompany/ruvon/issues)
+- Discussions: [github.com/yourcompany/ruvon/discussions](https://github.com/yourcompany/ruvon/discussions)
 
 ---
 
 ## Conclusion
 
-**Rufus unlocks five infrastructure capabilities that were previously too expensive, out of reach, or impossible for most companies**:
+**Ruvon unlocks five infrastructure capabilities that were previously too expensive, out of reach, or impossible for most companies**:
 
 1. **Offline Payment Processing** - $220K-$600K/year savings
 2. **Hot-Deploy Config Updates** - Millions in prevented downtime
@@ -1639,12 +1639,12 @@ rufus run examples/quickstart/greeting_workflow.yaml -d '{"name": "World"}'
 
 **Total Year 1 Savings**: **$686,000 - $1,400,000+**
 
-**What Changed**: Rufus is an **embeddable Python SDK** that brings enterprise-grade workflow orchestration to edge devices, SMBs, and mid-market companies.
+**What Changed**: Ruvon is an **embeddable Python SDK** that brings enterprise-grade workflow orchestration to edge devices, SMBs, and mid-market companies.
 
 **Production Proven**: 1,000 concurrent devices, 233,380 requests, 0% error rate, 45+ minutes sustained load.
 
-**Get Started**: [Install Rufus](README.md#quick-start-30-seconds) in 30 seconds and start building infrastructure that was impossible yesterday.
+**Get Started**: [Install Ruvon](README.md#quick-start-30-seconds) in 30 seconds and start building infrastructure that was impossible yesterday.
 
 ---
 
-**Rufus** - Infrastructure that was impossible yesterday, trivial today.
+**Ruvon** - Infrastructure that was impossible yesterday, trivial today.

@@ -1,6 +1,6 @@
 # Advanced: Custom Providers
 
-Rufus abstracts all external integrations via Python Protocol interfaces. This guide shows how to implement custom providers for persistence, execution, and observability.
+Ruvon abstracts all external integrations via Python Protocol interfaces. This guide shows how to implement custom providers for persistence, execution, and observability.
 
 ---
 
@@ -129,7 +129,7 @@ class MongoDBPersistenceProvider:
     def __init__(
         self,
         mongo_url: str = "mongodb://localhost:27017",
-        database: str = "rufus",
+        database: str = "ruvon",
         workflow_collection: str = "workflows",
         logs_collection: str = "execution_logs",
         metrics_collection: str = "metrics"
@@ -333,10 +333,10 @@ class MongoDBPersistenceProvider:
 ## Using Custom Provider
 
 ```python
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 from my_providers.mongodb import MongoDBPersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
 
 async def main():
     # Initialize MongoDB persistence
@@ -438,7 +438,7 @@ class LambdaExecutionProvider:
 
     def __init__(
         self,
-        lambda_function_prefix: str = "rufus-step-",
+        lambda_function_prefix: str = "ruvon-step-",
         region_name: str = "us-east-1"
     ):
         self.lambda_function_prefix = lambda_function_prefix
@@ -559,7 +559,7 @@ import importlib
 
 def lambda_handler(event, context):
     """
-    AWS Lambda handler for Rufus workflow steps
+    AWS Lambda handler for Ruvon workflow steps
     """
     # Extract task details
     task_id = event['task_id']
@@ -677,33 +677,33 @@ from prometheus_client import Counter, Histogram, Gauge
 
 # Prometheus metrics
 workflow_started = Counter(
-    'rufus_workflow_started_total',
+    'ruvon_workflow_started_total',
     'Total workflows started',
     ['workflow_type']
 )
 
 workflow_completed = Counter(
-    'rufus_workflow_completed_total',
+    'ruvon_workflow_completed_total',
     'Total workflows completed',
     ['workflow_type', 'status']
 )
 
 step_execution_time = Histogram(
-    'rufus_step_execution_seconds',
+    'ruvon_step_execution_seconds',
     'Step execution time in seconds',
     ['workflow_type', 'step_name'],
     buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0)
 )
 
 workflow_execution_time = Histogram(
-    'rufus_workflow_execution_seconds',
+    'ruvon_workflow_execution_seconds',
     'Workflow execution time in seconds',
     ['workflow_type'],
     buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0)
 )
 
 active_workflows = Gauge(
-    'rufus_active_workflows',
+    'ruvon_active_workflows',
     'Number of active workflows',
     ['workflow_type']
 )
@@ -809,14 +809,14 @@ async def persistence():
     """Fixture for MongoDB persistence"""
     provider = MongoDBPersistenceProvider(
         mongo_url="mongodb://localhost:27017",
-        database="test_rufus"
+        database="test_ruvon"
     )
     await provider.initialize()
 
     yield provider
 
     # Cleanup: drop test database
-    await provider.db.client.drop_database("test_rufus")
+    await provider.db.client.drop_database("test_ruvon")
     await provider.close()
 
 
@@ -889,10 +889,10 @@ async def test_list_workflows(persistence):
 
 ## Summary
 
-Custom providers allow you to integrate Rufus with any backend:
+Custom providers allow you to integrate Ruvon with any backend:
 
 - **Persistence**: MongoDB, DynamoDB, Cassandra, etc.
 - **Execution**: AWS Lambda, Google Cloud Functions, Kubernetes Jobs
 - **Observability**: Prometheus, DataDog, New Relic, custom analytics
 
-**Follow the protocol interfaces** and Rufus core remains unchanged.
+**Follow the protocol interfaces** and Ruvon core remains unchanged.

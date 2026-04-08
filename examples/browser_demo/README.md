@@ -1,4 +1,4 @@
-# Rufus Browser Demo
+# Ruvon Browser Demo
 
 A step-by-step guide to running the Ruvon SDK entirely in the browser — no backend, no
 Node.js, no cloud. The same Python `WorkflowBuilder` + `Workflow` step functions that run on
@@ -66,7 +66,7 @@ to any static host:
 - **itch.io / GitHub Gist**: upload as an HTML project
 
 Without a co-located wheel the demo automatically installs `ruvon-sdk==0.8.0`
-from TestPyPI on first load (~5–10 s extra). All other dependencies (pydantic,
+from PyPI on first load (~5–10 s extra). All other dependencies (pydantic,
 jinja2, etc.) come from PyPI as normal.
 
 ### Option C — Local server (for developers)
@@ -166,7 +166,7 @@ for _pkg, _ver in [
 await micropip.install(wheel_url, keep_going=True)
 ```
 
-Also disable uvloop and orjson **before** rufus is imported, otherwise `rufus/__init__.py`
+Also disable uvloop and orjson **before** ruvon is imported, otherwise `ruvon/__init__.py`
 tries to call `uvloop.EventLoopPolicy()` on the mock:
 
 ```python
@@ -260,7 +260,7 @@ The corresponding `globalThis` functions in `worker.js` forward to `self.postMes
 ### Step 5 — Define state models and step functions
 
 State models are standard Pydantic `BaseModel` subclasses — identical to what you'd write
-for any other Rufus deployment:
+for any other Ruvon deployment:
 
 ```python
 class OrderState(BaseModel):
@@ -616,7 +616,7 @@ No SDK files are modified by the demo.
 → Do not use `deps=False` — use `add_mock_package` for native-extension packages (see step 3).
 
 **`AttributeError: module 'uvloop' has no attribute 'EventLoopPolicy'`**
-→ Set `RUVON_USE_UVLOOP=false` before importing rufus (see step 3).
+→ Set `RUVON_USE_UVLOOP=false` before importing ruvon (see step 3).
 
 **`SyntaxError: Missing } in template expression` in worker.js**
 → A Python f-string inside `PYTHON_SETUP` contains `${`. Remove the `$`.
@@ -627,7 +627,7 @@ No SDK files are modified by the demo.
 **Wheels 404**
 → The server must be started from the **repo root**, not from `examples/browser_demo/`:
 ```bash
-cd /path/to/rufus
+cd /path/to/ruvon
 python -m http.server 8080   # correct — wheel at /dist/ruvon_sdk-0.8.0-py3-none-any.whl
 ```
 

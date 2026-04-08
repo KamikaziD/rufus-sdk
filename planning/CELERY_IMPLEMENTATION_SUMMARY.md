@@ -9,7 +9,7 @@
 
 ## Overview
 
-Successfully extracted and adapted **~5,000 lines** of production-ready Celery infrastructure from the Confucius monolith into Rufus SDK. This enables distributed workflow execution with async tasks, parallel execution, sub-workflows, and horizontal scaling.
+Successfully extracted and adapted **~5,000 lines** of production-ready Celery infrastructure from the Confucius monolith into Ruvon SDK. This enables distributed workflow execution with async tasks, parallel execution, sub-workflows, and horizontal scaling.
 
 ---
 
@@ -17,25 +17,25 @@ Successfully extracted and adapted **~5,000 lines** of production-ready Celery i
 
 ### Core Infrastructure
 
-1. **`src/rufus/worker_registry.py`** (97 lines)
+1. **`src/ruvon/worker_registry.py`** (97 lines)
    - Worker fleet management with heartbeat monitoring
    - PostgreSQL-backed worker registration
    - Auto-registration on worker startup
    - 30-second heartbeat loop
 
-2. **`src/rufus/utils/postgres_executor.py`** (152 lines)
+2. **`src/ruvon/utils/postgres_executor.py`** (152 lines)
    - Dedicated background thread + asyncio event loop for asyncpg operations
    - Prevents "another operation is in progress" errors
    - Thread-safe async coroutine execution
    - Singleton pattern with process-level isolation
 
-3. **`src/rufus/events.py`** (171 lines)
+3. **`src/ruvon/events.py`** (171 lines)
    - Redis Pub/Sub for real-time workflow updates
    - Redis Streams for persistent event storage
    - Prometheus metrics integration
    - Per-event-loop Redis client registry
 
-4. **`src/rufus/tasks.py`** (545 lines adapted → 450 lines)
+4. **`src/ruvon/tasks.py`** (545 lines adapted → 450 lines)
    - 8 production Celery tasks:
      - `execute_http_request` - Generic HTTP step execution
      - `resume_from_async_task` - Resume after async task completes
@@ -45,17 +45,17 @@ Successfully extracted and adapted **~5,000 lines** of production-ready Celery i
      - `resume_parent_from_child` - Parent resumption after child completes
      - `trigger_scheduled_workflow` - Celery Beat integration (stub)
      - `poll_scheduled_workflows` - Scheduled workflow polling (stub)
-   - Adapted to Rufus's Workflow class and PersistenceProvider interface
+   - Adapted to Ruvon's Workflow class and PersistenceProvider interface
    - Uses pg_executor for async operations from sync context
 
-5. **`src/rufus/celery_app.py`** (144 lines)
+5. **`src/ruvon/celery_app.py`** (144 lines)
    - Celery app configuration
    - Worker initialization hooks (process fork, ready, shutdown)
    - Automatic persistence provider injection
    - Worker registry integration
    - Regional queue support
 
-6. **`src/rufus/implementations/execution/celery.py`** (287 lines)
+6. **`src/ruvon/implementations/execution/celery.py`** (287 lines)
    - CeleryExecutionProvider implementing ExecutionProvider interface
    - Async task dispatch with workflow resumption callbacks
    - Parallel task execution with Celery groups
@@ -68,17 +68,17 @@ Successfully extracted and adapted **~5,000 lines** of production-ready Celery i
 
 ### Import Path Updates
 
-All imports updated from `confucius.*` → `rufus.*`:
+All imports updated from `confucius.*` → `ruvon.*`:
 ```python
 # Before (Confucius)
 from confucius.persistence import load_workflow_state, save_workflow_state
 from confucius.workflow_loader import workflow_builder
 from confucius.events import event_publisher
 
-# After (Rufus)
-from rufus.workflow import Workflow
-from rufus.events import event_publisher
-from rufus.utils.postgres_executor import pg_executor
+# After (Ruvon)
+from ruvon.workflow import Workflow
+from ruvon.events import event_publisher
+from ruvon.utils.postgres_executor import pg_executor
 ```
 
 ### Persistence Layer Integration
@@ -89,7 +89,7 @@ def _sync_load_workflow(workflow_id: str):
     return load_workflow_state(workflow_id, sync=True)
 ```
 
-**Rufus**: Uses PersistenceProvider interface with pg_executor
+**Ruvon**: Uses PersistenceProvider interface with pg_executor
 ```python
 def _sync_load_workflow(workflow_id: str):
     workflow_dict = pg_executor.run_coroutine_sync(
@@ -106,7 +106,7 @@ workflow.state.field = value
 workflow.status = "ACTIVE"
 ```
 
-**Rufus**: Pydantic-based Workflow class with validation
+**Ruvon**: Pydantic-based Workflow class with validation
 ```python
 workflow = Workflow.from_dict(workflow_dict)
 workflow.state.field = value  # Pydantic validation
@@ -122,7 +122,7 @@ def async_task(state: dict):
     return {"result": state["amount"] * 1.1}
 ```
 
-**Rufus**: Maintained compatibility, tasks still receive state as dict
+**Ruvon**: Maintained compatibility, tasks still receive state as dict
 ```python
 @celery_app.task
 def async_task(state: dict, workflow_id: str):
@@ -137,7 +137,7 @@ for workflow_type, config in workflow_builder.get_scheduled_workflows().items():
     # Register in Celery Beat
 ```
 
-**Rufus**: Stubbed for future implementation (requires WorkflowBuilder integration)
+**Ruvon**: Stubbed for future implementation (requires WorkflowBuilder integration)
 ```python
 # TODO: Integrate with WorkflowBuilder
 logger.warning("[SCHEDULER] trigger_scheduled_workflow not fully implemented yet")
@@ -165,7 +165,7 @@ all = [..., "celery", "redis", "psycopg2-binary", "prometheus-client"]
 **Installation:**
 ```bash
 # Install with Celery support
-pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[celery] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 ```
 
 ---
@@ -198,7 +198,7 @@ Added comprehensive **"Distributed Execution with Celery"** section (500+ lines)
 ```python
 # tests/test_celery_execution.py
 import pytest
-from rufus.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
 
 @pytest.mark.asyncio
 async def test_dispatch_async_task():
@@ -249,14 +249,14 @@ docker-compose -f docker-compose.test.yml down
 
 ```python
 # app.py
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 # Initialize providers
 execution = CeleryExecutionProvider()
-persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/rufus")
+persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/ruvon")
 await persistence.initialize()
 
 # Create builder with Celery
@@ -291,7 +291,7 @@ steps:
 **Task definition:**
 ```python
 # my_app/tasks.py
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 @celery_app.task
 def process_payment(state: dict, workflow_id: str):
@@ -301,11 +301,11 @@ def process_payment(state: dict, workflow_id: str):
 
 **Start worker:**
 ```bash
-export DATABASE_URL="postgresql://localhost/rufus"
+export DATABASE_URL="postgresql://localhost/ruvon"
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 
-celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+celery -A ruvon.celery_app worker --loglevel=info --concurrency=4
 ```
 
 ---
@@ -420,13 +420,13 @@ Based on Confucius production usage:
 
 ## Migration from Confucius
 
-For teams migrating from Confucius to Rufus:
+For teams migrating from Confucius to Ruvon:
 
 **Step 1**: Update imports
 ```bash
 # Global find-replace
-find . -name "*.py" -exec sed -i '' 's/from confucius/from rufus/g' {} +
-find . -name "*.py" -exec sed -i '' 's/import confucius/import rufus/g' {} +
+find . -name "*.py" -exec sed -i '' 's/from confucius/from ruvon/g' {} +
+find . -name "*.py" -exec sed -i '' 's/import confucius/import ruvon/g' {} +
 ```
 
 **Step 2**: Update task signatures (if needed)
@@ -436,7 +436,7 @@ find . -name "*.py" -exec sed -i '' 's/import confucius/import rufus/g' {} +
 def my_task(state):
     return {"result": state["field"]}
 
-# New Rufus (compatible)
+# New Ruvon (compatible)
 @celery_app.task
 def my_task(state: dict, workflow_id: str):
     return {"result": state["field"]}
@@ -448,7 +448,7 @@ def my_task(state: dict, workflow_id: str):
 from confucius.celery_app import celery_app
 
 # New
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 ```
 
 **Step 4**: Update persistence
@@ -456,8 +456,8 @@ from rufus.celery_app import celery_app
 # Old Confucius (Redis-based)
 from confucius.persistence import load_workflow_state
 
-# New Rufus (provider-based)
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+# New Ruvon (provider-based)
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 persistence = PostgresPersistenceProvider(db_url)
 ```
 
@@ -465,15 +465,15 @@ persistence = PostgresPersistenceProvider(db_url)
 
 ## Conclusion
 
-The Celery implementation extraction was **100% successful**. All core infrastructure extracted, adapted, and integrated into Rufus SDK with:
+The Celery implementation extraction was **100% successful**. All core infrastructure extracted, adapted, and integrated into Ruvon SDK with:
 
-- ✅ Zero breaking changes to existing Rufus code
-- ✅ Full compatibility with Rufus provider interfaces
+- ✅ Zero breaking changes to existing Ruvon code
+- ✅ Full compatibility with Ruvon provider interfaces
 - ✅ Production-ready worker fleet management
 - ✅ Comprehensive documentation
 - ✅ Clear migration path from Confucius
 
-The implementation provides **enterprise-grade distributed workflow execution** while maintaining Rufus's clean architecture and provider abstraction pattern.
+The implementation provides **enterprise-grade distributed workflow execution** while maintaining Ruvon's clean architecture and provider abstraction pattern.
 
 **Total implementation time**: ~2 hours (much faster than the estimated 6-9 hours thanks to extraction vs building from scratch)
 

@@ -1,24 +1,24 @@
 # Troubleshooting guide
 
-This guide covers common issues and solutions when working with Rufus.
+This guide covers common issues and solutions when working with Ruvon.
 
 ## Installation issues
 
-### Import error: "No module named 'rufus'"
+### Import error: "No module named 'ruvon'"
 
-**Problem:** Python can't find the Rufus module.
+**Problem:** Python can't find the Ruvon module.
 
 **Solution:** Install in editable mode:
 
 ```bash
-cd /path/to/rufus-sdk
+cd /path/to/ruvon-sdk
 pip install -e .
 ```
 
 **Verify:**
 
 ```bash
-python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus installed')"
+python -c "from ruvon.builder import WorkflowBuilder; print('✅ Ruvon installed')"
 ```
 
 ### Missing dependencies
@@ -44,7 +44,7 @@ pip install -r requirements.txt
 **Solution:** Run from project root with PYTHONPATH:
 
 ```bash
-cd /path/to/rufus-sdk
+cd /path/to/ruvon-sdk
 PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
 ```
 
@@ -57,8 +57,8 @@ PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
 **Solution:** Apply Alembic migrations:
 
 ```bash
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 ```
 
@@ -76,17 +76,17 @@ alembic current
 **Solution:** Initialize schema via CLI:
 
 ```bash
-rufus config set-persistence
+ruvon config set-persistence
 # Choose: SQLite
 # Database path: workflow.db
 
-rufus db init
+ruvon db init
 ```
 
 Or initialize programmatically:
 
 ```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(db_path="workflow.db")
 await persistence.initialize()
@@ -113,7 +113,7 @@ docker compose logs postgres
 **Test connection:**
 
 ```bash
-psql "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+psql "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 ```
 
 ### Database lock errors (SQLite)
@@ -164,7 +164,7 @@ def my_step(state, context):
 **Solution 3:** Check zombie workflow scanner for crashed workers:
 
 ```bash
-rufus scan-zombies --db $DATABASE_URL --fix
+ruvon scan-zombies --db $DATABASE_URL --fix
 ```
 
 ### Step function not found
@@ -226,7 +226,7 @@ export DATABASE_URL="postgresql://..."
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 ```
 
 **Check Redis connection:**
@@ -243,19 +243,19 @@ redis-cli -h localhost -p 6379 ping
 **Solution:** Check worker is running:
 
 ```bash
-celery -A rufus.celery_app inspect active
+celery -A ruvon.celery_app inspect active
 ```
 
 **Check queue status:**
 
 ```bash
-celery -A rufus.celery_app inspect stats
+celery -A ruvon.celery_app inspect stats
 ```
 
 **Verify worker sees tasks:**
 
 ```bash
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 # Watch for task received messages
 ```
 
@@ -280,7 +280,7 @@ docker exec <redis-container> redis-cli llen onsite-london
 **Solution:** Either remove `data_region` (routes to `default`) or start a worker listening to that queue:
 
 ```bash
-celery -A rufus.celery_app worker -Q onsite-london
+celery -A ruvon.celery_app worker -Q onsite-london
 ```
 
 Flush the orphaned queue before retrying:
@@ -320,8 +320,8 @@ def my_parallel_task(state: dict, workflow_id: str):
 **Solution 1:** Enable performance optimizations:
 
 ```bash
-export RUFUS_USE_UVLOOP=true
-export RUFUS_USE_ORJSON=true
+export RUVON_USE_UVLOOP=true
+export RUVON_USE_ORJSON=true
 ```
 
 **Solution 2:** Increase PostgreSQL connection pool:
@@ -334,7 +334,7 @@ export POSTGRES_POOL_MAX_SIZE=100
 **Solution 3:** Use thread pool or Celery for parallel execution:
 
 ```python
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
 
 execution = ThreadPoolExecutionProvider(max_workers=20)
 ```
@@ -359,7 +359,7 @@ export POSTGRES_POOL_MAX_SIZE=50
 
 ```bash
 # Celery: Restart worker after N tasks
-celery -A rufus.celery_app worker --max-tasks-per-child=1000
+celery -A ruvon.celery_app worker --max-tasks-per-child=1000
 ```
 
 ### Database connection pool exhausted
@@ -432,7 +432,7 @@ db_url = os.getenv("DATABASE_URL")
 **Solution:** Use in-memory database:
 
 ```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 @pytest.fixture
 async def persistence():
@@ -449,7 +449,7 @@ async def persistence():
 **Solution:** Use synchronous executor for tests:
 
 ```python
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
 
 # In tests, use sync executor
 execution = SyncExecutionProvider()
@@ -484,20 +484,20 @@ message_template: "Hello {{ recipient }}, your amount is {{ amount }}"
 
 ### Docker image runs wrong version after version bump
 
-**Problem:** Docker image is tagged `0.6.x` but `python -c "import rufus; print(rufus.__version__)"` inside the container prints the previous version.
+**Problem:** Docker image is tagged `0.6.x` but `python -c "import ruvon; print(ruvon.__version__)"` inside the container prints the previous version.
 
-**Cause:** Docker reused the cached `pip install rufus-sdk==<old>` layer because the Dockerfile was not updated before building.
+**Cause:** Docker reused the cached `pip install ruvon-sdk==<old>` layer because the Dockerfile was not updated before building.
 
 **Solution:** (1) Update the version pin in all three Dockerfiles as part of the version bump step. (2) Always build with `--no-cache` after a version bump:
 
 ```bash
-docker build --no-cache -f docker/Dockerfile.rufus-server-prod -t ruhfuskdev/rufus-server:0.6.x .
+docker build --no-cache -f docker/Dockerfile.ruvon-server-prod -t ruhfuskdev/ruvon-server:0.6.x .
 ```
 
 **Verify:**
 
 ```bash
-docker run --rm ruhfuskdev/rufus-server:0.6.x python -c "import rufus; print(rufus.__version__)"
+docker run --rm ruhfuskdev/ruvon-server:0.6.x python -c "import ruvon; print(ruvon.__version__)"
 # Must print the new version
 ```
 
@@ -508,7 +508,7 @@ docker run --rm ruhfuskdev/rufus-server:0.6.x python -c "import rufus; print(ruf
 **Solution:** Check logs:
 
 ```bash
-docker logs rufus-server
+docker logs ruvon-server
 ```
 
 **Common issues:**
@@ -517,14 +517,14 @@ docker logs rufus-server
 
    ```bash
    # Add to docker-entrypoint.sh
-   cd /app/src/rufus && alembic upgrade head
+   cd /app/src/ruvon && alembic upgrade head
    ```
 
 2. Database connection failed:
 
    ```bash
    # Check DATABASE_URL is correct
-   docker run --rm rufus:latest env | grep DATABASE_URL
+   docker run --rm ruvon:latest env | grep DATABASE_URL
    ```
 
 3. Missing dependencies:
@@ -541,7 +541,7 @@ docker logs rufus-server
 **Solution:** Check pod logs:
 
 ```bash
-kubectl logs -f deployment/rufus-server
+kubectl logs -f deployment/ruvon-server
 ```
 
 **Check resource limits:**
@@ -620,15 +620,15 @@ except Exception:
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("rufus")
+logger = logging.getLogger("ruvon")
 logger.setLevel(logging.DEBUG)
 ```
 
-### Check Rufus version
+### Check Ruvon version
 
 ```python
-import rufus
-print(rufus.__version__)
+import ruvon
+print(ruvon.__version__)
 ```
 
 ### Diagnostic information
@@ -639,8 +639,8 @@ Collect this information when reporting issues:
 # Python version
 python --version
 
-# Rufus version
-python -c "import rufus; print(rufus.__version__)"
+# Ruvon version
+python -c "import ruvon; print(ruvon.__version__)"
 
 # Database version
 psql --version  # or sqlite3 --version
@@ -649,22 +649,22 @@ psql --version  # or sqlite3 --version
 env | grep -E "(DATABASE|CELERY|RUFUS)"
 
 # Workflow status
-rufus show <workflow-id> --state --logs
+ruvon show <workflow-id> --state --logs
 ```
 
 ### Workflow debugging checklist
 
 When debugging workflow issues:
 
-- [ ] Check workflow status (`rufus show <workflow-id>`)
-- [ ] Check audit logs (`rufus logs <workflow-id>`)
+- [ ] Check workflow status (`ruvon show <workflow-id>`)
+- [ ] Check audit logs (`ruvon logs <workflow-id>`)
 - [ ] Verify step function can be imported
 - [ ] Check database connection
 - [ ] Verify YAML configuration is valid
 - [ ] Check for unhandled exceptions in step functions
 - [ ] Verify state is JSON-serializable
 - [ ] Check Celery workers are running (if using Celery)
-- [ ] Scan for zombie workflows (`rufus scan-zombies`)
+- [ ] Scan for zombie workflows (`ruvon scan-zombies`)
 
 ## Next steps
 

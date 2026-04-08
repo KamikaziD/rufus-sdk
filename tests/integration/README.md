@@ -1,6 +1,6 @@
 # Integration Tests for Celery Execution
 
-This directory contains integration tests for Rufus's Celery-based distributed execution.
+This directory contains integration tests for Ruvon's Celery-based distributed execution.
 
 ## Prerequisites
 
@@ -23,20 +23,20 @@ This starts:
 
 **2. Set environment variables:**
 ```bash
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5434/rufus_test"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5434/ruvon_test"
 export CELERY_BROKER_URL="redis://localhost:6380/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
 ```
 
 **3. Initialize database:**
 ```bash
-cd ../../src/rufus
+cd ../../src/ruvon
 alembic upgrade head
 ```
 
 **4. Start Celery worker (in separate terminal):**
 ```bash
-celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+celery -A ruvon.celery_app worker --loglevel=info --concurrency=4
 ```
 
 **5. Run integration tests:**
@@ -69,16 +69,16 @@ docker run -d --name redis-test -p 6380:6379 redis:latest
 **2. Setup PostgreSQL:**
 ```bash
 # Create test database
-createdb rufus_test
+createdb ruvon_test
 
 # Or use existing database
-export DATABASE_URL="postgresql://localhost/rufus_test"
+export DATABASE_URL="postgresql://localhost/ruvon_test"
 ```
 
 **3. Initialize database:**
 ```bash
-cd src/rufus
-export DATABASE_URL="postgresql://localhost/rufus_test"
+cd src/ruvon
+export DATABASE_URL="postgresql://localhost/ruvon_test"
 alembic upgrade head
 ```
 
@@ -86,7 +86,7 @@ alembic upgrade head
 ```bash
 export CELERY_BROKER_URL="redis://localhost:6380/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
-celery -A rufus.celery_app worker --loglevel=info
+celery -A ruvon.celery_app worker --loglevel=info
 ```
 
 **5. Run tests:**
@@ -141,13 +141,13 @@ docker-compose up -d && pytest tests/integration/test_celery_execution.py -v
 ### Workers not picking up tasks
 ```bash
 # Check worker status
-celery -A rufus.celery_app inspect active
+celery -A ruvon.celery_app inspect active
 
 # Check registered tasks
-celery -A rufus.celery_app inspect registered
+celery -A ruvon.celery_app inspect registered
 
 # Restart worker with debug logging
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 ```
 
 ### Database connection errors
@@ -156,7 +156,7 @@ celery -A rufus.celery_app worker --loglevel=debug
 psql $DATABASE_URL -c "SELECT 1"
 
 # Check if migrations are applied
-cd src/rufus && alembic current
+cd src/ruvon && alembic current
 
 # Apply migrations if needed
 alembic upgrade head
@@ -202,7 +202,7 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_DB: rufus_test
+          POSTGRES_DB: ruvon_test
           POSTGRES_PASSWORD: secret
         ports:
           - 5433:5432
@@ -224,23 +224,23 @@ jobs:
 
       - name: Run migrations
         env:
-          DATABASE_URL: postgresql://postgres:secret@localhost:5433/rufus_test
+          DATABASE_URL: postgresql://postgres:secret@localhost:5433/ruvon_test
         run: |
-          cd src/rufus
+          cd src/ruvon
           alembic upgrade head
 
       - name: Start Celery worker
         env:
-          DATABASE_URL: postgresql://postgres:secret@localhost:5433/rufus_test
+          DATABASE_URL: postgresql://postgres:secret@localhost:5433/ruvon_test
           CELERY_BROKER_URL: redis://localhost:6380/0
           CELERY_RESULT_BACKEND: redis://localhost:6380/0
         run: |
-          celery -A rufus.celery_app worker --loglevel=info &
+          celery -A ruvon.celery_app worker --loglevel=info &
           sleep 5
 
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql://postgres:secret@localhost:5433/rufus_test
+          DATABASE_URL: postgresql://postgres:secret@localhost:5433/ruvon_test
           CELERY_BROKER_URL: redis://localhost:6380/0
           CELERY_RESULT_BACKEND: redis://localhost:6380/0
         run: pytest tests/integration/test_celery_execution.py -v

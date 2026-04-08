@@ -19,7 +19,7 @@ The `cleanup_database.py` script removes test data and resets the database to a 
 ```bash
 # Clean PostgreSQL and re-seed
 python tools/cleanup_database.py \
-  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+  --db-url "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 
 # Clean SQLite and re-seed
 python tools/cleanup_database.py \
@@ -102,7 +102,7 @@ After cleanup with re-seeding, your database will contain:
 ```bash
 # Clean up all test data and reset to demo state
 python tools/cleanup_database.py \
-  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud" \
   --yes
 ```
 
@@ -111,7 +111,7 @@ python tools/cleanup_database.py \
 ```bash
 # Clean SQLite database for fresh start
 python tools/cleanup_database.py \
-  --db-url "sqlite:///rufus_edge.db" \
+  --db-url "sqlite:///ruvon_edge.db" \
   --yes
 ```
 
@@ -120,7 +120,7 @@ python tools/cleanup_database.py \
 ```bash
 # Remove just the load test devices
 python tools/cleanup_database.py \
-  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud" \
   --mode load-test-only \
   --yes
 ```

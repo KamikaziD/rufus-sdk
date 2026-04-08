@@ -282,7 +282,7 @@ def to_pagerduty_event(event_type, event_data):
         "payload": {
             "summary": f"{event_type}: {event_data['device_id']}",
             "severity": "critical" if "failed" in event_type else "warning",
-            "source": "rufus-edge",
+            "source": "ruvon-edge",
             "custom_details": event_data
         }
     }
@@ -297,7 +297,7 @@ def verify_signature(payload, signature, secret):
     return hmac.compare_digest(signature, expected)
 
 # Webhook receiver endpoint
-@app.post("/webhooks/rufus")
+@app.post("/webhooks/ruvon")
 async def receive_webhook(request: Request):
     signature = request.headers.get("X-Webhook-Signature")
     payload = await request.json()
@@ -310,7 +310,7 @@ async def receive_webhook(request: Request):
     event_data = payload["data"]
 
     # Your custom logic here
-    await process_rufus_event(event_type, event_data)
+    await process_ruvon_event(event_type, event_data)
 
     return {"status": "received"}
 ```
@@ -958,18 +958,18 @@ resource "aws_vpc" "ruvon" {
   cidr_block = "10.0.0.0/16"
 
   tags = {
-    Name = "rufus-edge-vpc"
+    Name = "ruvon-edge-vpc"
   }
 }
 
 # ECS Cluster
 resource "aws_ecs_cluster" "ruvon" {
-  name = "rufus-edge-cluster"
+  name = "ruvon-edge-cluster"
 }
 
 # RDS PostgreSQL
 resource "aws_db_instance" "ruvon" {
-  identifier        = "rufus-edge-db"
+  identifier        = "ruvon-edge-db"
   engine            = "postgres"
   engine_version    = "15.3"
   instance_class    = "db.t3.medium"
@@ -980,19 +980,19 @@ resource "aws_db_instance" "ruvon" {
   password = var.db_password
 
   vpc_security_group_ids = [aws_security_group.db.id]
-  db_subnet_group_name   = aws_db_subnet_group.rufus.name
+  db_subnet_group_name   = aws_db_subnet_group.ruvon.name
 
   backup_retention_period = 7
   multi_az               = true
 
   tags = {
-    Name = "rufus-edge-db"
+    Name = "ruvon-edge-db"
   }
 }
 
 # Application Load Balancer
 resource "aws_lb" "ruvon" {
-  name               = "rufus-edge-alb"
+  name               = "ruvon-edge-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
@@ -1001,15 +1001,15 @@ resource "aws_lb" "ruvon" {
 
 # ECS Service
 resource "aws_ecs_service" "ruvon" {
-  name            = "rufus-edge-service"
-  cluster         = aws_ecs_cluster.rufus.id
-  task_definition = aws_ecs_task_definition.rufus.arn
+  name            = "ruvon-edge-service"
+  cluster         = aws_ecs_cluster.ruvon.id
+  task_definition = aws_ecs_task_definition.ruvon.arn
   desired_count   = 3
   launch_type     = "FARGATE"
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.rufus.arn
-    container_name   = "rufus-edge"
+    target_group_arn = aws_lb_target_group.ruvon.arn
+    container_name   = "ruvon-edge"
     container_port   = 8000
   }
 
@@ -1022,7 +1022,7 @@ resource "aws_ecs_service" "ruvon" {
 
 # Task Definition
 resource "aws_ecs_task_definition" "ruvon" {
-  family                   = "rufus-edge"
+  family                   = "ruvon-edge"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = "1024"
@@ -1030,8 +1030,8 @@ resource "aws_ecs_task_definition" "ruvon" {
 
   container_definitions = jsonencode([
     {
-      name  = "rufus-edge"
-      image = "your-registry/rufus-edge:latest"
+      name  = "ruvon-edge"
+      image = "your-registry/ruvon-edge:latest"
 
       portMappings = [
         {
@@ -1043,7 +1043,7 @@ resource "aws_ecs_task_definition" "ruvon" {
       environment = [
         {
           name  = "DATABASE_URL"
-          value = "postgresql://${aws_db_instance.rufus.endpoint}/rufus"
+          value = "postgresql://${aws_db_instance.ruvon.endpoint}/ruvon"
         }
       ]
 
@@ -1057,7 +1057,7 @@ resource "aws_ecs_task_definition" "ruvon" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/rufus-edge"
+          "awslogs-group"         = "/ecs/ruvon-edge"
           "awslogs-region"        = "us-east-1"
           "awslogs-stream-prefix" = "ecs"
         }
@@ -1079,14 +1079,14 @@ resource "aws_ecs_task_definition" "ruvon" {
     {
       "type": "Microsoft.ContainerInstance/containerGroups",
       "apiVersion": "2021-09-01",
-      "name": "rufus-edge",
+      "name": "ruvon-edge",
       "location": "[parameters('location')]",
       "properties": {
         "containers": [
           {
-            "name": "rufus-edge-api",
+            "name": "ruvon-edge-api",
             "properties": {
-              "image": "your-registry/rufus-edge:latest",
+              "image": "your-registry/ruvon-edge:latest",
               "ports": [
                 {
                   "port": 8000,
@@ -1123,7 +1123,7 @@ resource "aws_ecs_task_definition" "ruvon" {
     {
       "type": "Microsoft.DBforPostgreSQL/servers",
       "apiVersion": "2017-12-01",
-      "name": "rufus-edge-db",
+      "name": "ruvon-edge-db",
       "location": "[parameters('location')]",
       "sku": {
         "name": "GP_Gen5_2",
@@ -1156,28 +1156,28 @@ resource "aws_ecs_task_definition" "ruvon" {
 steps:
   # Build container
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/rufus-edge:$SHORT_SHA', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ruvon-edge:$SHORT_SHA', '.']
 
   # Push to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/rufus-edge:$SHORT_SHA']
+    args: ['push', 'gcr.io/$PROJECT_ID/ruvon-edge:$SHORT_SHA']
 
   # Deploy to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - 'run'
       - 'deploy'
-      - 'rufus-edge'
-      - '--image=gcr.io/$PROJECT_ID/rufus-edge:$SHORT_SHA'
+      - 'ruvon-edge'
+      - '--image=gcr.io/$PROJECT_ID/ruvon-edge:$SHORT_SHA'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-cloudsql-instances=$PROJECT_ID:us-central1:rufus-edge-db'
-      - '--set-env-vars=DATABASE_URL=postgresql://rufus@/rufus?host=/cloudsql/$PROJECT_ID:us-central1:rufus-edge-db'
+      - '--set-cloudsql-instances=$PROJECT_ID:us-central1:ruvon-edge-db'
+      - '--set-env-vars=DATABASE_URL=postgresql://ruvon@/ruvon?host=/cloudsql/$PROJECT_ID:us-central1:ruvon-edge-db'
 
 # Terraform for Cloud SQL
 resource "google_sql_database_instance" "ruvon" {
-  name             = "rufus-edge-db"
+  name             = "ruvon-edge-db"
   database_version = "POSTGRES_15"
   region           = "us-central1"
 
@@ -1191,7 +1191,7 @@ resource "google_sql_database_instance" "ruvon" {
 
     ip_configuration {
       ipv4_enabled    = false
-      private_network = google_compute_network.rufus.id
+      private_network = google_compute_network.ruvon.id
     }
   }
 }
@@ -1203,11 +1203,11 @@ resource "google_sql_database_instance" "ruvon" {
 
 ```python
 # Read replicas for global distribution
-primary_db = "postgresql://aws-us-east-1/rufus"
+primary_db = "postgresql://aws-us-east-1/ruvon"
 replicas = {
-    "us": "postgresql://aws-us-east-1/rufus",
-    "eu": "postgresql://azure-eu-west/rufus",
-    "apac": "postgresql://gcp-asia-east/rufus"
+    "us": "postgresql://aws-us-east-1/ruvon",
+    "eu": "postgresql://azure-eu-west/ruvon",
+    "apac": "postgresql://gcp-asia-east/ruvon"
 }
 
 # Route reads to nearest replica

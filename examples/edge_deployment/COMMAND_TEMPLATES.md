@@ -513,7 +513,7 @@ CREATE TABLE command_templates (
 ## Migration
 
 ```bash
-psql -U rufus -d rufus < docker/migrations/add_command_templates.sql
+psql -U ruvon -d ruvon < docker/migrations/add_command_templates.sql
 ```
 
 This also creates default templates (security-lockdown, soft-restart, etc.).

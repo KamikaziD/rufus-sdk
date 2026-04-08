@@ -1,10 +1,10 @@
-# Rufus Outstanding Features & Roadmap
+# Ruvon Outstanding Features & Roadmap
 
 **Last Updated:** 2026-02-27
 **Current Version:** 0.6.0 (Stable)
 **Next Planned Release:** 0.7.0 (OpenTelemetry + Prometheus)
 
-This document tracks planned features, in-progress work, and the project roadmap for Rufus SDK.
+This document tracks planned features, in-progress work, and the project roadmap for Ruvon SDK.
 
 ---
 
@@ -36,9 +36,9 @@ This document tracks planned features, in-progress work, and the project roadmap
 - ✅ 33-table PostgreSQL schema under Alembic management
 - ✅ 10-table SQLite edge schema (auto-created)
 - ✅ OpenAPI tags / grouped Swagger UI (14 tag groups, 86 endpoints)
-- ✅ RUFUS_CUSTOM_ROUTERS for user-defined API extensions
-- ✅ **Package split** — three separate wheels (`rufus-sdk`, `rufus-sdk-edge`, `rufus-sdk-server`); edge devices install only ~250 KB instead of 9.3 MB
-- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.6.0`, `ruhfuskdev/rufus-worker:0.6.0`, `ruhfuskdev/rufus-flower:0.6.0`
+- ✅ RUVON_CUSTOM_ROUTERS for user-defined API extensions
+- ✅ **Package split** — three separate wheels (`ruvon-sdk`, `ruvon-edge`, `ruvon-server`); edge devices install only ~250 KB instead of 9.3 MB
+- ✅ Docker Hub: `ruhfuskdev/ruvon-server:0.6.0`, `ruhfuskdev/ruvon-worker:0.6.0`, `ruhfuskdev/ruvon-flower:0.6.0`
 
 **What's Missing for 1.0:**
 - Enhanced monitoring & observability
@@ -346,12 +346,12 @@ This document tracks planned features, in-progress work, and the project roadmap
 ### 8. Ecosystem & Integrations
 
 #### ✅ Implemented & Stable
-- [x] Package auto-discovery (`rufus-*`)
-- [x] rufus-slack (reference implementation)
+- [x] Package auto-discovery (`ruvon-*`)
+- [x] ruvon-slack (reference implementation)
 - [x] Cookiecutter template
 
 #### 🚧 In Progress
-- [ ] **rufus-stripe** (Target: v0.9.2)
+- [ ] **ruvon-stripe** (Target: v0.9.2)
   - Stripe payment workflows
   - Webhook handling
   - Subscription management
@@ -359,31 +359,31 @@ This document tracks planned features, in-progress work, and the project roadmap
 #### 📋 Planned
 
 **v1.0 (Q2 2026):**
-- [ ] **rufus-aws**
+- [ ] **ruvon-aws**
   - S3 operations
   - Lambda invocations
   - SQS/SNS integrations
   - DynamoDB operations
 
-- [ ] **rufus-sendgrid**
+- [ ] **ruvon-sendgrid**
   - Email workflows
   - Template management
   - Delivery tracking
 
 **v1.1 (Q3 2026):**
-- [ ] **rufus-gcp**
+- [ ] **ruvon-gcp**
   - Cloud Functions
   - Cloud Storage
   - Pub/Sub
   - BigQuery
 
-- [ ] **rufus-azure**
+- [ ] **ruvon-azure**
   - Azure Functions
   - Blob Storage
   - Service Bus
   - Cosmos DB
 
-- [ ] **rufus-openai**
+- [ ] **ruvon-openai**
   - ChatGPT workflows
   - Embeddings
   - Fine-tuning pipelines
@@ -391,7 +391,7 @@ This document tracks planned features, in-progress work, and the project roadmap
 
 **v1.2 (Q4 2026):**
 - [ ] **Marketplace/Registry Website**
-  - Discover rufus-* packages
+  - Discover ruvon-* packages
   - Usage statistics
   - Community ratings
   - Documentation hosting
@@ -407,7 +407,7 @@ This document tracks planned features, in-progress work, and the project roadmap
 - Documentation updates
 
 ### v0.9.2 (April 2026) - Ecosystem Expansion
-- rufus-stripe package
+- ruvon-stripe package
 - Error message improvements
 - Additional examples
 - Performance tuning
@@ -424,8 +424,8 @@ This document tracks planned features, in-progress work, and the project roadmap
 - Enhanced CLI output
 - Video tutorials
 - Interactive documentation
-- rufus-aws package
-- rufus-sendgrid package
+- ruvon-aws package
+- ruvon-sendgrid package
 - Comprehensive benchmarks
 - Deployment templates (Docker, K8s, systemd)
 
@@ -444,9 +444,9 @@ This document tracks planned features, in-progress work, and the project roadmap
 - Ray executor
 - Kubernetes executor
 - VS Code extension
-- rufus-gcp package
-- rufus-azure package
-- rufus-openai package
+- ruvon-gcp package
+- ruvon-azure package
+- ruvon-openai package
 
 ### v1.2.0 (Q4 2026) - Enterprise & Scale
 **Focus:** Enterprise features and ecosystem
@@ -578,10 +578,10 @@ Want to help build these features?
 - Migration guides
 
 **Ecosystem Packages:**
-- rufus-stripe
-- rufus-aws
-- rufus-sendgrid
-- rufus-gcp
+- ruvon-stripe
+- ruvon-aws
+- ruvon-sendgrid
+- ruvon-gcp
 
 ---
 
@@ -589,7 +589,7 @@ Want to help build these features?
 
 ### Semantic Versioning
 
-Rufus follows **strict semantic versioning**:
+Ruvon follows **strict semantic versioning**:
 
 - **Major (X.0.0):** Breaking API changes
 - **Minor (0.X.0):** New features, backwards compatible
@@ -612,12 +612,12 @@ Rufus follows **strict semantic versioning**:
 
 ## Questions?
 
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 - 📖 [Full Documentation](README.md)
-- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+- 🐛 [Report Issues](https://github.com/your-org/ruvon-sdk/issues)
 
 ---
 
 **Last Updated:** 2026-02-02
 **Next Review:** 2026-03-01 (monthly updates)
-**Maintained By:** Rufus SDK Team
+**Maintained By:** Ruvon SDK Team

@@ -4,7 +4,7 @@ This directory contains database schema definitions and migrations for Ruvon SDK
 
 ## Overview
 
-Ruvon uses a **unified migration system** where all database initialization (CLI `rufus db init` and SQLite auto-init) applies the same migration files. This eliminates schema drift and ensures consistency across all initialization methods.
+Ruvon uses a **unified migration system** where all database initialization (CLI `ruvon db init` and SQLite auto-init) applies the same migration files. This eliminates schema drift and ensures consistency across all initialization methods.
 
 ## Files
 
@@ -53,7 +53,7 @@ migrations/*.sql (single source of truth)
            │
     ┌──────┴──────┐
     ▼             ▼
-rufus db init  auto_init=True
+ruvon db init  auto_init=True
 (CLI command)  (SQLite only)
     │             │
     └─────┬───────┘
@@ -69,7 +69,7 @@ rufus db init  auto_init=True
 - ✅ **Production-ready** - Same schema in dev and prod
 
 **How it works:**
-1. **CLI (`rufus db init`)**: Applies all migrations via MigrationManager
+1. **CLI (`ruvon db init`)**: Applies all migrations via MigrationManager
 2. **Auto-init (SQLite)**: Detects missing schema, applies migrations automatically
 3. **Both methods**: Create `schema_migrations` table and record applied versions
 
@@ -124,38 +124,38 @@ python tools/validate_schema.py --all
 
 ```bash
 # Initialize database with all migrations
-rufus db init
+ruvon db init
 
 # Or specify database URL
-rufus db init --db-url postgresql://user:pass@localhost/ruvon
-rufus db init --db-url sqlite:///ruvon.db
+ruvon db init --db-url postgresql://user:pass@localhost/ruvon
+ruvon db init --db-url sqlite:///ruvon.db
 
 # Check migration status
-rufus db status
+ruvon db status
 
 # Apply pending migrations
-rufus db migrate
-rufus db migrate --dry-run  # Preview first
+ruvon db migrate
+ruvon db migrate --dry-run  # Preview first
 ```
 
 **Option B: Using Migration Tool Directly**
 
 ```bash
 # Initialize migration tracking (first time only)
-python tools/migrate.py --db postgres://user:pass@localhost/rufus --init
+python tools/migrate.py --db postgres://user:pass@localhost/ruvon --init
 
 # Check migration status
-python tools/migrate.py --db postgres://user:pass@localhost/rufus --status
+python tools/migrate.py --db postgres://user:pass@localhost/ruvon --status
 
 # Apply pending migrations
-python tools/migrate.py --db postgres://user:pass@localhost/rufus --up
+python tools/migrate.py --db postgres://user:pass@localhost/ruvon --up
 ```
 
 **Option C: SQLite Auto-Init (Development)**
 
 ```python
 # Schema automatically created via migrations on first use
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
 await persistence.initialize()  # Migrations applied automatically

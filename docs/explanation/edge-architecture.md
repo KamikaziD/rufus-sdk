@@ -1,6 +1,6 @@
 # Edge Architecture: Fintech Offline-First
 
-Rufus Edge is designed for fintech edge devices—POS terminals, ATMs, mobile card readers, and kiosks that must operate offline and sync when connectivity is available.
+Ruvon Edge is designed for fintech edge devices—POS terminals, ATMs, mobile card readers, and kiosks that must operate offline and sync when connectivity is available.
 
 ## The Edge Computing Challenge
 
@@ -18,12 +18,12 @@ POS Terminal → Network → Cloud Server → Response
 
 ## Edge-First Architecture
 
-Rufus Edge inverts the model: **edge devices are autonomous, cloud provides coordination**.
+Ruvon Edge inverts the model: **edge devices are autonomous, cloud provides coordination**.
 
 ```
 ┌─────────────────────────────────────────┐
 │          CLOUD CONTROL PLANE            │
-│     (PostgreSQL + Rufus Server)         │
+│     (PostgreSQL + Ruvon Server)         │
 │                                          │
 │  ┌────────────────────────────────┐    │
 │  │  Device Registry API           │    │
@@ -50,10 +50,10 @@ Rufus Edge inverts the model: **edge devices are autonomous, cloud provides coor
                │
 ┌──────────────▼───────────────────────────┐
 │      EDGE DEVICE (POS/ATM/Kiosk)         │
-│       (SQLite + RufusEdgeAgent)          │
+│       (SQLite + RuvonEdgeAgent)          │
 │                                           │
 │  ┌────────────────────────────────┐     │
-│  │  RufusEdgeAgent                │     │
+│  │  RuvonEdgeAgent                │     │
 │  │  - Run workflows locally       │     │
 │  │  - SQLite persistence          │     │
 │  │  - Store-and-Forward queue     │     │
@@ -158,7 +158,7 @@ Edge device:
 Edge devices store sensitive data encrypted:
 
 ```python
-# src/rufus_edge/encryption.py
+# src/ruvon_edge/encryption.py
 from cryptography.fernet import Fernet
 
 class EncryptedPersistence:
@@ -200,7 +200,7 @@ class EncryptedPersistence:
 ### Hardware Integration
 
 ```python
-# src/rufus_edge/hardware/
+# src/ruvon_edge/hardware/
 ├── card_reader.py       # EMV/MSR/contactless
 ├── pin_pad.py           # Secure PIN entry
 ├── printer.py           # Receipt printer
@@ -210,7 +210,7 @@ class EncryptedPersistence:
 
 **Example: Card validation**:
 ```python
-from rufus_edge.hardware import CardReader
+from ruvon_edge.hardware import CardReader
 
 def validate_card_offline(state: PaymentState, context: StepContext) -> dict:
     reader = CardReader()
@@ -425,15 +425,15 @@ def validate_config(config, expected_checksum):
 
 ## Package Footprint
 
-As of v0.6.0, Rufus ships as three separate wheels. Edge devices install only `rufus-sdk-edge`,
-which pulls in the `rufus-sdk` core but never installs the 10 MB cloud control plane.
+As of v0.6.0, Ruvon ships as three separate wheels. Edge devices install only `ruvon-edge`,
+which pulls in the `ruvon-sdk` core but never installs the 10 MB cloud control plane.
 
 | Scenario | Install command | Disk | RAM |
 |----------|----------------|------|-----|
-| Minimal (offline payment, no AI) | `pip install rufus-sdk-edge` | ~15–20 MB | ~50 MB |
-| With monitoring + WebSocket | `pip install 'rufus-sdk-edge[edge]'` | ~30–35 MB | ~65 MB |
-| With ONNX fraud scoring | `pip install 'rufus-sdk-edge[edge]' && pip install onnxruntime` | ~80–600 MB* | ~115–165 MB |
-| With TFLite | `pip install 'rufus-sdk-edge[edge]' && pip install tflite-runtime` | ~50–250 MB* | ~85–115 MB |
+| Minimal (offline payment, no AI) | `pip install ruvon-edge` | ~15–20 MB | ~50 MB |
+| With monitoring + WebSocket | `pip install 'ruvon-edge[edge]'` | ~30–35 MB | ~65 MB |
+| With ONNX fraud scoring | `pip install 'ruvon-edge[edge]' && pip install onnxruntime` | ~80–600 MB* | ~115–165 MB |
+| With TFLite | `pip install 'ruvon-edge[edge]' && pip install tflite-runtime` | ~50–250 MB* | ~85–115 MB |
 
 \* Varies by model size. Model files are downloaded separately.
 
@@ -445,8 +445,8 @@ which pulls in the `rufus-sdk` core but never installs the 10 MB cloud control p
 ### Edge Agent Installation
 
 ```bash
-# Install Rufus Edge SDK (edge device — no cloud code included)
-pip install 'rufus-sdk-edge[edge]'
+# Install Ruvon Edge SDK (edge device — no cloud code included)
+pip install 'ruvon-edge[edge]'
 
 # Optional: add ONNX inference for on-device ML
 pip install onnxruntime>=1.16.0
@@ -458,7 +458,7 @@ python edge_agent.py
 ### Cloud Server Setup
 
 ```bash
-# Deploy Rufus Server with edge endpoints
+# Deploy Ruvon Server with edge endpoints
 docker-compose -f docker/docker-compose.edge.yml up -d
 
 # Registers edge API routes:
@@ -506,6 +506,6 @@ Config Version Distribution:
 ## What's Next
 
 Now that you understand edge architecture:
-- [Architecture](architecture.md) - How edge fits into overall Rufus architecture
+- [Architecture](architecture.md) - How edge fits into overall Ruvon architecture
 - [State Management](state-management.md) - Offline state persistence
 - [Performance](performance.md) - Edge device performance characteristics

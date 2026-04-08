@@ -4,7 +4,7 @@ This guide walks through creating a workflow from scratch.
 
 ## Overview
 
-A Rufus workflow consists of three parts:
+A Ruvon workflow consists of three parts:
 
 1. **State model** - Pydantic model defining workflow data
 2. **Step functions** - Python functions implementing business logic
@@ -46,7 +46,7 @@ Create Python functions for each workflow step:
 
 ```python
 # my_workflow/steps.py
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from .state_models import OrderState
 
 def validate_order(state: OrderState, context: StepContext) -> dict:
@@ -180,12 +180,12 @@ Create and run your workflow:
 ```python
 # my_workflow/run.py
 import asyncio
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 async def main():
     # Initialize providers

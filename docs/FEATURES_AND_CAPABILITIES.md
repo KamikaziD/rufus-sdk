@@ -1,9 +1,9 @@
-# Rufus Features & Capabilities
+# Ruvon Features & Capabilities
 
 **Last Updated:** 2026-02-27
 **Version:** 0.6.0 (Stable)
 
-This document provides a comprehensive catalog of all Rufus SDK features, their implementation status, stability, and links to documentation and examples.
+This document provides a comprehensive catalog of all Ruvon SDK features, their implementation status, stability, and links to documentation and examples.
 
 ---
 
@@ -61,7 +61,7 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 | Persistence | ✅ File/Memory | ✅ Database | ✅ Redis | ❌ Ephemeral |
 | Concurrency | ⚠️ Limited (1 writer) | ✅ High | ✅ High | ✅ High |
 | ACID Transactions | ✅ Yes | ✅ Yes | ⚠️ Limited | ❌ N/A |
-| Auto-initialization | ✅ Yes | ❌ No (use `rufus db init`) | ❌ No | ✅ Yes |
+| Auto-initialization | ✅ Yes | ❌ No (use `ruvon db init`) | ❌ No | ✅ Yes |
 | LISTEN/NOTIFY | ❌ No | ✅ Yes | ✅ Pub/Sub | ❌ No |
 | Setup Complexity | ✅ Zero | ⚠️ Medium | ⚠️ Medium | ✅ Zero |
 
@@ -110,45 +110,45 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 #### Configuration Commands (6 commands)
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `rufus config show` | Show current configuration | `rufus config show` |
-| `rufus config set-persistence` | Set database provider | `rufus config set-persistence` |
-| `rufus config set-execution` | Set execution provider | `rufus config set-execution` |
-| `rufus config set-default` | Set default behaviors | `rufus config set-default` |
-| `rufus config reset` | Reset to defaults | `rufus config reset` |
-| `rufus config path` | Show config file location | `rufus config path` |
+| `ruvon config show` | Show current configuration | `ruvon config show` |
+| `ruvon config set-persistence` | Set database provider | `ruvon config set-persistence` |
+| `ruvon config set-execution` | Set execution provider | `ruvon config set-execution` |
+| `ruvon config set-default` | Set default behaviors | `ruvon config set-default` |
+| `ruvon config reset` | Reset to defaults | `ruvon config reset` |
+| `ruvon config path` | Show config file location | `ruvon config path` |
 
 #### Workflow Management Commands (8 commands)
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `rufus list` | List workflows | `rufus list --status ACTIVE --limit 50` |
-| `rufus start` | Start workflow | `rufus start OrderProcessing -d '{"customer_id": "123"}'` |
-| `rufus show` | Show workflow details | `rufus show <workflow-id> --state --logs` |
-| `rufus resume` | Resume paused workflow | `rufus resume <workflow-id> --input '{"approved": true}'` |
-| `rufus retry` | Retry failed workflow | `rufus retry <workflow-id> --from-step Payment` |
-| `rufus cancel` | Cancel workflow | `rufus cancel <workflow-id> --reason "Duplicate"` |
-| `rufus logs` | View workflow logs | `rufus logs <workflow-id> --level ERROR` |
-| `rufus metrics` | View performance metrics | `rufus metrics --summary` |
+| `ruvon list` | List workflows | `ruvon list --status ACTIVE --limit 50` |
+| `ruvon start` | Start workflow | `ruvon start OrderProcessing -d '{"customer_id": "123"}'` |
+| `ruvon show` | Show workflow details | `ruvon show <workflow-id> --state --logs` |
+| `ruvon resume` | Resume paused workflow | `ruvon resume <workflow-id> --input '{"approved": true}'` |
+| `ruvon retry` | Retry failed workflow | `ruvon retry <workflow-id> --from-step Payment` |
+| `ruvon cancel` | Cancel workflow | `ruvon cancel <workflow-id> --reason "Duplicate"` |
+| `ruvon logs` | View workflow logs | `ruvon logs <workflow-id> --level ERROR` |
+| `ruvon metrics` | View performance metrics | `ruvon metrics --summary` |
 
 #### Database Management Commands (5 commands)
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `rufus db init` | Initialize database schema | `rufus db init` |
-| `rufus db migrate` | Apply pending migrations | `rufus db migrate --dry-run` |
-| `rufus db status` | Check migration status | `rufus db status` |
-| `rufus db stats` | Show database statistics | `rufus db stats` |
-| `rufus db validate` | Validate schema integrity | `rufus db validate` |
+| `ruvon db init` | Initialize database schema | `ruvon db init` |
+| `ruvon db migrate` | Apply pending migrations | `ruvon db migrate --dry-run` |
+| `ruvon db status` | Check migration status | `ruvon db status` |
+| `ruvon db stats` | Show database statistics | `ruvon db stats` |
+| `ruvon db validate` | Validate schema integrity | `ruvon db validate` |
 
 #### Monitoring & Recovery Commands (2 commands)
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `rufus scan-zombies` | Find zombie workflows | `rufus scan-zombies --fix --threshold 120` |
-| `rufus zombie-daemon` | Run zombie recovery daemon | `rufus zombie-daemon --interval 60` |
+| `ruvon scan-zombies` | Find zombie workflows | `ruvon scan-zombies --fix --threshold 120` |
+| `ruvon zombie-daemon` | Run zombie recovery daemon | `ruvon zombie-daemon --interval 60` |
 
 #### Validation & Testing Commands (2 commands)
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `rufus validate` | Validate workflow YAML | `rufus validate workflow.yaml --strict` |
-| `rufus run` | Run workflow locally (testing) | `rufus run workflow.yaml -d '{}'` |
+| `ruvon validate` | Validate workflow YAML | `ruvon validate workflow.yaml --strict` |
+| `ruvon run` | Run workflow locally (testing) | `ruvon run workflow.yaml -d '{}'` |
 
 **Total:** 21 commands across 5 categories
 
@@ -159,7 +159,7 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 | Feature | Status | Stability | Integration | Documentation |
 |---------|--------|-----------|-------------|---------------|
 | **Logging Observer** | ✅ Implemented | **Stable** | Console logging | [USAGE_GUIDE.md](../USAGE_GUIDE.md#observability) |
-| **CLI Metrics** | ✅ Implemented | **Stable** | `rufus metrics` command | [CLI_REFERENCE.md](CLI_REFERENCE.md#metrics) |
+| **CLI Metrics** | ✅ Implemented | **Stable** | `ruvon metrics` command | [CLI_REFERENCE.md](CLI_REFERENCE.md#metrics) |
 | **Audit Logging (PostgreSQL)** | ✅ Implemented | **Stable** | Database audit table | See advanced guide |
 | **Workflow Heartbeats** | ✅ Implemented | **Stable** | Worker health monitoring | [CLAUDE.md](../CLAUDE.md#heartbeat-manager) |
 | **NoOp Observer** | ✅ Implemented | **Stable** | Silent mode for testing | `tests/sdk/` |
@@ -177,9 +177,9 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 | **Pydantic Validation** | ✅ Implemented | **Stable** | Runtime validation, clear errors |
 | **TestHarness** | ✅ Implemented | **Stable** | Easy workflow testing |
 | **YAML Schema** | ✅ Implemented | **Stable** | IDE autocomplete in YAML files |
-| **JSON Schema Validation** | ✅ Implemented | **Stable** | Pre-flight validation (`rufus validate --strict`) |
+| **JSON Schema Validation** | ✅ Implemented | **Stable** | Pre-flight validation (`ruvon validate --strict`) |
 | **Error Messages** | ✅ Implemented | **Beta** | Clear, actionable errors (being improved) |
-| **Package Auto-discovery** | ✅ Implemented | **Stable** | Automatic `rufus-*` package loading |
+| **Package Auto-discovery** | ✅ Implemented | **Stable** | Automatic `ruvon-*` package loading |
 | **Cookiecutter Template** | ✅ Implemented | **Beta** | Project scaffolding |
 
 ---
@@ -188,14 +188,14 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 
 | Package/Integration | Status | Purpose | Repository |
 |---------------------|--------|---------|------------|
-| **rufus-slack** | ✅ **Beta** | Slack notifications & workflows | `/rufus-slack/` |
+| **ruvon-slack** | ✅ **Beta** | Slack notifications & workflows | `/ruvon-slack/` |
 | **FastAPI Integration** | ✅ **Example** | REST API wrapper | `examples/fastapi_api/` |
 | **Flask Integration** | ✅ **Example** | REST API wrapper | `examples/flask_api/` |
 | **JavaScript/HTTP Steps** | ✅ **Example** | Polyglot workflows | `examples/javascript_steps/` |
-| **Cookiecutter Template** | ✅ **Beta** | Package template | `/cookiecutter-rufus-package/` |
-| **rufus-stripe** | 🚧 **In Progress** | Stripe payment workflows | TBD |
-| **rufus-aws** | 📋 **Planned** | AWS service integrations | TBD |
-| **rufus-gcp** | 📋 **Planned** | GCP service integrations | TBD |
+| **Cookiecutter Template** | ✅ **Beta** | Package template | `/cookiecutter-ruvon-package/` |
+| **ruvon-stripe** | 🚧 **In Progress** | Stripe payment workflows | TBD |
+| **ruvon-aws** | 📋 **Planned** | AWS service integrations | TBD |
+| **ruvon-gcp** | 📋 **Planned** | GCP service integrations | TBD |
 
 ---
 
@@ -291,7 +291,7 @@ This document provides a comprehensive catalog of all Rufus SDK features, their 
 
 **Example:**
 ```python
-from rufus.models import WorkflowPauseDirective
+from ruvon.models import WorkflowPauseDirective
 
 def approval_step(state, context):
     raise WorkflowPauseDirective(result={"awaiting_approval": True})
@@ -299,7 +299,7 @@ def approval_step(state, context):
 
 **Resume:**
 ```bash
-rufus resume <workflow-id> --input '{"approved": true}'
+ruvon resume <workflow-id> --input '{"approved": true}'
 ```
 
 ---
@@ -365,12 +365,12 @@ workflow.enable_saga_mode()
 ## Version History
 
 ### v0.6.0 (Current — Stable)
-- ✅ **Package split** — monolithic `rufus-sdk` (9.3 MB) split into three targeted wheels
-  - `rufus-sdk` (core + CLI, ~185 KB wheel) — `rufus` + `rufus_cli`
-  - `rufus-sdk-edge` (~250 KB wheel) — `rufus_edge` only; edge devices no longer pull cloud code
-  - `rufus-sdk-server` (~9.5 MB wheel) — `rufus_server` only
-- ✅ Docker Hub: `ruhfuskdev/rufus-server:0.6.0`, `ruhfuskdev/rufus-worker:0.6.0`, `ruhfuskdev/rufus-flower:0.6.0`
-- ✅ `rufus_edge.__version__` corrected from stale `"0.5.0"` to `"0.6.0"`; `rufus_server` + `rufus_cli` now expose `__version__`
+- ✅ **Package split** — monolithic `ruvon-sdk` (9.3 MB) split into three targeted wheels
+  - `ruvon-sdk` (core + CLI, ~185 KB wheel) — `ruvon` + `ruvon_cli`
+  - `ruvon-edge` (~250 KB wheel) — `ruvon_edge` only; edge devices no longer pull cloud code
+  - `ruvon-server` (~9.5 MB wheel) — `ruvon_server` only
+- ✅ Docker Hub: `ruhfuskdev/ruvon-server:0.6.0`, `ruhfuskdev/ruvon-worker:0.6.0`, `ruhfuskdev/ruvon-flower:0.6.0`
+- ✅ `ruvon_edge.__version__` corrected from stale `"0.5.0"` to `"0.6.0"`; `ruvon_server` + `ruvon_cli` now expose `__version__`
 - ✅ `tests/test_package_versions.py` — version drift guard across all four packages
 
 ### v0.5.3
@@ -396,7 +396,7 @@ workflow.enable_saga_mode()
 - ✅ Grouped Swagger UI at `/docs`
 
 ### v0.4.0
-- ✅ `RUFUS_CUSTOM_ROUTERS` environment variable for user-defined API extensions
+- ✅ `RUVON_CUSTOM_ROUTERS` environment variable for user-defined API extensions
 
 ### v0.3.0
 - ✅ Core SDK complete
@@ -435,4 +435,4 @@ To request a new feature:
 ---
 
 **Last Updated:** 2026-02-24
-**Maintained By:** Rufus SDK Team
+**Maintained By:** Ruvon SDK Team

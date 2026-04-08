@@ -140,7 +140,7 @@ class UserProfileState(BaseModel):
 
 1. Install Ruvon SDK:
 ```bash
-cd /path/to/rufus
+cd /path/to/ruvon
 pip install -e .
 ```
 

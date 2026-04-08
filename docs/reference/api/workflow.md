@@ -4,7 +4,7 @@
 
 `Workflow` manages workflow lifecycle, state, and execution. Main class for orchestrating step execution and control flow.
 
-**Module:** `rufus.workflow`
+**Module:** `ruvon.workflow`
 
 ## Constructor
 

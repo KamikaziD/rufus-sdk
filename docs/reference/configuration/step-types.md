@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rufus supports 11 step execution types. Each type controls how the step executes and what configuration options are available.
+Ruvon supports 11 step execution types. Each type controls how the step executes and what configuration options are available.
 
 ## STANDARD
 

@@ -1,10 +1,10 @@
 # How to test workflows
 
-This guide covers testing Rufus workflows with the TestHarness and pytest.
+This guide covers testing Ruvon workflows with the TestHarness and pytest.
 
 ## Overview
 
-Rufus provides a TestHarness for writing fast, deterministic workflow tests. It uses in-memory persistence and synchronous execution.
+Ruvon provides a TestHarness for writing fast, deterministic workflow tests. It uses in-memory persistence and synchronous execution.
 
 ## Basic workflow test
 
@@ -12,7 +12,7 @@ Rufus provides a TestHarness for writing fast, deterministic workflow tests. It 
 
 ```python
 import pytest
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 
 @pytest.mark.asyncio
 async def test_simple_workflow():
@@ -68,9 +68,9 @@ tests/
 ```python
 # tests/conftest.py
 import pytest
-from rufus.testing.harness import TestHarness
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from ruvon.testing.harness import TestHarness
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
 
 @pytest.fixture
 async def harness():
@@ -99,7 +99,7 @@ def execution():
 
 ```python
 import pytest
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from my_app.state_models import OrderState
 from my_app.steps import validate_order
 
@@ -503,12 +503,12 @@ async def test_workflow_performance():
 
 ```python
 import pytest
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.builder import WorkflowBuilder
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -517,7 +517,7 @@ async def test_postgres_workflow():
 
     # Use test database
     persistence = PostgresPersistenceProvider(
-        db_url="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+        db_url="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
     )
     await persistence.initialize()
 
@@ -663,7 +663,7 @@ await workflow.next_step(user_input={"approved": True})
 
 ```python
 # Patches the source — celery.py already has its own binding, unaffected
-with patch("rufus.utils.postgres_executor.pg_executor") as mock:
+with patch("ruvon.utils.postgres_executor.pg_executor") as mock:
     ...
 ```
 
@@ -671,11 +671,11 @@ with patch("rufus.utils.postgres_executor.pg_executor") as mock:
 
 ```python
 # Patches the binding in the module being tested
-with patch("rufus.implementations.execution.celery.pg_executor") as mock:
+with patch("ruvon.implementations.execution.celery.pg_executor") as mock:
     ...
 ```
 
-**Rule:** If `celery.py` does `from rufus.utils.postgres_executor import pg_executor`, patch `rufus.implementations.execution.celery.pg_executor`.
+**Rule:** If `celery.py` does `from ruvon.utils.postgres_executor import pg_executor`, patch `ruvon.implementations.execution.celery.pg_executor`.
 
 ## Best practices
 
@@ -711,7 +711,7 @@ pytest tests/test_order_workflow.py::test_simple_workflow
 ### Run with coverage
 
 ```bash
-pytest --cov=rufus --cov-report=html
+pytest --cov=ruvon --cov-report=html
 ```
 
 ### Run integration tests only

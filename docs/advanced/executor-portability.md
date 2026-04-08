@@ -231,8 +231,8 @@ ThreadPoolExecutor is closer to Celery's behavior (separate threads, less shared
 
 ```python
 import pytest
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
 
 @pytest.mark.parametrize("executor", [
     SyncExecutor(),

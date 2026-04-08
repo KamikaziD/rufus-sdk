@@ -1,47 +1,47 @@
-# How to Deploy and Use the Rufus Dashboard
+# How to Deploy and Use the Ruvon Dashboard
 
-This guide covers deploying the Rufus Dashboard, logging in, assigning roles, and using each page of the management UI. It assumes you already have the Rufus API server running.
+This guide covers deploying the Ruvon Dashboard, logging in, assigning roles, and using each page of the management UI. It assumes you already have the Ruvon API server running.
 
 ---
 
 ## Prerequisites
 
-- Docker Compose with the Rufus stack running (`rufus-server`, `rufus-worker`, `postgres`, `redis`)
+- Docker Compose with the Ruvon stack running (`ruvon-server`, `ruvon-worker`, `postgres`, `redis`)
 - A Keycloak instance **or** any OIDC-compatible identity provider
-- The `rufus-dashboard` Docker image (`ruhfuskdev/rufus-dashboard:1.0.0rc5`)
+- The `ruvon-dashboard` Docker image (`ruhfuskdev/ruvon-dashboard:1.0.0rc5`)
 
 ---
 
 ## Deploying the Dashboard
 
-Add the `rufus-dashboard` service to your compose file:
+Add the `ruvon-dashboard` service to your compose file:
 
 ```yaml
-rufus-dashboard:
-  image: ruhfuskdev/rufus-dashboard:1.0.0rc5
+ruvon-dashboard:
+  image: ruhfuskdev/ruvon-dashboard:1.0.0rc5
   ports: ["3000:3000"]
   environment:
-    NEXT_PUBLIC_RUFUS_API_URL: http://localhost:8000   # baked at build time
+    NEXT_PUBLIC_RUVON_API_URL: http://localhost:8000   # baked at build time
     NEXTAUTH_URL: http://localhost:3000
     NEXTAUTH_SECRET: change-me-in-production
-    KEYCLOAK_ISSUER: http://localhost:8080/realms/rufus
-    KEYCLOAK_ID: rufus-dashboard
+    KEYCLOAK_ISSUER: http://localhost:8080/realms/ruvon
+    KEYCLOAK_ID: ruvon-dashboard
     KEYCLOAK_SECRET: your-keycloak-client-secret
-  depends_on: [rufus-server]
+  depends_on: [ruvon-server]
 ```
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `NEXT_PUBLIC_RUFUS_API_URL` | Yes | Base URL of the Rufus REST API (baked into the image at build time; default: `http://localhost:8000`) |
+| `NEXT_PUBLIC_RUVON_API_URL` | Yes | Base URL of the Ruvon REST API (baked into the image at build time; default: `http://localhost:8000`) |
 | `NEXTAUTH_URL` | Yes | Public URL of the dashboard itself |
 | `NEXTAUTH_SECRET` | Yes | Random string used to sign session tokens (minimum 32 chars) |
-| `KEYCLOAK_ISSUER` | Yes | OIDC issuer URL, e.g. `http://keycloak:8080/realms/rufus` |
+| `KEYCLOAK_ISSUER` | Yes | OIDC issuer URL, e.g. `http://keycloak:8080/realms/ruvon` |
 | `KEYCLOAK_ID` | Yes | OIDC client ID registered in Keycloak |
 | `KEYCLOAK_SECRET` | Yes | OIDC client secret |
 
-> If you need a custom API URL baked into the image, rebuild from source with `--build-arg NEXT_PUBLIC_RUFUS_API_URL=https://api.example.com`.
+> If you need a custom API URL baked into the image, rebuild from source with `--build-arg NEXT_PUBLIC_RUVON_API_URL=https://api.example.com`.
 
 A full Keycloak compose configuration is provided at `docker/docker-compose.keycloak.yml`.
 
@@ -60,7 +60,7 @@ If you see a redirect loop, check [Troubleshooting](#troubleshooting) below.
 
 ## Role Reference
 
-Rufus uses five roles. Assign them to users or groups in Keycloak under the `rufus-dashboard` client roles.
+Ruvon uses five roles. Assign them to users or groups in Keycloak under the `ruvon-dashboard` client roles.
 
 | Role | Access |
 |------|--------|
@@ -240,17 +240,17 @@ This step-by-step covers the full flow for updating a workflow without redeploym
 ### Auth redirect loop (login page keeps reloading)
 
 - Confirm `NEXTAUTH_URL` matches the exact URL you are using in the browser (including port).
-- Check that `KEYCLOAK_ISSUER` is reachable from **inside** the dashboard container. Use the container-internal hostname (e.g. `http://keycloak:8080/realms/rufus`) not the host machine URL.
+- Check that `KEYCLOAK_ISSUER` is reachable from **inside** the dashboard container. Use the container-internal hostname (e.g. `http://keycloak:8080/realms/ruvon`) not the host machine URL.
 - Ensure `sslRequired` is set to `none` in the Keycloak realm for development (HTTP) deployments.
 
 ### API unreachable (dashboard shows "Failed to fetch")
 
-- Confirm `NEXT_PUBLIC_RUFUS_API_URL` points to the correct API host. This value is baked into the image at build time — if the URL is wrong, you must rebuild or use the default `http://localhost:8000`.
-- Check that `rufus-server` is healthy: `curl http://localhost:8000/health` should return `{"status":"ok"}`.
+- Confirm `NEXT_PUBLIC_RUVON_API_URL` points to the correct API host. This value is baked into the image at build time — if the URL is wrong, you must rebuild or use the default `http://localhost:8000`.
+- Check that `ruvon-server` is healthy: `curl http://localhost:8000/health` should return `{"status":"ok"}`.
 
 ### CORS errors in browser console
 
-- The Rufus API server reads `CORS_ORIGINS` from the environment. Add the dashboard origin: `CORS_ORIGINS=http://localhost:3000`.
+- The Ruvon API server reads `CORS_ORIGINS` from the environment. Add the dashboard origin: `CORS_ORIGINS=http://localhost:3000`.
 - Restart the API server after changing `CORS_ORIGINS`.
 
 ### Keycloak "HTTPS required" error
@@ -259,5 +259,5 @@ This step-by-step covers the full flow for updating a workflow without redeploym
 
 ### Workers page shows no workers
 
-- Workers register on startup. If the page is empty, confirm at least one `rufus-worker` container is running and connected to the same PostgreSQL and Redis instances as the server.
+- Workers register on startup. If the page is empty, confirm at least one `ruvon-worker` container is running and connected to the same PostgreSQL and Redis instances as the server.
 - Check worker logs for `Registered worker` confirmation.

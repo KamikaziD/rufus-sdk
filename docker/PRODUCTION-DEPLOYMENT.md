@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-This guide explains how to deploy Rufus using pre-built Docker images from Docker Hub.
+This guide explains how to deploy Ruvon using pre-built Docker images from Docker Hub.
 
 ## Overview
 
@@ -16,14 +16,14 @@ This guide explains how to deploy Rufus using pre-built Docker images from Docke
 
 ---
 
-## For Rufus Maintainers: Building and Publishing Images
+## For Ruvon Maintainers: Building and Publishing Images
 
 ### Step 1: Build Production Images
 
 ```bash
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 
-# Build images (TestPyPI version for testing)
+# Build images (PyPI version for testing)
 ./build-production-images.sh 0.3.5 yourname
 
 # Or specify custom version and registry
@@ -60,7 +60,7 @@ docker-compose up -d
 docker login
 
 # Build and push
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 ./build-production-images.sh 0.3.5 your-docker-hub-username true
 ```
 
@@ -69,9 +69,9 @@ cd /Users/kim/PycharmProjects/rufus/docker
 Edit the three Dockerfiles and uncomment the production PyPI lines:
 
 ```dockerfile
-# Comment out TestPyPI:
+# Comment out PyPI:
 # RUN pip install --no-cache-dir \
-#     --index-url https://test.pypi.org/simple/ \
+#     --index-url https://pypi.org/simple/ \
 #     --extra-index-url https://pypi.org/simple/ \
 #     'ruvon-sdk[all]==0.3.5'
 

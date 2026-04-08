@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Rufus SDK are documented in this file.
+All notable changes to Ruvon SDK are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **WASM sidecar binary** — Pre-built `apply_config.wasm` (CPython WASI, 25MB) committed to
-  repo and distributed in `rufus-sdk-edge` wheel; `fraud_scorer.wasm` Rust binary included
-  in `Dockerfile.rufus-edge-dev`; no toolchain required at runtime
+  repo and distributed in `ruvon-edge` wheel; `fraud_scorer.wasm` Rust binary included
+  in `Dockerfile.ruvon-edge-dev`; no toolchain required at runtime
 - **Benchmark suite sections 15/16** — RUVON capability gossip (CapabilityVector
   serialisation, `find_best_builder()` at N=10–1000 peers, S(Vc) formula cost) and
   NKey Ed25519 patch verification (valid/invalid/from_env paths)
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FraudCaseReview` workflow; analyst reviews via dashboard Approvals page; decision
   delivered back to device as CRITICAL-priority `resume_fraud_review` command (WebSocket
   instant / heartbeat fallback). 90s timeout falls back to on-device manager PIN.
-- **`register_command_handler()` API** — `RufusEdgeAgent` now supports registering async
+- **`register_command_handler()` API** — `RuvonEdgeAgent` now supports registering async
   handlers for custom cloud command types: `agent.register_command_handler(type, fn)`.
 - **LoanReviewPanel** — Specialised HITL approval panel for `LoanApplication` workflows;
   shows credit score bar, fraud check badge, applicant profile, underwriting recommendation,
@@ -90,8 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Alembic merge heads** (`g2h3i4j5k6l7`) and **patch metrics/rate_limit** (`h3i4j5k6l7m8`) migrations applied.
 
 ### New Components
-- `packages/rufus-dashboard/src/components/workflows/ConsoleDetailPanel.tsx`
-- `packages/rufus-dashboard/src/components/workflows/WorkflowHeader.tsx`
+- `packages/ruvon-dashboard/src/components/workflows/ConsoleDetailPanel.tsx`
+- `packages/ruvon-dashboard/src/components/workflows/WorkflowHeader.tsx`
 - `examples/cross_platform_workflows/` — 6 cross-platform workflow examples (OrderFulfillment, IoTSensorPipeline, TransactionRiskScoring, DocumentSummarisation, FieldTechTriage, PagedReasoning) running unchanged on Browser/Cloud/Edge.
 
 ---
@@ -121,8 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`PagedInferenceRuntime`** — shard-level LLM paging for memory-constrained browsers and edge devices. Keeps only a rolling window of GGUF shards resident in WASM/RAM, enabling a 1.2 GB BitNet 2B model to run within Safari's ~300 MB limit.
-- **`PagedBrowserInferenceProvider`** (`src/rufus/implementations/inference/paged_browser.py`) — Pyodide/browser provider; delegates to `globalThis.runPagedInference` via JS FFI.
-- **`LlamaCppPagedProvider`** (`src/rufus/implementations/inference/llamacpp_paged.py`) — native edge provider; wraps `llama-cli --mmap` for OS-level layer paging (~200 MB resident on 512 MB field devices).
+- **`PagedBrowserInferenceProvider`** (`src/ruvon/implementations/inference/paged_browser.py`) — Pyodide/browser provider; delegates to `globalThis.runPagedInference` via JS FFI.
+- **`LlamaCppPagedProvider`** (`src/ruvon/implementations/inference/llamacpp_paged.py`) — native edge provider; wraps `llama-cli --mmap` for OS-level layer paging (~200 MB resident on 512 MB field devices).
 - **`AIInferenceConfig` paging fields**: `paging_strategy`, `max_resident_shards`, `prefetch_shards`, `shard_urls`, `shard_size_mb`, `logic_gate_threshold`, `max_tokens`.
 - **`WorkflowBuilder.create_workflow()` `paged_inference_provider=` param** — auto-selects browser or native provider based on `sys.platform` when any step uses `paging_strategy != "none"`.
 - **Browser demo Workflow 6 — Paged Reasoning** — `AssessComplexity` → logic-gate fast path (shard-0 only, ~140 MB, ~1.5s) or full paged inference (all shards, ~260 MB); live token streaming; OPFS shard cache with 1-ahead prefetch; memory gauge bar in UI.
@@ -144,10 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`workflow_observer=` param name** in `create_workflow()` (was `observer=`).
 
 ### Added
-- **CLI fixed**: `workflow_cmd.py`, `interactive.py`, `main.py` fully migrated to `WorkflowBuilder.create_workflow()` — `rufus start`, `rufus retry --auto`, `rufus interactive run` all functional.
+- **CLI fixed**: `workflow_cmd.py`, `interactive.py`, `main.py` fully migrated to `WorkflowBuilder.create_workflow()` — `ruvon start`, `ruvon retry --auto`, `ruvon interactive run` all functional.
 - **`automate_start` attribute** on `Workflow` — `WorkflowEngine.start_workflow()` respects it; mock tests updated.
 - **5 new `WorkflowObserver` lifecycle events**: `on_workflow_paused`, `on_workflow_resumed`, `on_compensation_started`, `on_compensation_completed`, `on_child_workflow_started`.
-- **`OtelObserver`** — OpenTelemetry parent/child spans; graceful no-op when `opentelemetry-sdk` absent; install via `pip install 'rufus-sdk[otel]'`.
+- **`OtelObserver`** — OpenTelemetry parent/child spans; graceful no-op when `opentelemetry-sdk` absent; install via `pip install 'ruvon-sdk[otel]'`.
 - **`ExecutionContext` dataclass** — `trace_id`, `workflow_id`, `step_name`, `attempt`, `actor_id`; additive param on `dispatch_async_task` / `dispatch_parallel_tasks`.
 - **Ed25519 server-side verification** — `DeviceService.sync_transactions()` verifies `X-Payload-Signature` for devices with a registered public key; falls back to HMAC-only for unregistered devices.
 - **WASM Component Model + Browser/WASI targets** — `PlatformAdapter` Protocol with Native/Pyodide/WASI implementations; `ComponentStepRuntime`; `WIT` interface; `PyodideSQLiteProvider`; `bootstrap_wasi()`.
@@ -165,7 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Sprint 1 — Provider Interface Contract Freeze
 
 #### Added
-- **Domain DTOs** (`src/rufus/providers/dtos.py`) — `WorkflowRecord`, `TaskRecord`, `AuditLogRecord`, `MetricRecord`, `SyncStateRecord` typed dataclasses (slots=True) replacing `Dict[str,Any]` in new code
+- **Domain DTOs** (`src/ruvon/providers/dtos.py`) — `WorkflowRecord`, `TaskRecord`, `AuditLogRecord`, `MetricRecord`, `SyncStateRecord` typed dataclasses (slots=True) replacing `Dict[str,Any]` in new code
 - **Typed exceptions** — `PersistenceError`, `WorkflowNotFoundError`, `DuplicateIdempotencyKeyError`, `TaskNotFoundError` in `persistence.py`
 - **`CompatibilityMixin`** — moves `_sync` suffix methods out of abstract interface; `PersistenceProvider` now has ~16 abstract methods (was 24)
 - **5 edge sync abstract methods** on `PersistenceProvider`: `get_pending_sync_workflows`, `get_audit_logs_for_workflows`, `delete_synced_workflows`, `get_edge_sync_state(key) -> Optional[str]`, `set_edge_sync_state`
@@ -189,8 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 - **Step timing** (`workflow.py`) — `time.monotonic()` wrap around sync step execution; `duration_ms` passed to `observer.on_step_executed()` and `persistence.record_metric()`
 - **Structured JSON logging** (`logging.py`) — `StructuredLogFormatter`; all `LoggingObserver` methods use `logger.info("event.name", extra={...})` pattern for Fluent Bit / syslog aggregators
-- **`OtelObserver`** (`src/rufus/implementations/observability/otel.py`) — parent span per workflow, child span per step; graceful no-op if `opentelemetry-sdk` not installed; add `pip install 'rufus-sdk[otel]'`
-- **`EventPublisherObserver`** updates — `duration_ms` in `step.executed` stream event; 5 new lifecycle events; saga events to `rufus:saga_events` stream
+- **`OtelObserver`** (`src/ruvon/implementations/observability/otel.py`) — parent span per workflow, child span per step; graceful no-op if `opentelemetry-sdk` not installed; add `pip install 'ruvon-sdk[otel]'`
+- **`EventPublisherObserver`** updates — `duration_ms` in `step.executed` stream event; 5 new lifecycle events; saga events to `ruvon:saga_events` stream
 - **Tests**: `tests/providers/test_otel_observer.py`, `test_logging_observer.py`, `tests/sdk/test_step_timing.py`
 
 ### Sprint 4 — Security Hardening
@@ -198,8 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 - **Ed25519 payload signing** — `SyncManager._sync_batch()` signs `json.dumps(payload, sort_keys=True)` and adds `X-Payload-Signature` header (base64-encoded); `_ed25519_private_key` field on `SyncManager`
 - **API key rotation** — `DeviceService.rotate_api_key(device_id, current_api_key)` endpoint `POST /api/v1/devices/{device_id}/rotate-key`; `api_key_rotated_at` column added to `edge_devices` via Alembic migration `f1a2b3c4d5e6`
-- **Graduated heartbeat failure logging** — `RufusEdgeAgent`: warning on 1st consecutive failure, error on every 10th; counter resets on success
-- **Device bootstrap** — `RufusEdgeAgent.bootstrap(device_type, merchant_id, firmware_version) -> bool`; reads stored API key from `edge_sync_state`; auto-registers with cloud if absent; `start()` calls `bootstrap()` when `api_key` is empty
+- **Graduated heartbeat failure logging** — `RuvonEdgeAgent`: warning on 1st consecutive failure, error on every 10th; counter resets on success
+- **Device bootstrap** — `RuvonEdgeAgent.bootstrap(device_type, merchant_id, firmware_version) -> bool`; reads stored API key from `edge_sync_state`; auto-registers with cloud if absent; `start()` calls `bootstrap()` when `api_key` is empty
 - **Alembic migration** `f1a2b3c4d5e6` — adds `last_device_sequence INTEGER DEFAULT 0` and `api_key_rotated_at TIMESTAMP` to `edge_devices`
 - **Tests**: `tests/edge/test_payload_signing.py`, `test_api_key_rotation.py`, `test_device_bootstrap.py`
 
@@ -223,7 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run-step(input: string) -> string` interface shared by all WASM step components.
 - **Browser target** — `PyodidePlatformAdapter` + JSPI async bridge; `wa-sqlite`
   replaces native SQLite in browser context; `browser_loader.js` bootstraps the
-  Pyodide runtime and mounts the Rufus wheel.
+  Pyodide runtime and mounts the Ruvon wheel.
 - **WASI 0.3 native target** — `wasi_main.py` entry-point reads workflow state from
   stdin and writes result JSON to stdout; `build_wasi.sh` compiles the edge agent to
   a portable WASI component using `componentize-py`.
@@ -239,7 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **WASM step type** — Execute pre-compiled WebAssembly binaries as workflow steps via the WASI stdin/stdout interface. Any language that compiles to WASM (Rust, C, Go) can implement step logic with full sandbox isolation. Requires `pip install wasmtime`.
-  - `WasmConfig` + `WasmWorkflowStep` models in `rufus.models`
+  - `WasmConfig` + `WasmWorkflowStep` models in `ruvon.models`
   - `WasmRuntime` helper with `DiskWasmBinaryResolver` (cloud) and `SqliteWasmBinaryResolver` (edge)
   - Builder parses `type: "WASM"` steps from workflow YAML
   - `Workflow` accepts optional `wasm_runtime=` parameter
@@ -329,15 +329,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`POST /api/v1/devices/commands/broadcast`** — new endpoint broadcasts a command to all registered edge devices; primary use is pushing `update_workflow` commands from the Admin dashboard
 - **`DeviceBroadcastRequest`** Pydantic model in `api_models.py`
-- **`update_workflow` command handler** in `RufusEdgeAgent._handle_cloud_command()` — edge agents now process workflow-push commands received via heartbeat response
-- **`ruhfuskdev/rufus-edge-dev:0.7.6`** Docker image — minimal edge device emulator for docker-compose testing
+- **`update_workflow` command handler** in `RuvonEdgeAgent._handle_cloud_command()` — edge agents now process workflow-push commands received via heartbeat response
+- **`ruhfuskdev/ruvon-edge-dev:0.7.6`** Docker image — minimal edge device emulator for docker-compose testing
 - **`examples/edge_deployment/edge_device_sim.py`** — clean self-contained edge device simulator script
-- **`docker/Dockerfile.rufus-edge-dev`** — Dockerfile for the edge device emulator image
-- **`rufus-edge-sim` service** in `rufus_test/docker-compose.test-async.yml` — automatically registers with the cloud control plane and receives workflow pushes
+- **`docker/Dockerfile.ruvon-edge-dev`** — Dockerfile for the edge device emulator image
+- **`ruvon-edge-sim` service** in `ruvon_test/docker-compose.test-async.yml` — automatically registers with the cloud control plane and receives workflow pushes
 
 ### Fixed
-- **Edge agent heartbeat payload field mismatch** — `RufusEdgeAgent._send_heartbeat()` was sending `"status"` but the server's `DeviceHeartbeatRequest` model requires `"device_status"`; caused silent 422 errors dropping all heartbeat responses (and pending commands)
-- **`run_edge_macbook.py`** — removed broken imports (`artifact_updater`, `command_handler`, `InferenceFactory`) and rewrote to use `RufusEdgeAgent` with proper device registration
+- **Edge agent heartbeat payload field mismatch** — `RuvonEdgeAgent._send_heartbeat()` was sending `"status"` but the server's `DeviceHeartbeatRequest` model requires `"device_status"`; caused silent 422 errors dropping all heartbeat responses (and pending commands)
+- **`run_edge_macbook.py`** — removed broken imports (`artifact_updater`, `command_handler`, `InferenceFactory`) and rewrote to use `RuvonEdgeAgent` with proper device registration
 
 ---
 
@@ -352,30 +352,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dashboard how-to guide** (`docs/how-to-guides/dashboard.md`) — complete operational reference covering deployment, Keycloak OIDC setup, 5 role types, 13-page UI walkthrough, live definition updates, and troubleshooting
 
 ### Fixed
-- Test docker-compose (`rufus_test/docker-compose.test-async.yml`) — image tags updated to v0.7.5; bind-mount `alembic/versions/` directory so migration `c1d2e3f4a5b6` (workflow_definitions + server_commands) is visible when running on older base images
+- Test docker-compose (`ruvon_test/docker-compose.test-async.yml`) — image tags updated to v0.7.5; bind-mount `alembic/versions/` directory so migration `c1d2e3f4a5b6` (workflow_definitions + server_commands) is visible when running on older base images
 
 ---
 
 ## [0.6.0] - 2026-02-27
 
 ### Added
-- **Package split** — `rufus-sdk` (9.3 MB monolithic) divided into three targeted distribution wheels published to TestPyPI:
-  - `rufus-sdk` — core engine (`rufus/`) + CLI (`rufus_cli/`); ~185 KB wheel
-  - `rufus-sdk-edge` — edge agent (`rufus_edge/`) only; ~250 KB wheel — edge devices no longer pull 9+ MB of cloud control plane code
-  - `rufus-sdk-server` — cloud control plane (`rufus_server/`) only; ~9.5 MB wheel
-- **Sub-package `pyproject.toml` files** — `packages/rufus-sdk-edge/pyproject.toml` and `packages/rufus-sdk-server/pyproject.toml` (hatchling build backend with `force-include` for out-of-tree source)
-- **`tests/test_package_versions.py`** — version drift guard; asserts all four `__version__` strings are equal across `rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`
-- **`__version__`** added to `rufus_server/__init__.py` and `rufus_cli/__init__.py` (previously empty)
+- **Package split** — `ruvon-sdk` (9.3 MB monolithic) divided into three targeted distribution wheels published to PyPI:
+  - `ruvon-sdk` — core engine (`ruvon/`) + CLI (`ruvon_cli/`); ~185 KB wheel
+  - `ruvon-edge` — edge agent (`ruvon_edge/`) only; ~250 KB wheel — edge devices no longer pull 9+ MB of cloud control plane code
+  - `ruvon-server` — cloud control plane (`ruvon_server/`) only; ~9.5 MB wheel
+- **Sub-package `pyproject.toml` files** — `packages/ruvon-edge/pyproject.toml` and `packages/ruvon-server/pyproject.toml` (hatchling build backend with `force-include` for out-of-tree source)
+- **`tests/test_package_versions.py`** — version drift guard; asserts all four `__version__` strings are equal across `ruvon`, `ruvon_edge`, `ruvon_server`, `ruvon_cli`
+- **`__version__`** added to `ruvon_server/__init__.py` and `ruvon_cli/__init__.py` (previously empty)
 
 ### Changed
-- **Root `pyproject.toml`** — packages trimmed to `[rufus, rufus_cli]`; extras `server`, `celery`, `auth`, `edge`, `all` moved to their respective sub-packages; optional deps slimmed accordingly
-- **`rufus_edge.__version__`** corrected from stale `"0.5.0"` to `"0.6.0"`
-- **Docker production images** updated to two-step install pattern: Step 1 installs `rufus-sdk` + `rufus-sdk-server` (no extras) from TestPyPI; Step 2 installs actual optional deps (fastapi, celery, etc.) from PyPI to avoid broken TestPyPI stubs
+- **Root `pyproject.toml`** — packages trimmed to `[ruvon, ruvon_cli]`; extras `server`, `celery`, `auth`, `edge`, `all` moved to their respective sub-packages; optional deps slimmed accordingly
+- **`ruvon_edge.__version__`** corrected from stale `"0.5.0"` to `"0.6.0"`
+- **Docker production images** updated to two-step install pattern: Step 1 installs `ruvon-sdk` + `ruvon-server` (no extras) from PyPI; Step 2 installs actual optional deps (fastapi, celery, etc.) from PyPI to avoid broken PyPI stubs
 - **`docker/build-production-images.sh`** default `VERSION` updated from `0.3.5` → `0.6.0`
 - **Docs** — `installation.md`, `edge-architecture.md`, `edge-deployment.md`, `edge-footprint.md`, `CLI_QUICK_REFERENCE.md`, `CLAUDE.md` updated for three-package install model
 
 ### Fixed
-- `rufus_edge.__version__` was `"0.5.0"` (stale since v0.3.x); now correctly `"0.6.0"`
+- `ruvon_edge.__version__` was `"0.5.0"` (stale since v0.3.x); now correctly `"0.6.0"`
 
 ---
 
@@ -414,7 +414,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **PolicyRollout workflow** — durable policy creation with saga compensation: `Validate_Policy` → `Persist_Policy` (compensatable: DELETE + in-memory cache eviction) → `Finalize_Policy_Rollout`; endpoint at `POST /api/v1/policies/rollout`
-- `src/rufus_server/steps/policy_rollout_steps.py` — step functions + `PolicyRolloutState` model + `init_services()` injection
+- `src/ruvon_server/steps/policy_rollout_steps.py` — step functions + `PolicyRolloutState` model + `init_services()` injection
 - `config/policy_rollout_workflow.yaml` — YAML definition registered in `workflow_registry.yaml`
 
 ### Fixed
@@ -433,15 +433,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - **README.md** — full rewrite with new positioning: self-hosting insight, 3-role architecture diagram (Device Runtime / Cloud Worker / Control Plane), Docker Compose quick-start using published images, horizontal edge framing (robotics, MedTech, drones, industrial IoT alongside fintech)
-- **`docs/explanation/self-hosting.md`** — new file explaining how Rufus orchestrates itself; covers the three-role model, what self-hosting means for reliability and architecture, and the recursive pattern in practice
+- **`docs/explanation/self-hosting.md`** — new file explaining how Ruvon orchestrates itself; covers the three-role model, what self-hosting means for reliability and architecture, and the recursive pattern in practice
 - **`docs/explanation/architecture.md`** — added "Three Roles, One Runtime" section with ASCII diagram and self-hosting prose
 - **`docs/reference/configuration/database-schema.md`** — complete rewrite documenting all 33 cloud tables (by group) and 10 edge tables; added schema governance table, extending-schema instructions, and cascade behavior reference
-- **`docs/reference/configuration/configuration.md`** — added `RUFUS_ENCRYPTION_KEY` (marked required) and `RUFUS_CUSTOM_ROUTERS` with usage examples
+- **`docs/reference/configuration/configuration.md`** — added `RUVON_ENCRYPTION_KEY` (marked required) and `RUVON_CUSTOM_ROUTERS` with usage examples
 - **`docs/appendices/changelog.md`** — added v0.4.0, v0.4.1, v0.4.2, v0.5.0 entries (were missing entirely)
 - **`docs/appendices/migration-notes.md`** — added v0.4.0/0.4.1/0.4.2/v0.5.0 upgrade guides and updated compatibility matrix to include all versions from 0.4.x onward
 - **`docs/appendices/roadmap.md`** — updated timeline (v0.5.0 current), moved v0.4.x features to completed, added new roadmap items (OpenTelemetry, GPU inference step type, mTLS, HSM)
-- **`docs/advanced/extending-rufus.md`** — added "Extending the Database Schema" section (custom tables via shared `metadata`) and "Custom API Routes (RUFUS_CUSTOM_ROUTERS)" section
-- **`docs/advanced/security.md`** — added "Fintech & PCI-DSS Patterns" section: `RUFUS_ENCRYPTION_KEY` setup/rotation, card tokenization, transaction signing, device authentication, offline floor limit pattern, PCI audit trail query
+- **`docs/advanced/extending-ruvon.md`** — added "Extending the Database Schema" section (custom tables via shared `metadata`) and "Custom API Routes (RUVON_CUSTOM_ROUTERS)" section
+- **`docs/advanced/security.md`** — added "Fintech & PCI-DSS Patterns" section: `RUVON_ENCRYPTION_KEY` setup/rotation, card tokenization, transaction signing, device authentication, offline floor limit pattern, PCI audit trail query
 - **`docs/tutorials/edge-deployment.md`** — fixed broken code: `SyncExecutor()` → `SyncExecutionProvider()`
 - **`docs/index.md`** — updated to v0.5.0, new self-hosting intro paragraph, added self-hosting link
 - **`docs/README.md`** — removed stale `v0.9.0` version claim
@@ -453,7 +453,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-02-24
 
 ### Changed
-- Database schema consolidation: `src/rufus/db_schema/database.py` is now the single source of truth for all **33 PostgreSQL tables** (previously only ~7 were Alembic-managed)
+- Database schema consolidation: `src/ruvon/db_schema/database.py` is now the single source of truth for all **33 PostgreSQL tables** (previously only ~7 were Alembic-managed)
 - `docker/init-db.sql` stripped to PostgreSQL extensions only (`uuid-ossp`, `pg_trgm`); all schema creation and seed data migrated to Alembic
 
 ### Added
@@ -467,11 +467,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Webhooks & rate limiting: `webhook_registrations`, `webhook_deliveries`, `rate_limit_rules`, `rate_limit_tracking`
   - Edge config & SAF: `device_configs`, `saf_transactions`, `device_assignments`, `policies`
 - 3 new edge-specific SQLite tables: `saf_pending_transactions`, `device_config_cache`, `edge_sync_state`
-- `src/rufus/db_schema/edge_database.py` — edge SQLite schema constants and documentation
+- `src/ruvon/db_schema/edge_database.py` — edge SQLite schema constants and documentation
 - Helper functions: `get_core_tables()`, `get_cloud_only_tables()`, `get_edge_device_tables()`
 - Alembic migration `a1b2c3d4e5f6` — creates all missing tables, TSVECTOR column, seed data (roles, policies, rate limits, command versions)
 - `TECHNICAL_INFORMATION.md` §16: schema reference and table inventory
-- Docker Hub images (linux/amd64 + linux/arm64): `ruhfuskdev/rufus-server:0.5.0`, `ruhfuskdev/rufus-worker:0.5.0`, `ruhfuskdev/rufus-flower:0.5.0`
+- Docker Hub images (linux/amd64 + linux/arm64): `ruhfuskdev/ruvon-server:0.5.0`, `ruhfuskdev/ruvon-worker:0.5.0`, `ruhfuskdev/ruvon-flower:0.5.0`
 
 ---
 
@@ -505,7 +505,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-02-23
 
 ### Added
-- `RUFUS_CUSTOM_ROUTERS` environment variable: comma-separated dotted paths to FastAPI `APIRouter` objects, mounted on server startup without modifying core server code
+- `RUVON_CUSTOM_ROUTERS` environment variable: comma-separated dotted paths to FastAPI `APIRouter` objects, mounted on server startup without modifying core server code
 
 ---
 
@@ -517,7 +517,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Step execution timeline view
   - State inspection and history
   - Audit log viewer
-  - Accessible at `http://localhost:8000/debug` when running Rufus Server
+  - Accessible at `http://localhost:8000/debug` when running Ruvon Server
 - **Feature Parity Analysis** - Comprehensive comparison with Confucius (80% parity achieved)
 - **Docker/Kubernetes Deployment** - Complete distributed Celery worker deployment
   - Docker Compose orchestration for multi-container setup
@@ -532,7 +532,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pydantic protected namespace warnings
 - PostgreSQL compatibility for `current_step` field (converted to string)
 - Missing dependencies in `pyproject.toml`
-- Package name correction from `rufus-edge` to `rufus`
+- Package name correction from `ruvon-edge` to `ruvon`
 - Load testing for 500+ concurrent devices
 - Device cleanup and registration in load tests
 
@@ -561,13 +561,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Add missing dependencies to `pyproject.toml`
-- Correct package name from `rufus-edge` to `rufus`
+- Correct package name from `ruvon-edge` to `ruvon`
 
 ---
 
 ## [0.1.0] - 2026-01-12
 
-**First official release of Rufus SDK**
+**First official release of Ruvon SDK**
 
 ### Added
 
@@ -618,30 +618,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### CLI Tool (21 commands)
 - **Workflow Management**
-  - `rufus list` - List workflows with filtering
-  - `rufus show` - Show workflow details
-  - `rufus start` - Start new workflow
-  - `rufus resume` - Resume paused workflow
-  - `rufus retry` - Retry failed workflow
-  - `rufus cancel` - Cancel running workflow
-  - `rufus logs` - View execution logs
-  - `rufus metrics` - View performance metrics
+  - `ruvon list` - List workflows with filtering
+  - `ruvon show` - Show workflow details
+  - `ruvon start` - Start new workflow
+  - `ruvon resume` - Resume paused workflow
+  - `ruvon retry` - Retry failed workflow
+  - `ruvon cancel` - Cancel running workflow
+  - `ruvon logs` - View execution logs
+  - `ruvon metrics` - View performance metrics
 - **Configuration**
-  - `rufus config show` - Show current configuration
-  - `rufus config set-persistence` - Configure database
-  - `rufus config set-execution` - Configure executor
-  - `rufus config set-default` - Set defaults
-  - `rufus config reset` - Reset to defaults
-  - `rufus config path` - Show config file location
+  - `ruvon config show` - Show current configuration
+  - `ruvon config set-persistence` - Configure database
+  - `ruvon config set-execution` - Configure executor
+  - `ruvon config set-default` - Set defaults
+  - `ruvon config reset` - Reset to defaults
+  - `ruvon config path` - Show config file location
 - **Database**
-  - `rufus db init` - Initialize schema
-  - `rufus db migrate` - Apply migrations
-  - `rufus db status` - Migration status
-  - `rufus db stats` - Database statistics
-  - `rufus db validate` - Validate schema
+  - `ruvon db init` - Initialize schema
+  - `ruvon db migrate` - Apply migrations
+  - `ruvon db status` - Migration status
+  - `ruvon db stats` - Database statistics
+  - `ruvon db validate` - Validate schema
 - **Zombie Recovery**
-  - `rufus scan-zombies` - Scan for zombie workflows
-  - `rufus zombie-daemon` - Run scanner as daemon
+  - `ruvon scan-zombies` - Scan for zombie workflows
+  - `ruvon zombie-daemon` - Run scanner as daemon
 
 #### Reliability Features
 - **Zombie workflow recovery** with heartbeat monitoring
@@ -663,10 +663,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import caching** - 162x speedup for repeated step function imports
 - Benchmark results: 703,633 workflows/sec (simplified), 5.5µs p50 latency
 
-#### Edge Deployment (Rufus Edge)
+#### Edge Deployment (Ruvon Edge)
 - **Offline-first architecture** with SQLite
 - **Store-and-Forward (SAF)** for payment transactions
-- **Cloud control plane** (Rufus Server) with FastAPI
+- **Cloud control plane** (Ruvon Server) with FastAPI
   - Device registry API
   - Config server with ETag-based updates
   - Transaction sync API
@@ -716,7 +716,7 @@ None (first release)
 
 ### Version 0.3.0 Highlights
 
-**Debug UI Launch** - Visual workflow inspection and monitoring is now available. Access the Debug UI at `http://localhost:8000/debug` when running Rufus Server to view real-time workflow status, step execution timelines, state history, and audit logs.
+**Debug UI Launch** - Visual workflow inspection and monitoring is now available. Access the Debug UI at `http://localhost:8000/debug` when running Ruvon Server to view real-time workflow status, step execution timelines, state history, and audit logs.
 
 **Production Deployment** - Complete Docker and Kubernetes deployment templates with distributed Celery worker support. Deploy multi-container setups with health checks and monitoring out of the box.
 
@@ -724,13 +724,13 @@ None (first release)
 
 ### Version 0.1.0 Highlights
 
-**First Official Release** - Rufus SDK is production-capable for most workloads. Core workflow orchestration, 8 step types, multiple persistence and execution providers, comprehensive CLI, and reliability features are stable and tested.
+**First Official Release** - Ruvon SDK is production-capable for most workloads. Core workflow orchestration, 8 step types, multiple persistence and execution providers, comprehensive CLI, and reliability features are stable and tested.
 
-**Fintech-Ready** - Offline-first architecture with Store-and-Forward, edge device management, and PCI-DSS ready features make Rufus suitable for payment terminal deployments.
+**Fintech-Ready** - Offline-first architecture with Store-and-Forward, edge device management, and PCI-DSS ready features make Ruvon suitable for payment terminal deployments.
 
 **Performance Optimized** - Phase 1 optimizations deliver 50-100% throughput improvement and 30-40% latency reduction for I/O-bound workflows.
 
-**Developer-Friendly** - Type-safe state models, TestHarness for easy testing, comprehensive documentation, and working examples make Rufus accessible to new users.
+**Developer-Friendly** - Type-safe state models, TestHarness for easy testing, comprehensive documentation, and working examples make Ruvon accessible to new users.
 
 ---
 
@@ -772,7 +772,7 @@ None (first release)
 ## GitHub Releases
 
 For full release notes, changelogs, and downloadable assets, see:
-- [GitHub Releases](https://github.com/your-org/rufus-sdk/releases)
+- [GitHub Releases](https://github.com/your-org/ruvon-sdk/releases)
 
 ---
 

@@ -1,6 +1,6 @@
 # Advanced: Security Considerations
 
-Security best practices for production Rufus deployments, with focus on PCI-DSS compliance for fintech applications.
+Security best practices for production Ruvon deployments, with focus on PCI-DSS compliance for fintech applications.
 
 ---
 
@@ -69,7 +69,7 @@ class SecurePaymentState(BaseModel):
 
 ```python
 # Encryption key from environment (never hardcode!)
-ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY").encode()
+ENCRYPTION_KEY = os.getenv("RUVON_ENCRYPTION_KEY").encode()
 
 # Create workflow with encrypted data
 state = SecurePaymentState.from_card_data(
@@ -101,9 +101,9 @@ ENCRYPTION_KEY = b'hardcoded-key-123'
 ```python
 import os
 
-ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY")
+ENCRYPTION_KEY = os.getenv("RUVON_ENCRYPTION_KEY")
 if not ENCRYPTION_KEY:
-    raise ValueError("RUFUS_ENCRYPTION_KEY environment variable not set")
+    raise ValueError("RUVON_ENCRYPTION_KEY environment variable not set")
 ```
 
 **✅ Better: Use AWS KMS or HashiCorp Vault:**
@@ -117,7 +117,7 @@ def get_encryption_key():
 
     response = kms_client.decrypt(
         CiphertextBlob=os.getenv("ENCRYPTED_KEY_BLOB"),
-        EncryptionContext={'Application': 'Rufus'}
+        EncryptionContext={'Application': 'Ruvon'}
     )
 
     return response['Plaintext']
@@ -412,7 +412,7 @@ DB_PASSWORD = "password123"
 
 ```bash
 # .env (add to .gitignore!)
-RUFUS_API_KEY=sk_live_abc123
+RUVON_API_KEY=sk_live_abc123
 DB_PASSWORD=password123
 ENCRYPTION_KEY=fernet-key-here
 ```
@@ -423,7 +423,7 @@ import os
 
 load_dotenv()
 
-API_KEY = os.getenv("RUFUS_API_KEY")
+API_KEY = os.getenv("RUVON_API_KEY")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 ```
 
@@ -445,8 +445,8 @@ def get_secret(secret_name: str) -> str:
 
 
 # Usage
-DB_PASSWORD = get_secret("rufus/db/password")
-API_KEY = get_secret("rufus/api/key")
+DB_PASSWORD = get_secret("ruvon/db/password")
+API_KEY = get_secret("ruvon/api/key")
 ```
 
 ---
@@ -519,9 +519,9 @@ bandit -r src/
 
 ## Fintech & PCI-DSS Patterns
 
-This section covers security patterns specific to payment applications on Rufus edge devices.
+This section covers security patterns specific to payment applications on Ruvon edge devices.
 
-### RUFUS_ENCRYPTION_KEY Setup
+### RUVON_ENCRYPTION_KEY Setup
 
 All workflow state is encrypted at rest using a Fernet key. **This key must be set before starting the server or any worker.**
 
@@ -530,7 +530,7 @@ All workflow state is encrypted at rest using a Fernet key. **This key must be s
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # Set in environment (or .env file)
-export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
+export RUVON_ENCRYPTION_KEY="your-base64-fernet-key-here"
 ```
 
 **Key rotation procedure:**
@@ -642,7 +642,7 @@ This pattern is safe because Store-and-Forward will sync the transaction when co
 6. **Regular security scanning** (dependencies, code)
 
 **For fintech applications:**
-- Set `RUFUS_ENCRYPTION_KEY` before starting any server or worker
+- Set `RUVON_ENCRYPTION_KEY` before starting any server or worker
 - Never store PANs in workflow state — tokenize immediately and store the token
 - Use `workflow_audit_log` and `command_audit_log` for PCI-DSS compliance audit trail
 - Rotate device API keys on each sync for forward secrecy

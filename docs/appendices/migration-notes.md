@@ -1,6 +1,6 @@
 # Migration Notes
 
-Version-to-version migration guides for upgrading Rufus SDK.
+Version-to-version migration guides for upgrading Ruvon SDK.
 
 ---
 
@@ -54,40 +54,40 @@ The `SyncManager` now uses `saf_pending_transactions` instead of the `tasks` tab
 
 ### Summary
 
-v0.6.0 splits the monolithic `rufus-sdk` wheel into three separate packages. **No Python import changes are required** — the package names (`rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`) are unchanged. Only the `pip install` command changes depending on your deployment target.
+v0.6.0 splits the monolithic `ruvon-sdk` wheel into three separate packages. **No Python import changes are required** — the package names (`ruvon`, `ruvon_edge`, `ruvon_server`, `ruvon_cli`) are unchanged. Only the `pip install` command changes depending on your deployment target.
 
 ### Install Command Changes
 
 **Before (0.5.x):**
 ```bash
-pip install 'rufus-sdk==0.5.4'                    # installs everything — 9.3 MB
+pip install 'ruvon-sdk==0.5.4'                    # installs everything — 9.3 MB
 ```
 
 **After (0.6.0+):**
 ```bash
 # Edge device — installs only core + edge agent (~500 KB total)
-pip install 'rufus-sdk==0.6.0' 'rufus-sdk-edge[edge]==0.6.0'
+pip install 'ruvon-sdk==0.6.0' 'ruvon-edge[edge]==0.6.0'
 
 # Cloud server — installs core + server package
-pip install 'rufus-sdk==0.6.0' 'rufus-sdk-server[server,auth]==0.6.0'
+pip install 'ruvon-sdk==0.6.0' 'ruvon-server[server,auth]==0.6.0'
 
 # Celery worker
-pip install 'rufus-sdk==0.6.0' 'rufus-sdk-server[celery]==0.6.0'
+pip install 'ruvon-sdk==0.6.0' 'ruvon-server[celery]==0.6.0'
 
 # Dev (all packages from source)
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 ```
 
 ### Breaking Changes
 
-**None for existing code.** All Python imports (`from rufus import ...`, `from rufus_edge import ...`, etc.) continue to work unchanged.
+**None for existing code.** All Python imports (`from ruvon import ...`, `from ruvon_edge import ...`, etc.) continue to work unchanged.
 
 **Docker Compose / deployment scripts** must be updated if they reference the old monolithic extras:
-- `rufus-sdk[server]` → install `rufus-sdk-server[server]` separately
-- `rufus-sdk[celery]` → install `rufus-sdk-server[celery]` separately
-- `rufus-sdk[edge]` → install `rufus-sdk-edge[edge]` separately
+- `ruvon-sdk[server]` → install `ruvon-server[server]` separately
+- `ruvon-sdk[celery]` → install `ruvon-server[celery]` separately
+- `ruvon-sdk[edge]` → install `ruvon-edge[edge]` separately
 
 ### Action Required
 
@@ -111,7 +111,7 @@ v0.5.0 consolidates all PostgreSQL tables under Alembic management. No Python AP
 **Run the new migration:**
 
 ```bash
-cd src/rufus
+cd src/ruvon
 alembic upgrade head
 ```
 
@@ -129,7 +129,7 @@ This creates 27 previously-unmanaged tables and adds 13 columns to `device_comma
 
 1. Run `alembic upgrade head` on your PostgreSQL database
 2. If using `init-db.sql` as a setup script, replace it with `alembic upgrade head`
-3. Set `RUFUS_ENCRYPTION_KEY` if not already set (required for workflow decryption)
+3. Set `RUVON_ENCRYPTION_KEY` if not already set (required for workflow decryption)
 
 ---
 
@@ -148,7 +148,7 @@ Bug fix release. No breaking changes.
 
 ### Optional Actions
 
-- Add `RUFUS_CUSTOM_ROUTERS` env var to mount custom API routes (introduced in v0.4.0)
+- Add `RUVON_CUSTOM_ROUTERS` env var to mount custom API routes (introduced in v0.4.0)
 
 ---
 
@@ -178,7 +178,7 @@ Swagger UI at `/docs` now shows routes grouped by functional area (Workflows, De
 
 ### Summary
 
-Adds `RUFUS_CUSTOM_ROUTERS` for user-defined API extensions. No breaking changes.
+Adds `RUVON_CUSTOM_ROUTERS` for user-defined API extensions. No breaking changes.
 
 ### Breaking Changes
 
@@ -187,7 +187,7 @@ Adds `RUFUS_CUSTOM_ROUTERS` for user-defined API extensions. No breaking changes
 ### New Feature
 
 ```bash
-export RUFUS_CUSTOM_ROUTERS="myapp.api.custom_router"
+export RUVON_CUSTOM_ROUTERS="myapp.api.custom_router"
 ```
 
 Mount additional FastAPI routers on startup without modifying core server code.
@@ -223,15 +223,15 @@ Version 0.3.0 is a **feature release with full backward compatibility**. No code
 
 1. **Try the Debug UI**
    ```bash
-   # Start Rufus Server
-   uvicorn rufus_server.main:app --reload
+   # Start Ruvon Server
+   uvicorn ruvon_server.main:app --reload
 
    # Visit http://localhost:8000/debug
    ```
 
 2. **Use Database Seeding for Testing**
    ```bash
-   python tools/seed_data.py --db postgresql://localhost/rufus
+   python tools/seed_data.py --db postgresql://localhost/ruvon
    ```
 
 3. **Review Deployment Templates**
@@ -278,7 +278,7 @@ Bug fix release addressing Pydantic warnings and PostgreSQL compatibility.
 **None.** Just upgrade:
 
 ```bash
-pip install --upgrade rufus
+pip install --upgrade ruvon
 ```
 
 ### Database Changes
@@ -307,8 +307,8 @@ Bug fix release correcting package metadata.
    - Dependencies now auto-install correctly
 
 2. **Package Name Correction**
-   - Changed from `rufus-edge` to `rufus`
-   - Pip install now works correctly: `pip install rufus`
+   - Changed from `ruvon-edge` to `ruvon`
+   - Pip install now works correctly: `pip install ruvon`
 
 ### Action Required
 
@@ -316,10 +316,10 @@ Bug fix release correcting package metadata.
 
 ```bash
 # Old (incorrect)
-pip install rufus-edge
+pip install ruvon-edge
 
 # New (correct)
-pip install rufus
+pip install ruvon
 ```
 
 Existing installations continue to work.
@@ -401,7 +401,7 @@ Existing installations continue to work.
 
 ```bash
 # Check current migration status
-cd src/rufus
+cd src/ruvon
 alembic current
 
 # View pending migrations
@@ -419,7 +419,7 @@ alembic downgrade -1        # Rollback one migration
 
 ```bash
 # PostgreSQL backup
-pg_dump -h localhost -U rufus rufus_cloud > backup.sql
+pg_dump -h localhost -U ruvon ruvon_cloud > backup.sql
 
 # SQLite backup
 cp workflow.db workflow.db.backup
@@ -431,14 +431,14 @@ cp workflow.db workflow.db.backup
 
 ```bash
 # Backup existing config
-cp ~/.rufus/config.json ~/.rufus/config.json.backup
+cp ~/.ruvon/config.json ~/.ruvon/config.json.backup
 
 # Reset to defaults (generates new format)
-rufus config reset
+ruvon config reset
 
 # Re-apply your settings
-rufus config set-persistence  # Interactive
-rufus config set-execution    # Interactive
+ruvon config set-persistence  # Interactive
+ruvon config set-execution    # Interactive
 ```
 
 ### Code Updates
@@ -473,16 +473,16 @@ TypeError: step_function() got an unexpected keyword argument 'new_param'
 pytest
 
 # 2. Start a simple workflow
-rufus start MyWorkflow --data '{"test": true}'
+ruvon start MyWorkflow --data '{"test": true}'
 
 # 3. Check workflow completed
-rufus show <workflow-id>
+ruvon show <workflow-id>
 
 # 4. View logs
-rufus logs <workflow-id>
+ruvon logs <workflow-id>
 
 # 5. Check database
-rufus db stats
+ruvon db stats
 ```
 
 ---
@@ -515,13 +515,13 @@ rufus db stats
 
 ```bash
 # Restore database backup
-psql -h localhost -U rufus rufus_cloud < backup.sql
+psql -h localhost -U ruvon ruvon_cloud < backup.sql
 
 # Reinstall previous version
-pip install rufus==0.1.2  # Example: rollback to 0.1.2
+pip install ruvon==0.1.2  # Example: rollback to 0.1.2
 
 # Restore config backup
-cp ~/.rufus/config.json.backup ~/.rufus/config.json
+cp ~/.ruvon/config.json.backup ~/.ruvon/config.json
 ```
 
 ---
@@ -550,7 +550,7 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 
 ## Version Compatibility Matrix
 
-| Rufus Version | Python | PostgreSQL | SQLite | Redis | Celery |
+| Ruvon Version | Python | PostgreSQL | SQLite | Redis | Celery |
 |---------------|--------|------------|--------|-------|--------|
 | 0.6.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.5.0         | 3.9+   | 12+        | 3.35+  | 6.0+  | 5.3+   |
@@ -561,7 +561,7 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 | 0.1.2         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
 | 0.1.0         | 3.10+  | 12+        | 3.35+  | 6.0+  | 5.3+   |
 
-**Note:** Rufus SDK is tested against these versions. Older versions may work but are not officially supported.
+**Note:** Ruvon SDK is tested against these versions. Older versions may work but are not officially supported.
 
 **Last Updated:** 2026-02-24
 
@@ -570,8 +570,8 @@ cp ~/.rufus/config.json.backup ~/.rufus/config.json
 ## Questions?
 
 - 📖 [Changelog](/docs/appendices/changelog.md)
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
-- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
+- 🐛 [Report Issues](https://github.com/your-org/ruvon-sdk/issues)
 
 ---
 

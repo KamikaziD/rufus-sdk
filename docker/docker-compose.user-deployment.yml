@@ -1,5 +1,5 @@
 # Example docker-compose for USER PROJECTS
-# Uses pre-built Rufus images from Docker Hub
+# Uses pre-built Ruvon images from Docker Hub
 # Users mount their custom code as volumes
 
 # INSTRUCTIONS:
@@ -52,7 +52,7 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Rufus Server - REST API (pre-built image)
+  # Ruvon Server - REST API (pre-built image)
   ruvon-server:
     image: yourname/ruvon-server:latest  # TODO: Change 'yourname' to your Docker Hub username
     container_name: my-app-ruvon-server
@@ -81,7 +81,7 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Rufus Worker - Executes workflows (pre-built image)
+  # Ruvon Worker - Executes workflows (pre-built image)
   ruvon-worker:
     image: ruvondev/ruvon-worker:latest  # TODO: Change 'yourname' to your Docker Hub username
     volumes:

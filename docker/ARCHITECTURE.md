@@ -1,4 +1,4 @@
-# Rufus Distributed Architecture
+# Ruvon Distributed Architecture
 
 ## High-Level Overview
 
@@ -14,7 +14,7 @@
                             │
                             ▼
           ┌──────────────────────────────────────────┐
-          │       Rufus API Server (FastAPI)         │
+          │       Ruvon API Server (FastAPI)         │
           │  - Workflow Management REST API          │
           │  - Workflow creation & resumption        │
           │  - Status monitoring                     │

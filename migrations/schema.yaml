@@ -1,9 +1,9 @@
-# Rufus Edge SDK - Unified Database Schema Definition
+# Ruvon Edge SDK - Unified Database Schema Definition
 # Version: 2.0.0
 # This schema is compiled to database-specific SQL by tools/compile_schema.py
 
 version: "2.0.0"
-description: "Rufus Edge fintech workflow engine persistence schema"
+description: "Ruvon Edge fintech workflow engine persistence schema"
 
 # Type mappings for different databases
 type_mappings:

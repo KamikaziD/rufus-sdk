@@ -1,6 +1,6 @@
 # Advanced: Resource Management
 
-Best practices for managing memory, connections, and system resources in production Rufus deployments.
+Best practices for managing memory, connections, and system resources in production Ruvon deployments.
 
 ---
 
@@ -9,12 +9,12 @@ Best practices for managing memory, connections, and system resources in product
 ### PostgreSQL Connection Pool Configuration
 
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 # Default configuration (suitable for most deployments)
 persistence = PostgresPersistenceProvider(
-    db_url="postgresql://user:pass@localhost:5432/rufus",
+    db_url="postgresql://user:pass@localhost:5432/ruvon",
     pool_min_size=10,   # Minimum connections
     pool_max_size=50,   # Maximum connections
 )
@@ -52,7 +52,7 @@ export POSTGRES_POOL_MAX_INACTIVE_LIFETIME=300
 
 ```python
 import asyncio
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 async def monitor_connection_pool(persistence: PostgresPersistenceProvider):
@@ -343,7 +343,7 @@ result_expires = 3600  # 1 hour (clean up results)
 ```python
 from celery import Celery
 
-app = Celery('rufus')
+app = Celery('ruvon')
 
 
 async def monitor_queue_depth():

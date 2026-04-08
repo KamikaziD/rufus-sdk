@@ -62,9 +62,9 @@ async def sync_transactions(self, ...):
 ```
 
 **Files to Modify**:
-- `src/rufus_edge/sync_manager.py` - add sequence tracking
-- `src/rufus_server/device_service.py` - verify sequence, detect gaps
-- `src/rufus_edge/models.py` - add `device_sequence` to SAFTransaction
+- `src/ruvon_edge/sync_manager.py` - add sequence tracking
+- `src/ruvon_server/device_service.py` - verify sequence, detect gaps
+- `src/ruvon_edge/models.py` - add `device_sequence` to SAFTransaction
 - Database schema - add `device_sequence` column to `saf_transactions`
 
 **Workaround**: Manual reconciliation via audit logs
@@ -132,8 +132,8 @@ Implement Conflict-free Replicated Data Types for non-financial workflow state (
 - `automerge-py` - Automerge CRDT bindings
 
 **Files to Create**:
-- `src/rufus_edge/crdt.py` - CRDT merge strategies
-- `src/rufus/models.py` - add CRDT field markers
+- `src/ruvon_edge/crdt.py` - CRDT merge strategies
+- `src/ruvon/models.py` - add CRDT field markers
 - Tests for conflict scenarios
 
 **Current Workaround**: LWW + idempotency-key (works for financial)
@@ -165,7 +165,7 @@ app.mount("/metrics", make_asgi_app())
 
 # In device_service.py
 saf_transactions = Counter(
-    'rufus_saf_transactions_total',
+    'ruvon_saf_transactions_total',
     'Total SAF transactions',
     ['device_id', 'status']
 )
@@ -178,9 +178,9 @@ async def sync_transactions(...):
 ```
 
 **Files to Modify**:
-- `src/rufus_server/main.py` - add /metrics endpoint
-- `src/rufus_server/device_service.py` - instrument methods
-- `src/rufus_edge/agent.py` - optional edge metrics
+- `src/ruvon_server/main.py` - add /metrics endpoint
+- `src/ruvon_server/device_service.py` - instrument methods
+- `src/ruvon_edge/agent.py` - optional edge metrics
 - `prometheus.yml` - scrape config
 
 **Deliverables**:
@@ -285,7 +285,7 @@ Polish the Celery executor implementation for production use.
 - Worker autoscaling
 
 **Files to Modify**:
-- `src/rufus/implementations/execution/celery.py`
+- `src/ruvon/implementations/execution/celery.py`
 - `celeryconfig.py` - production config
 
 **Current Workaround**: Use SyncExecutor or ThreadPoolExecutor for most workloads
@@ -381,7 +381,7 @@ Add GraphQL API alongside REST API for flexible querying.
 **Status**: 🔖 PINNED (user decision pending)
 
 **Description**:
-Reframe Rufus from "workflow orchestration" to "Resilience Engine" with new RufusEngine API wrapper.
+Reframe Ruvon from "workflow orchestration" to "Resilience Engine" with new RufusEngine API wrapper.
 
 **Changes**:
 - Create `RufusEngine` class wrapping `WorkflowBuilder`

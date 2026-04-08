@@ -51,7 +51,7 @@
 
 ## Changes Made
 
-### File: `src/rufus_server/device_service.py`
+### File: `src/ruvon_server/device_service.py`
 
 **1. Fixed nested connection acquisition (lines 338-345):**
 ```python
@@ -167,11 +167,11 @@ python tests/load/run_load_test.py --all --devices 500 --output-dir results/scal
 ### 3. Monitor During Test
 ```bash
 # Watch server logs
-docker logs -f rufus-cloud
+docker logs -f ruvon-cloud
 
 # Watch database connections
-docker exec -it rufus-postgres psql -U rufus -d rufus_cloud -c \
-  "SELECT count(*) as active_connections FROM pg_stat_activity WHERE datname='rufus_cloud';"
+docker exec -it ruvon-postgres psql -U ruvon -d ruvon_cloud -c \
+  "SELECT count(*) as active_connections FROM pg_stat_activity WHERE datname='ruvon_cloud';"
 
 # Watch CPU/memory
 docker stats
