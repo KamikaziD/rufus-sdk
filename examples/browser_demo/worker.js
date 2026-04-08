@@ -1,5 +1,5 @@
 /**
- * Rufus Browser Runtime — Web Worker
+ \* Ruvon Browser Runtime — Web Worker
  *
  * Runs Pyodide (Python 3.12) + Transformers.js (WebGPU) in a dedicated worker thread.
  * Serves three demo workflows:
