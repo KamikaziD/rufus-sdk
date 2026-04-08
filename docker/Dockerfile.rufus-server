@@ -19,7 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir \
     fastapi==0.104.1 \
     uvicorn[standard]==0.24.0 \
-    psycopg2-binary==2.9.9
+    psycopg2-binary==2.9.9 \
+    celery>=5.6.3
+
+COPY . /rufus_package
+RUN pip install --no-cache-dir -e /rufus_package
+RUN rm -rf /rufus_package
 
 # Copy application code
 COPY src/ /app/src/
