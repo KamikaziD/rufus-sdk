@@ -537,7 +537,7 @@ class DeviceService:
                             status, synced_at
                         )
                         SELECT
-                            gen_random_uuid(),
+                            t.row_id,
                             t.transaction_id, t.idempotency_key,
                             $1,
                             t.merchant_id, t.amount_cents, t.currency,
@@ -546,11 +546,11 @@ class DeviceService:
                             $2, $3, $4, $5,
                             'synced', NOW()
                         FROM UNNEST(
-                            $6::text[], $7::text[], $8::text[], $9::int[],
-                            $10::text[], $11::text[], $12::text[],
-                            $13::text[], $14::text[], $15::text[]
+                            $6::uuid[], $7::text[], $8::text[], $9::text[], $10::int[],
+                            $11::text[], $12::text[], $13::text[],
+                            $14::text[], $15::text[], $16::text[]
                         ) AS t(
-                            transaction_id, idempotency_key, merchant_id, amount_cents,
+                            row_id, transaction_id, idempotency_key, merchant_id, amount_cents,
                             currency, card_token, card_last_four,
                             encrypted_payload, encryption_key_id, workflow_id
                         )
@@ -559,6 +559,7 @@ class DeviceService:
                         """,
                         device_id,
                         relay_device_id, relay_source_device_id, hop_count, relayed_at,
+                        [uuid.uuid4() for _ in valid_txns],
                         [t["transaction_id"] for t in valid_txns],
                         [t.get("idempotency_key", t["transaction_id"]) for t in valid_txns],
                         [t.get("merchant_id", "") for t in valid_txns],

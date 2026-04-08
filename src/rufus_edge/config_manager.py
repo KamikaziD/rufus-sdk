@@ -102,12 +102,11 @@ class ConfigManager:
         """Initialize the config manager."""
         if self._adapter is None:
             from rufus_edge.platform import detect_platform
-            self._adapter = detect_platform(
-                default_headers={
-                    "X-API-Key": self.api_key,
-                    "X-Device-ID": self.device_id,
-                }
-            )
+            self._adapter = detect_platform()
+            # Inject auth headers into the adapter after detection
+            _headers = {"X-API-Key": self.api_key, "X-Device-ID": self.device_id}
+            if hasattr(self._adapter, "_default_headers"):
+                self._adapter._default_headers.update(_headers)
 
         # Load cached config if available
         await self._load_cached_config()
