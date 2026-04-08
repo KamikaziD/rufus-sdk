@@ -1,5 +1,5 @@
 /**
- * worker.js — Rufus Browser Demo 2 — PaymentSimulation Sovereign Dispatcher
+ * worker.js — Ruvon Browser Demo 2 — PaymentSimulation Sovereign Dispatcher
  *
  * Each browser device runs a full PaymentSimulation + TransactionMonitoring
  * pipeline — identical workflow types to the Docker edge simulators.
@@ -1087,7 +1087,7 @@ function startStatsLoop() {
 }
 
 // ── Proto wire size estimator ──────────────────────────────────────────────
-// Mirrors src/rufus/proto/edge.proto field definitions.
+// Mirrors src/ruvon/proto/edge.proto field definitions.
 // Used for JSON vs proto payload comparison panel — no library needed.
 function _varintSize(n) {
   if (n <= 0) return 1;

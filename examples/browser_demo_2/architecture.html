@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rufus SDK — Architecture</title>
+<title>Ruvon SDK — Architecture</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -272,15 +272,15 @@
 <div class="page">
 
 <header>
-  <h1>Rufus SDK — Architecture</h1>
+  <h1>Ruvon SDK — Architecture</h1>
   <p class="subtitle">How it's built, from the inside out.</p>
 </header>
 
-<!-- ───────────────────────── 1. What is Rufus? ───────────────────────── -->
+<!-- ───────────────────────── 1. What is Ruvon? ───────────────────────── -->
 <section>
-  <h2><span class="num">01</span> What is Rufus?</h2>
+  <h2><span class="num">01</span> What is Ruvon?</h2>
   <p>
-    Rufus is a workflow engine for fintech edge devices — POS terminals, ATMs, mobile
+    Ruvon is a workflow engine for fintech edge devices — POS terminals, ATMs, mobile
     readers, browsers, and cloud servers — all running the same code. You define a workflow
     once in YAML, and the engine runs it wherever you deploy it. The same payment-processing
     logic that runs on an offline ATM also runs in a browser and in a cloud API server,
@@ -293,7 +293,7 @@
   <h2><span class="num">02</span> The Core Engine</h2>
   <p>
     A workflow is a YAML file plus a set of Python functions. The engine (the
-    <code>Workflow</code> class in <code>src/rufus/workflow.py</code>) reads the YAML,
+    <code>Workflow</code> class in <code>src/ruvon/workflow.py</code>) reads the YAML,
     calls the functions in order, and tracks state in a typed Python object (a Pydantic
     <code>BaseModel</code> subclass). That's it.
   </p>
@@ -384,7 +384,7 @@
 <section>
   <h2><span class="num">04</span> What Ships in the Box</h2>
   <p>
-    The <code>src/rufus/implementations/</code> directory contains 7 categories of
+    The <code>src/ruvon/implementations/</code> directory contains 7 categories of
     ready-to-use providers across 29 files. You can mix and match — for example, use the
     Postgres persistence provider with the Celery execution provider and the OpenTelemetry
     observer.
@@ -465,7 +465,7 @@
 <section>
   <h2><span class="num">06</span> The Extension System</h2>
   <p>
-    Third-party packages can add new step types without modifying Rufus. The
+    Third-party packages can add new step types without modifying Ruvon. The
     <code>WorkflowBuilder</code> uses Python's standard
     <code>importlib.metadata.entry_points</code> API to discover them automatically at
     startup. No config changes, no registration calls — just install the package.
@@ -484,13 +484,13 @@
 
 <pre>
 <span class="c"># 2. Register it in your package's pyproject.toml — one line</span>
-[project.entry-points.<span class="s">"rufus.steps"</span>]
+[project.entry-points.<span class="s">"ruvon.steps"</span>]
 my_custom = <span class="s">"my_package.steps:MyCustomStep"</span>
 </pre>
 
 <pre>
 <span class="c"># 3. At startup, WorkflowBuilder discovers it automatically</span>
-eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>)
+eps = importlib.metadata.entry_points(group=<span class="s">"ruvon.steps"</span>)
 <span class="k">for</span> ep <span class="k">in</span> eps:
     step_cls = ep.load()          <span class="c"># must subclass WorkflowStep</span>
     name = getattr(step_cls, <span class="s">"STEP_TYPE_NAME"</span>, ep.name)
@@ -514,7 +514,7 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
 
   <div class="pkg-stack">
     <div class="pkg core">
-      <div class="pkg-name">rufus-sdk</div>
+      <div class="pkg-name">ruvon-sdk</div>
       <div class="pkg-body">
         <div class="pkg-tagline">The engine alone (~15 MB installed)</div>
         <div class="pkg-extras">
@@ -523,7 +523,7 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
       </div>
     </div>
     <div class="pkg edge">
-      <div class="pkg-name">rufus-sdk-edge</div>
+      <div class="pkg-name">ruvon-edge</div>
       <div class="pkg-body">
         <div class="pkg-tagline">Adds offline storage, store-and-forward sync, config polling, and platform adapters</div>
         <div class="pkg-extras">
@@ -532,7 +532,7 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
       </div>
     </div>
     <div class="pkg server">
-      <div class="pkg-name">rufus-sdk-server</div>
+      <div class="pkg-name">ruvon-server</div>
       <div class="pkg-body">
         <div class="pkg-tagline">Adds REST API, device fleet management, and command dispatch</div>
         <div class="pkg-extras">
@@ -544,13 +544,13 @@ eps = importlib.metadata.entry_points(group=<span class="s">"rufus.steps"</span>
 
 <pre>
 <span class="c"># Edge device only</span>
-pip install <span class="s">'rufus-sdk-edge[edge]'</span>
+pip install <span class="s">'ruvon-edge[edge]'</span>
 
 <span class="c"># Cloud server</span>
-pip install <span class="s">'rufus-sdk[postgres,performance]'</span> <span class="s">'rufus-sdk-server[server,celery,auth]'</span>
+pip install <span class="s">'ruvon-sdk[postgres,performance]'</span> <span class="s">'ruvon-server[server,celery,auth]'</span>
 
 <span class="c"># Browser (Pyodide)</span>
-<span class="c"># — micropip.install('rufus-sdk-edge[browser]') from a Web Worker</span>
+<span class="c"># — micropip.install('ruvon-edge[browser]') from a Web Worker</span>
 </pre>
 </section>
 
@@ -832,7 +832,7 @@ python tests/benchmarks/benchmark_suite.py
 <pre>
 <span class="c"># ENCODING_JSON  = 0x01  (JSON payload, readable by all clients)</span>
 <span class="c"># ENCODING_PROTO = 0x02  (proto binary, 5–7× smaller)</span>
-<span class="k">from</span> rufus.utils.serialization <span class="k">import</span> pack_message, unpack_message
+<span class="k">from</span> ruvon.utils.serialization <span class="k">import</span> pack_message, unpack_message
 
 data = pack_message(payload_dict)            <span class="c"># JSON envelope (0x01 + orjson bytes)</span>
 data = pack_message(payload_dict, proto_msg) <span class="c"># proto envelope (0x02 + proto bytes)</span>
@@ -865,7 +865,7 @@ obj  = unpack_message(data, HeartbeatMsg)    <span class="c"># auto-detects enve
   <p>
     The serialization helpers detect which library is in use at runtime (<code>hasattr(msg, "SerializeToString")</code>)
     and dispatch accordingly — application code never changes. Generated <code>_pb2.py</code> files
-    (google.protobuf) and betterproto dataclasses both live in <code>src/rufus/proto/gen/</code>;
+    (google.protobuf) and betterproto dataclasses both live in <code>src/ruvon/proto/gen/</code>;
     the <code>__init__.py</code> selects the right set on import.
   </p>
 
@@ -947,7 +947,7 @@ RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
   <h2><span class="num">12</span> RUVON — Vector-Optimised Mesh Networking</h2>
   <p>
     When the cloud control plane is unreachable, edge devices don't go silent — they form a
-    self-organising mesh using <strong>RUVON</strong> (Rufus Vector-Optimised Networking).
+    self-organising mesh using <strong>RUVON</strong> — the Ruvon peer mesh protocol.
     Instead of a greedy BFS that picks the first online peer, every relay candidate is scored
     using a four-dimensional vector:
   </p>
@@ -1017,7 +1017,7 @@ RUFUS_NATS_URL=nats://localhost:4222 python tests/load/run_load_test.py \
 <section>
   <h2><span class="num">13</span> Security</h2>
   <p>
-    Rufus is built for PCI-DSS-adjacent fintech deployments. Security is layered across
+    Ruvon is built for PCI-DSS-adjacent fintech deployments. Security is layered across
     the edge device, the transport, and the cloud control plane.
   </p>
 
@@ -1081,11 +1081,11 @@ export RUFUS_HMAC_SECRET=<span class="s">"$(openssl rand -hex 32)"</span>
 export RUFUS_NATS_URL=<span class="s">"tls://nats.internal:4222"</span>
 
 <span class="c"># Rotate encryption key (re-encrypts old SAF records with new key)</span>
-rufus edge rotate-key --old-key $OLD_KEY --new-key $NEW_KEY --db /var/lib/rufus/edge.db
+ruvon edge rotate-key --old-key $OLD_KEY --new-key $NEW_KEY --db /var/lib/ruvon/edge.db
 </pre>
 
   <p>
-    <strong>PCI-DSS posture:</strong> Rufus is designed to be PCI-DSS-compatible but not
+    <strong>PCI-DSS posture:</strong> Ruvon is designed to be PCI-DSS-compatible but not
     certified out of the box. The architecture addresses the primary control areas: encrypted
     cardholder data at rest (Fernet), integrity verification in transit (HMAC), audit logging,
     role-based access, and key rotation hooks. A full PCI assessment requires infrastructure-level
