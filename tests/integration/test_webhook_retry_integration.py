@@ -6,16 +6,12 @@ import asyncio
 import time
 from typing import AsyncGenerator
 
-BASE_URL = "http://localhost:8000"
+from tests.integration.conftest import requires_postgres
+
+# client fixture provided by tests/integration/conftest.py (in-process ASGITransport)
 
 
-@pytest.fixture
-async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Create async HTTP client."""
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
-        yield client
-
-
+@requires_postgres
 @pytest.mark.asyncio
 @pytest.mark.integration
 class TestWebhookRetryIntegration:

@@ -22,6 +22,8 @@ pytestmark = pytest.mark.skipif(
     reason="FastAPI/server dependencies not available in this environment",
 )
 
+from tests.integration.conftest import requires_postgres  # noqa: E402
+
 # Test server URLs
 BASE_URL = "http://localhost:8000"
 WEBHOOK_RECEIVER_URL = "http://localhost:9000"
@@ -104,13 +106,10 @@ def webhook_receiver():
     receiver.stop()
 
 
-@pytest.fixture
-async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Create async HTTP client."""
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
-        yield client
+# client fixture provided by tests/integration/conftest.py (in-process ASGITransport)
 
 
+@requires_postgres
 @pytest.mark.asyncio
 @pytest.mark.integration
 class TestWebhookIntegration:
@@ -285,6 +284,7 @@ class TestWebhookIntegration:
         assert response.status_code == 404
 
 
+@requires_postgres
 @pytest.mark.asyncio
 class TestWebhookEventDispatching:
     """Test webhook event dispatching integration."""
@@ -372,6 +372,7 @@ class TestWebhookEventDispatching:
             assert latest["payload"]["data"]["command_type"] == "restart"
 
 
+@requires_postgres
 @pytest.mark.asyncio
 class TestWebhookPerformance:
     """Performance tests for webhooks."""

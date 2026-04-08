@@ -88,14 +88,26 @@ def _split_text(text: str, max_chars: int = _MAX_CHUNK_TOKENS * 4) -> List[str]:
             if current:
                 chunks.append(current)
             if len(part) > max_chars:
-                # Hard split on sentence boundary
+                # Hard split on sentence boundary, word boundary as last resort
+                current = ""
                 for sentence in re.split(r"(?<=[.!?])\s+", part):
-                    if len(current) + len(sentence) <= max_chars:
+                    if len(current) + len(sentence) + 1 <= max_chars:
                         current = (current + " " + sentence).strip()
                     else:
                         if current:
                             chunks.append(current)
-                        current = sentence
+                        current = ""
+                        if len(sentence) > max_chars:
+                            # No sentence boundary — split by words
+                            for word in sentence.split():
+                                if len(current) + len(word) + 1 <= max_chars:
+                                    current = (current + " " + word).strip()
+                                else:
+                                    if current:
+                                        chunks.append(current)
+                                    current = word
+                        else:
+                            current = sentence
             else:
                 current = part
     if current:
@@ -131,12 +143,13 @@ def _chunk_markdown(path: Path, default_type: str) -> List[Chunk]:
     # Split prose by heading, then by paragraph
     sections = re.split(_HEADING_RE, prose)
     current_heading = ""
-    for piece in sections:
+    # re.split with a capturing group produces alternating [content, heading, content, ...]
+    # Odd indices are captured heading titles; even indices are content between headings.
+    for i, piece in enumerate(sections):
         piece = piece.strip()
         if not piece:
             continue
-        # Detect if this piece IS a heading (single line, no spaces at start)
-        if "\n" not in piece and len(piece) < 120:
+        if i % 2 == 1:  # captured heading group
             current_heading = piece
             continue
         for j, part in enumerate(_split_text(piece)):
