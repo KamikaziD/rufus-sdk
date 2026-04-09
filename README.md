@@ -1,5 +1,7 @@
 # Ruvon — Workflow Runtime for Edge and Cloud
 
+[![Documentation](https://img.shields.io/badge/docs-ruvon--docs-indigo)](https://kamikazid.github.io/ruvon-docs/)
+
 **Describe it. Run it. Scale it.**
 
 Ruvon is a Python workflow engine built around provider-based dependency injection. The same SDK runs on a constrained edge device (SQLite, offline-first) and on a cloud control plane (PostgreSQL, Celery, distributed) — different backends, identical step functions and YAML definitions.

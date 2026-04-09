@@ -1,5 +1,7 @@
 # ruvon-edge
 
+[![Documentation](https://img.shields.io/badge/docs-ruvon--docs-indigo)](https://kamikazid.github.io/ruvon-docs/)
+
 **Offline-resilient workflow agent for edge devices.**
 
 `ruvon-edge` is the device-side runtime for the [Ruvon](https://pypi.org/project/ruvon-sdk/) workflow engine. It runs full workflow orchestration on POS terminals, ATMs, mobile readers, kiosks, and industrial controllers — with or without network connectivity.

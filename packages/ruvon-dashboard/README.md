@@ -1,5 +1,7 @@
 # Ruvon Edge Dashboard
 
+[![Documentation](https://img.shields.io/badge/docs-ruvon--docs-indigo)](https://kamikazid.github.io/ruvon-docs/)
+
 A production-grade React/Next.js 14 management UI for the Ruvon Edge control plane.
 
 ## Stack

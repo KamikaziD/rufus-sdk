@@ -1,5 +1,7 @@
 # ruvon-server
 
+[![Documentation](https://img.shields.io/badge/docs-ruvon--docs-indigo)](https://kamikazid.github.io/ruvon-docs/)
+
 **Cloud control plane and fleet management for edge workflows.**
 
 `ruvon-server` is the server-side runtime for the [Ruvon](https://pypi.org/project/ruvon-sdk/) workflow engine. It provides a production-grade REST API, device fleet management, distributed task execution, and a real-time observability dashboard — deployable in minutes with Docker.
