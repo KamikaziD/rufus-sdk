@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install ruvon-sdk + ruvon-server from PyPI
 RUN pip install --no-cache-dir \
-    'ruvon-sdk[postgres,performance,cli]==0.1.0' \
-    'ruvon-server[server,auth]==0.1.0'
+    'ruvon-sdk[postgres,performance,cli]==0.1.1' \
+    'ruvon-server[server,auth]==0.1.1'
 
 # Install Celery deps separately (keeps image layers cacheable)
 RUN pip install --no-cache-dir \

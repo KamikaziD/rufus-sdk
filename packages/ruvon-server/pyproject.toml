@@ -1,6 +1,6 @@
 [project]
 name = "ruvon-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ruvon cloud control plane — REST API, device fleet management, Celery workers"
 authors = [{name = "Ruvon Team", email = "team@ruvon.dev"}]
 license = {text = "Apache-2.0"}
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["ruvon-sdk>=0.1.0"]
+dependencies = ["ruvon-sdk>=0.1.1"]
 
 [project.urls]
 Homepage = "https://github.com/KamikaziD/ruvon-server"

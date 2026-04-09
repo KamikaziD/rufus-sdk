@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ruvon-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Offline-first workflow engine for edge devices - saga compensation, store-and-forward, fleet config rollout"
 authors = ["Ruvon Team <team@ruvon.dev>"]
 license = "Apache-2.0"
