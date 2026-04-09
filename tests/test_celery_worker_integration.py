@@ -50,7 +50,7 @@ def test_celery_config(celery_app):
     includes = celery_app.conf.include
     print(f"  Celery includes: {includes}")
     assert 'ruvon.tasks' in includes, "ruvon.tasks not in includes!"
-    print("  ✅ rufus.tasks included")
+    print("  ✅ ruvon.tasks included")
 
     # Check broker/backend
     broker = celery_app.conf.broker_url
@@ -145,10 +145,10 @@ def main():
     print("\nNext steps:")
     print("1. Set WORKFLOW_CONFIG_DIR to your config directory")
     print("2. Create workflow_registry.yaml with your workflows")
-    print("3. Start a Celery worker: celery -A rufus.celery_app worker")
+    print("3. Start a Celery worker: celery -A ruvon.celery_app worker")
     print("4. Check worker logs for discovered modules and scheduled workflows")
     print("\nFor scheduled workflows:")
-    print("1. Start Celery Beat: celery -A rufus.celery_app beat")
+    print("1. Start Celery Beat: celery -A ruvon.celery_app beat")
     print("2. Beat will automatically trigger workflows based on their schedule")
 
 if __name__ == '__main__':

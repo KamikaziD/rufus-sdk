@@ -35,7 +35,7 @@ def _configure_logging():
 
 
 async def _main():
-    from ruvon_edge.agent import RufusEdgeAgent
+    from ruvon_edge.agent import RuvonEdgeAgent
     from ruvon_edge.platform.wasi import WasiPlatformAdapter
 
     device_id = os.environ.get("RUVON_DEVICE_ID", "wasi-device")
@@ -51,7 +51,7 @@ async def _main():
         }
     )
 
-    agent = RufusEdgeAgent(
+    agent = RuvonEdgeAgent(
         device_id=device_id,
         cloud_url=cloud_url,
         api_key=api_key,

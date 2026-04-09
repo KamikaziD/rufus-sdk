@@ -36,7 +36,7 @@ async def run_order_processing_example():
     print("="*70 + "\n")
 
     # Initialize providers
-    db_url = os.environ.get("DATABASE_URL", "postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example")
     execution = CeleryExecutionProvider()
     persistence = PostgresPersistenceProvider(db_url=db_url)
     await persistence.initialize()
@@ -111,7 +111,7 @@ async def run_order_processing_example():
 
     print(f"\n✅ Example complete - workflow ID: {workflow.id}")
     print(f"📋 To check workflow status:")
-    print(f"   rufus show {workflow.id}")
+    print(f"   ruvon show {workflow.id}")
 
 
 async def run_payment_example():
@@ -126,7 +126,7 @@ async def run_payment_example():
     print("="*70 + "\n")
 
     # Initialize providers
-    db_url = os.environ.get("DATABASE_URL", "postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example")
     execution = CeleryExecutionProvider()
     persistence = PostgresPersistenceProvider(db_url=db_url)
     await persistence.initialize()

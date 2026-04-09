@@ -70,7 +70,7 @@ class TestSchemaValidatorGate:
     def test_auto_repairs_missing_standard_function(self):
         wf = {"steps": [{"name": "X", "type": "STANDARD"}]}
         validated, _ = self._v().validate(wf)
-        assert validated["steps"][0]["function"] == "rufus_workflows.steps.identity"
+        assert validated["steps"][0]["function"] == "ruvon_workflows.steps.identity"
 
     def test_normalises_type_to_uppercase(self):
         wf = {"steps": [{"name": "X", "type": "standard", "function": "m.f"}]}

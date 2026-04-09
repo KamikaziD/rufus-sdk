@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub heavy optional deps before any rufus.implementations.inference import.
+# Stub heavy optional deps before any ruvon.implementations.inference import.
 # tflite.py imports numpy at module level; paged_browser imports js (Pyodide).
 # ---------------------------------------------------------------------------
 if "numpy" not in sys.modules:

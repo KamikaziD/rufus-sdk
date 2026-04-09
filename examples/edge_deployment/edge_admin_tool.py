@@ -128,7 +128,7 @@ def show_device_heartbeat(server: str, device_id: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Ruvon Edge Admin Tool")
-    parser.add_argument("--server", default=BASE, help="Rufus server URL")
+    parser.add_argument("--server", default=BASE, help="Ruvon server URL")
     args = parser.parse_args()
     server = args.server.rstrip("/")
 

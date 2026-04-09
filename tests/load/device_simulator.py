@@ -1354,7 +1354,7 @@ class SimulatedEdgeDevice:
     async def _election_stability_scenario(self, duration_seconds: int = 120):
         """
         Local-only. Repeatedly runs the leadership-score + deterministic election
-        formula used by RufusEdgeAgent, measuring:
+        formula used by RuvonEdgeAgent, measuring:
           - elections_run       : total elections simulated
           - election_latencies  : time per election (should be sub-millisecond)
           - leader_tenure_samples : how long each pod held the Sovereign role

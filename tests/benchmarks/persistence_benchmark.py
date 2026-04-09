@@ -5,7 +5,7 @@ Compares SQLite vs PostgreSQL (if available) for common workflow operations.
 
 Usage:
     python tests/benchmarks/persistence_benchmark.py
-    python tests/benchmarks/persistence_benchmark.py --postgres postgres://user:pass@localhost/rufus_test
+    python tests/benchmarks/persistence_benchmark.py --postgres postgres://user:pass@localhost/ruvon_test
 """
 
 import asyncio

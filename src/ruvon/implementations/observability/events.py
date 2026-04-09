@@ -13,13 +13,13 @@ try:
     from prometheus_client import Counter, REGISTRY
     try:
         WORKFLOW_EVENTS_TOTAL = Counter(
-            'rufus_workflow_events_total',
+            'ruvon_workflow_events_total',
             'Total number of ruvon workflow events published',
             ['event_type'],
             registry=REGISTRY
         )
     except ValueError:
-        WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors.get('rufus_workflow_events_total', None)
+        WORKFLOW_EVENTS_TOTAL = REGISTRY._names_to_collectors.get('ruvon_workflow_events_total', None)
 except ImportError:
     WORKFLOW_EVENTS_TOTAL = None
 

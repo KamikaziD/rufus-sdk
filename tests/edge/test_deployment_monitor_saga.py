@@ -6,7 +6,7 @@ Verifies that when ApplyChange raises an exception:
 
 The test uses the actual `apply_approved_change` / `rollback_change` functions from
 `config_applier` — they are patched so no filesystem or signal I/O happens — proving
-the compensation wiring is correct end-to-end through the Rufus saga engine.
+the compensation wiring is correct end-to-end through the Ruvon saga engine.
 """
 
 from __future__ import annotations

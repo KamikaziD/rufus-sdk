@@ -1,7 +1,7 @@
 """
-RufusEdgeAgent - Main agent class for fintech edge devices.
+RuvonEdgeAgent - Main agent class for fintech edge devices.
 
-This is the primary interface for running Rufus on POS terminals,
+This is the primary interface for running Ruvon on POS terminals,
 ATMs, mobile readers, and other edge devices.
 """
 
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 _MIN_WASM_LOAD_RAM_MB = 128
 
 
-class RufusEdgeAgent:
+class RuvonEdgeAgent:
     """
     Edge agent for fintech devices.
 
@@ -63,10 +63,10 @@ class RufusEdgeAgent:
     - Automatic sync when connectivity is restored
 
     Example:
-        agent = RufusEdgeAgent(
+        agent = RuvonEdgeAgent(
             device_id="pos-001",
             cloud_url="https://control.example.com",
-            db_path="/var/lib/rufus/edge.db",
+            db_path="/var/lib/ruvon/edge.db",
         )
         await agent.start()
 

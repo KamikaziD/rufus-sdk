@@ -1,4 +1,4 @@
-"""Stage 1 — Intent Parser: converts a natural language prompt into a RufusIntent."""
+"""Stage 1 — Intent Parser: converts a natural language prompt into a RuvonIntent."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from ruvon.builder_ai.models import RufusIntent
+from ruvon.builder_ai.models import RuvonIntent
 from ruvon.builder_ai.stages.base import LLMStageMixin
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """You are an expert at understanding workflow requirements for enterprise software.
 Convert the user's natural language prompt into a structured JSON intent object.
 
-Available Rufus step types (for reference when identifying domain):
+Available Ruvon step types (for reference when identifying domain):
 STANDARD, ASYNC, HTTP, PARALLEL, LOOP, HUMAN_IN_LOOP, AI_INFERENCE (TFLite/ONNX edge ML),
 AI_LLM_INFERENCE (cloud/local LLM), HUMAN_APPROVAL (multi-channel approval gate),
 AUDIT_EMIT (immutable audit record), COMPLIANCE_CHECK (regulatory ruleset evaluation),
@@ -41,13 +41,13 @@ Rules:
 
 
 class IntentParser(LLMStageMixin):
-    """Stage 1: Parse a natural language prompt into a structured RufusIntent."""
+    """Stage 1: Parse a natural language prompt into a structured RuvonIntent."""
 
     async def parse(
         self,
         prompt: str,
         decision: "Optional[RetrievalDecision]" = None,
-    ) -> RufusIntent:
+    ) -> RuvonIntent:
         logger.debug("[Stage 1] Parsing intent from prompt: %s", prompt[:80])
         system = self._inject_knowledge(
             _SYSTEM_PROMPT, decision, focus_types=["explanation", "step_reference"]
@@ -65,5 +65,5 @@ class IntentParser(LLMStageMixin):
         except json.JSONDecodeError as e:
             logger.warning("[Stage 1] Failed to parse JSON from LLM response: %s", e)
             # Fallback: minimal intent with the prompt as description
-            return RufusIntent(description=prompt, trigger="manual", domain="unknown", ambiguities=[])
-        return RufusIntent(**data)
+            return RuvonIntent(description=prompt, trigger="manual", domain="unknown", ambiguities=[])
+        return RuvonIntent(**data)

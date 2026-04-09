@@ -1,10 +1,10 @@
-# Rufus Edge Cloud Control Plane
+# Ruvon Edge Cloud Control Plane
 # Production-ready Docker image for the cloud platform
 
 FROM python:3.11-slim
 
-LABEL maintainer="Rufus Team"
-LABEL description="Rufus Edge Cloud Control Plane - Policy Engine & Device Management"
+LABEL maintainer="Ruvon Team"
+LABEL description="Ruvon Edge Cloud Control Plane - Policy Engine & Device Management"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1

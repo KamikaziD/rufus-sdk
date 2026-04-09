@@ -41,7 +41,7 @@ class WebhookReceiver:
         @self.app.post("/webhook")
         async def receive_webhook(request: Request):
             """Receive webhook."""
-            signature = request.headers.get("X-Rufus-Signature")
+            signature = request.headers.get("X-Ruvon-Signature")
             payload = await request.json()
 
             self.received_webhooks.append({

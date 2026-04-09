@@ -1,4 +1,4 @@
-"""Knowledge base indexer — loads Rufus docs, chunks them, and stores embeddings.
+"""Knowledge base indexer — loads Ruvon docs, chunks them, and stores embeddings.
 
 Storage backends (auto-selected by available RAM + installed packages):
   - LanceDB   (~60 MB footprint) — preferred for cloud/dev machines
@@ -267,7 +267,7 @@ class KnowledgeBase:
     """Local vector store backed by LanceDB or sqlite-vec.
 
     Usage — one-time index build:
-        kb = KnowledgeBase.build()          # indexes all Rufus docs
+        kb = KnowledgeBase.build()          # indexes all Ruvon docs
         kb = KnowledgeBase.build(force=True) # full rebuild
 
     Usage — retrieve:
@@ -303,7 +303,7 @@ class KnowledgeBase:
         force: bool = False,
         project_root: Optional[Path] = None,
     ) -> "KnowledgeBase":
-        """Index Rufus documentation and persist to local vector store.
+        """Index Ruvon documentation and persist to local vector store.
 
         Args:
             source_roots: Override default doc directories.
@@ -425,11 +425,11 @@ class KnowledgeBase:
             }
             for c, emb in zip(chunks, embeddings)
         ]
-        if "rufus_chunks" in db.table_names():
-            tbl = db.open_table("rufus_chunks")
+        if "ruvon_chunks" in db.table_names():
+            tbl = db.open_table("ruvon_chunks")
             tbl.add(records)
         else:
-            db.create_table("rufus_chunks", data=records)
+            db.create_table("ruvon_chunks", data=records)
         self._table = None  # reset cached handle
 
     def _store_sqlite_vec(self, chunks: List[Chunk], embeddings: List[List[float]]) -> None:
@@ -448,14 +448,14 @@ class KnowledgeBase:
         sqlite_vec.load(con)
         dim = len(embeddings[0]) if embeddings else 384
         con.execute(
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS rufus_chunks "
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS ruvon_chunks "
             f"USING vec0(id TEXT, text TEXT, source TEXT, section TEXT, "
             f"chunk_type TEXT, embedding FLOAT[{dim}])"
         )
         for c, emb in zip(chunks, embeddings):
             blob = struct.pack(f"{len(emb)}f", *emb)
             con.execute(
-                "INSERT OR REPLACE INTO rufus_chunks VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO ruvon_chunks VALUES (?, ?, ?, ?, ?, ?)",
                 (c.id, c.text, c.source, c.section, c.chunk_type, blob),
             )
         con.commit()
@@ -502,7 +502,7 @@ class KnowledgeBase:
         blob = struct.pack(f"{len(query_vec)}f", *query_vec)
         rows = con.execute(
             "SELECT id, text, source, section, chunk_type, distance "
-            "FROM rufus_chunks WHERE embedding MATCH ? "
+            "FROM ruvon_chunks WHERE embedding MATCH ? "
             f"ORDER BY distance LIMIT {top_k}",
             (blob,),
         ).fetchall()
@@ -561,9 +561,9 @@ class KnowledgeBase:
                 if not self.db_path.exists():
                     return None
                 db = lancedb.connect(str(self.db_path))
-                if "rufus_chunks" not in db.table_names():
+                if "ruvon_chunks" not in db.table_names():
                     return None
-                self._table = db.open_table("rufus_chunks")
+                self._table = db.open_table("ruvon_chunks")
             except Exception as e:
                 logger.warning("[KnowledgeBase] Failed to open LanceDB table: %s", e)
                 return None
@@ -589,8 +589,8 @@ class KnowledgeBase:
                 db_file = self.db_path.parent / "knowledge.sqlite"
                 if db_file.exists():
                     con = sqlite3.connect(str(db_file))
-                    count = con.execute("SELECT COUNT(*) FROM rufus_chunks").fetchone()[0]
-                    sources = {r[0] for r in con.execute("SELECT DISTINCT source FROM rufus_chunks")}
+                    count = con.execute("SELECT COUNT(*) FROM ruvon_chunks").fetchone()[0]
+                    sources = {r[0] for r in con.execute("SELECT DISTINCT source FROM ruvon_chunks")}
                     con.close()
         except Exception as e:
             logger.warning("[KnowledgeBase] stats error: %s", e)

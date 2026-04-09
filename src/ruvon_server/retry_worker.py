@@ -29,7 +29,7 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger('rufus.retry_worker')
+logger = logging.getLogger('ruvon.retry_worker')
 
 
 async def run_retry_worker(
@@ -101,11 +101,11 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Rufus Command Retry Worker'
+        description='Ruvon Command Retry Worker'
     )
     parser.add_argument(
         '--db-url',
-        default=os.getenv('DATABASE_URL', 'postgresql://rufus:rufus@localhost:5433/rufus'),
+        default=os.getenv('DATABASE_URL', 'postgresql://ruvon:ruvon@localhost:5433/ruvon'),
         help='PostgreSQL connection URL'
     )
     parser.add_argument(

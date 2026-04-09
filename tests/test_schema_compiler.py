@@ -359,19 +359,19 @@ class TestSchemaCompiler:
 
 
 class TestRealSchema:
-    """Test with actual rufus schema.yaml"""
+    """Test with actual ruvon schema.yaml"""
 
     @pytest.fixture
-    def rufus_schema_path(self):
-        """Get path to actual rufus schema.yaml"""
+    def ruvon_schema_path(self):
+        """Get path to actual ruvon schema.yaml"""
         schema_path = Path(__file__).parent.parent / "migrations" / "schema.yaml"
         if not schema_path.exists():
-            pytest.skip("Rufus schema.yaml not found")
+            pytest.skip("Ruvon schema.yaml not found")
         return str(schema_path)
 
-    def test_compile_rufus_postgres(self, rufus_schema_path):
-        """Test compiling actual rufus schema for PostgreSQL"""
-        compiler = SchemaCompiler(schema_path=rufus_schema_path)
+    def test_compile_ruvon_postgres(self, ruvon_schema_path):
+        """Test compiling actual ruvon schema for PostgreSQL"""
+        compiler = SchemaCompiler(schema_path=ruvon_schema_path)
         migration_sql = compiler.compile_migration('postgres')
 
         # Check for all expected tables
@@ -395,9 +395,9 @@ class TestRealSchema:
         assert "CREATE OR REPLACE VIEW active_workflows" in migration_sql
         assert "CREATE OR REPLACE VIEW workflow_execution_summary" in migration_sql
 
-    def test_compile_rufus_sqlite(self, rufus_schema_path):
-        """Test compiling actual rufus schema for SQLite"""
-        compiler = SchemaCompiler(schema_path=rufus_schema_path)
+    def test_compile_ruvon_sqlite(self, ruvon_schema_path):
+        """Test compiling actual ruvon schema for SQLite"""
+        compiler = SchemaCompiler(schema_path=ruvon_schema_path)
         migration_sql = compiler.compile_migration('sqlite')
 
         # Check for all expected tables with type conversions

@@ -1,5 +1,5 @@
 """
-Tests for workflow commands (rufus workflow * and top-level aliases).
+Tests for workflow commands (ruvon workflow * and top-level aliases).
 """
 import pytest
 import json
@@ -13,7 +13,7 @@ from tests.cli.utils import assert_output_contains
 
 
 class TestWorkflowList:
-    """Tests for 'rufus list' and 'rufus workflow list' commands."""
+    """Tests for 'ruvon list' and 'ruvon workflow list' commands."""
 
     def test_list_empty(self, cli_runner, temp_config_dir, mock_persistence):
         """Test listing workflows when none exist."""
@@ -65,7 +65,7 @@ class TestWorkflowList:
             assert isinstance(workflows, list)
 
     def test_list_via_workflow_subcommand(self, cli_runner, temp_config_dir, mock_persistence):
-        """Test 'rufus workflow list' subcommand syntax."""
+        """Test 'ruvon workflow list' subcommand syntax."""
         with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result = cli_runner.invoke(app, ["workflow", "list"])
 
@@ -73,7 +73,7 @@ class TestWorkflowList:
 
 
 class TestWorkflowStart:
-    """Tests for 'rufus start' command."""
+    """Tests for 'ruvon start' command."""
 
     @pytest.mark.skip(reason="Requires full workflow integration - implement after basic tests pass")
     def test_start_success(self, cli_runner, temp_config_dir, sample_workflow_yaml):
@@ -104,7 +104,7 @@ class TestWorkflowStart:
 
 
 class TestWorkflowShow:
-    """Tests for 'rufus show' command."""
+    """Tests for 'ruvon show' command."""
 
     def test_show_basic(self, cli_runner, temp_config_dir, mock_persistence, sample_workflow_data):
         """Test showing workflow details."""
@@ -174,7 +174,7 @@ class TestWorkflowShow:
 
 
 class TestWorkflowResume:
-    """Tests for 'rufus resume' command."""
+    """Tests for 'ruvon resume' command."""
 
     def test_resume_with_input(self, cli_runner, temp_config_dir, mock_persistence, sample_workflow_data):
         """Test resuming workflow with user input."""
@@ -203,7 +203,7 @@ class TestWorkflowResume:
 
 
 class TestWorkflowRetry:
-    """Tests for 'rufus retry' command."""
+    """Tests for 'ruvon retry' command."""
 
     def test_retry_basic(self, cli_runner, temp_config_dir, mock_persistence, sample_workflow_data):
         """Test retrying failed workflow."""
@@ -244,7 +244,7 @@ class TestWorkflowRetry:
 
 
 class TestWorkflowLogs:
-    """Tests for 'rufus logs' command."""
+    """Tests for 'ruvon logs' command."""
 
     def test_logs_basic(self, cli_runner, temp_config_dir, mock_persistence):
         """Test viewing workflow logs."""
@@ -309,7 +309,7 @@ class TestWorkflowLogs:
 
 
 class TestWorkflowMetrics:
-    """Tests for 'rufus metrics' command."""
+    """Tests for 'ruvon metrics' command."""
 
     def test_metrics_basic(self, cli_runner, temp_config_dir, mock_persistence):
         """Test viewing workflow metrics."""
@@ -344,7 +344,7 @@ class TestWorkflowMetrics:
 
 
 class TestWorkflowCancel:
-    """Tests for 'rufus cancel' command."""
+    """Tests for 'ruvon cancel' command."""
 
     def test_cancel_with_confirmation(self, cli_runner, temp_config_dir, mock_persistence, sample_workflow_data):
         """Test canceling workflow with confirmation."""

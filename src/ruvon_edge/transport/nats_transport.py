@@ -160,7 +160,7 @@ class NATSEdgeTransport:
             return
 
         subject = f"devices.{self.device_id}.commands"
-        consumer_name = f"rufus-edge-{self.device_id}"
+        consumer_name = f"ruvon-edge-{self.device_id}"
 
         try:
             sub = await self._js.subscribe(
@@ -281,7 +281,7 @@ class NATSEdgeTransport:
             return
 
         subject = f"devices.{self.device_id}.config"
-        consumer_name = f"rufus-config-{self.device_id}"
+        consumer_name = f"ruvon-config-{self.device_id}"
         from ruvon.utils.serialization import unpack_message
 
         async def _handler(msg):
@@ -350,7 +350,7 @@ class NATSEdgeTransport:
 
         subject = "ruvon.node.patch"
         # Unique cursor per device — each node tracks its own replay position.
-        consumer_name = f"rufus-patch-{self.device_id}"
+        consumer_name = f"ruvon-patch-{self.device_id}"
 
         async def _handler(msg):
             try:
@@ -499,7 +499,7 @@ class NATSEdgeTransport:
         if not self._connected:
             return
 
-        consumer_name = f"rufus-build-worker-{self.device_id}"
+        consumer_name = f"ruvon-build-worker-{self.device_id}"
 
         async def _handler(msg):
             try:

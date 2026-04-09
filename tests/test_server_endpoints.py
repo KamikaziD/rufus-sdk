@@ -1,5 +1,5 @@
 """
-Tests for Rufus server endpoints: health, registry, workflow lifecycle, and error contracts.
+Tests for Ruvon server endpoints: health, registry, workflow lifecycle, and error contracts.
 
 Fixtures (test_client, setup_test_workflow) are defined in tests/conftest.py.
 """

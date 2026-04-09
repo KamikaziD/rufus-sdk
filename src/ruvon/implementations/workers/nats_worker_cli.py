@@ -16,7 +16,7 @@ import signal
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rufus NATS JetStream workflow worker",
+        description="Ruvon NATS JetStream workflow worker",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

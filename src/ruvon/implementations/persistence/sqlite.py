@@ -1,5 +1,5 @@
 """
-SQLite Persistence Adapter for Rufus Workflow Engine
+SQLite Persistence Adapter for Ruvon Workflow Engine
 
 Provides lightweight, embedded workflow state management with:
 - Atomic task claiming for local workers
@@ -29,7 +29,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Import from rufus package structure
+# Import from ruvon package structure
 from ruvon.workflow import Workflow
 from ruvon.providers.persistence import PersistenceProvider
 from ruvon.providers.dtos import WorkflowRecord, TaskRecord, MetricRecord
@@ -338,8 +338,8 @@ class SQLitePersistenceProvider(PersistenceProvider):
         from pathlib import Path
 
         # Add tools directory to path so we can import migrate
-        # __file__ is src/rufus/implementations/persistence/sqlite.py
-        # Need 5 parents to get to project root: persistence -> implementations -> rufus -> src -> root
+        # __file__ is src/ruvon/implementations/persistence/sqlite.py
+        # Need 5 parents to get to project root: persistence -> implementations -> ruvon -> src -> root
         project_root = Path(__file__).parent.parent.parent.parent.parent
         tools_dir = project_root / "tools"
         if str(tools_dir) not in sys.path:

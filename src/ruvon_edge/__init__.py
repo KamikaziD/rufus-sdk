@@ -2,18 +2,18 @@
 Ruvon Edge SDK - Python-native workflow engine for fintech edge devices.
 
 This package provides:
-- RufusEdgeAgent: Main agent class for POS terminals, ATMs, mobile readers
+- RuvonEdgeAgent: Main agent class for POS terminals, ATMs, mobile readers
 - SyncManager: Store-and-Forward transaction sync
 - ConfigManager: ETag-based config polling from cloud
 - Encrypted SQLite persistence for offline operation
 
 Example usage:
-    from ruvon_edge import RufusEdgeAgent
+    from ruvon_edge import RuvonEdgeAgent
 
-    agent = RufusEdgeAgent(
+    agent = RuvonEdgeAgent(
         device_id="pos-terminal-001",
         cloud_url="https://control.example.com",
-        db_path="/var/lib/rufus/edge.db",
+        db_path="/var/lib/ruvon/edge.db",
         encryption_key=os.getenv("RUVON_ENCRYPTION_KEY"),
     )
 
@@ -26,7 +26,7 @@ Example usage:
     )
 """
 
-from ruvon_edge.agent import RufusEdgeAgent
+from ruvon_edge.agent import RuvonEdgeAgent
 from ruvon_edge.sync_manager import SyncManager
 from ruvon_edge.config_manager import ConfigManager, UpdateInstruction
 try:
@@ -49,7 +49,7 @@ from ruvon_edge.models import (
 __version__ = "0.1.0"
 
 __all__ = [
-    "RufusEdgeAgent",
+    "RuvonEdgeAgent",
     "SyncManager",
     "ConfigManager",
     "UpdateInstruction",

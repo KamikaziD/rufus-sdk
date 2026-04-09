@@ -45,7 +45,7 @@ MOCK_WORKFLOW_JSON = json.dumps({
     "version": "1.0",
     "owner": "procurement-team",
     "steps": [
-        {"name": "Parse_Bid", "type": "STANDARD", "function": "rufus_workflows.steps.identity", "automate_next": True},
+        {"name": "Parse_Bid", "type": "STANDARD", "function": "ruvon_workflows.steps.identity", "automate_next": True},
         {"name": "Audit_Log", "type": "AUDIT_EMIT", "audit_config": {"event_type": "bid.parsed"}, "automate_next": False},
     ],
 })

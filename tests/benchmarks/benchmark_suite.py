@@ -1240,7 +1240,7 @@ def bench_proto_codec(n: int) -> "Section":
     try:
         from ruvon.utils.serialization import pack_message, unpack_message, _USING_PROTO
     except ImportError as exc:
-        sec.note(f"rufus SDK not on path — skipping ({exc})")
+        sec.note(f"ruvon SDK not on path — skipping ({exc})")
         return sec
 
     hb_dict = {
@@ -1331,7 +1331,7 @@ def bench_proto_codec(n: int) -> "Section":
         except ImportError:
             sec.note(
                 "betterproto installed but generated code not found — "
-                "run `make proto` to generate src/rufus/proto/gen/. "
+                "run `make proto` to generate src/ruvon/proto/gen/. "
                 "JSON envelope benchmark above still valid."
             )
     else:
@@ -1603,7 +1603,7 @@ async def _run(args) -> List[Section]:
     sections: List[Section] = []
 
     print("\n" + "=" * 78)
-    print("  RUFUS SDK — COMPREHENSIVE BENCHMARK SUITE")
+    print("  RUVON SDK — COMPREHENSIVE BENCHMARK SUITE")
     print("=" * 78)
     print(f"  orjson      : {'yes' if _ORJSON_AVAILABLE else 'no'}")
     print(f"  msgspec     : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")

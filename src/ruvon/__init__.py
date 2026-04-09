@@ -1,5 +1,5 @@
 """
-Rufus - Python Workflow SDK
+Ruvon - Python Workflow SDK
 
 High-performance workflow orchestration engine with pluggable architecture.
 """

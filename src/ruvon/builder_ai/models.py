@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from ruvon.builder_ai.knowledge.raft_router import PrivacyLevel, RetrievalDecision
 
 
-class RufusIntent(BaseModel):
+class RuvonIntent(BaseModel):
     """Structured representation of the user's workflow intent."""
     description: str = Field(..., description="User intent paraphrased by the model")
     trigger: str = Field("manual", description="'event' | 'schedule' | 'manual' | 'webhook'")
@@ -21,7 +21,7 @@ class RufusIntent(BaseModel):
 class StepPlanEntry(BaseModel):
     """A single step in the planned workflow."""
     id: str
-    type: str = Field(..., description="Rufus step type string, e.g. 'AI_LLM_INFERENCE'")
+    type: str = Field(..., description="Ruvon step type string, e.g. 'AI_LLM_INFERENCE'")
     label: str = Field(..., description="Human-readable description of what this step does")
 
 

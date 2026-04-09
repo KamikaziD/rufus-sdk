@@ -1,5 +1,5 @@
 """
-ComponentStepRuntime — Component Model WASM executor for Rufus.
+ComponentStepRuntime — Component Model WASM executor for Ruvon.
 
 Supersedes the stdin/stdout WasmRuntime for modules compiled with the
 WASI 0.3 / Component Model toolchain.

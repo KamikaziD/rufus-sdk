@@ -1,5 +1,5 @@
 """
-Tests for zombie scanner commands (rufus scan-zombies, rufus zombie-daemon).
+Tests for zombie scanner commands (ruvon scan-zombies, ruvon zombie-daemon).
 """
 import pytest
 import json
@@ -12,7 +12,7 @@ from tests.cli.utils import assert_output_contains
 
 
 class TestScanZombies:
-    """Tests for 'rufus scan-zombies' command."""
+    """Tests for 'ruvon scan-zombies' command."""
 
     @pytest.mark.skip(reason="Requires ZombieScanner implementation and database")
     def test_scan_zombies_no_zombies(self, cli_runner, sample_config):
@@ -72,7 +72,7 @@ class TestScanZombies:
 
 
 class TestZombieDaemon:
-    """Tests for 'rufus zombie-daemon' command."""
+    """Tests for 'ruvon zombie-daemon' command."""
 
     @pytest.mark.skip(reason="Daemon runs indefinitely - requires special test setup")
     def test_zombie_daemon_start(self, cli_runner, sample_config):

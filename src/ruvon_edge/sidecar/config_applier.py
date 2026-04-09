@@ -7,7 +7,7 @@ Decides between two application paths:
   - DRAIN+RESTART:  structural changes (executor, DB schema, workflow YAML)
                     Drains in-flight transactions then restarts.
 
-This module is also compiled to WASM for sandboxed execution via Rufus's
+This module is also compiled to WASM for sandboxed execution via Ruvon's
 WASM step type. When running as WASM, it reads the proposal from stdin
 and writes the result to stdout.
 """
@@ -52,7 +52,7 @@ _CONFIG_BACKUP_SUFFIX = ".pre_sidecar_backup"
 
 
 def apply_config_change(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
-    """Rufus step function: apply an approved config change.
+    """Ruvon step function: apply an approved config change.
 
     Reads state.suggestion (set by GenerateSuggestions step).
     Reads state.approved (set by ApprovalGate HITL step).
@@ -164,7 +164,7 @@ def _update_config_file(key: str, value: Any) -> None:
 
 
 def _find_agent_pid() -> Optional[int]:
-    """Find the PID of the running RufusEdgeAgent process."""
+    """Find the PID of the running RuvonEdgeAgent process."""
     pid_file = os.environ.get("RUVON_EDGE_PID_FILE", "edge_agent.pid")
     try:
         from pathlib import Path

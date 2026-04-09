@@ -35,7 +35,7 @@ from ruvon_edge.models import PaymentState
 async def run_payment_demo():
     """Run the payment terminal demo."""
     print("\n" + "=" * 60)
-    print("  RUFUS EDGE - Payment Terminal Demo")
+    print("  RUVON EDGE - Payment Terminal Demo")
     print("=" * 60 + "\n")
 
     # Initialize persistence (in-memory for demo)

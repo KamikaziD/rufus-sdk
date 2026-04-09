@@ -1,5 +1,5 @@
 """
-Domain Transfer Objects (DTOs) for Rufus provider interfaces.
+Domain Transfer Objects (DTOs) for Ruvon provider interfaces.
 
 These msgspec.Struct subclasses replace Dict[str, Any] return types across all
 provider interfaces, giving implementations a verifiable contract and enabling

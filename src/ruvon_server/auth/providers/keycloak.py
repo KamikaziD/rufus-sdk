@@ -7,7 +7,7 @@ JWKS keys are cached for 5 minutes with auto-refresh on key-id miss.
 Required env vars (set when RUVON_AUTH_PROVIDER=keycloak):
   KEYCLOAK_SERVER_URL  — e.g. https://keycloak.example.com
   KEYCLOAK_REALM       — e.g. my-realm
-  KEYCLOAK_CLIENT_ID   — e.g. rufus-api
+  KEYCLOAK_CLIENT_ID   — e.g. ruvon-api
   KEYCLOAK_AUDIENCE    — (optional) defaults to KEYCLOAK_CLIENT_ID
 
 Optional dependency: pip install 'ruvon-sdk[auth]'  (python-jose[cryptography])

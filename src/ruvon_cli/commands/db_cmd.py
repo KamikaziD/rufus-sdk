@@ -28,7 +28,7 @@ except ImportError as e:
     MigrationManager = None
 
 
-app = typer.Typer(name="db", help="Manage Rufus database")
+app = typer.Typer(name="db", help="Manage Ruvon database")
 
 
 def get_db_url_from_config() -> str:

@@ -2,7 +2,7 @@
 ruvon build — AI-assisted workflow builder.
 
 Converts natural language descriptions into validated, governance-checked
-Rufus workflow YAML definitions.
+Ruvon workflow YAML definitions.
 
 Supports three model backends:
   anthropic  — Claude via Anthropic API (requires ANTHROPIC_API_KEY)
@@ -20,7 +20,7 @@ import typer
 
 app = typer.Typer(
     name="build",
-    help="AI-assisted workflow builder — natural language to Rufus YAML",
+    help="AI-assisted workflow builder — natural language to Ruvon YAML",
     no_args_is_help=True,
 )
 
@@ -86,7 +86,7 @@ def generate(
     from_file: Optional[Path] = typer.Option(None, "--from-file", help="Modify an existing workflow YAML"),
 ):
     """
-    Generate a Rufus workflow from a natural language description.
+    Generate a Ruvon workflow from a natural language description.
 
     Examples:
 
@@ -137,7 +137,7 @@ def interactive_session(
 
 @app.command("explain")
 def explain_workflow(
-    workflow_file: Path = typer.Argument(..., help="Path to a Rufus workflow YAML file"),
+    workflow_file: Path = typer.Argument(..., help="Path to a Ruvon workflow YAML file"),
     backend: str = typer.Option("anthropic", "--backend", help="LLM backend: anthropic | ollama"),
     model: Optional[str] = typer.Option(None, "--model"),
     ollama_url: str = typer.Option("http://localhost:11434", "--ollama-url"),
@@ -193,7 +193,7 @@ async def _run_single_shot(
     while result.needs_clarification and attempts < 3:
         attempts += 1
         typer.echo("")
-        typer.secho("> Rufus needs a few clarifications before generating:", fg=_CYAN, bold=True)
+        typer.secho("> Ruvon needs a few clarifications before generating:", fg=_CYAN, bold=True)
         answers = {}
         for i, q in enumerate(result.questions, 1):
             answer = typer.prompt(f"  [{i}] {q}", default="")
@@ -334,7 +334,7 @@ async def _run_interactive(
 ) -> None:
     builder = _get_builder(backend, model, ollama_url, api_key)
     typer.secho(
-        f"\nRufus Workflow Builder (interactive) — backend={backend}, model={builder.model}",
+        f"\nRuvon Workflow Builder (interactive) — backend={backend}, model={builder.model}",
         fg=_CYAN, bold=True,
     )
     typer.secho("Type your intent, or 'help' for commands. Ctrl+C to exit.\n", fg=_CYAN)
@@ -402,7 +402,7 @@ async def _run_interactive(
             continue
 
         if result.needs_clarification:
-            typer.secho("> Rufus needs clarifications:", fg=_CYAN)
+            typer.secho("> Ruvon needs clarifications:", fg=_CYAN)
             answers = {}
             for i, q in enumerate(result.questions, 1):
                 answer = typer.prompt(f"  [{i}] {q}", default="")

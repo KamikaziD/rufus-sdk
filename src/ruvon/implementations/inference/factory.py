@@ -1,7 +1,7 @@
 """
 Inference Factory - Automatic Hardware-Optimized Provider Selection
 
-The InferenceFactory is the core of Rufus's "Write Once, Run Anywhere" promise.
+The InferenceFactory is the core of Ruvon's "Write Once, Run Anywhere" promise.
 It dynamically detects available hardware accelerators and creates the optimal
 inference provider for the current platform.
 

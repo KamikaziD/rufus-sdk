@@ -32,7 +32,7 @@ _REQUIRED_EDGE_CONFIG = {"model_id", "prompt"}
 
 
 class SchemaValidator:
-    """Stage 5: Deterministic validation of a workflow dict against the Rufus schema."""
+    """Stage 5: Deterministic validation of a workflow dict against the Ruvon schema."""
 
     def validate(self, workflow: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         """
@@ -103,7 +103,7 @@ class SchemaValidator:
             # STANDARD steps need a function path
             if step_type == "STANDARD" and not step.get("function"):
                 # Auto-repair with a placeholder
-                step["function"] = "rufus_workflows.steps.identity"
+                step["function"] = "ruvon_workflows.steps.identity"
                 logger.debug("[Stage 5] Auto-repaired missing function for step '%s'", step_label)
 
         return workflow, errors

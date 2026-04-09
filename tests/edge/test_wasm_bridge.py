@@ -76,11 +76,11 @@ class TestPyodideWasmBridge:
         with pytest.raises(NotImplementedError, match="Component Model"):
             bridge.execute_component(CM_BINARY, "{}", "execute")
 
-    def test_calls_js_rufus_wasm_execute_for_core_module(self):
+    def test_calls_js_ruvon_wasm_execute_for_core_module(self):
         bridge = PyodideWasmBridge()
 
         fake_js = MagicMock()
-        fake_js.rufusWasmExecute.return_value = MagicMock()  # JS Promise proxy
+        fake_js.ruvonWasmExecute.return_value = MagicMock()  # JS Promise proxy
 
         fake_run_sync = MagicMock(return_value='{"ok": true}')
 

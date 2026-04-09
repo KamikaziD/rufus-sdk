@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List
 
-from ruvon.builder_ai.models import RufusIntent
+from ruvon.builder_ai.models import RuvonIntent
 from ruvon.builder_ai.stages.base import LLMStageMixin
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ Schema:
 class ClarificationChecker(LLMStageMixin):
     """Stage 2: Generate clarifying questions and resolve answers into the intent."""
 
-    async def generate_questions(self, intent: RufusIntent) -> List[str]:
+    async def generate_questions(self, intent: RuvonIntent) -> List[str]:
         if not intent.ambiguities:
             return []
         logger.debug("[Stage 2] Generating clarifying questions for %d ambiguities", len(intent.ambiguities))
@@ -58,7 +58,7 @@ class ClarificationChecker(LLMStageMixin):
         # Fallback: return ambiguities as questions
         return intent.ambiguities
 
-    async def resolve(self, intent: RufusIntent, answers: Dict[str, str]) -> RufusIntent:
+    async def resolve(self, intent: RuvonIntent, answers: Dict[str, str]) -> RuvonIntent:
         """Incorporate clarification answers into the intent, clearing ambiguities."""
         if not answers:
             return intent.model_copy(update={"ambiguities": []})
@@ -78,6 +78,6 @@ class ClarificationChecker(LLMStageMixin):
         try:
             data = json.loads(raw)
             data["ambiguities"] = []  # resolved
-            return RufusIntent(**data)
+            return RuvonIntent(**data)
         except Exception:
             return intent.model_copy(update={"ambiguities": []})

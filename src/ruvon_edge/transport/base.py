@@ -5,7 +5,7 @@ Implementations:
   HTTPEdgeTransport — standard HTTP polling (always available)
   NATSEdgeTransport — sub-millisecond pub/sub (when RUVON_NATS_URL is set)
 
-All methods are async. The transport is created once in RufusEdgeAgent.start()
+All methods are async. The transport is created once in RuvonEdgeAgent.start()
 and torn down in stop().
 """
 from typing import Any, Callable, Dict, List, Optional

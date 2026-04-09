@@ -14,10 +14,10 @@ Usage:
     cd docker && docker compose up -d
 
     # Copy this script to the Raspberry Pi
-    scp -r examples/edge_deployment/ pi@raspberrypi:~/rufus/
+    scp -r examples/edge_deployment/ pi@raspberrypi:~/ruvon/
 
     # On the Raspberry Pi:
-    cd ~/rufus/edge_deployment
+    cd ~/ruvon/edge_deployment
     python run_edge_rpi.py --cloud-url http://YOUR_MAC_IP:8000
 
 Requirements:
@@ -41,7 +41,7 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger('rufus.edge.rpi')
+logger = logging.getLogger('ruvon.edge.rpi')
 
 
 def parse_args():
@@ -170,7 +170,7 @@ async def main():
 
     print("\n" + "#"*60)
     print("#" + " "*58 + "#")
-    print("#    RUFUS EDGE - Raspberry Pi 5" + " "*24 + "#")
+    print("#    RUVON EDGE - Raspberry Pi 5" + " "*24 + "#")
     print("#" + " "*58 + "#")
     print("#"*60)
 

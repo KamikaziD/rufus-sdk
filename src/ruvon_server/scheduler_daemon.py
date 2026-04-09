@@ -149,7 +149,7 @@ def main():
     """CLI entry point for scheduler daemon."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Rufus Scheduler Daemon")
+    parser = argparse.ArgumentParser(description="Ruvon Scheduler Daemon")
     parser.add_argument(
         "--db-url",
         required=True,

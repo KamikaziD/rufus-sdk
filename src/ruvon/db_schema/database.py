@@ -1,5 +1,5 @@
 """
-SQLAlchemy Database Models for Rufus Workflow Engine.
+SQLAlchemy Database Models for Ruvon Workflow Engine.
 
 This module is the single source of truth for all PostgreSQL tables.
 Used for:

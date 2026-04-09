@@ -15,8 +15,8 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Stub out optional heavy dependencies before any rufus module is imported.
-# rufus.tasks → rufus.events → redis.asyncio (not installed in test env)
+# Stub out optional heavy dependencies before any ruvon module is imported.
+# ruvon.tasks → ruvon.events → redis.asyncio (not installed in test env)
 # ---------------------------------------------------------------------------
 if "redis" not in sys.modules:
     _redis_stub = types.ModuleType("redis")

@@ -104,15 +104,15 @@ class WorkflowBuilder:
             eps = importlib.metadata.entry_points()
             if hasattr(eps, 'select'):
                 # Python 3.10+ API
-                rufus_steps = eps.select(group='ruvon.steps')
+                ruvon_steps = eps.select(group='ruvon.steps')
             elif hasattr(eps, 'get'):
                 # Python 3.9 API
-                rufus_steps = eps.get('ruvon.steps', [])
+                ruvon_steps = eps.get('ruvon.steps', [])
             else:
                 # Fallback: try accessing as dict
-                rufus_steps = eps.get('ruvon.steps', []) if isinstance(eps, dict) else []
+                ruvon_steps = eps.get('ruvon.steps', []) if isinstance(eps, dict) else []
 
-            for entry_point in rufus_steps:
+            for entry_point in ruvon_steps:
                 try:
                     step_cls = entry_point.load()
                     # Check if step_cls is a subclass of WorkflowStep,

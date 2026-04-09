@@ -1,11 +1,11 @@
-# Development Rufus Server Dockerfile - Uses LOCAL source code
-# This builds from the current repo state, not TestPyPI
+# Development Ruvon Server Dockerfile - Uses LOCAL source code
+# This builds from the current repo state, not PyPI
 # Use this for testing changes before publishing
 
 FROM python:3.11-slim
 
-LABEL maintainer="Rufus Team <team@ruvon.dev>"
-LABEL description="Rufus Workflow Engine - REST API Server (Local Dev Build)"
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine - REST API Server (Local Dev Build)"
 
 # Set working directory
 WORKDIR /app

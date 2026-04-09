@@ -1,5 +1,5 @@
 """
-PostgreSQL Persistence Adapter for Rufus Workflow Engine
+PostgreSQL Persistence Adapter for Ruvon Workflow Engine
 
 Provides durable, ACID-compliant workflow state management with:
 - Atomic task claiming for distributed   workers
@@ -19,9 +19,9 @@ import uuid # For idempotency key generation if not provided
 
 logger = logging.getLogger(__name__)
 
-# Import from rufus package structure
+# Import from ruvon package structure
 from ruvon.implementations.security.crypto_utils import encrypt_string, decrypt_string
-from ruvon.workflow import Workflow # Assuming Workflow class is in rufus.workflow
+from ruvon.workflow import Workflow # Assuming Workflow class is in ruvon.workflow
 from ruvon.providers.persistence import PersistenceProvider # Import the interface
 from ruvon.providers.dtos import WorkflowRecord, TaskRecord
 from ruvon.utils.serialization import serialize, deserialize  # High-performance JSON serialization
@@ -57,7 +57,7 @@ class PostgresPersistenceProvider(PersistenceProvider):
                 max_inactive_connection_lifetime=self.pool_max_inactive_lifetime,
                 command_timeout=self.pool_command_timeout,
                 server_settings={
-                    'application_name': 'rufus_workflow_engine',
+                    'application_name': 'ruvon_workflow_engine',
                     'statement_timeout': f'{self.pool_command_timeout * 1000}',  # Convert to ms
                 }
             )

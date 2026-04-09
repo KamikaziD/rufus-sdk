@@ -24,7 +24,7 @@ from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine # Added
 
 class WorkflowTestHarness:
     """
-    A tool for testing Rufus workflows locally and synchronously.
+    A tool for testing Ruvon workflows locally and synchronously.
     It provides an isolated environment for workflow execution, allowing
     mocking of step functions and inspection of workflow state.
     """

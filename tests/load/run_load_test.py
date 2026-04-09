@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rufus Load Test Runner.
+Ruvon Load Test Runner.
 
 Command-line interface for running load tests against Ruvon Edge control plane.
 
@@ -741,10 +741,10 @@ Examples:
   # Run with custom cloud URL and database URL
   python run_load_test.py --scenario heartbeat --devices 100 \\
       --cloud-url http://localhost:8000 \\
-      --db-url "postgresql://rufus:password@localhost:5433/rufus_cloud"
+      --db-url "postgresql://ruvon:password@localhost:5433/ruvon_cloud"
 
   # Seed data check (automatic if DATABASE_URL env var set)
-  export DATABASE_URL="postgresql://rufus:password@localhost:5433/rufus_cloud"
+  export DATABASE_URL="postgresql://ruvon:password@localhost:5433/ruvon_cloud"
   python run_load_test.py --scenario heartbeat --devices 100
 
 Scenarios:

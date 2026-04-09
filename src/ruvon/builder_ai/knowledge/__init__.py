@@ -1,7 +1,7 @@
-"""Rufus AI Builder — Knowledge Base (RAG + RAFT) module.
+"""Ruvon AI Builder — Knowledge Base (RAG + RAFT) module.
 
 Provides:
-  KnowledgeBase  — local vector store built from Rufus docs
+  KnowledgeBase  — local vector store built from Ruvon docs
   Chunk          — a single retrievable document chunk
   RAFTRouter     — runtime routing: NONE / RAG / RAFT
   RetrievalDecision — result of routing, shared across all pipeline stages

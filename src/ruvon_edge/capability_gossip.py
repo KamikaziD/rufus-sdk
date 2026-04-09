@@ -64,12 +64,12 @@ def classify_node_tier(ram_total_mb: float, accelerators: List[Any]) -> NodeTier
     Args:
         ram_total_mb:  Total physical RAM in megabytes.
         accelerators:  List of ``AcceleratorType`` values from
-                       ``rufus.utils.platform.detect_accelerators()``.
+                       ``ruvon.utils.platform.detect_accelerators()``.
 
     Returns:
         The most capable tier this hardware qualifies for.
     """
-    # Import here to avoid hard-wiring rufus.utils as a mandatory dep
+    # Import here to avoid hard-wiring ruvon.utils as a mandatory dep
     # in edge-only deployments that strip the core SDK.
     try:
         from ruvon.utils.platform import AcceleratorType

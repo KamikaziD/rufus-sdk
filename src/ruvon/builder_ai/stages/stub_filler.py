@@ -11,9 +11,9 @@ from ruvon.builder_ai.stages.base import LLMStageMixin
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
-You are a Python expert writing step functions for the Rufus workflow engine.
+You are a Python expert writing step functions for the Ruvon workflow engine.
 
-A Rufus step function has this signature:
+A Ruvon step function has this signature:
     def func_name(state, context: StepContext, **kwargs) -> dict:
 
 Rules:

@@ -437,7 +437,7 @@ def create_relay_app(
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
 
-    app = FastAPI(title="Rufus Peer Relay", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Ruvon Peer Relay", docs_url=None, redoc_url=None)
 
     # Track active relay sessions for relay_load reporting
     _relay_load = {"active": 0}

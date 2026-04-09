@@ -1,5 +1,5 @@
 """
-WASM Runtime Helper for Rufus Workflow Engine.
+WASM Runtime Helper for Ruvon Workflow Engine.
 
 Executes pre-compiled WebAssembly binaries as workflow steps using the WASI
 stdin/stdout interface via the wasmtime Python package.

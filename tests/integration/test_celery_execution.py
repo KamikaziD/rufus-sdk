@@ -8,7 +8,7 @@ These tests require:
 
 Setup:
     docker run -d --name redis-test -p 6380:6379 redis:latest
-    export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+    export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
     export CELERY_BROKER_URL="redis://localhost:6380/0"
     export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
 
@@ -143,7 +143,7 @@ def celery_worker_running():
     if not active_workers:
         pytest.skip(
             "No Celery workers running. Start worker with: "
-            "celery -A rufus.celery_app worker --loglevel=info"
+            "celery -A ruvon.celery_app worker --loglevel=info"
         )
     return True
 

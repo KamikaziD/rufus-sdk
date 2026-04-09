@@ -524,7 +524,7 @@ def bench_nkey(n: int):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Rufus RUVON standalone benchmark")
+    parser = argparse.ArgumentParser(description="Ruvon RUVON standalone benchmark")
     parser.add_argument("--iterations", type=int, default=5000,
                         help="Base iteration count (default: 5000)")
     parser.add_argument("--quick", action="store_true",
@@ -535,7 +535,7 @@ def main():
     n = 500 if args.quick else args.iterations
 
     print("\n" + "=" * 72)
-    print("  RUFUS SDK — RUVON BENCHMARK SUITE")
+    print("  RUVON SDK — RUVON BENCHMARK SUITE")
     print("=" * 72)
     print(f"  Iterations       : {n}")
     print(f"  capability_gossip: {'available' if _GOSSIP_OK else 'NOT AVAILABLE'}")

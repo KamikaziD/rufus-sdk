@@ -1,4 +1,4 @@
-# Rufus API Server Dockerfile
+# Ruvon API Server Dockerfile
 # FastAPI server for workflow management
 
 FROM python:3.11-slim

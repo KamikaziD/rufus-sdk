@@ -1,5 +1,5 @@
 """
-Integration tests: RufusEdgeAgent WASM resolver wiring.
+Integration tests: RuvonEdgeAgent WASM resolver wiring.
 
 Verifies that:
   1. agent.start() creates a SqliteWasmBinaryResolver and assigns _wasm_resolver
@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ruvon_edge.agent import RufusEdgeAgent
+from ruvon_edge.agent import RuvonEdgeAgent
 from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
 
 
@@ -23,15 +23,15 @@ from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolve
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_agent(db_path: str = ":memory:") -> RufusEdgeAgent:
-    return RufusEdgeAgent(
+def make_agent(db_path: str = ":memory:") -> RuvonEdgeAgent:
+    return RuvonEdgeAgent(
         device_id="test-device-001",
         cloud_url="",  # no cloud; avoids bootstrap HTTP calls
         db_path=db_path,
     )
 
 
-async def _start_agent_minimal(agent: RufusEdgeAgent):
+async def _start_agent_minimal(agent: RuvonEdgeAgent):
     """Start agent with all network/polling patched out."""
     with (
         patch.object(agent, "bootstrap", new=AsyncMock(return_value=True)),

@@ -1,13 +1,13 @@
 """Build script: compile apply_config.wasm from config_applier.wasm_main().
 
-This script is NOT a Rufus step function — it is a one-time build tool
+This script is NOT a Ruvon step function — it is a one-time build tool
 invoked via the CLI or CI pipeline:
 
     python -m ruvon_edge.sidecar.build_wasm
 
 or via the CLI command (once registered):
 
-    rufus sidecar build-wasm
+    ruvon sidecar build-wasm
 
 Requirements:
     pip install wasmtime           # Python bindings for the Wasmtime runtime

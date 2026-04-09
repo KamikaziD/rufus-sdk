@@ -1,5 +1,5 @@
 """
-Celery tasks for Rufus workflow execution.
+Celery tasks for Ruvon workflow execution.
 
 These tasks handle async operations, parallel execution, sub-workflows,
 and workflow resumption from Celery workers.

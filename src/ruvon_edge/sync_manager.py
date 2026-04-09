@@ -635,7 +635,7 @@ class SyncManager:
         """
         Resolve conflicts between edge and cloud state.
 
-        Rufus uses a Last-Writer-Wins (LWW) strategy with idempotency-key
+        Ruvon uses a Last-Writer-Wins (LWW) strategy with idempotency-key
         precedence for financial transactions:
 
         1. Idempotency-first: If cloud already has a transaction with

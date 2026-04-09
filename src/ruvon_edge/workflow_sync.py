@@ -1,7 +1,7 @@
 """
 EdgeWorkflowSyncer — push completed edge workflows to cloud, purge local SQLite.
 
-Runs inside _sync_loop() of RufusEdgeAgent when online. Queries terminal-status
+Runs inside _sync_loop() of RuvonEdgeAgent when online. Queries terminal-status
 workflows from SQLite, POSTs them to the cloud, then deletes the synced rows to
 prevent local DB bloat (offline-card-machine pattern).
 """

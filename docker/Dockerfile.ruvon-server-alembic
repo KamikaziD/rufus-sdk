@@ -1,10 +1,10 @@
-# Production Rufus Server Dockerfile with Alembic Migrations
+# Production Ruvon Server Dockerfile with Alembic Migrations
 # Installs ruvon-sdk from PyPI and runs Alembic migrations on startup
 
 FROM python:3.11-slim
 
-LABEL maintainer="Rufus Team <team@ruvon.dev>"
-LABEL description="Rufus Workflow Engine - REST API Server with Alembic Migrations"
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine - REST API Server with Alembic Migrations"
 
 # Set working directory
 WORKDIR /app
@@ -15,16 +15,16 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ruvon-sdk from TestPyPI (TEMPORARY - for testing)
+# Install ruvon-sdk from PyPI (TEMPORARY - for testing)
 # TODO: Switch to production PyPI once published
 
-# First install ruvon-sdk core from TestPyPI
+# First install ruvon-sdk core from PyPI
 RUN pip install --no-cache-dir \
-    --index-url https://test.pypi.org/simple/ \
+    --index-url https://pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
     'ruvon-sdk==0.3.6'
 
-# Then install extras from PyPI to avoid broken packages on TestPyPI
+# Then install extras from PyPI to avoid broken packages on PyPI
 RUN pip install --no-cache-dir \
     fastapi>=0.100 \
     uvicorn[standard]>=0.20 \

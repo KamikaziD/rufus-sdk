@@ -1,7 +1,7 @@
 """
 Cloud Policy Engine
 
-The Policy Engine is the "Symmetric Brain" of the Rufus platform. It allows
+The Policy Engine is the "Symmetric Brain" of the Ruvon platform. It allows
 management of diverse device fleets (NVIDIA Jetsons, Mac Minis, Raspberry Pis)
 through declarative policies that map hardware capabilities to artifacts.
 

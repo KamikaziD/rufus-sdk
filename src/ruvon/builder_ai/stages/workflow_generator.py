@@ -1,4 +1,4 @@
-"""Stage 4 — Workflow Generator: expands a step plan into a full Rufus workflow dict."""
+"""Stage 4 — Workflow Generator: expands a step plan into a full Ruvon workflow dict."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from ruvon.builder_ai.models import RufusIntent, StepPlan
+from ruvon.builder_ai.models import RuvonIntent, StepPlan
 from ruvon.builder_ai.stages.base import LLMStageMixin
 
 if TYPE_CHECKING:
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are a Rufus workflow definition generator. Given a step plan, generate a
-complete Rufus workflow YAML structure as JSON.
+_SYSTEM_PROMPT = """You are a Ruvon workflow definition generator. Given a step plan, generate a
+complete Ruvon workflow YAML structure as JSON.
 
 The output must be a JSON object with this structure:
 {
@@ -46,13 +46,13 @@ Rules:
 - Use PascalCase for step names
 - Set automate_next: true for steps that should flow automatically
 - The last step should have automate_next: false (or omit it)
-- For STANDARD steps without a real function, use "function": "rufus_workflows.steps.identity"
+- For STANDARD steps without a real function, use "function": "ruvon_workflows.steps.identity"
 - Keep step names short but descriptive
 
 Return ONLY valid JSON. No markdown, no explanation.
 """
 
-_EVALUATOR_SYSTEM = """You are reviewing a generated Rufus workflow definition.
+_EVALUATOR_SYSTEM = """You are reviewing a generated Ruvon workflow definition.
 Score the workflow against the original intent (0-100) and list any issues.
 Return JSON: {"score": 85, "issues": ["issue 1", "issue 2"]}
 A score >= 80 is acceptable. Focus only on structural/semantic correctness.
@@ -65,7 +65,7 @@ class WorkflowGenerator(LLMStageMixin):
     async def generate(
         self,
         plan: StepPlan,
-        intent: RufusIntent,
+        intent: RuvonIntent,
         max_iterations: int = 3,
         prior_errors: "list[str] | None" = None,
         decision: "Optional[RetrievalDecision]" = None,

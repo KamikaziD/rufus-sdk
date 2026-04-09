@@ -1,4 +1,4 @@
-"""Two-stage retrieval interface for the Rufus knowledge base.
+"""Two-stage retrieval interface for the Ruvon knowledge base.
 
 Provides a clean separation between:
   - Stage A (routing):   fast ANN-only search used by RAFTRouter to decide

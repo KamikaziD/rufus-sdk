@@ -1,5 +1,5 @@
 """
-Alembic Environment Configuration for Rufus.
+Alembic Environment Configuration for Ruvon.
 
 Configured for dual database support:
 - PostgreSQL (production)
@@ -19,7 +19,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Import Rufus database schema
+# Import Ruvon database schema
 from ruvon.db_schema import metadata
 
 # this is the Alembic Config object, which provides

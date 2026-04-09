@@ -449,7 +449,7 @@ async def shutdown_event():
 @app.get("/health", tags=["Health"])
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "service": "rufus-edge-control-plane"}
+    return {"status": "healthy", "service": "ruvon-edge-control-plane"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1455,7 +1455,7 @@ async def subscribe(websocket: WebSocket):
                     subscribed_workflows.add(workflow_id)
 
                     # Subscribe to Redis channel
-                    channel = f"rufus:events:{workflow_id}"
+                    channel = f"ruvon:events:{workflow_id}"
                     await pubsub.subscribe(channel)
                     logger.info(f"[WS] Subscribed to Redis channel {channel}")
 
@@ -1499,7 +1499,7 @@ async def subscribe(websocket: WebSocket):
                     subscribed_workflows.discard(workflow_id)
 
                     # Unsubscribe from Redis channel
-                    channel = f"rufus:events:{workflow_id}"
+                    channel = f"ruvon:events:{workflow_id}"
                     await pubsub.unsubscribe(channel)
                     logger.info(f"[WS] Unsubscribed from Redis channel {channel}")
 
@@ -1524,7 +1524,7 @@ async def subscribe(websocket: WebSocket):
                     if message and message['type'] == 'message':
                         try:
                             channel = message['channel']
-                            workflow_id = channel.replace('rufus:events:', '')
+                            workflow_id = channel.replace('ruvon:events:', '')
                             logger.info(f"[WS-REDIS] Received message for workflow {workflow_id}")
                             event_data = json.loads(message['data'])
                             event_data['workflow_id'] = workflow_id
@@ -1629,7 +1629,7 @@ async def subscribe(websocket: WebSocket):
         try:
             # Unsubscribe from all channels
             for workflow_id in subscribed_workflows:
-                channel = f"rufus:events:{workflow_id}"
+                channel = f"ruvon:events:{workflow_id}"
                 await pubsub.unsubscribe(channel)
 
             await redis_client.close()
@@ -2550,7 +2550,7 @@ async def download_artifact(artifact_name: str):
     import os
 
     # Artifact storage directory
-    artifacts_dir = os.getenv("ARTIFACTS_DIR", "/tmp/rufus-artifacts")
+    artifacts_dir = os.getenv("ARTIFACTS_DIR", "/tmp/ruvon-artifacts")
 
     # Security: validate artifact name (prevent path traversal)
     if ".." in artifact_name or "/" in artifact_name or "\\" in artifact_name:

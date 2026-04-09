@@ -1,6 +1,6 @@
 """Sidecar decision step functions.
 
-All functions follow the Rufus step function signature:
+All functions follow the Ruvon step function signature:
   (state, context, **kwargs) -> dict
 
 DECISION steps may raise WorkflowJumpDirective to branch the workflow.

@@ -25,7 +25,7 @@ def cli_runner():
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Creates a temporary config directory for tests."""
-    config_dir = tmp_path / ".rufus"
+    config_dir = tmp_path / ".ruvon"
     config_dir.mkdir()
     return config_dir
 

@@ -1,1 +1,1 @@
-# rufus.wasm_component — WIT definitions and Component Model runtime helpers
+# ruvon.wasm_component — WIT definitions and Component Model runtime helpers

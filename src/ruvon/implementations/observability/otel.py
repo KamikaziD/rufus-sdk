@@ -1,5 +1,5 @@
 """
-OtelObserver — OpenTelemetry tracing for Rufus workflow events.
+OtelObserver — OpenTelemetry tracing for Ruvon workflow events.
 
 Creates a parent span per workflow and a child span per step. Spans are exported
 via the standard OTLP exporter configured through OTEL_EXPORTER_OTLP_ENDPOINT.

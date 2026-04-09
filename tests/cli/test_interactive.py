@@ -11,7 +11,7 @@ from ruvon_cli.main import app
 
 
 class TestInteractiveRun:
-    """Tests for 'rufus interactive run' command."""
+    """Tests for 'ruvon interactive run' command."""
 
     @pytest.fixture
     def sample_workflow_yaml(self, tmp_path):

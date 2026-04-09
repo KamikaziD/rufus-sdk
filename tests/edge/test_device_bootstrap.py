@@ -10,12 +10,12 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
-from ruvon_edge.agent import RufusEdgeAgent
+from ruvon_edge.agent import RuvonEdgeAgent
 
 
 @pytest_asyncio.fixture
 async def fresh_agent(tmp_path):
-    agent = RufusEdgeAgent(
+    agent = RuvonEdgeAgent(
         device_id="fresh-device-001",
         cloud_url="http://localhost:8000",
         api_key="",  # Factory-fresh: no key

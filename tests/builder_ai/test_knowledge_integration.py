@@ -153,7 +153,7 @@ async def test_raft_strategy_overrides_model_on_all_stages():
         strategy=RetrievalStrategy.RAFT,
         chunks=[_make_chunk()],
         confidence=0.85,
-        model_override="rufus-expert",
+        model_override="ruvon-expert",
         privacy_level=PrivacyLevel.BALANCED,
         pii_redactions=0,
         chunks_sent_to_cloud=False,
@@ -169,8 +169,8 @@ async def test_raft_strategy_overrides_model_on_all_stages():
     # All LLM stages should have received the overridden model
     for stage in [builder.intent_parser, builder.step_planner,
                   builder.workflow_generator, builder.stub_filler]:
-        assert stage.model == "rufus-expert", (
-            f"Stage {type(stage).__name__} model not updated to rufus-expert"
+        assert stage.model == "ruvon-expert", (
+            f"Stage {type(stage).__name__} model not updated to ruvon-expert"
         )
 
 
@@ -197,7 +197,7 @@ async def test_none_strategy_does_not_inject_knowledge():
         chunks_sent_to_cloud=False,
     )
 
-    original = "You are a Rufus workflow generator."
+    original = "You are a Ruvon workflow generator."
     result = mixin._inject_knowledge(original, none_decision, focus_types=["yaml_example"])
 
     assert result == original

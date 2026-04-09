@@ -43,7 +43,7 @@ def test_events_import():
 def test_tasks_import():
     """Test that Celery tasks can be imported."""
     try:
-        from rufus import tasks
+        from ruvon import tasks
         # Check that key tasks exist
         assert hasattr(tasks, 'execute_http_request')
         assert hasattr(tasks, 'resume_from_async_task')

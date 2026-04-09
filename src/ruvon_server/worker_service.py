@@ -1,5 +1,5 @@
 """
-Worker fleet management service for the Rufus control plane.
+Worker fleet management service for the Ruvon control plane.
 
 Sends commands to Celery workers via the worker_commands DB table.
 Workers poll this table on every heartbeat (every 30s) and execute

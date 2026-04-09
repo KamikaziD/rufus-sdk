@@ -144,9 +144,9 @@ def _find_sovereign_dispatcher():
 
 
 def _get_or_write_wasm_cache(wasm_hash: str, binary: bytes):
-    """Write WASM binary to /tmp/rufus_wasm_cache/<hash>.wasm and return path."""
+    """Write WASM binary to /tmp/ruvon_wasm_cache/<hash>.wasm and return path."""
     import pathlib
-    cache_dir = pathlib.Path("/tmp/rufus_wasm_cache")
+    cache_dir = pathlib.Path("/tmp/ruvon_wasm_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     wasm_path = cache_dir / f"{wasm_hash}.wasm"
     if not wasm_path.exists():
@@ -190,9 +190,9 @@ def _run_sovereign_dispatcher(dispatcher_path, binary: bytes, states_json: list,
 # ---------------------------------------------------------------------------
 
 class PyodideWasmBridge:
-    """Browser bridge: calls globalThis.rufusWasmExecute via Pyodide JS FFI.
+    """Browser bridge: calls globalThis.ruvonWasmExecute via Pyodide JS FFI.
 
-    The host page must define window.rufusWasmExecute(wasm_bytes, state_json,
+    The host page must define window.ruvonWasmExecute(wasm_bytes, state_json,
     step_name) → string (synchronous JS function) before starting the Python
     runtime.
 
@@ -217,16 +217,16 @@ class PyodideWasmBridge:
                 "for wasm32-wasi, or run on a native edge device."
             )
         try:
-            from js import rufusWasmExecute  # type: ignore[import]
+            from js import ruvonWasmExecute  # type: ignore[import]
             from pyodide.ffi import run_sync  # type: ignore[import]
         except ImportError as exc:
             raise ImportError(
                 "PyodideWasmBridge requires Pyodide and a host page that exposes "
-                "globalThis.rufusWasmExecute."
+                "globalThis.ruvonWasmExecute."
             ) from exc
 
         # run_sync wraps a JS Promise returned by the async JS function
-        result = run_sync(rufusWasmExecute(binary, state_json, step_name))
+        result = run_sync(ruvonWasmExecute(binary, state_json, step_name))
         return str(result)
 
     def execute_batch(
@@ -245,7 +245,7 @@ class PyodideWasmBridge:
 class WasiWasmBridge:
     """WASI bridge: delegates to WasmRuntime._execute_wasi (stdin/stdout).
 
-    Used when the Rufus agent itself is compiled to wasm32 (WASI deployment).
+    Used when the Ruvon agent itself is compiled to wasm32 (WASI deployment).
     Nested Component Model instantiation raises NotImplementedError; callers
     should apply fallback_on_error='skip' or 'default' for WASI deployments.
     """
@@ -261,7 +261,7 @@ class WasiWasmBridge:
         if sys.platform == "wasm32" and binary[:6] == self._CM_MAGIC:
             raise NotImplementedError(
                 "Component Model binary execution is not supported when the "
-                "Rufus agent is running as a WASI module (sys.platform='wasm32'). "
+                "Ruvon agent is running as a WASI module (sys.platform='wasm32'). "
                 "The host environment must handle nested WASM instantiation."
             )
         from ruvon.implementations.execution.wasm_runtime import WasmRuntime

@@ -1,5 +1,5 @@
 """
-Rufus Database Schema Package.
+Ruvon Database Schema Package.
 
 This package contains SQLAlchemy Core table definitions for:
 - Alembic migration generation

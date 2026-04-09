@@ -1,4 +1,4 @@
-"""CLI commands for managing the Rufus AI knowledge base (RAG + RAFT)."""
+"""CLI commands for managing the Ruvon AI knowledge base (RAG + RAFT)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import typer
 
 app = typer.Typer(
     name="rag",
-    help="Manage the Rufus knowledge base for AI workflow builder (RAG + RAFT)",
+    help="Manage the Ruvon knowledge base for AI workflow builder (RAG + RAFT)",
     no_args_is_help=True,
 )
 
@@ -53,7 +53,7 @@ def rag_build(
         help="Full rebuild even if nothing changed",
     ),
 ):
-    """Index Rufus documentation into the local vector store.
+    """Index Ruvon documentation into the local vector store.
 
     By default, indexes all docs found under the project root:
     docs/, config/, .claude/, and CLAUDE.md.

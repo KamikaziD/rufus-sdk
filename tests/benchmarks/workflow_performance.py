@@ -149,7 +149,7 @@ def benchmark_import_caching(iterations: int = 1000):
     # NOTE: intentional use of private API for caching benchmark
     WorkflowBuilder._import_cache.clear()
 
-    # Use a real rufus function for testing
+    # Use a real ruvon function for testing
     test_path = "ruvon.utils.serialization.serialize"
 
     # First import (cache miss)
@@ -291,11 +291,11 @@ def print_benchmark_results(name: str, results: Dict[str, Any]):
 async def run_all_benchmarks():
     """Run all performance benchmarks"""
     print("\n" + "="*60)
-    print("  RUFUS SDK PHASE 1 PERFORMANCE BENCHMARKS")
+    print("  RUVON SDK PHASE 1 PERFORMANCE BENCHMARKS")
     print("="*60)
     print(f"\n  Optimizations Enabled:")
     print(f"    - Serialization Backend: {get_backend()}")
-    print(f"    - Event Loop Backend: {rufus._event_loop_backend}")
+    print(f"    - Event Loop Backend: {ruvon._event_loop_backend}")
     print(f"    - Import Caching: Enabled")
     print()
 

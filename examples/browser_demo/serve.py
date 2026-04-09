@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compressed static server for the Rufus browser demo.
+Compressed static server for the Ruvon browser demo.
 
 Drop-in replacement for `python -m http.server`:
 

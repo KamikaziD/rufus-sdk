@@ -101,7 +101,7 @@ class EventPublisher:
         if use_pubsub:
             workflow_id = payload.get("workflow_id") or payload.get("id")
             if workflow_id:
-                channel = f"ruvon:events:{workflow_id}"  # Changed from workflow:events to rufus:events
+                channel = f"ruvon:events:{workflow_id}"  # Changed from workflow:events to ruvon:events
                 pubsub_message = {
                     "event_type": event_type,
                     "timestamp": timestamp,

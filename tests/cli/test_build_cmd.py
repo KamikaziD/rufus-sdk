@@ -1,4 +1,4 @@
-"""Tests for the `rufus build` CLI command."""
+"""Tests for the `ruvon build` CLI command."""
 
 import json
 import pytest

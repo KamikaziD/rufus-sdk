@@ -1,5 +1,5 @@
 """
-Tests for config commands (rufus config *).
+Tests for config commands (ruvon config *).
 """
 import pytest
 import json
@@ -12,7 +12,7 @@ from tests.cli.utils import assert_output_contains
 
 
 class TestConfigShow:
-    """Tests for 'rufus config show' command."""
+    """Tests for 'ruvon config show' command."""
 
     def test_config_show_default(self, cli_runner, temp_config_dir):
         """Test showing default configuration when no config file exists."""
@@ -42,7 +42,7 @@ class TestConfigShow:
 
 
 class TestConfigSetPersistence:
-    """Tests for 'rufus config set-persistence' command."""
+    """Tests for 'ruvon config set-persistence' command."""
 
     def test_set_persistence_sqlite_memory(self, cli_runner, temp_config_dir):
         """Test setting SQLite in-memory persistence."""
@@ -73,7 +73,7 @@ class TestConfigSetPersistence:
 
     def test_set_persistence_postgres(self, cli_runner, temp_config_dir):
         """Test setting PostgreSQL persistence."""
-        db_url = "postgresql://user:pass@localhost/rufus"
+        db_url = "postgresql://user:pass@localhost/ruvon"
 
         result = cli_runner.invoke(
             app,
@@ -98,7 +98,7 @@ class TestConfigSetPersistence:
 
 
 class TestConfigSetExecution:
-    """Tests for 'rufus config set-execution' command."""
+    """Tests for 'ruvon config set-execution' command."""
 
     def test_set_execution_sync(self, cli_runner, temp_config_dir):
         """Test setting sync executor."""
@@ -130,7 +130,7 @@ class TestConfigSetExecution:
 
 
 class TestConfigSetDefault:
-    """Tests for 'rufus config set-default' command."""
+    """Tests for 'ruvon config set-default' command."""
 
     def test_set_default_auto_execute(self, cli_runner, temp_config_dir):
         """Test setting auto_execute default."""
@@ -156,7 +156,7 @@ class TestConfigSetDefault:
 
 
 class TestConfigReset:
-    """Tests for 'rufus config reset' command."""
+    """Tests for 'ruvon config reset' command."""
 
     def test_config_reset_with_yes_flag(self, cli_runner, sample_config):
         """Test resetting config with --yes flag."""
@@ -183,7 +183,7 @@ class TestConfigReset:
 
 
 class TestConfigPath:
-    """Tests for 'rufus config path' command."""
+    """Tests for 'ruvon config path' command."""
 
     def test_config_path_shows_location(self, cli_runner, temp_config_dir):
         """Test showing config path."""
@@ -191,11 +191,11 @@ class TestConfigPath:
 
         assert result.exit_code == 0
         # Should contain path to config directory
-        assert str(temp_config_dir) in result.stdout or ".rufus" in result.stdout
+        assert str(temp_config_dir) in result.stdout or ".ruvon" in result.stdout
 
     def test_config_path_with_file(self, cli_runner, sample_config):
         """Test showing config path when file exists."""
         result = cli_runner.invoke(app, ["config", "path"])
 
         assert result.exit_code == 0
-        assert "config.yaml" in result.stdout.lower() or ".rufus" in result.stdout
+        assert "config.yaml" in result.stdout.lower() or ".ruvon" in result.stdout

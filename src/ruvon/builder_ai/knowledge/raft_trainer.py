@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _MODELFILE_TEMPLATE = """\
 FROM {base_model}
 SYSTEM You are an expert Ruvon SDK workflow architect.
-You have deep knowledge of Rufus step types, governance rules, YAML workflow
+You have deep knowledge of Ruvon step types, governance rules, YAML workflow
 definitions, saga patterns, edge device constraints, and fintech compliance.
 Always cite documentation when answering with ##begin_quote## markers.
 If the provided context does not contain the answer, say "I don't know."
@@ -109,7 +109,7 @@ class RAFTTrainer:
 
         return model_name
 
-    def list_rufus_models(self) -> list[str]:
+    def list_ruvon_models(self) -> list[str]:
         """Return all ruvon-expert model versions available in Ollama."""
         try:
             import httpx
@@ -127,7 +127,7 @@ class RAFTTrainer:
     def is_stale(self, dataset_path: Path, base: str = "ruvon-expert") -> bool:
         """Return True if no Ollama model matches the current dataset hash."""
         expected = self.versioned_model_name(dataset_path, base)
-        return expected not in self.list_rufus_models()
+        return expected not in self.list_ruvon_models()
 
     @staticmethod
     def _dataset_to_train_blocks(dataset_jsonl: str) -> str:

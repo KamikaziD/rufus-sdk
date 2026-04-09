@@ -1,5 +1,5 @@
 """
-Enhanced validation for Rufus workflows.
+Enhanced validation for Ruvon workflows.
 Provides strict validation beyond basic YAML syntax checking.
 """
 

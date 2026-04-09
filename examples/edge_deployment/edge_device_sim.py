@@ -1,15 +1,15 @@
 """
-edge_device_sim.py — Rufus edge device emulator for docker-compose testing.
+edge_device_sim.py — Ruvon edge device emulator for docker-compose testing.
 
 1. Registers the device with the cloud control plane.
-2. Starts RufusEdgeAgent (heartbeat + config polling).
+2. Starts RuvonEdgeAgent (heartbeat + config polling).
 3. Runs a continuous EdgeTelemetry workflow loop (TELEMETRY_INTERVAL seconds).
 4. Runs a concurrent PaymentSimulation workflow loop (PAYMENT_INTERVAL seconds).
    Each payment triggers an inline TransactionMonitoring sub-workflow (fraud screening).
 5. Gracefully shuts down on SIGTERM / SIGINT.
 
 Environment variables:
-    CLOUD_URL             Cloud control plane URL (default: http://rufus-server:8000)
+    CLOUD_URL             Cloud control plane URL (default: http://ruvon-server:8000)
     DEVICE_ID             Unique device identifier (default: sim-device-001)
     DEVICE_TYPE           "pos" or "atm" — controls payment amounts and fraud rules (default: pos)
     FLOOR_LIMIT           Offline approval floor limit in USD (default: 1000.0 for POS, 500 for ATM)
@@ -46,7 +46,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("edge-sim")
 
-CLOUD_URL = os.getenv("CLOUD_URL", "http://rufus-server:8000")
+CLOUD_URL = os.getenv("CLOUD_URL", "http://ruvon-server:8000")
 DEVICE_ID = os.getenv("DEVICE_ID", "sim-device-001")
 DEVICE_TYPE = os.getenv("DEVICE_TYPE", "pos")   # "pos" or "atm"
 # Default floor limit: $1000 for POS, $500 for ATM
@@ -449,9 +449,9 @@ async def main():
         except Exception as e:
             logger.warning(f"Could not PATCH sdk_version: {e}")
 
-    from ruvon_edge import RufusEdgeAgent
+    from ruvon_edge import RuvonEdgeAgent
 
-    agent = RufusEdgeAgent(
+    agent = RuvonEdgeAgent(
         device_id=DEVICE_ID,
         cloud_url=CLOUD_URL,
         api_key=api_key,

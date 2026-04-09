@@ -1,4 +1,4 @@
-"""RAFT Dataset Generator — creates fine-tuning data from indexed Rufus docs.
+"""RAFT Dataset Generator — creates fine-tuning data from indexed Ruvon docs.
 
 RAFT = Retrieval Augmented Fine-Tuning (Gorman et al., 2024).
 
@@ -25,7 +25,7 @@ from ruvon.builder_ai.knowledge.indexer import Chunk, KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
-_QUESTION_SYSTEM = """You are generating training data for a Rufus workflow SDK assistant.
+_QUESTION_SYSTEM = """You are generating training data for a Ruvon workflow SDK assistant.
 Given a documentation chunk, generate {n} distinct questions a developer might ask
 that this chunk directly answers.
 
@@ -51,7 +51,7 @@ _NO_ORACLE_ANSWER = "I don't know."
 
 
 class RAFTDatasetGenerator:
-    """Generates RAFT training data from indexed Rufus docs.
+    """Generates RAFT training data from indexed Ruvon docs.
 
     Requires a stage LLM mixin to call the LLM for Q&A generation.
     """

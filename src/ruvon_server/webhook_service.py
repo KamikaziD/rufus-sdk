@@ -462,7 +462,7 @@ class WebhookService:
 
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "Rufus-Edge-Webhook/1.0"
+            "User-Agent": "Ruvon-Edge-Webhook/1.0"
         }
 
         # Add custom headers (SQLite returns JSON columns as strings)
@@ -474,7 +474,7 @@ class WebhookService:
         # Add HMAC signature
         if secret:
             signature = self._compute_signature(payload, secret)
-            headers["X-Rufus-Signature"] = signature
+            headers["X-Ruvon-Signature"] = signature
 
         try:
             response = await self.http_client.post(

@@ -1,5 +1,5 @@
 """
-PersistenceProvider — abstract interface for all Rufus storage backends.
+PersistenceProvider — abstract interface for all Ruvon storage backends.
 
 Implementations: SQLitePersistenceProvider, PostgresPersistenceProvider,
                  MemoryPersistenceProvider, RedisPersistenceProvider

@@ -7,7 +7,7 @@ import os
 import json
 import asyncio
 
-# Ensure rufus package is discoverable
+# Ensure ruvon package is discoverable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from ruvon.builder import WorkflowBuilder
@@ -24,7 +24,7 @@ from ruvon.providers.observer import WorkflowObserver
 from ruvon_cli.commands import config_cmd, workflow_cmd, db_cmd, interactive, build_cmd, rag_cmd
 
 app = typer.Typer(
-    help="Rufus - Python-native workflow orchestration engine",
+    help="Ruvon - Python-native workflow orchestration engine",
     no_args_is_help=True
 )
 
@@ -167,7 +167,7 @@ def validate(
     graph_format: str = typer.Option("mermaid", "--graph-format", help="Graph format: mermaid, dot, or text")
 ):
     """
-    Validates a Rufus workflow YAML file for syntax, structure, and correctness.
+    Validates a Ruvon workflow YAML file for syntax, structure, and correctness.
 
     Basic validation checks:
     - YAML syntax
@@ -189,11 +189,11 @@ def validate(
     - Text format: Simple text representation
 
     Examples:
-        rufus validate workflow.yaml                      # Basic validation
-        rufus validate workflow.yaml --strict             # Comprehensive validation
-        rufus validate workflow.yaml --graph              # Show dependency graph
-        rufus validate workflow.yaml --graph --graph-format dot  # DOT format graph
-        rufus validate workflow.yaml --json               # JSON output
+        ruvon validate workflow.yaml                      # Basic validation
+        ruvon validate workflow.yaml --strict             # Comprehensive validation
+        ruvon validate workflow.yaml --graph              # Show dependency graph
+        ruvon validate workflow.yaml --graph --graph-format dot  # DOT format graph
+        ruvon validate workflow.yaml --json               # JSON output
     """
     from ruvon_cli.validation import validate_workflow_file, WorkflowValidator
 
@@ -262,7 +262,7 @@ def run(
     initial_data: Optional[str] = typer.Option("{}", "--data", "-d", help="Initial workflow data as a JSON string."),
 ):
     """
-    Runs a Rufus workflow locally using in-memory persistence and synchronous execution.
+    Runs a Ruvon workflow locally using in-memory persistence and synchronous execution.
     """
     async def _run_workflow():
         if not workflow_file.is_file():
@@ -370,8 +370,8 @@ def scan_zombies(
     leaving the workflow in RUNNING state with a stale heartbeat.
 
     Example:
-        rufus scan-zombies --db postgresql://localhost/ruvon --fix
-        rufus scan-zombies --db sqlite:///workflows.db --threshold 180 --json
+        ruvon scan-zombies --db postgresql://localhost/ruvon --fix
+        ruvon scan-zombies --db sqlite:///workflows.db --threshold 180 --json
     """
     async def _scan():
         # Import persistence provider based on database URL
@@ -459,7 +459,7 @@ def zombie_daemon(
     mark them as FAILED_WORKER_CRASH.
 
     Example:
-        rufus zombie-daemon --db postgresql://localhost/ruvon --interval 60
+        ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 60
     """
     async def _run_daemon():
         # Import persistence provider based on database URL

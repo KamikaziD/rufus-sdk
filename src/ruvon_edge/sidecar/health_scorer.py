@@ -33,7 +33,7 @@ _HEALTH_TRIGGER = 0.7  # Score below this → generate suggestions
 
 
 def score_device_health(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
-    """Rufus step function: score device health from collected metrics.
+    """Ruvon step function: score device health from collected metrics.
 
     Reads state.metrics (set by collect_device_metrics step).
     Returns dict with health_score and health_issues list.

@@ -61,7 +61,7 @@ class RAFTRouter:
 
     Decision algorithm:
       1. Compute query specificity score (no LLM, no network):
-           - Rufus domain keyword match (step types, gov rules, YAML keys)  → up to 0.3
+           - Ruvon domain keyword match (step types, gov rules, YAML keys)  → up to 0.3
            - Phrase match: known anti-patterns from lessons  → up to 0.2 bonus
       2. Fast ANN-only retrieval → top-10 candidates → record max cosine similarity
       3. Domain match boost for fintech/edge/compliance terms → up to 0.2
@@ -227,7 +227,7 @@ class RAFTRouter:
     # ------------------------------------------------------------------
 
     def _specificity_score(self, query: str) -> float:
-        """Score 0.0–1.0 based on presence of Rufus-domain terms in query."""
+        """Score 0.0–1.0 based on presence of Ruvon-domain terms in query."""
         q_upper = query.upper()
         q_lower = query.lower()
         hits = 0

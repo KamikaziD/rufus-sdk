@@ -448,7 +448,7 @@ class AuditEmitConfig(BaseModel):
 
 
 class AuditEmitWorkflowStep(WorkflowStep):
-    """Workflow step that emits an immutable audit record to the Rufus audit trail.
+    """Workflow step that emits an immutable audit record to the Ruvon audit trail.
 
     Records are append-only (WORM). Required downstream of any AI_LLM_INFERENCE step
     with pii_detected=true (enforced by GOV-001 governance rule).

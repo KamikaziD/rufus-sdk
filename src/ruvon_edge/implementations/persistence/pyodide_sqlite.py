@@ -6,7 +6,7 @@ In a Pyodide / Web Worker environment the Python ``sqlite3`` module is
 **wa-sqlite** — a WebAssembly build of SQLite exposed as a JavaScript ES module.
 
 This shim presents the same async interface as
-``rufus.implementations.persistence.sqlite.SQLitePersistenceProvider`` so the
+``ruvon.implementations.persistence.sqlite.SQLitePersistenceProvider`` so the
 edge agent code is identical in all three environments.
 
 Architecture

@@ -1,5 +1,5 @@
 """
-NATSBridge — server-side NATS JetStream bridge for the Rufus control plane.
+NATSBridge — server-side NATS JetStream bridge for the Ruvon control plane.
 
 Connects to NATS on server startup and mirrors all device communication
 that previously required HTTP polling:

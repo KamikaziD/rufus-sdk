@@ -86,7 +86,7 @@ class TestSchemaValidator:
         wf = {"name": "test", "steps": [{"name": "S1", "type": "STANDARD"}]}
         validated, errors = _validator().validate(wf)
         # Should auto-repair with placeholder function
-        assert validated["steps"][0].get("function") == "rufus_workflows.steps.identity"
+        assert validated["steps"][0].get("function") == "ruvon_workflows.steps.identity"
 
     def test_workflow_builder_meta_no_required_fields(self):
         # workflow_builder_meta has no required config fields

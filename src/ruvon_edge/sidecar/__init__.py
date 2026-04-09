@@ -1,6 +1,6 @@
 """Ruvon Edge — Deployment Sidecar Agent.
 
-The sidecar is a Rufus workflow that runs alongside the main edge agent,
+The sidecar is a Ruvon workflow that runs alongside the main edge agent,
 autonomously monitoring device health and surfacing improvement proposals
 to human operators via HITL before applying any changes.
 

@@ -3,9 +3,9 @@ Wizer pre-initialization hook for ruvon-edge WASM builds.
 
 This module is invoked once at compile time by the Wizer snapshotting tool:
 
-    wizer --init-func=rufus_pre_init -o dist/ruvon_edge_snapshotted.wasm dist/ruvon_edge.wasm
+    wizer --init-func=ruvon_pre_init -o dist/ruvon_edge_snapshotted.wasm dist/ruvon_edge.wasm
 
-Wizer executes rufus_pre_init() inside the WASM linear memory, runs all the
+Wizer executes ruvon_pre_init() inside the WASM linear memory, runs all the
 top-level imports, and saves the resulting memory snapshot into the output
 binary.  When the snapshotted binary is loaded at runtime, all of these modules
 are already parsed and initialized — cold-start drops from 300ms–2s to <5ms.
@@ -19,7 +19,7 @@ build_wasi.sh as the --init-func target.
 """
 
 
-def rufus_pre_init() -> None:
+def ruvon_pre_init() -> None:
     """Pre-load heavy dependencies into WASM linear memory via Wizer.
 
     Called once at build time.  All imported names are discarded; the side
@@ -36,12 +36,12 @@ def rufus_pre_init() -> None:
     import yaml  # noqa: F401
     import pydantic  # noqa: F401
 
-    # Rufus core models and builder (largest parse cost)
+    # Ruvon core models and builder (largest parse cost)
     from ruvon.models import WorkflowStep  # noqa: F401
     from ruvon.builder import WorkflowBuilder  # noqa: F401
 
     # Edge agent — the main entry point class
-    from ruvon_edge.agent import RufusEdgeAgent  # noqa: F401
+    from ruvon_edge.agent import RuvonEdgeAgent  # noqa: F401
 
     # orjson is optional (may not compile to WASM), so guard it
     try:

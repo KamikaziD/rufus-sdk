@@ -11,7 +11,7 @@ from ruvon_cli.validation import WorkflowValidator
 
 
 class TestValidateCommand:
-    """Tests for 'rufus validate' command."""
+    """Tests for 'ruvon validate' command."""
 
     @pytest.fixture
     def valid_workflow_yaml(self, tmp_path):
@@ -259,7 +259,7 @@ class TestWorkflowValidator:
 
 
 class TestRunCommand:
-    """Tests for 'rufus run' command."""
+    """Tests for 'ruvon run' command."""
 
     def test_run_simple_workflow(self, cli_runner, tmp_path):
         """Test running a simple workflow that completes immediately."""

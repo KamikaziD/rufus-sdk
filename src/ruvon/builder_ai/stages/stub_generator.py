@@ -22,7 +22,7 @@ class StubGenerator:
     """Stage 8: Scans a validated workflow dict for STANDARD steps and emits a .py file.
 
     For each STANDARD step that has a ``function`` field, one stub function is
-    generated with the correct Rufus signature:
+    generated with the correct Ruvon signature:
 
         def <func_name>(state, context: StepContext, **kwargs) -> dict:
 

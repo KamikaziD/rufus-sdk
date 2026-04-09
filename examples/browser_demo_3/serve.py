@@ -7,7 +7,7 @@ Binds to 0.0.0.0 so other devices on the same LAN can connect.
 Usage:
     cd examples/browser_demo_3 && python serve.py
     # Open the printed URL on this machine or any LAN device.
-    # For cross-device mesh: start the Rufus server first:
+    # For cross-device mesh: start the Ruvon server first:
     #   uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
 """
 
@@ -46,12 +46,12 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 ip = local_ip()
 print()
-print("  Rufus Browser Demo 3 — Regenerative Pod Mesh")
+print("  Ruvon Browser Demo 3 — Regenerative Pod Mesh")
 print("  ─────────────────────────────────────────────")
 print(f"  This machine : http://localhost:{DEMO_PORT}")
 print(f"  Other devices: http://{ip}:{DEMO_PORT}")
 print()
-print("  Cross-device mesh requires the Rufus server:")
+print("  Cross-device mesh requires the Ruvon server:")
 print(f"    uvicorn ruvon_server.main:app --host 0.0.0.0 --port {SERVER_PORT}")
 print()
 print("  Tip: share this link to add a remote pod to your mesh:")

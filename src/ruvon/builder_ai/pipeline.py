@@ -324,7 +324,7 @@ class AIWorkflowBuilder:
     async def explain(self, workflow_yaml: str) -> str:
         """Explain an existing workflow YAML in plain English."""
         system = (
-            "You are a workflow expert. Given a Rufus workflow YAML definition, "
+            "You are a workflow expert. Given a Ruvon workflow YAML definition, "
             "explain what it does in plain English. Be concise (3-5 sentences). "
             "Focus on the business purpose, not the technical implementation."
         )

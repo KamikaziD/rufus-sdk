@@ -6,7 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from ruvon.builder_ai.models import RufusIntent, StepPlan, StepPlanEdge, StepPlanEntry
+from ruvon.builder_ai.models import RuvonIntent, StepPlan, StepPlanEdge, StepPlanEntry
 from ruvon.builder_ai.stages.base import LLMStageMixin
 
 if TYPE_CHECKING:
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """You are a workflow architect. Convert the user's workflow intent into a step plan.
 
-Available Rufus step types:
+Available Ruvon step types:
 - STANDARD: simple synchronous Python function
 - AI_LLM_INFERENCE: call Claude, Ollama, or local LLM for text generation/analysis
 - HUMAN_APPROVAL: pause for human decision (multi-channel: slack, email, dashboard)
@@ -56,7 +56,7 @@ class StepPlanner(LLMStageMixin):
 
     async def plan(
         self,
-        intent: RufusIntent,
+        intent: RuvonIntent,
         decision: "Optional[RetrievalDecision]" = None,
     ) -> StepPlan:
         logger.debug("[Stage 3] Planning steps for domain: %s", intent.domain)

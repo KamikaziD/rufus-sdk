@@ -1,7 +1,7 @@
 """
 Version consistency guard.
 
-Verifies that all four rufus packages report the same __version__.
+Verifies that all four ruvon packages report the same __version__.
 This prevents silent version drift when bumping the release.
 """
 

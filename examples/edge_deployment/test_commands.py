@@ -196,7 +196,7 @@ async def main():
     """Main test flow."""
     print("\n" + "#"*70)
     print("#" + " "*68 + "#")
-    print("#    RUFUS COMMAND SYSTEM TEST" + " "*39 + "#")
+    print("#    RUVON COMMAND SYSTEM TEST" + " "*39 + "#")
     print("#" + " "*68 + "#")
     print("#"*70)
 

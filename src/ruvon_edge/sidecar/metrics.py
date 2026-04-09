@@ -1,10 +1,10 @@
 """Sidecar Step 1 — Collect device metrics.
 
 Gathers CPU, RAM, queue depth, and step latency data from the local
-RufusEdgeAgent. Aggregates into summary statistics — no raw transaction
+RuvonEdgeAgent. Aggregates into summary statistics — no raw transaction
 IDs or card numbers are collected; only counts and latency percentiles.
 
-This module is a standard Rufus step function callable:
+This module is a standard Ruvon step function callable:
   def collect_device_metrics(state, context, **kwargs) -> dict
 """
 
@@ -65,7 +65,7 @@ class SidecarState(BaseModel):
 
 
 def collect_device_metrics(state: Any, context: Any, **kwargs) -> Dict[str, Any]:
-    """Rufus step function: collect device metrics and return as state update.
+    """Ruvon step function: collect device metrics and return as state update.
 
     Returns:
         dict with 'metrics' key containing a DeviceMetrics-compatible dict.
