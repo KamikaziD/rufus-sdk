@@ -31,6 +31,18 @@
 "use strict";
 
 // ---------------------------------------------------------------------------
+// Worker-context shim
+// wllama@2 calls document.baseURI to resolve relative WASM paths.
+// In a Web Worker, document is undefined — shim it to the wllama CDN base
+// so absoluteUrl() resolves correctly without restructuring to main thread.
+// ---------------------------------------------------------------------------
+if (typeof document === "undefined") {
+  globalThis.document = {
+    baseURI: "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Transformers.js (MiniLM — Tier 1)
 // ---------------------------------------------------------------------------
 const TRANSFORMERS_CDNS = [
@@ -76,47 +88,6 @@ const MODEL_CONFIGS = {
 };
 
 let _activeModel = "SmolLM2-135M";
-
-// ---------------------------------------------------------------------------
-// OPFS shard cache (verbatim from browser_demo/worker.js)
-// ---------------------------------------------------------------------------
-class OPFSShardCache {
-  constructor() { this._root = null; }
-
-  async init() {
-    try {
-      this._root = await navigator.storage.getDirectory();
-    } catch (_) {
-      this._root = null;
-    }
-  }
-
-  async has(id) {
-    if (!this._root) return false;
-    try { await this._root.getFileHandle(id); return true; } catch { return false; }
-  }
-
-  async write(id, buffer) {
-    if (!this._root) return;
-    try {
-      const fh = await this._root.getFileHandle(id, { create: true });
-      const writable = await fh.createWritable();
-      await writable.write(buffer);
-      await writable.close();
-    } catch (_) {}
-  }
-
-  async read(id) {
-    if (!this._root) return null;
-    try {
-      const fh = await this._root.getFileHandle(id);
-      const file = await fh.getFile();
-      return file.arrayBuffer();
-    } catch { return null; }
-  }
-}
-
-const _opfsCache = new OPFSShardCache();
 
 // ---------------------------------------------------------------------------
 // Promise-chain model mutex (verbatim from browser_demo/worker.js)
@@ -256,10 +227,11 @@ async function runLLM(text, reqId) {
   }
 
   if (!_wllama) {
-    _wllama = new _wllamaClass(WLLAMA_PATHS);
+    // allowOffline: true — serve from OPFS cache without network round-trip
+    _wllama = new _wllamaClass(WLLAMA_PATHS, { allowOffline: true });
     const url = cfg.urls.length === 1 ? cfg.urls[0] : cfg.urls;
     await _wllama.loadModelFromUrl(url, {
-      useCache: true,
+      useCache: true,   // wllama stores in OPFS; instant on repeat loads
       progressCallback: ({ loaded, total }) => {
         self.postMessage({ type: "MODEL_PROGRESS", loaded, total, model: _activeModel });
       },
@@ -368,7 +340,6 @@ self.onmessage = async (evt) => {
   try {
     switch (msg.type) {
       case "INIT":
-        await _opfsCache.init();
         await loadMiniLm();
         break;
 
