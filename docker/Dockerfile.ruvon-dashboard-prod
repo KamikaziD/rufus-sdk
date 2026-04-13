@@ -7,7 +7,7 @@
 # Runtime env vars (pass at `docker run` time):
 #   NEXTAUTH_URL      — Public URL of this dashboard, e.g. https://dash.example.com
 #   NEXTAUTH_SECRET   — Random secret (openssl rand -base64 32)
-#   KEYCLOAK_ID       — Keycloak client ID (default: ruvon-dashboard)
+#   KEYCLOAK_CLIENT_ID — Keycloak client ID (default: ruvon-dashboard)
 #   KEYCLOAK_SECRET   — Keycloak client secret
 #   KEYCLOAK_ISSUER   — Keycloak realm URL, e.g. https://sso.example.com/realms/ruvon
 

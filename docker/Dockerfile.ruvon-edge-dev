@@ -2,16 +2,17 @@ FROM python:3.11-slim
 
 LABEL maintainer="Ruvon Team <team@ruvon.dev>"
 LABEL description="Ruvon Edge — Device Emulator (dev image)"
-LABEL version="0.1.0"
+LABEL version="0.1.2"
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    'ruvon-edge[edge]==0.1.1' \
+    'ruvon-edge[edge,relay,nats]==0.1.2' \
     'httpx>=0.24' \
-    'aiosqlite>=0.19'
+    'aiosqlite>=0.19' \
+    'uvicorn[standard]>=0.20'
 
 COPY examples/edge_deployment/edge_device_sim.py /app/edge_device_sim.py
 

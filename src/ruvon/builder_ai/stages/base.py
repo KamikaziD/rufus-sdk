@@ -44,9 +44,15 @@ class LLMStageMixin:
                 "anthropic package is required for backend='anthropic'. "
                 "Install it with: pip install 'ruvon-sdk[builder]'"
             )
+        if not self.api_key:
+            raise RuntimeError(
+                "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment variable "
+                "or pass --api-key to the command."
+            )
+
         # Anthropic SDK is sync; run in executor to avoid blocking the event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _sync_call():
             client = anthropic.Anthropic(api_key=self.api_key)

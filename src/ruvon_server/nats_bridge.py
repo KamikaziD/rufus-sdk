@@ -57,6 +57,19 @@ _STREAMS = [
         "retention": "limits",
         "max_age": 86400,
     },
+    # Edge-specific streams (subscribed to by ruvon-edge transport)
+    {
+        "name": "RUVON_NODE_PATCH",
+        "subjects": ["ruvon.node.patch"],
+        "retention": "limits",
+        "max_age": 86400,
+    },
+    {
+        "name": "RUVON_MESH_BUILD",
+        "subjects": ["ruvon.mesh.build.*"],
+        "retention": "limits",
+        "max_age": 86400,
+    },
 ]
 
 

@@ -12,7 +12,13 @@ import type {
   RelayContext,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_RUFUS_API_URL ?? "http://localhost:8000";
+// Server components run inside the container (localhost:8000 = nothing there).
+// RUVON_INTERNAL_API_URL is a runtime-only env var (no NEXT_PUBLIC_ prefix) that
+// points at the Docker-internal hostname. Falls back to the public URL for local dev.
+const API_BASE =
+  typeof window === "undefined"
+    ? (process.env.RUVON_INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_RUVON_API_URL ?? "http://localhost:8000")
+    : (process.env.NEXT_PUBLIC_RUVON_API_URL ?? "http://localhost:8000");
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {

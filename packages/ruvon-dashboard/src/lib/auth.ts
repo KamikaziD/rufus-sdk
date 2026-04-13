@@ -10,7 +10,7 @@ interface ExtendedToken extends JWT {
 }
 
 // Server-side Keycloak URL (Docker internal network, never reaches the browser)
-const KC_INTERNAL = "http://keycloak:8080/realms/rufus";
+const KC_INTERNAL = "http://keycloak:8080/realms/ruvon";
 
 // Public-facing Keycloak URL (browser follows redirects to this host)
 const KC_PUBLIC = process.env.KEYCLOAK_ISSUER!; // http://localhost:8080/realms/rufus

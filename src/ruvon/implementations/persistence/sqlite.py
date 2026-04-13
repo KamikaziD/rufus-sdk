@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     workflow_type TEXT NOT NULL,
     workflow_version TEXT,
     definition_snapshot TEXT,
-    current_step INTEGER NOT NULL DEFAULT 0,
+    current_step TEXT DEFAULT '',
     status TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT '{}',
     steps_config TEXT NOT NULL DEFAULT '[]',
@@ -440,7 +440,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         workflow_type = workflow_dict.get('workflow_type')
         workflow_version = workflow_dict.get('workflow_version')
         definition_snapshot = self._serialize_json(workflow_dict.get('definition_snapshot')) if workflow_dict.get('definition_snapshot') else None
-        current_step = workflow_dict.get('current_step', 0)
+        current_step = workflow_dict.get('current_step') or ''
         status = workflow_dict.get('status')
         state = self._serialize_json(workflow_dict.get('state', {}))
         steps_config = self._serialize_json(workflow_dict.get('steps_config', []))

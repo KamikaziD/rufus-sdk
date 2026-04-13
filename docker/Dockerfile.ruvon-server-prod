@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 LABEL maintainer="Ruvon Team <team@ruvon.dev>"
 LABEL description="Ruvon Workflow Engine — REST API Server"
-LABEL version="0.1.0"
+LABEL version="0.1.2"
 
 WORKDIR /app
 
@@ -11,10 +11,10 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ruvon-sdk + ruvon-server from PyPI
+# Install ruvon-sdk + ruvon-server (including NATS bridge) from PyPI
 RUN pip install --no-cache-dir \
-    'ruvon-sdk[postgres,performance,cli]==0.1.1' \
-    'ruvon-server[server,auth]==0.1.1'
+    'ruvon-sdk[postgres,performance,cli]==0.1.2' \
+    'ruvon-server[server,auth,nats]==0.1.2'
 
 # Install Celery deps separately (keeps image layers cacheable)
 RUN pip install --no-cache-dir \
@@ -24,7 +24,10 @@ RUN pip install --no-cache-dir \
     'slowapi>=0.1' \
     'asyncpg>=0.27' \
     'python-jose[cryptography]>=3.3' \
-    'uvloop>=0.19'
+    'uvloop>=0.19' \
+    'python-multipart>=0.0.9' \
+    'celery>=5.3' \
+    'redis>=5.0'
 
 # Directories for user code (mounted as volumes in production)
 RUN mkdir -p /app/config /app/user_code

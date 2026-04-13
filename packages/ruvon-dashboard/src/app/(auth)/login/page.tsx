@@ -27,7 +27,7 @@ export default async function LoginPage({
         {/* Logo */}
         <div className="text-center">
           <div className="font-mono text-base font-semibold">
-            <span className="text-amber-400">RUFUS EDGE</span>
+            <span className="text-amber-400">RUVON EDGE</span>
             <span className="text-zinc-600"> · </span>
             <span className="text-zinc-500">CONTROL PLANE</span>
           </div>
