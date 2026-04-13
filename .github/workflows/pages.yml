@@ -44,6 +44,10 @@ jobs:
           mkdir -p _site/browser_demo_3
           cp -r examples/browser_demo_3/. _site/browser_demo_3/
           rm -f _site/browser_demo_3/serve.py _site/browser_demo_3/README.md
+          # Demo 4 — Swarm Studio (drone mesh + shared compute) at /browser_demo_4/
+          mkdir -p _site/browser_demo_4
+          cp -r examples/browser_demo_4/. _site/browser_demo_4/
+          rm -f _site/browser_demo_4/serve.py _site/browser_demo_4/README.md
 
       - uses: actions/configure-pages@v5
 
