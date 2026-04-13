@@ -27,7 +27,8 @@ RUN pip install --no-cache-dir \
     'uvloop>=0.19' \
     'python-multipart>=0.0.9' \
     'celery>=5.3' \
-    'redis>=5.0'
+    'redis>=5.0' \
+    'psycopg2-binary>=2.9'
 
 # Directories for user code (mounted as volumes in production)
 RUN mkdir -p /app/config /app/user_code
