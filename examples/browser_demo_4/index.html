@@ -235,6 +235,7 @@ canvas { display: block; width: 100%; height: 100%; }
       <div class="stat-row"><span class="label">Avg deviation</span><span class="val" id="stat-dev">— px</span></div>
       <div class="stat-row"><span class="label">SAF queued</span><span class="val" id="stat-saf">0</span></div>
       <div class="stat-row"><span class="label">Mesh peers</span><span class="val" id="stat-peers">1</span></div>
+      <div class="stat-row"><span class="label">Compute nodes</span><span class="val" id="stat-compute">1</span></div>
       <div class="stat-row"><span class="label">Sovereign</span></div>
       <div id="sovereign-badge">—</div>
     </div>
@@ -245,8 +246,9 @@ canvas { display: block; width: 100%; height: 100%; }
     <canvas id="swarm-canvas"></canvas>
     <div id="mode-banner">
       <strong>Same mesh intelligence. Different application.</strong><br/>
-      S(Vc) scoring · Sovereign election · Help-push · SAF queues —
+      S(Vc) scoring · Sovereign election · Help-push · SAF queues · Shared compute —
       the same primitives that power <a href="../browser_demo_2/index.html" target="_blank">resilient cross-border payments</a>.
+      Open a second tab to add a compute node.
     </div>
     <div id="toast"></div>
   </div>
@@ -280,6 +282,9 @@ let intentWorker = null;
 let intentWorkerReady = false;
 let _pendingReqId = 0;
 let _pendingIntentText = null;  // text waiting for semantic resolution
+
+// Shared compute mesh (V2) — maps intent worker reqId → mesh task_id for shards
+const _shardCallbacks = new Map();
 
 // ---------------------------------------------------------------------------
 // Init
@@ -358,6 +363,7 @@ function handleBrainMsg(evt) {
       break;
     case "PEER_UPDATE":
       document.getElementById("stat-peers").textContent = msg.peers.length + 1;
+      updateComputeNodes(msg.peers);
       break;
     case "HELP_SENT":
       toast(`Help-push → ${msg.targets.length} peers`);
@@ -368,6 +374,32 @@ function handleBrainMsg(evt) {
     case "RESTORED":
       toast("Mesh restored — SAF draining");
       break;
+
+    // Mesh assigned an INFERENCE_SHARD task to this pod — run it locally
+    case "RUN_INFERENCE": {
+      if (!intentWorkerReady) {
+        // Can't service this shard — report failure back
+        meshBrain.postMessage({ type: "INFERENCE_RESULT", task_id: msg.task_id, preset: null, confidence: 0 });
+        break;
+      }
+      const shardReqId = ++_pendingReqId;
+      _shardCallbacks.set(shardReqId, msg.task_id);
+      intentWorker.postMessage({ type: "RESOLVE", text: msg.text, reqId: shardReqId });
+      break;
+    }
+
+    // Mesh reports a distributed inference task completed (submitted by another pod)
+    case "TASK_COMPLETED": {
+      if (msg.result?.preset && msg.result.confidence > 0.1) {
+        const text = document.getElementById("intent-input").value.trim();
+        document.getElementById("intent-status").textContent =
+          `✓ "${text}" → ${msg.result.preset} (${msg.result.confidence}) [mesh]`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+        currentPreset = msg.result.preset;
+        applyFormation(msg.result.preset, text);
+      }
+      break;
+    }
   }
 }
 
@@ -388,6 +420,24 @@ function updateStats() {
   document.getElementById("stat-score").textContent  = avgScore;
   document.getElementById("stat-dev").textContent    = `${avgDev} px`;
   document.getElementById("stat-saf").textContent    = safTotal;
+}
+
+// ---------------------------------------------------------------------------
+// Compute node tracking (V2 — shared compute mesh)
+// ---------------------------------------------------------------------------
+let _computeNodeCount = 1;
+
+function updateComputeNodes(peers) {
+  // A peer counts as a compute node if it has low cpu_load and ≥T2 tier
+  // (means it likely has the model loaded and can service inference shards)
+  const capable = peers.filter(p => p.tier >= 2 && p.cpu_load < 0.8).length;
+  _computeNodeCount = 1 + capable;  // always count self
+  document.getElementById("stat-compute").textContent = _computeNodeCount;
+  if (_computeNodeCount > 1) {
+    document.getElementById("stat-compute").style.color = "#a5d6a7";  // green
+  } else {
+    document.getElementById("stat-compute").style.color = "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -549,7 +599,20 @@ function handleIntentMsg(evt) {
         resolveIntentSemantic(text);
       }
       break;
-    case "RESOLVED":
+    case "RESOLVED": {
+      // Check if this was a mesh shard request
+      if (_shardCallbacks.has(msg.reqId)) {
+        const taskId = _shardCallbacks.get(msg.reqId);
+        _shardCallbacks.delete(msg.reqId);
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          preset: msg.preset,
+          confidence: msg.confidence,
+        });
+        break;
+      }
+      // Local resolution
       if (msg.preset && msg.confidence > 0.1) {
         const inputEl = document.getElementById("intent-input");
         const userText = inputEl.value.trim();
@@ -561,6 +624,7 @@ function handleIntentMsg(evt) {
         statusEl.textContent = "? Low confidence — using fuzzy match";
       }
       break;
+    }
     case "ERROR":
       console.warn("[intent_worker] error:", msg.message);
       statusEl.textContent = "⚠ Semantic model unavailable — using fuzzy match";
@@ -571,11 +635,11 @@ function handleIntentMsg(evt) {
 function resolveIntentSemantic(text) {
   if (!intentWorkerReady) {
     _pendingIntentText = text;
-    return false;  // will resolve when READY arrives
+    return false;
   }
-  const reqId = ++_pendingReqId;
-  intentWorker.postMessage({ type: "RESOLVE", text, reqId });
   document.getElementById("intent-status").textContent = "⟳ Resolving…";
+  // Route through mesh — Sovereign will assign to best available compute node
+  meshBrain.postMessage({ type: "INFERENCE_TASK", text, reqId: ++_pendingReqId });
   return true;
 }
 

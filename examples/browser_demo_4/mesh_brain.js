@@ -224,25 +224,35 @@ function processIncomingMsg(msg) {
       _runningTasks++;
       notifyPeerUpdate();
       broadcastAll({ type: "TASK_ACK", task_id: msg.task.task_id, pod_id: POD_ID, timestamp: Date.now() });
-      let resultMsg;
-      try {
-        const { result, duration_ms } = _executeDroneTask(msg.task);
-        resultMsg = { type: "TASK_RESULT", task_id: msg.task.task_id,
-                      result, duration_ms, worker_pod_id: POD_ID,
-                      submitter_pod_id: msg.task.submitter_pod_id,
-                      pod_id: POD_ID, timestamp: Date.now() };
-      } catch (err) {
-        resultMsg = { type: "TASK_RESULT", task_id: msg.task.task_id,
-                      error: err.message, worker_pod_id: POD_ID,
-                      submitter_pod_id: msg.task.submitter_pod_id,
-                      pod_id: POD_ID, timestamp: Date.now() };
-      } finally {
+
+      const _finishTask = (result, err) => {
         _runningTasks--;
         notifyPeerUpdate();
         self.postMessage({ type: "TASK_EXECUTED", task: msg.task });
+        const resultMsg = {
+          type: "TASK_RESULT", task_id: msg.task.task_id,
+          result: err ? undefined : result,
+          error: err ? err.message : undefined,
+          worker_pod_id: POD_ID,
+          submitter_pod_id: msg.task.submitter_pod_id,
+          pod_id: POD_ID, timestamp: Date.now(),
+        };
+        broadcastAll(resultMsg);
+        setTimeout(() => processIncomingMsg(resultMsg), 0);
+      };
+
+      if (msg.task.type === "INFERENCE_SHARD") {
+        _executeInferenceShard(msg.task)
+          .then(result => _finishTask(result, null))
+          .catch(err  => _finishTask(null, err));
+      } else {
+        try {
+          const { result, duration_ms } = _executeDroneTask(msg.task);
+          _finishTask({ ...result, duration_ms }, null);
+        } catch (err) {
+          _finishTask(null, err);
+        }
       }
-      broadcastAll(resultMsg);
-      setTimeout(() => processIncomingMsg(resultMsg), 0);
       break;
     }
 
@@ -275,14 +285,18 @@ mesh.onmessage = (evt) => {
 };
 
 // ---------------------------------------------------------------------------
-// Drone task execution — these run on this pod (brain)
+// Pending inference callbacks — resolves when main thread returns the result
+// ---------------------------------------------------------------------------
+const _pendingInference = new Map(); // task_id → { resolve, reject, timer }
+
+// ---------------------------------------------------------------------------
+// Drone + inference task execution
 // ---------------------------------------------------------------------------
 function _executeDroneTask(task) {
   const t0 = performance.now();
   let result;
   switch (task.type) {
     case "FORMATION_ASSIGN":
-      // Acknowledgement — actual assignment is done in main thread
       result = { ack: true, droneCount: task.params.droneCount };
       break;
     case "MOVE_TO":
@@ -292,7 +306,6 @@ function _executeDroneTask(task) {
       result = { ack: true, droneId: task.params.droneId };
       break;
     case "BATTERY_LOW":
-      // Signal back to main thread to trigger help-push
       self.postMessage({ type: "BATTERY_LOW_SIGNAL", droneId: task.params.droneId });
       result = { ack: true };
       break;
@@ -300,6 +313,22 @@ function _executeDroneTask(task) {
       throw new Error("Unknown drone task type: " + task.type);
   }
   return { result, duration_ms: Math.round(performance.now() - t0) };
+}
+
+/**
+ * INFERENCE_SHARD — ask the main thread to run the query through its
+ * intent_worker and return the result.  Returns a Promise so the task
+ * executor can await it before broadcasting TASK_RESULT.
+ */
+function _executeInferenceShard(task) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      _pendingInference.delete(task.task_id);
+      reject(new Error("inference timeout"));
+    }, 8000);
+    _pendingInference.set(task.task_id, { resolve, reject, timer });
+    self.postMessage({ type: "RUN_INFERENCE", task_id: task.task_id, text: task.params.text });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +591,23 @@ self.onmessage = (evt) => {
 
     case "DRONE_COUNT_CHANGE": {
       droneCount = msg.drone_count;
+      break;
+    }
+
+    // Main thread completed an INFERENCE_SHARD task assigned to this pod
+    case "INFERENCE_RESULT": {
+      const entry = _pendingInference.get(msg.task_id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        _pendingInference.delete(msg.task_id);
+        entry.resolve({ preset: msg.preset, confidence: msg.confidence });
+      }
+      break;
+    }
+
+    // Main thread wants to submit an intent query to the mesh for distributed resolution
+    case "INFERENCE_TASK": {
+      submitTask("INFERENCE_SHARD", { text: msg.text, reqId: msg.reqId }, "NORMAL");
       break;
     }
 
