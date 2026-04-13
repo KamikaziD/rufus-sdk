@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Ruvon Swarm Studio — Browser Demo 4</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>⬡</text></svg>"/>
 <style>
 /* ── Reset ──────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -549,7 +550,7 @@ function handleIntentMsg(evt) {
       }
       break;
     case "RESOLVED":
-      if (msg.preset && msg.confidence > 0.3) {
+      if (msg.preset && msg.confidence > 0.1) {
         const inputEl = document.getElementById("intent-input");
         const userText = inputEl.value.trim();
         statusEl.textContent = `✓ "${userText}" → ${msg.preset} (${msg.confidence})`;
@@ -561,7 +562,8 @@ function handleIntentMsg(evt) {
       }
       break;
     case "ERROR":
-      statusEl.textContent = "⚠ Intent model unavailable — using fuzzy match";
+      console.warn("[intent_worker] error:", msg.message);
+      statusEl.textContent = "⚠ Semantic model unavailable — using fuzzy match";
       break;
   }
 }

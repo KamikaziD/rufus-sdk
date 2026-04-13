@@ -22,23 +22,26 @@
 
 "use strict";
 
+// v2 first — proven to work in demo1; v3 as fallback
 const TRANSFORMERS_CDNS = [
-  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js",
   "https://cdn.jsdelivr.net/npm/@xenova/transformers@2/dist/transformers.min.js",
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js",
 ];
 
 // ---------------------------------------------------------------------------
 // Formation descriptions — richer than preset names for better embedding match
 // ---------------------------------------------------------------------------
+// Full sentences work much better with MiniLM than keyword lists —
+// the model was trained on sentence pairs and activates properly on prose.
 const PRESET_DESCRIPTIONS = {
-  circle:    "circular ring concentric loops orbit rotating round formation",
-  heart:     "heart love romantic Valentine affection pulsing heart shape",
-  horse:     "running galloping horse animal silhouette equestrian quadruped",
-  birds:     "V-formation bird flock flying geese migrating wing spread",
-  waterfall: "cascading waterfall streaming water falling droplets torrent",
-  spiral:    "spiral helix swirl galaxy tornado vortex spinning outward",
-  diamond:   "diamond rhombus square geometric facets crystal gem lattice",
-  ruvon:     "R letter logo brand Ruvon identity monogram initial",
+  circle:    "Form a circular ring shape with drones arranged in concentric orbit loops.",
+  heart:     "Arrange drones into a heart shape, like a love symbol or Valentine's day heart.",
+  horse:     "Make the drones form a running horse or galloping animal silhouette.",
+  birds:     "Fly the drones in a V-formation like a migrating bird flock or geese in the sky.",
+  waterfall: "Let the drones cascade downward in streams like a waterfall or falling water.",
+  spiral:    "Form a spiral or galaxy shape, like a swirling vortex, helix, or spinning galaxy.",
+  diamond:   "Arrange drones into a diamond or rhombus shape, like a gem or crystal lattice.",
+  ruvon:     "Form the letter R or the Ruvon logo shape with the drones.",
 };
 
 const PRESET_NAMES = Object.keys(PRESET_DESCRIPTIONS);
@@ -84,29 +87,28 @@ function meanPool(tensor) {
 async function loadModel() {
   self.postMessage({ type: "LOADING" });
 
-  let mod = null;
+  let pipeline, env;
+  let lastErr = null;
   for (const url of TRANSFORMERS_CDNS) {
     try {
-      mod = await import(url);
+      const mod = await import(url);
+      pipeline = mod.pipeline;
+      env = mod.env;
       break;
-    } catch (_) {}
+    } catch (e) {
+      lastErr = e;
+    }
   }
-  if (!mod) throw new Error("Could not load transformers.js from any CDN");
+  if (!pipeline) throw new Error("Could not load transformers.js: " + (lastErr?.message ?? "unknown"));
 
-  const { pipeline, env } = mod;
-
-  // Use OPFS for model caching (same pattern as demo1)
-  if (typeof caches !== "undefined" || typeof globalThis.FileSystemDirectoryHandle !== "undefined") {
-    try { env.useCustomCache = true; } catch (_) {}
-  }
-  env.allowLocalModels = false;
+  // Disable local model lookup — we always pull from HuggingFace Hub
+  try { env.allowLocalModels = false; } catch (_) {}
+  try { env.allowRemoteModels = true; } catch (_) {}
 
   _pipeline = await pipeline(
     "feature-extraction",
     "Xenova/all-MiniLM-L6-v2",
     {
-      device: "wasm",   // reliable cross-browser; GPU not needed for 23MB model
-      dtype: "fp32",
       progress_callback: ({ status, progress }) => {
         if (status === "progress" && typeof progress === "number") {
           self.postMessage({ type: "PROGRESS", pct: Math.round(progress) });
@@ -119,8 +121,13 @@ async function loadModel() {
   _presetEmbeddings = new Map();
   for (const [preset, desc] of Object.entries(PRESET_DESCRIPTIONS)) {
     const out = await _pipeline(desc, { pooling: "mean", normalize: true });
-    _presetEmbeddings.set(preset, out.data.slice());  // clone Float32Array
+    // out may be Tensor{dims:[1,384]} or nested — grab the flat Float32Array
+    const vec = out.data instanceof Float32Array ? out.data.slice() : new Float32Array(out.data);
+    _presetEmbeddings.set(preset, vec);
   }
+  // Debug: log embedding dim so we can verify pooling worked
+  const sampleDim = _presetEmbeddings.get("circle")?.length ?? 0;
+  console.log("[intent_worker] preset embedding dim:", sampleDim);
 
   _ready = true;
   self.postMessage({ type: "READY" });
@@ -137,18 +144,22 @@ async function resolve(text, reqId) {
   }
 
   const out = await _pipeline(text, { pooling: "mean", normalize: true });
-  const qVec = out.data.slice();
+  const qVec = out.data instanceof Float32Array ? out.data.slice() : new Float32Array(out.data);
 
+  const scores = {};
   let bestPreset = "circle", bestSim = -1;
   for (const [preset, vec] of _presetEmbeddings) {
     const sim = cosineSim(qVec, vec);
+    scores[preset] = parseFloat(sim.toFixed(3));
     if (sim > bestSim) { bestSim = sim; bestPreset = preset; }
   }
+  console.log("[intent_worker] query:", text, "scores:", scores, "best:", bestPreset, bestSim.toFixed(3));
 
   self.postMessage({
     type: "RESOLVED",
     preset: bestPreset,
     confidence: parseFloat(bestSim.toFixed(3)),
+    scores,
     reqId,
   });
 }
@@ -170,6 +181,7 @@ self.onmessage = async (evt) => {
         break;
     }
   } catch (err) {
+    console.error("[intent_worker]", err);
     self.postMessage({ type: "ERROR", message: err.message });
   }
 };

@@ -35,6 +35,13 @@ except ImportError:
 class CompressedHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
+        # Redirect bare root to the demo page
+        if self.path in ("/", ""):
+            self.send_response(302)
+            self.send_header("Location", "/index.html")
+            self.end_headers()
+            return
+
         path = self.translate_path(self.path)
         if not os.path.isfile(path):
             return super().do_GET()
@@ -79,20 +86,25 @@ class CompressedHandler(http.server.SimpleHTTPRequestHandler):
         super().log_message(fmt, *args)
 
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8081
 mode = "brotli + gzip" if _HAS_BROTLI else "gzip"
 
 print(f"Serving on http://localhost:{PORT}  [{mode} compression]")
 print("Press Ctrl-C to stop.")
 print()
 
-# Serve from the repo root so /dist/ruvon_sdk-*.whl resolves correctly
-repo_root = Path(__file__).resolve().parents[2]
-os.chdir(repo_root)
+# Serve from the demo directory so localhost:8081/ → index.html directly
+demo_dir = Path(__file__).resolve().parent
+os.chdir(demo_dir)
 
-with socketserver.TCPServer(("", PORT), CompressedHandler) as httpd:
-    httpd.allow_reuse_address = True
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped.")
+socketserver.TCPServer.allow_reuse_address = True
+httpd = socketserver.TCPServer(("", PORT), CompressedHandler)
+try:
+    httpd.serve_forever()
+except KeyboardInterrupt:
+    pass
+finally:
+    httpd.shutdown()
+    httpd.server_close()
+    print("\nStopped.")
+    sys.exit(0)
