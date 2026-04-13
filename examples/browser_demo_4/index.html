@@ -155,6 +155,44 @@ canvas { display: block; width: 100%; height: 100%; }
   border-bottom: 1px solid #1a2236; padding-bottom: 12px;
 }
 #logo span { color: #9eb4d4; font-weight: 400; font-size: 10px; display: block; }
+
+/* ── Model selector ──────────────────────────────────────────────────────── */
+.model-btn-row { display: flex; gap: 6px; }
+.model-btn {
+  flex: 1; padding: 6px 4px; border: 1px solid #1e2d45;
+  background: #101827; color: #9eb4d4; border-radius: 6px;
+  cursor: pointer; font-size: 11px; text-align: center; line-height: 1.4;
+  transition: all 0.15s;
+}
+.model-btn span { display: block; font-size: 9px; color: #4a607a; }
+.model-btn:hover { background: #162236; border-color: #2c4a7a; }
+.model-btn.active { background: #1a3a6e; border-color: #4a7bc4; color: #a8c8ff; }
+.model-btn.active span { color: #6a8fb4; }
+#model-status { font-size: 10px; color: #4a607a; min-height: 14px; }
+#token-stream {
+  font-size: 10px; color: #6a8fb4; font-family: monospace;
+  min-height: 16px; max-height: 56px; overflow: hidden;
+  word-break: break-all; line-height: 1.4;
+}
+
+/* ── Group mesh UI ───────────────────────────────────────────────────────── */
+#group-code-display {
+  background: #060c18; border: 1px solid #1a2236; border-radius: 6px;
+  padding: 8px 10px;
+}
+#group-code {
+  font-size: 18px; font-weight: 700; color: #4fc3f7;
+  letter-spacing: 0.1em; margin: 2px 0;
+}
+.join-row { display: flex; gap: 6px; }
+.join-row .intent-input {
+  flex: 1; padding: 7px 8px;
+  background: #101827; border: 1px solid #1e2d45; border-radius: 6px;
+  color: #e0e6ef; font-size: 11px; outline: none;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.join-row .intent-input:focus { border-color: #4a7bc4; }
+#mesh-status { font-size: 10px; color: #4a607a; min-height: 14px; }
 </style>
 </head>
 <body>
@@ -164,7 +202,23 @@ canvas { display: block; width: 100%; height: 100%; }
   <aside id="sidebar">
     <div id="logo">
       ⬡ RUVON SWARM STUDIO
-      <span>Browser Demo 4 · Mesh Intelligence Visualiser</span>
+      <span>Browser Demo 4 · Agentic AI Mesh</span>
+    </div>
+
+    <!-- Mesh Group -->
+    <div class="section">
+      <div class="section-title">Mesh Group</div>
+      <div id="group-code-display" style="display:none">
+        <div style="font-size:10px;color:#4a607a">Your group code</div>
+        <div id="group-code"></div>
+        <div style="font-size:9px;color:#4a607a;margin-top:2px">Share this code — others paste it to join</div>
+      </div>
+      <button id="btn-start-mesh" class="sim-btn" style="width:100%">⬡ Start Mesh Group</button>
+      <div class="join-row">
+        <input id="join-code-input" class="intent-input" type="text" placeholder="Paste group code…"/>
+        <button id="btn-join-mesh" class="sim-btn">Join</button>
+      </div>
+      <div id="mesh-status"></div>
     </div>
 
     <!-- Mode toggle -->
@@ -189,7 +243,7 @@ canvas { display: block; width: 100%; height: 100%; }
         <button class="preset-btn" data-preset="ruvon">⬡ Ruvon</button>
         <button class="preset-btn" data-preset="circle">⭕ Circle</button>
       </div>
-      <input id="intent-input" type="text" placeholder='Custom intent: "form a galaxy"'/>
+      <input id="intent-input" type="text" placeholder='Ask AI: "write TEST" or "form a galaxy"'/>
       <div id="intent-status" style="font-size:10px;color:#4a607a;min-height:14px;padding-left:2px;"></div>
       <div class="slider-row">
         <span style="color:#4a607a;font-size:11px">Drones</span>
@@ -197,6 +251,24 @@ canvas { display: block; width: 100%; height: 100%; }
         <span id="drone-count">300</span>
       </div>
       <button id="launch-btn">⚡ Launch Swarm</button>
+    </div>
+
+    <!-- AI Brain -->
+    <div class="section">
+      <div class="section-title">AI Brain</div>
+      <div class="model-btn-row" id="model-selector">
+        <button class="model-btn active" data-model="SmolLM2-135M">
+          SmolLM2<span>88 MB · fast</span>
+        </button>
+        <button class="model-btn" data-model="Qwen2.5-0.5B">
+          Qwen2.5<span>395 MB · smart</span>
+        </button>
+        <button class="model-btn" data-model="Nemotron-Mini-4B">
+          Nemotron<span>2.7 GB · paged</span>
+        </button>
+      </div>
+      <div id="model-status"></div>
+      <div id="token-stream"></div>
     </div>
 
     <!-- Simulation -->
@@ -245,10 +317,9 @@ canvas { display: block; width: 100%; height: 100%; }
   <div id="canvas-wrap">
     <canvas id="swarm-canvas"></canvas>
     <div id="mode-banner">
-      <strong>Same mesh intelligence. Different application.</strong><br/>
-      S(Vc) scoring · Sovereign election · Help-push · SAF queues · Shared compute —
-      the same primitives that power <a href="../browser_demo_2/index.html" target="_blank">resilient cross-border payments</a>.
-      Open a second tab to add a compute node.
+      <strong>Agentic AI mesh swarm.</strong><br/>
+      Type <em>"write RUVON"</em> or <em>"form a galaxy"</em> — the AI brain parses natural language
+      and commands 1 000 drones. Open a second tab → inference distributes across the mesh.
     </div>
     <div id="toast"></div>
   </div>
@@ -259,9 +330,9 @@ canvas { display: block; width: 100%; height: 100%; }
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
 
 <script type="module">
-import { initRenderer, renderFrame, spawnInitialDrones, setOverlayVisible, getCanvasSize, onClick } from "./renderer.js";
+import { initRenderer, renderFrame, setOverlayVisible, getCanvasSize, onClick } from "./renderer.js";
 import { createDrone, stepDrone, assignFormationTargets, scoreDrone, failDrone, recoverDrone, drainBattery } from "./drone_sim.js";
-import { getFormationTargets, resolveIntent, PRESETS } from "./formations.js";
+import { getFormationTargets, textFormation, resolveIntent, PRESETS } from "./formations.js";
 
 // ---------------------------------------------------------------------------
 // State
@@ -276,14 +347,16 @@ let animFrame = null;
 let partitioned = false;
 let meshBrain = null;
 let _toastTimer;
+let _physicsActive = true;   // false when this tab is a mesh follower
+let isSovereignLocal = true; // updated by READY / ELECTION messages
 
-// Intent worker (Phase 3 — semantic formation resolver)
-let intentWorker = null;
-let intentWorkerReady = false;
+// Command brain (replaces intent_worker — two-tier MiniLM + LLM)
+let commandBrain = null;
+let commandBrainReady = false;
 let _pendingReqId = 0;
-let _pendingIntentText = null;  // text waiting for semantic resolution
+let _pendingIntentText = null;
 
-// Shared compute mesh (V2) — maps intent worker reqId → mesh task_id for shards
+// Shared compute mesh — maps commandBrain reqId → mesh task_id for shards
 const _shardCallbacks = new Map();
 
 // ---------------------------------------------------------------------------
@@ -298,16 +371,43 @@ await initRenderer(canvas);
 
 // Start mesh brain worker
 meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
-meshBrain.postMessage({ type: "INIT", drone_count: droneCount });
+meshBrain.postMessage({ type: "INIT", drone_count: droneCount, is_founder: true });
 meshBrain.onmessage = handleBrainMsg;
 
-// Start intent worker (load model in background — non-blocking)
-intentWorker = new Worker(new URL("./intent_worker.js", import.meta.url));
-intentWorker.onmessage = handleIntentMsg;
-intentWorker.postMessage({ type: "INIT" });
+// Start command brain worker (load model in background — non-blocking)
+commandBrain = new Worker(new URL("./command_brain.js", import.meta.url));
+commandBrain.onmessage = handleCommandMsg;
+commandBrain.postMessage({ type: "INIT" });
 
-// Launch initial swarm
+// Launch initial swarm (physics active by default)
 launchSwarm();
+
+// Broadcast swarm state every 100 ms so follower tabs can render it
+setInterval(() => {
+  if (!isSovereignLocal || drones.length === 0) return;
+  meshBrain.postMessage({
+    type: "SWARM_STATE_UPDATE",
+    formation: currentPreset,
+    drones: drones.map(d => ({
+      id: d.id,
+      x: Math.round(d.x), y: Math.round(d.y),
+      vx: +d.vx.toFixed(2), vy: +d.vy.toFixed(2),
+      status: d.status, tier: d.tier,
+      battery: Math.round(d.battery),
+      score: +d.score.toFixed(2),
+    })),
+  });
+}, 100);
+
+// ---------------------------------------------------------------------------
+// Group code generation
+// ---------------------------------------------------------------------------
+function generateGroupCode() {
+  const words = ["RUVON","MESH","SWARM","DRONE","NODE","APEX","SYNC","FLUX"];
+  const w = words[Math.floor(Math.random() * words.length)];
+  const n = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${w}-${n}`;
+}
 
 // ---------------------------------------------------------------------------
 // Swarm lifecycle
@@ -316,34 +416,130 @@ function launchSwarm() {
   if (animFrame) cancelAnimationFrame(animFrame);
   const { w, h } = getCanvasSize();
 
-  // Spawn drones scattered randomly
   drones = Array.from({ length: droneCount }, (_, i) =>
     createDrone(i, Math.random() * w, Math.random() * h)
   );
 
-  // Assign formation targets
   const targets = getFormationTargets(currentPreset, droneCount).map(pt => ({
     x: pt.x * w, y: pt.y * h,
   }));
   assignFormationTargets(drones, targets);
 
-  // Signal brain
   meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: currentPreset });
 
-  // Render loop
   loop();
   toast(`Swarm launched: ${droneCount} drones → ${currentPreset}`);
 }
 
+function startPhysicsLoop() {
+  _physicsActive = true;
+}
+
+function startRenderOnlyLoop() {
+  _physicsActive = false;
+}
+
 function loop() {
   const { w, h } = getCanvasSize();
-  for (const drone of drones) {
-    drone.score = scoreDrone(drone);
-    stepDrone(drone, drones, w, h);
+  if (_physicsActive) {
+    for (const drone of drones) {
+      drone.score = scoreDrone(drone);
+      stepDrone(drone, drones, w, h);
+    }
   }
   renderFrame(drones, sovereignId);
   updateStats();
   animFrame = requestAnimationFrame(loop);
+}
+
+// Apply state received from the sovereign tab
+function applyReceivedState(remoteDrones, formation) {
+  if (isSovereignLocal) return;
+  const remoteMap = new Map(remoteDrones.map(d => [d.id, d]));
+  const { w, h } = getCanvasSize();
+  // Remove drones that no longer exist
+  drones = drones.filter(d => remoteMap.has(d.id));
+  // Update existing / add new
+  for (const rd of remoteDrones) {
+    const local = drones.find(d => d.id === rd.id);
+    if (local) {
+      Object.assign(local, rd);
+    } else {
+      const nd = createDrone(rd.id, rd.x, rd.y);
+      Object.assign(nd, rd);
+      drones.push(nd);
+    }
+  }
+  currentPreset = formation;
+}
+
+// ---------------------------------------------------------------------------
+// Command dispatcher — handles structured action objects from the AI brain
+// ---------------------------------------------------------------------------
+function handleCommand(cmd) {
+  if (!cmd?.action) return;
+  switch (cmd.action) {
+    case "formation":
+      applyFormation(cmd.preset ?? "circle");
+      break;
+    case "text":
+      if (cmd.content) applyTextFormation(cmd.content);
+      break;
+    case "scatter":
+      scatterDrones();
+      break;
+    case "fail":
+      failRandomDrones(cmd.pct ?? 10);
+      break;
+    case "recover":
+      drones.forEach(d => recoverDrone(d));
+      toast("All drones recovered");
+      break;
+    default:
+      console.warn("[handleCommand] unknown action:", cmd.action);
+  }
+}
+
+function applyFormation(preset, originalText) {
+  const { w, h } = getCanvasSize();
+  const targets = getFormationTargets(preset, drones.length).map(pt => ({
+    x: pt.x * w, y: pt.y * h,
+  }));
+  assignFormationTargets(drones, targets);
+  currentPreset = preset;
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset });
+  const label = originalText ? `"${originalText}" → ${preset}` : preset;
+  toast(`Formation: ${label}`);
+}
+
+function applyTextFormation(content) {
+  const { w, h } = getCanvasSize();
+  // textFormation runs on main thread where document/canvas is available
+  const pts = textFormation(content, drones.length);
+  const targets = pts.map(pt => ({ x: pt.x * w, y: pt.y * h }));
+  assignFormationTargets(drones, targets);
+  currentPreset = "text";
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: "text" });
+  toast(`Writing: "${content}"`);
+}
+
+function scatterDrones() {
+  const { w, h } = getCanvasSize();
+  drones.forEach(d => {
+    d.targetX = Math.random() * w;
+    d.targetY = Math.random() * h;
+  });
+  currentPreset = "scatter";
+  toast("Scattered");
+}
+
+function failRandomDrones(pct) {
+  const failCount = Math.max(1, Math.floor(drones.length * pct / 100));
+  const active = drones.filter(d => d.status !== "offline");
+  for (let i = 0; i < failCount && i < active.length; i++) {
+    failDrone(active[Math.floor(Math.random() * active.length)]);
+  }
+  toast(`${failCount} drones failed`);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,50 +549,78 @@ function handleBrainMsg(evt) {
   const msg = evt.data;
   switch (msg.type) {
     case "READY":
+      isSovereignLocal = msg.is_sovereign;
       sovereignId = msg.is_sovereign ? msg.pod_id : null;
       document.getElementById("sovereign-badge").textContent = msg.pod_id;
+      if (isSovereignLocal) startPhysicsLoop();
+      else startRenderOnlyLoop();
       break;
-    case "ELECTION":
+
+    case "ELECTION": {
+      const wasSovereign = isSovereignLocal;
+      isSovereignLocal = msg.is_me;
       sovereignId = msg.sovereign_pod_id;
       document.getElementById("sovereign-badge").textContent = msg.sovereign_pod_id;
-      toast(msg.is_me ? "You are now Sovereign ♛" : `New Sovereign: ${msg.sovereign_pod_id}`);
+      if (!wasSovereign && isSovereignLocal) {
+        startPhysicsLoop();
+        toast("You are now Sovereign ♛");
+      } else if (wasSovereign && !isSovereignLocal) {
+        startRenderOnlyLoop();
+        toast("Sovereignty transferred");
+      } else {
+        toast(msg.is_me ? "You are now Sovereign ♛" : `New Sovereign: ${msg.sovereign_pod_id}`);
+      }
       break;
+    }
+
     case "PEER_UPDATE":
       document.getElementById("stat-peers").textContent = msg.peers.length + 1;
       updateComputeNodes(msg.peers);
       break;
+
     case "HELP_SENT":
       toast(`Help-push → ${msg.targets.length} peers`);
       break;
+
     case "PARTITIONED":
       toast("Network partitioned — SAF queues active");
       break;
+
     case "RESTORED":
       toast("Mesh restored — SAF draining");
       break;
 
-    // Mesh assigned an INFERENCE_SHARD task to this pod — run it locally
+    // Sovereign broadcasts its drone state; followers apply it
+    case "SWARM_STATE":
+      applyReceivedState(msg.drones, msg.formation);
+      break;
+
+    // Mesh assigned an INFERENCE_SHARD to this pod — route to commandBrain
     case "RUN_INFERENCE": {
-      if (!intentWorkerReady) {
-        // Can't service this shard — report failure back
-        meshBrain.postMessage({ type: "INFERENCE_RESULT", task_id: msg.task_id, preset: null, confidence: 0 });
+      if (!commandBrainReady) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: msg.task_id,
+          action_obj: null, preset: null, confidence: 0,
+        });
         break;
       }
       const shardReqId = ++_pendingReqId;
       _shardCallbacks.set(shardReqId, msg.task_id);
-      intentWorker.postMessage({ type: "RESOLVE", text: msg.text, reqId: shardReqId });
+      commandBrain.postMessage({ type: "RESOLVE", text: msg.text, reqId: shardReqId });
       break;
     }
 
-    // Mesh reports a distributed inference task completed (submitted by another pod)
+    // Distributed inference task completed (result from another pod)
     case "TASK_COMPLETED": {
-      if (msg.result?.preset && msg.result.confidence > 0.1) {
-        const text = document.getElementById("intent-input").value.trim();
-        document.getElementById("intent-status").textContent =
-          `✓ "${text}" → ${msg.result.preset} (${msg.result.confidence}) [mesh]`;
-        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
-        currentPreset = msg.result.preset;
-        applyFormation(msg.result.preset, text);
+      const result = msg.result;
+      if (!result) break;
+      if (result.action_obj) {
+        handleCommand(result.action_obj);
+      } else if (result.preset && result.confidence > 0.1) {
+        applyFormation(result.preset);
+        const statusEl = document.getElementById("intent-status");
+        statusEl.textContent = `✓ ${result.preset} (${result.confidence}) [mesh]`;
       }
       break;
     }
@@ -404,7 +628,7 @@ function handleBrainMsg(evt) {
 }
 
 // ---------------------------------------------------------------------------
-// Stats update
+// Stats
 // ---------------------------------------------------------------------------
 function updateStats() {
   const active = drones.filter(d => d.status !== "offline").length;
@@ -422,22 +646,124 @@ function updateStats() {
   document.getElementById("stat-saf").textContent    = safTotal;
 }
 
-// ---------------------------------------------------------------------------
-// Compute node tracking (V2 — shared compute mesh)
-// ---------------------------------------------------------------------------
 let _computeNodeCount = 1;
-
 function updateComputeNodes(peers) {
-  // A peer counts as a compute node if it has low cpu_load and ≥T2 tier
-  // (means it likely has the model loaded and can service inference shards)
   const capable = peers.filter(p => p.tier >= 2 && p.cpu_load < 0.8).length;
-  _computeNodeCount = 1 + capable;  // always count self
-  document.getElementById("stat-compute").textContent = _computeNodeCount;
-  if (_computeNodeCount > 1) {
-    document.getElementById("stat-compute").style.color = "#a5d6a7";  // green
-  } else {
-    document.getElementById("stat-compute").style.color = "";
+  _computeNodeCount = 1 + capable;
+  const el = document.getElementById("stat-compute");
+  el.textContent = _computeNodeCount;
+  el.style.color = _computeNodeCount > 1 ? "#a5d6a7" : "";
+}
+
+// ---------------------------------------------------------------------------
+// Command brain messages
+// ---------------------------------------------------------------------------
+function handleCommandMsg(evt) {
+  const msg = evt.data;
+  const statusEl = document.getElementById("intent-status");
+  const modelStatusEl = document.getElementById("model-status");
+  const tokenStreamEl = document.getElementById("token-stream");
+
+  switch (msg.type) {
+    // MiniLM lifecycle
+    case "LOADING":
+      statusEl.textContent = "⬇ Downloading semantic model (23 MB)…";
+      break;
+    case "PROGRESS":
+      statusEl.textContent = `⬇ Loading model… ${msg.pct}%`;
+      break;
+    case "READY":
+      commandBrainReady = true;
+      statusEl.textContent = "✓ AI brain ready";
+      setTimeout(() => { if (statusEl.textContent.startsWith("✓ AI brain")) statusEl.textContent = ""; }, 2000);
+      if (_pendingIntentText) {
+        const text = _pendingIntentText;
+        _pendingIntentText = null;
+        resolveWithBrain(text);
+      }
+      break;
+
+    // LLM model lifecycle
+    case "MODEL_LOADING":
+      modelStatusEl.textContent = `⬇ Loading ${msg.model} (${msg.ramMb} MB)…`;
+      tokenStreamEl.textContent = "";
+      break;
+    case "MODEL_PROGRESS": {
+      const pct = msg.total > 0 ? Math.round(msg.loaded / msg.total * 100) : 0;
+      modelStatusEl.textContent = `⬇ ${msg.model} ${pct}%`;
+      break;
+    }
+    case "MODEL_READY":
+      modelStatusEl.textContent = `✓ ${msg.model} loaded`;
+      // Signal mesh so it can boost our sovereignty score
+      meshBrain.postMessage({ type: "MODEL_LOADED" });
+      break;
+    case "MODEL_THINKING":
+      modelStatusEl.textContent = "⟳ Thinking…";
+      tokenStreamEl.textContent = "";
+      break;
+    case "TOKEN":
+      tokenStreamEl.textContent += msg.piece;
+      break;
+    case "MODEL_SWITCHED":
+      toast(`Brain: ${msg.model}`);
+      modelStatusEl.textContent = `Model: ${msg.model}`;
+      tokenStreamEl.textContent = "";
+      break;
+
+    // Resolved command — apply it
+    case "COMMAND": {
+      tokenStreamEl.textContent = "";
+
+      // Check if this was a mesh shard request
+      if (_shardCallbacks.has(msg.reqId)) {
+        const taskId = _shardCallbacks.get(msg.reqId);
+        _shardCallbacks.delete(msg.reqId);
+        // Return the full action object so the submitting pod can dispatch it
+        const action_obj = { action: msg.action, preset: msg.preset, content: msg.content, pct: msg.pct };
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj,
+          preset: msg.preset,
+          confidence: msg.confidence ?? 1,
+        });
+        break;
+      }
+
+      // Local command
+      const inputEl = document.getElementById("intent-input");
+      const userText = inputEl.value.trim();
+      const action_obj = { action: msg.action, preset: msg.preset, content: msg.content, pct: msg.pct };
+
+      if (msg.action === "formation" && msg.preset) {
+        statusEl.textContent = `✓ "${userText}" → ${msg.preset}${msg.confidence ? ` (${msg.confidence})` : ""}`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      } else {
+        statusEl.textContent = `✓ "${userText}" → ${msg.action}${msg.content ? ": " + msg.content : ""}`;
+      }
+      handleCommand(action_obj);
+      break;
+    }
+
+    case "ERROR":
+      console.warn("[command_brain] error:", msg.message);
+      statusEl.textContent = "⚠ AI brain error — using fuzzy match";
+      break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Intent resolution
+// ---------------------------------------------------------------------------
+function resolveWithBrain(text) {
+  if (!commandBrainReady) {
+    _pendingIntentText = text;
+    return;
+  }
+  document.getElementById("intent-status").textContent = "⟳ Resolving…";
+  // Route through mesh — Sovereign assigns to best compute node
+  meshBrain.postMessage({ type: "INFERENCE_TASK", text, reqId: ++_pendingReqId });
 }
 
 // ---------------------------------------------------------------------------
@@ -464,26 +790,25 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.classList.add("active");
     currentPreset = btn.dataset.preset;
     document.getElementById("intent-input").value = "";
+    document.getElementById("intent-status").textContent = "";
     applyFormation(currentPreset);
   });
 });
 
-// Custom intent — client-side Levenshtein is instant fallback; semantic worker
-// gives a better result for novel phrases (e.g. "form a galaxy" → spiral).
+// Intent input — client-side Levenshtein fires instantly; AI brain refines
 document.getElementById("intent-input").addEventListener("keydown", e => {
-  if (e.key === "Enter") {
-    const text = e.target.value.trim();
-    if (!text) return;
+  if (e.key !== "Enter") return;
+  const text = e.target.value.trim();
+  if (!text) return;
 
-    // Always apply client-side match immediately so the swarm responds instantly
-    const clientResolved = resolveIntent(text);
-    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
-    currentPreset = clientResolved;
-    applyFormation(clientResolved, text);
+  // Instant client-side Levenshtein fallback
+  const clientResolved = resolveIntent(text);
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+  currentPreset = clientResolved;
+  applyFormation(clientResolved, text);
 
-    // Then kick off semantic resolution — will update formation if it differs
-    resolveIntentSemantic(text);
-  }
+  // AI brain for real natural language understanding
+  resolveWithBrain(text);
 });
 
 // Drone count slider
@@ -503,12 +828,8 @@ document.getElementById("launch-btn").addEventListener("click", () => {
 
 // Simulation buttons
 document.getElementById("btn-fail").addEventListener("click", () => {
-  const failCount = Math.max(1, Math.floor(drones.length * 0.10));
-  const active = drones.filter(d => d.status !== "offline");
-  for (let i = 0; i < failCount && i < active.length; i++) {
-    failDrone(active[Math.floor(Math.random() * active.length)]);
-  }
-  toast(`💥 ${failCount} drones failed — mesh adapting`);
+  failRandomDrones(10);
+  toast("💥 10% drones failed — mesh adapting");
 });
 
 document.getElementById("btn-recover").addEventListener("click", () => {
@@ -519,7 +840,6 @@ document.getElementById("btn-recover").addEventListener("click", () => {
 document.getElementById("btn-partition").addEventListener("click", () => {
   if (!partitioned) {
     meshBrain.postMessage({ type: "PARTITION_START" });
-    // Simulate: drones buffer commands in SAF queues
     const count = Math.floor(drones.length * 0.3);
     for (let i = 0; i < count; i++) {
       const d = drones[Math.floor(Math.random() * drones.length)];
@@ -530,7 +850,6 @@ document.getElementById("btn-partition").addEventListener("click", () => {
     toast("📡 30% of drones partitioned — SAF active");
   } else {
     meshBrain.postMessage({ type: "PARTITION_END" });
-    // Drain SAF queues
     drones.forEach(d => { d.safQueue = []; });
     document.getElementById("btn-partition").textContent = "📡 Partition";
     partitioned = false;
@@ -549,7 +868,7 @@ document.getElementById("btn-drain").addEventListener("click", () => {
   toast(`🔋 ${count} drones battery-drained — help-push triggered`);
 });
 
-// Click canvas → fail nearest drone
+// Click canvas → toggle drone fail/recover
 onClick((clickX, clickY) => {
   let nearest = null, nearestDist = 30;
   for (const drone of drones) {
@@ -575,101 +894,49 @@ document.getElementById("tog-sovereign").addEventListener("change", e => {
   setOverlayVisible(overlayScore || overlaySOV);
 });
 
-// ---------------------------------------------------------------------------
-// Intent worker messages
-// ---------------------------------------------------------------------------
-function handleIntentMsg(evt) {
-  const msg = evt.data;
-  const statusEl = document.getElementById("intent-status");
-  switch (msg.type) {
-    case "LOADING":
-      statusEl.textContent = "⬇ Downloading semantic model (23 MB)…";
-      break;
-    case "PROGRESS":
-      statusEl.textContent = `⬇ Loading model… ${msg.pct}%`;
-      break;
-    case "READY":
-      intentWorkerReady = true;
-      statusEl.textContent = "✓ Semantic intent ready";
-      setTimeout(() => { statusEl.textContent = ""; }, 2000);
-      // Re-resolve any text the user already typed while model was loading
-      if (_pendingIntentText) {
-        const text = _pendingIntentText;
-        _pendingIntentText = null;
-        resolveIntentSemantic(text);
-      }
-      break;
-    case "RESOLVED": {
-      // Check if this was a mesh shard request
-      if (_shardCallbacks.has(msg.reqId)) {
-        const taskId = _shardCallbacks.get(msg.reqId);
-        _shardCallbacks.delete(msg.reqId);
-        meshBrain.postMessage({
-          type: "INFERENCE_RESULT",
-          task_id: taskId,
-          preset: msg.preset,
-          confidence: msg.confidence,
-        });
-        break;
-      }
-      // Local resolution
-      if (msg.preset && msg.confidence > 0.1) {
-        const inputEl = document.getElementById("intent-input");
-        const userText = inputEl.value.trim();
-        statusEl.textContent = `✓ "${userText}" → ${msg.preset} (${msg.confidence})`;
-        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
-        currentPreset = msg.preset;
-        applyFormation(msg.preset, userText);
-      } else {
-        statusEl.textContent = "? Low confidence — using fuzzy match";
-      }
-      break;
-    }
-    case "ERROR":
-      console.warn("[intent_worker] error:", msg.message);
-      statusEl.textContent = "⚠ Semantic model unavailable — using fuzzy match";
-      break;
-  }
-}
+// Model selector
+document.querySelectorAll(".model-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".model-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    commandBrain.postMessage({ type: "SET_MODEL", model: btn.dataset.model });
+  });
+});
 
-function resolveIntentSemantic(text) {
-  if (!intentWorkerReady) {
-    _pendingIntentText = text;
-    return false;
-  }
-  document.getElementById("intent-status").textContent = "⟳ Resolving…";
-  // Route through mesh — Sovereign will assign to best available compute node
-  meshBrain.postMessage({ type: "INFERENCE_TASK", text, reqId: ++_pendingReqId });
-  return true;
-}
+// Group mesh — Start
+document.getElementById("btn-start-mesh").addEventListener("click", () => {
+  const code = generateGroupCode();
+  document.getElementById("group-code").textContent = code;
+  document.getElementById("group-code-display").style.display = "block";
+  document.getElementById("btn-start-mesh").style.display = "none";
+  document.getElementById("mesh-status").textContent = "⬡ Mesh started — share the code";
+  // Re-init brain with the group key as founder
+  meshBrain.postMessage({ type: "STOP" });
+  setTimeout(() => {
+    meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+    meshBrain.onmessage = handleBrainMsg;
+    meshBrain.postMessage({ type: "INIT", drone_count: droneCount, group_key: code, is_founder: true });
+  }, 200);
+});
 
-// ---------------------------------------------------------------------------
-// Formation apply helper
-// ---------------------------------------------------------------------------
-function applyFormation(preset, originalText) {
-  const { w, h } = getCanvasSize();
-  const targets = getFormationTargets(preset, drones.length).map(pt => ({
-    x: pt.x * w, y: pt.y * h,
-  }));
-  assignFormationTargets(drones, targets);
-  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset });
-  const label = originalText ? `"${originalText}" → ${preset}` : preset;
-  toast(`Formation: ${label}`);
-}
+// Group mesh — Join
+document.getElementById("btn-join-mesh").addEventListener("click", () => {
+  const code = document.getElementById("join-code-input").value.trim().toUpperCase();
+  if (!code) return;
+  document.getElementById("mesh-status").textContent = `Joining ${code}…`;
+  document.getElementById("group-code").textContent = code;
+  document.getElementById("group-code-display").style.display = "block";
+  document.getElementById("btn-start-mesh").style.display = "none";
+  // Re-init brain as a joiner (not founder)
+  meshBrain.postMessage({ type: "STOP" });
+  setTimeout(() => {
+    meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+    meshBrain.onmessage = handleBrainMsg;
+    meshBrain.postMessage({ type: "INIT", drone_count: droneCount, group_key: code, is_founder: false });
+  }, 200);
+});
 
-// ---------------------------------------------------------------------------
-// Toast
-// ---------------------------------------------------------------------------
-
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
-}
-
-// Resize handling
+// Resize
 window.addEventListener("resize", () => {
   canvas.width  = canvasWrap.clientWidth;
   canvas.height = canvasWrap.clientHeight;

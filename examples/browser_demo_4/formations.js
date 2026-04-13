@@ -5,6 +5,7 @@
  * {x, y} coordinates in [0, 1] space. The renderer scales to canvas size.
  *
  * Patterns: HORSE, HEART, BIRDS, WATERFALL, CIRCLE, SPIRAL, DIAMOND, RUVON
+ * Dynamic: textFormation(text, n) — canvas rasterisation of any string
  */
 
 "use strict";
@@ -273,6 +274,62 @@ function levenshtein(a, b) {
                : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
   return dp[m][n];
 }
+
+// ---------------------------------------------------------------------------
+// TEXT — rasterise any string into drone positions via a hidden Canvas
+// ---------------------------------------------------------------------------
+
+/**
+ * Render `text` into a hidden canvas and sample dark pixels as target positions.
+ * Must be called from the main thread where `document` is available.
+ *
+ * @param {string} text   — any string (letters, digits, emoji)
+ * @param {number} n      — number of drones
+ * @returns Array<{x, y}> normalized [0, 1] coordinates
+ */
+export function textFormation(text, n) {
+  const W = 1200, H = 300;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  // White background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  // Auto-size font to fill canvas width
+  let fontSize = 220;
+  ctx.font = `bold ${fontSize}px monospace`;
+  while (ctx.measureText(text).width > W * 0.94 && fontSize > 18) {
+    fontSize -= 4;
+    ctx.font = `bold ${fontSize}px monospace`;
+  }
+
+  // Render black text centred
+  ctx.fillStyle = "#000000";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, W / 2, H / 2);
+
+  // Sample dark pixels — adaptive step targets ~6× more candidates than n
+  const data = ctx.getImageData(0, 0, W, H).data;
+  const step = Math.max(1, Math.floor(Math.sqrt((W * H) / (n * 6))));
+  const pts = [];
+  for (let y = 0; y < H; y += step)
+    for (let x = 0; x < W; x += step)
+      if ((data[(y * W + x) * 4] ?? 255) < 128)
+        pts.push({ x: x / W, y: y / H });
+
+  // Fallback to circle if text produced no pixels (e.g. empty string)
+  if (pts.length === 0) return circleFormation(n);
+
+  // Tight jitter so letter shapes stay legible
+  return fillToCount(pts, n, 0.002);
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy intent resolver
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve a free-text intent string to a preset name.

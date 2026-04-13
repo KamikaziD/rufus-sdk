@@ -41,9 +41,10 @@ Main Thread                          mesh_brain Worker
 ├── Reynolds physics (60 fps)        ├── Task distribution
 └── postMessage ↔ Worker             └── SAF relay
 
-intent_worker Worker                 BroadcastChannel mesh
-└── Xenova/all-MiniLM-L6-v2         └── Cross-tab coordination
-    Semantic formation resolver          (INFERENCE_SHARD tasks)
+command_brain Worker                 BroadcastChannel mesh
+├── MiniLM-L6-v2 (Tier 1, 23 MB)   └── Cross-tab coordination
+└── wllama GGUF LLM (Tier 2)            (INFERENCE_SHARD tasks)
+    SmolLM2 / Qwen2.5 / Nemotron
 ```
 
 ## Formations

@@ -26,6 +26,12 @@ const POD_ID = "brain-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 let isSovereign = false;
 let groupKey = null;
 let droneCount = 0;
+let groupFounder = false;   // true on the browser that created the group
+let modelLoaded  = false;   // true once the LLM is loaded (signals for scoring bonus)
+
+// Sovereignty stability
+const FOUNDING_BIAS = 0.10;  // score bonus for the founding browser
+const HYSTERESIS    = 0.15;  // challenger must exceed sovereign by this much to unseat
 
 // ---------------------------------------------------------------------------
 // Message dedup — LRU
@@ -101,8 +107,21 @@ function allPods() {
 
 function electLeader() {
   pruneStale();
-  const all = allPods();
-  all.sort((a, b) => score(b) - score(a));
+
+  const selfScore = score(buildCapabilityVector())
+    + (groupFounder ? FOUNDING_BIAS : 0)
+    + (modelLoaded  ? 0.05 : 0);
+
+  if (isSovereign) {
+    // Hold sovereignty unless a challenger materially exceeds us
+    const maxPeerScore = Object.values(peers).reduce((m, v) => Math.max(m, score(v)), 0);
+    if (maxPeerScore <= selfScore + HYSTERESIS) return POD_ID;
+  }
+
+  // Full election among all known pods
+  const all = Object.entries(peers).map(([id, vec]) => ({ pod_id: id, s: score(vec) }));
+  all.push({ pod_id: POD_ID, s: selfScore });
+  all.sort((a, b) => b.s - a.s);
   return all[0]?.pod_id ?? POD_ID;
 }
 
@@ -273,6 +292,16 @@ function processIncomingMsg(msg) {
     case "TASK_ORPHAN":
       self.postMessage({ type: "TASK_ORPHANED", task_id: msg.task_id, reason: msg.reason });
       break;
+
+    // Sovereign broadcasts swarm state to all peers (same-device BroadcastChannel)
+    case "SWARM_STATE": {
+      if (msg.pod_id === POD_ID) break;  // ignore our own broadcasts
+      if (!isSovereign) {
+        // Forward to main thread so follower can render it
+        self.postMessage({ type: "SWARM_STATE", drones: msg.drones, formation: msg.formation });
+      }
+      break;
+    }
   }
 }
 
@@ -317,7 +346,7 @@ function _executeDroneTask(task) {
 
 /**
  * INFERENCE_SHARD — ask the main thread to run the query through its
- * intent_worker and return the result.  Returns a Promise so the task
+ * command_brain and return the result.  Returns a Promise so the task
  * executor can await it before broadcasting TASK_RESULT.
  */
 function _executeInferenceShard(task) {
@@ -325,7 +354,7 @@ function _executeInferenceShard(task) {
     const timer = setTimeout(() => {
       _pendingInference.delete(task.task_id);
       reject(new Error("inference timeout"));
-    }, 8000);
+    }, 30000);  // generous timeout — LLM may take a while
     _pendingInference.set(task.task_id, { resolve, reject, timer });
     self.postMessage({ type: "RUN_INFERENCE", task_id: task.task_id, text: task.params.text });
   });
@@ -535,8 +564,9 @@ self.onmessage = (evt) => {
 
   switch (msg.type) {
     case "INIT": {
-      groupKey = msg.group_key || null;
-      droneCount = msg.drone_count || 200;
+      groupKey    = msg.group_key || null;
+      droneCount  = msg.drone_count || 200;
+      groupFounder = msg.is_founder ?? true;  // first browser is founder by default
       startAdaptiveGossip();
       self.postMessage({ type: "READY", pod_id: POD_ID, is_sovereign: isSovereign, group_key: groupKey });
       break;
@@ -600,8 +630,28 @@ self.onmessage = (evt) => {
       if (entry) {
         clearTimeout(entry.timer);
         _pendingInference.delete(msg.task_id);
-        entry.resolve({ preset: msg.preset, confidence: msg.confidence });
+        // Carry full action_obj so the submitter can dispatch it directly
+        entry.resolve({ action_obj: msg.action_obj, preset: msg.preset, confidence: msg.confidence });
       }
+      break;
+    }
+
+    // Sovereign broadcasts compact drone state to all same-device tabs
+    case "SWARM_STATE_UPDATE": {
+      if (!isSovereign) break;
+      broadcastLocal({
+        type: "SWARM_STATE",
+        drones: msg.drones,
+        formation: msg.formation,
+        pod_id: POD_ID,
+        timestamp: Date.now(),
+      });
+      break;
+    }
+
+    // Main thread signals the LLM model is loaded → boost sovereignty score
+    case "MODEL_LOADED": {
+      modelLoaded = true;
       break;
     }
 
