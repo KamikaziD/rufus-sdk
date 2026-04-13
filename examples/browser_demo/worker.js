@@ -188,8 +188,8 @@ const MODEL_CONFIGS = {
 let _pagedModel = "SmolLM2-135M";   // default; changed by { type: "set_model", model: "Qwen2.5-0.5B" }
 
 // wllama CDN — loaded dynamically on first inference call
-const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/wllama@2/esm/wllama.js";
-const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/wllama@2/esm/";
+const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/index.js";
+const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/";
 const WLLAMA_PATHS = {
     "single-thread/wllama.wasm": WLLAMA_BASE + "single-thread/wllama.wasm",
     "multi-thread/wllama.wasm":  WLLAMA_BASE + "multi-thread/wllama.wasm",
