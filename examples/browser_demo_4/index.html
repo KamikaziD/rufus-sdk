@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Ruvon Swarm Studio — Browser Demo 4</title>
+<style>
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #05080f; color: #e0e6ef; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+#app { display: flex; height: 100vh; }
+
+/* Sidebar */
+#sidebar {
+  width: 280px; min-width: 260px;
+  background: #0b0f1a;
+  border-right: 1px solid #1a2236;
+  display: flex; flex-direction: column;
+  padding: 16px;
+  overflow-y: auto;
+  gap: 20px;
+  z-index: 10;
+}
+
+/* Canvas area */
+#canvas-wrap {
+  flex: 1; position: relative; overflow: hidden;
+}
+canvas { display: block; width: 100%; height: 100%; }
+
+/* ── Sidebar sections ────────────────────────────────────────────────────── */
+.section-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+  color: #4a7bc4; text-transform: uppercase; margin-bottom: 8px;
+}
+
+.section { display: flex; flex-direction: column; gap: 8px; }
+
+/* Preset buttons */
+.preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.preset-btn {
+  padding: 7px 4px; border: 1px solid #1e2d45; background: #101827;
+  color: #9eb4d4; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: all 0.15s;
+}
+.preset-btn:hover { background: #162236; color: #e0e6ef; border-color: #2c4a7a; }
+.preset-btn.active { background: #1a3a6e; border-color: #4a7bc4; color: #a8c8ff; }
+
+/* Custom intent */
+#intent-input {
+  width: 100%; padding: 8px 10px;
+  background: #101827; border: 1px solid #1e2d45; border-radius: 6px;
+  color: #e0e6ef; font-size: 12px; outline: none;
+}
+#intent-input:focus { border-color: #4a7bc4; }
+#intent-input::placeholder { color: #4a607a; }
+
+/* Launch button */
+#launch-btn {
+  width: 100%; padding: 10px;
+  background: linear-gradient(135deg, #1a3a6e, #2a5caa);
+  border: none; border-radius: 8px;
+  color: #cce0ff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+  letter-spacing: 0.05em;
+}
+#launch-btn:hover { background: linear-gradient(135deg, #2a5caa, #3a72c8); }
+
+/* Drone count slider */
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-row input[type=range] { flex: 1; accent-color: #4a7bc4; }
+.slider-row span { font-size: 12px; color: #6a8fb4; min-width: 32px; text-align: right; }
+
+/* Mode toggle */
+#mode-toggle-wrap {
+  display: flex; background: #101827; border: 1px solid #1e2d45;
+  border-radius: 8px; overflow: hidden;
+}
+.mode-btn {
+  flex: 1; padding: 7px 4px; border: none; background: transparent;
+  color: #6a8fb4; font-size: 11px; cursor: pointer; transition: all 0.15s;
+}
+.mode-btn.active { background: #1a3a6e; color: #a8c8ff; }
+
+/* Simulation controls */
+.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sim-btn {
+  padding: 7px 4px; border: 1px solid #1e2d45; background: #101827;
+  color: #9eb4d4; border-radius: 6px; cursor: pointer; font-size: 11px;
+  transition: all 0.15s;
+}
+.sim-btn:hover { background: #162236; color: #e0e6ef; }
+.sim-btn.danger { border-color: #5a2a2a; color: #ef9a9a; }
+.sim-btn.danger:hover { background: #2a1212; }
+
+/* Overlay toggles */
+.toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.toggle-row label { font-size: 12px; color: #9eb4d4; }
+.toggle {
+  position: relative; width: 36px; height: 18px; display: inline-block;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0; background: #1e2d45; border-radius: 18px;
+  cursor: pointer; transition: 0.2s;
+}
+.toggle-slider::before {
+  content: ""; position: absolute; left: 2px; top: 2px;
+  width: 14px; height: 14px; background: #6a8fb4;
+  border-radius: 50%; transition: 0.2s;
+}
+.toggle input:checked + .toggle-slider { background: #1a3a6e; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(18px); background: #4a7bc4; }
+
+/* Stats */
+.stat-row { display: flex; justify-content: space-between; font-size: 11px; }
+.stat-row .label { color: #4a607a; }
+.stat-row .val { color: #9eb4d4; font-variant-numeric: tabular-nums; }
+#sovereign-badge {
+  font-size: 10px; padding: 2px 8px;
+  background: #1a3a6e; border: 1px solid #4a7bc4;
+  border-radius: 4px; color: #a8c8ff; word-break: break-all;
+}
+
+/* Mode description banner */
+#mode-banner {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(10, 16, 30, 0.88); border: 1px solid #1a2236;
+  border-radius: 8px; padding: 10px 18px;
+  font-size: 12px; color: #6a8fb4; text-align: center;
+  max-width: 480px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+#mode-banner strong { color: #a8c8ff; }
+#mode-banner a { color: #4a7bc4; text-decoration: none; pointer-events: all; }
+
+/* Toast */
+#toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: #1a3a6e; border: 1px solid #4a7bc4;
+  border-radius: 8px; padding: 8px 20px;
+  font-size: 12px; color: #a8c8ff;
+  opacity: 0; transition: opacity 0.3s;
+  pointer-events: none; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+
+/* Header logo */
+#logo {
+  font-size: 13px; font-weight: 700; color: #4a7bc4; letter-spacing: 0.08em;
+  border-bottom: 1px solid #1a2236; padding-bottom: 12px;
+}
+#logo span { color: #9eb4d4; font-weight: 400; font-size: 10px; display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="logo">
+      ⬡ RUVON SWARM STUDIO
+      <span>Browser Demo 4 · Mesh Intelligence Visualiser</span>
+    </div>
+
+    <!-- Mode toggle -->
+    <div class="section">
+      <div class="section-title">Mode</div>
+      <div id="mode-toggle-wrap">
+        <button class="mode-btn active" data-mode="swarm">Swarm Mode</button>
+        <button class="mode-btn" data-mode="payment">Payment Mode</button>
+      </div>
+    </div>
+
+    <!-- Pattern Input -->
+    <div class="section" id="swarm-controls">
+      <div class="section-title">Pattern Input</div>
+      <div class="preset-grid">
+        <button class="preset-btn active" data-preset="horse">🐎 Running Horse</button>
+        <button class="preset-btn" data-preset="birds">🐦 Flocking Birds</button>
+        <button class="preset-btn" data-preset="heart">❤️ Pulsing Heart</button>
+        <button class="preset-btn" data-preset="waterfall">💧 Waterfall</button>
+        <button class="preset-btn" data-preset="spiral">🌀 Spiral</button>
+        <button class="preset-btn" data-preset="diamond">💎 Diamond</button>
+        <button class="preset-btn" data-preset="ruvon">⬡ Ruvon</button>
+        <button class="preset-btn" data-preset="circle">⭕ Circle</button>
+      </div>
+      <input id="intent-input" type="text" placeholder='Custom intent: "form a galaxy"'/>
+      <div id="intent-status" style="font-size:10px;color:#4a607a;min-height:14px;padding-left:2px;"></div>
+      <div class="slider-row">
+        <span style="color:#4a607a;font-size:11px">Drones</span>
+        <input id="drone-slider" type="range" min="50" max="1000" value="300" step="50"/>
+        <span id="drone-count">300</span>
+      </div>
+      <button id="launch-btn">⚡ Launch Swarm</button>
+    </div>
+
+    <!-- Simulation -->
+    <div class="section">
+      <div class="section-title">Simulation</div>
+      <div class="sim-grid">
+        <button class="sim-btn danger" id="btn-fail">💥 Fail 10%</button>
+        <button class="sim-btn" id="btn-recover">♻️ Recover All</button>
+        <button class="sim-btn danger" id="btn-partition">📡 Partition</button>
+        <button class="sim-btn" id="btn-drain">🔋 Drain Battery</button>
+      </div>
+    </div>
+
+    <!-- Educational Overlays -->
+    <div class="section">
+      <div class="section-title">Educational Overlays</div>
+      <div class="toggle-row">
+        <label>S(Vc) score bars</label>
+        <label class="toggle"><input type="checkbox" id="tog-score"/><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>SAF queue indicators</label>
+        <label class="toggle"><input type="checkbox" id="tog-saf"/><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Show Sovereign ♛</label>
+        <label class="toggle"><input type="checkbox" id="tog-sovereign" checked/><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="section">
+      <div class="section-title">Mesh Stats</div>
+      <div class="stat-row"><span class="label">Drones active</span><span class="val" id="stat-active">—</span></div>
+      <div class="stat-row"><span class="label">Avg S(Vc)</span><span class="val" id="stat-score">—</span></div>
+      <div class="stat-row"><span class="label">Avg deviation</span><span class="val" id="stat-dev">— px</span></div>
+      <div class="stat-row"><span class="label">SAF queued</span><span class="val" id="stat-saf">0</span></div>
+      <div class="stat-row"><span class="label">Mesh peers</span><span class="val" id="stat-peers">1</span></div>
+      <div class="stat-row"><span class="label">Sovereign</span></div>
+      <div id="sovereign-badge">—</div>
+    </div>
+  </aside>
+
+  <!-- Canvas -->
+  <div id="canvas-wrap">
+    <canvas id="swarm-canvas"></canvas>
+    <div id="mode-banner">
+      <strong>Same mesh intelligence. Different application.</strong><br/>
+      S(Vc) scoring · Sovereign election · Help-push · SAF queues —
+      the same primitives that power <a href="../browser_demo_2/index.html" target="_blank">resilient cross-border payments</a>.
+    </div>
+    <div id="toast"></div>
+  </div>
+
+</div>
+
+<!-- PixiJS v7 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
+
+<script type="module">
+import { initRenderer, renderFrame, spawnInitialDrones, setOverlayVisible, getCanvasSize, onClick } from "./renderer.js";
+import { createDrone, stepDrone, assignFormationTargets, scoreDrone, failDrone, recoverDrone, drainBattery } from "./drone_sim.js";
+import { getFormationTargets, resolveIntent, PRESETS } from "./formations.js";
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let drones = [];
+let droneCount = 300;
+let currentPreset = "horse";
+let overlayScore = false;
+let overlaySOV = true;
+let sovereignId = null;
+let animFrame = null;
+let partitioned = false;
+let meshBrain = null;
+let _toastTimer;
+
+// Intent worker (Phase 3 — semantic formation resolver)
+let intentWorker = null;
+let intentWorkerReady = false;
+let _pendingReqId = 0;
+let _pendingIntentText = null;  // text waiting for semantic resolution
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById("swarm-canvas");
+const canvasWrap = document.getElementById("canvas-wrap");
+canvas.width  = canvasWrap.clientWidth;
+canvas.height = canvasWrap.clientHeight;
+
+await initRenderer(canvas);
+
+// Start mesh brain worker
+meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+meshBrain.postMessage({ type: "INIT", drone_count: droneCount });
+meshBrain.onmessage = handleBrainMsg;
+
+// Start intent worker (load model in background — non-blocking)
+intentWorker = new Worker(new URL("./intent_worker.js", import.meta.url));
+intentWorker.onmessage = handleIntentMsg;
+intentWorker.postMessage({ type: "INIT" });
+
+// Launch initial swarm
+launchSwarm();
+
+// ---------------------------------------------------------------------------
+// Swarm lifecycle
+// ---------------------------------------------------------------------------
+function launchSwarm() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  const { w, h } = getCanvasSize();
+
+  // Spawn drones scattered randomly
+  drones = Array.from({ length: droneCount }, (_, i) =>
+    createDrone(i, Math.random() * w, Math.random() * h)
+  );
+
+  // Assign formation targets
+  const targets = getFormationTargets(currentPreset, droneCount).map(pt => ({
+    x: pt.x * w, y: pt.y * h,
+  }));
+  assignFormationTargets(drones, targets);
+
+  // Signal brain
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: currentPreset });
+
+  // Render loop
+  loop();
+  toast(`Swarm launched: ${droneCount} drones → ${currentPreset}`);
+}
+
+function loop() {
+  const { w, h } = getCanvasSize();
+  for (const drone of drones) {
+    drone.score = scoreDrone(drone);
+    stepDrone(drone, drones, w, h);
+  }
+  renderFrame(drones, sovereignId);
+  updateStats();
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ---------------------------------------------------------------------------
+// Mesh brain messages
+// ---------------------------------------------------------------------------
+function handleBrainMsg(evt) {
+  const msg = evt.data;
+  switch (msg.type) {
+    case "READY":
+      sovereignId = msg.is_sovereign ? msg.pod_id : null;
+      document.getElementById("sovereign-badge").textContent = msg.pod_id;
+      break;
+    case "ELECTION":
+      sovereignId = msg.sovereign_pod_id;
+      document.getElementById("sovereign-badge").textContent = msg.sovereign_pod_id;
+      toast(msg.is_me ? "You are now Sovereign ♛" : `New Sovereign: ${msg.sovereign_pod_id}`);
+      break;
+    case "PEER_UPDATE":
+      document.getElementById("stat-peers").textContent = msg.peers.length + 1;
+      break;
+    case "HELP_SENT":
+      toast(`Help-push → ${msg.targets.length} peers`);
+      break;
+    case "PARTITIONED":
+      toast("Network partitioned — SAF queues active");
+      break;
+    case "RESTORED":
+      toast("Mesh restored — SAF draining");
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stats update
+// ---------------------------------------------------------------------------
+function updateStats() {
+  const active = drones.filter(d => d.status !== "offline").length;
+  const avgScore = drones.length > 0
+    ? (drones.reduce((s, d) => s + d.score, 0) / drones.length).toFixed(3)
+    : 0;
+  const avgDev = drones.length > 0
+    ? Math.round(drones.reduce((s, d) => s + d.formationDeviation, 0) / drones.length)
+    : 0;
+  const safTotal = drones.reduce((s, d) => s + d.safQueue.length, 0);
+
+  document.getElementById("stat-active").textContent = `${active} / ${drones.length}`;
+  document.getElementById("stat-score").textContent  = avgScore;
+  document.getElementById("stat-dev").textContent    = `${avgDev} px`;
+  document.getElementById("stat-saf").textContent    = safTotal;
+}
+
+// ---------------------------------------------------------------------------
+// UI interactions
+// ---------------------------------------------------------------------------
+
+// Mode toggle
+document.querySelectorAll(".mode-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    if (btn.dataset.mode === "payment") {
+      window.open("../browser_demo_2/index.html", "_blank");
+      btn.classList.remove("active");
+      document.querySelector('.mode-btn[data-mode="swarm"]').classList.add("active");
+    }
+  });
+});
+
+// Preset buttons
+document.querySelectorAll(".preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentPreset = btn.dataset.preset;
+    document.getElementById("intent-input").value = "";
+    applyFormation(currentPreset);
+  });
+});
+
+// Custom intent — client-side Levenshtein is instant fallback; semantic worker
+// gives a better result for novel phrases (e.g. "form a galaxy" → spiral).
+document.getElementById("intent-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const text = e.target.value.trim();
+    if (!text) return;
+
+    // Always apply client-side match immediately so the swarm responds instantly
+    const clientResolved = resolveIntent(text);
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+    currentPreset = clientResolved;
+    applyFormation(clientResolved, text);
+
+    // Then kick off semantic resolution — will update formation if it differs
+    resolveIntentSemantic(text);
+  }
+});
+
+// Drone count slider
+const droneSlider = document.getElementById("drone-slider");
+const droneCountEl = document.getElementById("drone-count");
+droneSlider.addEventListener("input", () => {
+  droneCount = parseInt(droneSlider.value);
+  droneCountEl.textContent = droneCount;
+  meshBrain.postMessage({ type: "DRONE_COUNT_CHANGE", drone_count: droneCount });
+});
+
+// Launch button
+document.getElementById("launch-btn").addEventListener("click", () => {
+  droneCount = parseInt(droneSlider.value);
+  launchSwarm();
+});
+
+// Simulation buttons
+document.getElementById("btn-fail").addEventListener("click", () => {
+  const failCount = Math.max(1, Math.floor(drones.length * 0.10));
+  const active = drones.filter(d => d.status !== "offline");
+  for (let i = 0; i < failCount && i < active.length; i++) {
+    failDrone(active[Math.floor(Math.random() * active.length)]);
+  }
+  toast(`💥 ${failCount} drones failed — mesh adapting`);
+});
+
+document.getElementById("btn-recover").addEventListener("click", () => {
+  drones.forEach(d => recoverDrone(d));
+  toast("♻️ All drones recovered");
+});
+
+document.getElementById("btn-partition").addEventListener("click", () => {
+  if (!partitioned) {
+    meshBrain.postMessage({ type: "PARTITION_START" });
+    // Simulate: drones buffer commands in SAF queues
+    const count = Math.floor(drones.length * 0.3);
+    for (let i = 0; i < count; i++) {
+      const d = drones[Math.floor(Math.random() * drones.length)];
+      d.safQueue.push({ cmd: "MOVE_TO", ts: Date.now() });
+    }
+    document.getElementById("btn-partition").textContent = "📡 Restore Mesh";
+    partitioned = true;
+    toast("📡 30% of drones partitioned — SAF active");
+  } else {
+    meshBrain.postMessage({ type: "PARTITION_END" });
+    // Drain SAF queues
+    drones.forEach(d => { d.safQueue = []; });
+    document.getElementById("btn-partition").textContent = "📡 Partition";
+    partitioned = false;
+    toast("✅ Mesh restored — SAF queues drained");
+  }
+});
+
+document.getElementById("btn-drain").addEventListener("click", () => {
+  const count = Math.max(1, Math.floor(drones.length * 0.15));
+  const active = drones.filter(d => d.status !== "offline");
+  for (let i = 0; i < count; i++) {
+    const d = active[Math.floor(Math.random() * active.length)];
+    drainBattery(d, 40 + Math.random() * 30);
+    meshBrain.postMessage({ type: "DRONE_BATTERY_LOW", droneId: d.id });
+  }
+  toast(`🔋 ${count} drones battery-drained — help-push triggered`);
+});
+
+// Click canvas → fail nearest drone
+onClick((clickX, clickY) => {
+  let nearest = null, nearestDist = 30;
+  for (const drone of drones) {
+    const d = Math.hypot(drone.x - clickX, drone.y - clickY);
+    if (d < nearestDist) { nearestDist = d; nearest = drone; }
+  }
+  if (nearest) {
+    if (nearest.status === "offline") { recoverDrone(nearest); toast(`♻️ Drone #${nearest.id} recovered`); }
+    else { failDrone(nearest); toast(`💥 Drone #${nearest.id} failed`); }
+  }
+});
+
+// Overlay toggles
+document.getElementById("tog-score").addEventListener("change", e => {
+  overlayScore = e.target.checked;
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+document.getElementById("tog-saf").addEventListener("change", () => {
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+document.getElementById("tog-sovereign").addEventListener("change", e => {
+  overlaySOV = e.target.checked;
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+
+// ---------------------------------------------------------------------------
+// Intent worker messages
+// ---------------------------------------------------------------------------
+function handleIntentMsg(evt) {
+  const msg = evt.data;
+  const statusEl = document.getElementById("intent-status");
+  switch (msg.type) {
+    case "LOADING":
+      statusEl.textContent = "⬇ Downloading semantic model (23 MB)…";
+      break;
+    case "PROGRESS":
+      statusEl.textContent = `⬇ Loading model… ${msg.pct}%`;
+      break;
+    case "READY":
+      intentWorkerReady = true;
+      statusEl.textContent = "✓ Semantic intent ready";
+      setTimeout(() => { statusEl.textContent = ""; }, 2000);
+      // Re-resolve any text the user already typed while model was loading
+      if (_pendingIntentText) {
+        const text = _pendingIntentText;
+        _pendingIntentText = null;
+        resolveIntentSemantic(text);
+      }
+      break;
+    case "RESOLVED":
+      if (msg.preset && msg.confidence > 0.3) {
+        const inputEl = document.getElementById("intent-input");
+        const userText = inputEl.value.trim();
+        statusEl.textContent = `✓ "${userText}" → ${msg.preset} (${msg.confidence})`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+        currentPreset = msg.preset;
+        applyFormation(msg.preset, userText);
+      } else {
+        statusEl.textContent = "? Low confidence — using fuzzy match";
+      }
+      break;
+    case "ERROR":
+      statusEl.textContent = "⚠ Intent model unavailable — using fuzzy match";
+      break;
+  }
+}
+
+function resolveIntentSemantic(text) {
+  if (!intentWorkerReady) {
+    _pendingIntentText = text;
+    return false;  // will resolve when READY arrives
+  }
+  const reqId = ++_pendingReqId;
+  intentWorker.postMessage({ type: "RESOLVE", text, reqId });
+  document.getElementById("intent-status").textContent = "⟳ Resolving…";
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Formation apply helper
+// ---------------------------------------------------------------------------
+function applyFormation(preset, originalText) {
+  const { w, h } = getCanvasSize();
+  const targets = getFormationTargets(preset, drones.length).map(pt => ({
+    x: pt.x * w, y: pt.y * h,
+  }));
+  assignFormationTargets(drones, targets);
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset });
+  const label = originalText ? `"${originalText}" → ${preset}` : preset;
+  toast(`Formation: ${label}`);
+}
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
+
+// Resize handling
+window.addEventListener("resize", () => {
+  canvas.width  = canvasWrap.clientWidth;
+  canvas.height = canvasWrap.clientHeight;
+  if (drones.length > 0) applyFormation(currentPreset);
+});
+</script>
+</body>
+</html>
