@@ -65,23 +65,28 @@ let _wllamaClass = null;
 // ---------------------------------------------------------------------------
 // Model configs
 // ---------------------------------------------------------------------------
+// Use loadModelFromHF (not loadModelFromUrl) — wllama handles HuggingFace
+// redirects and CORS correctly; OPFS caches keyed by SHA-1(url)+filename.
+// bartowski repos are the standard community GGUF source (all public, no gating).
 const MODEL_CONFIGS = {
   "SmolLM2-135M": {
-    label: "SmolLM2-135M · 88 MB · fast",
-    urls: ["https://huggingface.co/QuantFactory/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct.Q4_K_M.gguf"],
+    label: "SmolLM2-135M · 100 MB · fast",
+    hfRepo: "bartowski/SmolLM2-135M-Instruct-GGUF",
+    hfFile: "SmolLM2-135M-Instruct-Q4_K_M.gguf",
     ramMb: 120,
     maxTokens: 80,
   },
   "Qwen2.5-0.5B": {
-    label: "Qwen2.5-0.5B · 395 MB · smart",
-    urls: ["https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"],
+    label: "Qwen2.5-0.5B · 380 MB · smart",
+    hfRepo: "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+    hfFile: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
     ramMb: 450,
     maxTokens: 100,
   },
   "Nemotron-Mini-4B": {
-    label: "Nemotron-Mini-4B · 2.7 GB · powerful",
-    // Single Q4_K_M file — wllama handles fetch in chunks; OPFS caches after first load
-    urls: ["https://huggingface.co/bartowski/Nemotron-Mini-4B-Instruct-GGUF/resolve/main/Nemotron-Mini-4B-Instruct-Q4_K_M.gguf"],
+    label: "Nemotron-Mini-4B · 2.5 GB · powerful",
+    hfRepo: "bartowski/Nemotron-Mini-4B-Instruct-GGUF",
+    hfFile: "Nemotron-Mini-4B-Instruct-Q4_K_M.gguf",
     ramMb: 2700,
     maxTokens: 120,
   },
@@ -227,18 +232,26 @@ async function runLLM(text, reqId) {
   }
 
   if (!_wllama) {
-    // allowOffline: true — serve from OPFS cache without network round-trip
-    _wllama = new _wllamaClass(WLLAMA_PATHS, { allowOffline: true });
-    const url = cfg.urls.length === 1 ? cfg.urls[0] : cfg.urls;
-    await _wllama.loadModelFromUrl(url, {
-      useCache: true,   // wllama stores in OPFS; instant on repeat loads
-      progressCallback: ({ loaded, total }) => {
-        self.postMessage({ type: "MODEL_PROGRESS", loaded, total, model: _activeModel });
-      },
-    });
+    _wllama = new _wllamaClass(WLLAMA_PATHS);
+    try {
+      // loadModelFromHF handles HuggingFace redirects and CORS correctly.
+      // useCache: true → wllama stores in OPFS keyed by SHA-1(url)+filename;
+      // second load (same session or after restart) reads directly from OPFS.
+      await _wllama.loadModelFromHF(cfg.hfRepo, cfg.hfFile, {
+        useCache: true,
+        progressCallback: ({ loaded, total }) => {
+          self.postMessage({ type: "MODEL_PROGRESS", loaded, total, model: _activeModel });
+        },
+      });
+    } catch (loadErr) {
+      // Clear broken instance so the next call gets a clean retry
+      try { await _wllama.exit(); } catch (_) {}
+      _wllama = null;
+      _wllama_loaded_model = null;
+      throw loadErr;  // bubble up to outer catch → posts ERROR, falls back to MiniLM
+    }
     _wllama_loaded_model = _activeModel;
     self.postMessage({ type: "MODEL_READY", model: _activeModel });
-    // Tell main thread the LLM is ready (for mesh scoring boost)
     self.postMessage({ type: "LLM_READY" });
   }
 
