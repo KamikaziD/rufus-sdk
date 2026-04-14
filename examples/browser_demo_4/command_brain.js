@@ -1,49 +1,28 @@
 /**
- * command_brain.js — Agentic command brain for Ruvon Swarm Studio.
+ * command_brain.js — Tier 1 semantic resolver (Web Worker)
  *
- * Two-tier inference:
- *   Tier 1 (fast):  MiniLM-L6-v2 (23 MB) — semantic embedding, instant preset match
- *   Tier 2 (smart): wllama GGUF — full LLM reasoning, structured JSON output
+ * Runs MiniLM-L6-v2 (23 MB) in this worker for instant preset matching.
+ * When confidence is low OR trigger words detected, posts ESCALATE to the
+ * main thread. The main thread runs wllama (Tier 2 LLM) directly — wllama
+ * requires document + proper nested-worker support unavailable in a Worker.
  *
- * Model selector:
- *   SmolLM2-135M   88 MB   fast, default
- *   Qwen2.5-0.5B  395 MB   smart
- *   Nemotron-Mini-4B  2.7 GB   powerful (paged loading via wllama)
- *
- * Output (worker → main thread):
- *   LOADING / PROGRESS / READY          — MiniLM download lifecycle
- *   MODEL_LOADING { model, ramMb }      — wllama model download started
- *   MODEL_PROGRESS { loaded, total }    — wllama download progress
- *   MODEL_READY { model }               — wllama model loaded and ready
- *   MODEL_THINKING                      — LLM generation started
- *   TOKEN { piece }                     — streaming token from LLM
- *   COMMAND { action, preset?, content?, pct?, reqId }
+ * Messages out:
+ *   LOADING / PROGRESS / READY           — MiniLM download lifecycle
+ *   COMMAND { action, preset, confidence, reqId }  — fast path (MiniLM only)
+ *   ESCALATE { text, reqId, miniLmFallback }       — needs LLM (main thread)
+ *   MODEL_SWITCH_REQUEST { model }        — forward model change to main thread
  *   ERROR { message }
- *   MODEL_SWITCHED { model }
  *
- * Input (main thread → worker):
+ * Messages in:
  *   INIT
  *   SET_MODEL { model }
  *   RESOLVE { text, reqId }
- *   MODEL_LOADED                        — main thread signals LLM is ready (for mesh scoring)
  */
 
 "use strict";
 
 // ---------------------------------------------------------------------------
-// Worker-context shim
-// wllama@2 calls document.baseURI to resolve relative WASM paths.
-// In a Web Worker, document is undefined — shim it to the wllama CDN base
-// so absoluteUrl() resolves correctly without restructuring to main thread.
-// ---------------------------------------------------------------------------
-if (typeof document === "undefined") {
-  globalThis.document = {
-    baseURI: "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/",
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Transformers.js (MiniLM — Tier 1)
+// Transformers.js CDNs (try in order — v2 is more compatible with workers)
 // ---------------------------------------------------------------------------
 const TRANSFORMERS_CDNS = [
   "https://cdn.jsdelivr.net/npm/@xenova/transformers@2/dist/transformers.min.js",
@@ -51,56 +30,7 @@ const TRANSFORMERS_CDNS = [
 ];
 
 // ---------------------------------------------------------------------------
-// wllama (GGUF — Tier 2)
-// ---------------------------------------------------------------------------
-const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/index.js";
-const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/";
-const WLLAMA_PATHS = {
-  "single-thread/wllama.wasm": WLLAMA_BASE + "single-thread/wllama.wasm",
-  "multi-thread/wllama.wasm":  WLLAMA_BASE + "multi-thread/wllama.wasm",
-};
-let _wllama = null;
-let _wllamaClass = null;
-
-// ---------------------------------------------------------------------------
-// Model configs
-// ---------------------------------------------------------------------------
-// Use loadModelFromHF (not loadModelFromUrl) — wllama handles HuggingFace
-// redirects and CORS correctly; OPFS caches keyed by SHA-1(url)+filename.
-// bartowski repos are the standard community GGUF source (all public, no gating).
-const MODEL_CONFIGS = {
-  "SmolLM2-135M": {
-    label: "SmolLM2-135M · 100 MB · fast",
-    hfRepo: "bartowski/SmolLM2-135M-Instruct-GGUF",
-    hfFile: "SmolLM2-135M-Instruct-Q4_K_M.gguf",
-    ramMb: 120,
-    maxTokens: 80,
-  },
-  "Qwen2.5-0.5B": {
-    label: "Qwen2.5-0.5B · 380 MB · smart",
-    hfRepo: "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-    hfFile: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
-    ramMb: 450,
-    maxTokens: 100,
-  },
-  "Nemotron-Mini-4B": {
-    label: "Nemotron-Mini-4B · 2.5 GB · powerful",
-    hfRepo: "bartowski/Nemotron-Mini-4B-Instruct-GGUF",
-    hfFile: "Nemotron-Mini-4B-Instruct-Q4_K_M.gguf",
-    ramMb: 2700,
-    maxTokens: 120,
-  },
-};
-
-let _activeModel = "SmolLM2-135M";
-
-// ---------------------------------------------------------------------------
-// Promise-chain model mutex (verbatim from browser_demo/worker.js)
-// ---------------------------------------------------------------------------
-let _modelMutex = Promise.resolve();
-
-// ---------------------------------------------------------------------------
-// MiniLM — Tier 1 semantic embeddings
+// MiniLM preset descriptions — full sentences give better cosine similarity
 // ---------------------------------------------------------------------------
 const PRESET_DESCRIPTIONS = {
   circle:    "Form a circular ring shape with drones arranged in concentric orbit loops.",
@@ -111,15 +41,28 @@ const PRESET_DESCRIPTIONS = {
   spiral:    "Form a spiral or galaxy shape, like a swirling vortex, helix, or spinning galaxy.",
   diamond:   "Arrange drones into a diamond or rhombus shape, like a gem or crystal lattice.",
   ruvon:     "Form the letter R or the Ruvon logo shape with the drones.",
+  star:      "Form a five-pointed star shape, like a shooting star or gold star symbol.",
+  triangle:  "Arrange drones into a triangle or pyramid shape, like a delta or wedge.",
+  cross:     "Form a cross or plus sign shape, like a medical cross or addition symbol.",
+  arrow:     "Make the drones form a right-pointing arrow or directional pointer shape.",
+  hexagon:   "Arrange drones into a hexagon or six-sided polygon shape, like a honeycomb cell.",
+  smiley:    "Form a smiley face or happy face emoji shape with eyes and a smile.",
+  lightning: "Form a lightning bolt or thunderbolt zigzag shape, like an electric flash.",
+  rocket:    "Make the drones form a rocket ship or spaceship silhouette ready for launch.",
 };
 
-// Trigger words that force LLM escalation regardless of MiniLM confidence
-const ESCALATION_RE = /\bwrite\b|\bdisplay\b|\bshow\s+\w*\s*word|\bspell\b|\bdraw\b|\bprint\b|\bthe\s+word\b|\btext\b|\bletter\b|\bword\b|\btype\b|\bsay\b/i;
+// Trigger words that always escalate to LLM regardless of MiniLM confidence.
+// "draw", "make a", "show a", "create a" trigger open-ended object requests.
+// "form a" is intentionally excluded — it's a common preset-formation prefix (e.g. "form a circle").
+const ESCALATION_RE = /\bwrite\b|\bdisplay\b|\bshow\s+\w*\s*word|\bspell\b|\bdraw\b|\bprint\b|\bthe\s+word\b|\btext\b|\bletter\b|\bword\b|\btype\b|\bsay\b|\bmake\s+a\b|\bshow\s+a\b|\bcreate\s+a\b|\bbuild\s+a\b/i;
 
 let _miniLm = null;
 let _presetEmbeddings = null;
 let _miniLmReady = false;
 
+// ---------------------------------------------------------------------------
+// Cosine similarity
+// ---------------------------------------------------------------------------
 function cosineSim(a, b) {
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {
@@ -128,11 +71,13 @@ function cosineSim(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8);
 }
 
+// ---------------------------------------------------------------------------
+// MiniLM loading
+// ---------------------------------------------------------------------------
 async function loadMiniLm() {
   self.postMessage({ type: "LOADING" });
 
-  let pipeline, env;
-  let lastErr = null;
+  let pipeline, env, lastErr = null;
   for (const url of TRANSFORMERS_CDNS) {
     try {
       const mod = await import(url);
@@ -156,7 +101,6 @@ async function loadMiniLm() {
     }
   );
 
-  // Pre-compute preset embeddings
   _presetEmbeddings = new Map();
   for (const [preset, desc] of Object.entries(PRESET_DESCRIPTIONS)) {
     const out = await _miniLm(desc, { pooling: "mean", normalize: true });
@@ -167,6 +111,9 @@ async function loadMiniLm() {
   self.postMessage({ type: "READY" });
 }
 
+// ---------------------------------------------------------------------------
+// MiniLM inference
+// ---------------------------------------------------------------------------
 async function runMiniLm(text) {
   if (!_miniLmReady || !_miniLm) return { preset: "circle", confidence: 0 };
   const out = await _miniLm(text, { pooling: "mean", normalize: true });
@@ -180,167 +127,28 @@ async function runMiniLm(text) {
 }
 
 // ---------------------------------------------------------------------------
-// wllama — Tier 2 LLM reasoning
-// ---------------------------------------------------------------------------
-const SYSTEM_PROMPT = `You are the command brain of a drone swarm. Parse the user's instruction and respond with ONLY a single-line JSON object. No prose, no markdown, no explanation.
-
-Available actions:
-  {"action":"formation","preset":"circle|heart|horse|birds|waterfall|spiral|diamond|ruvon"}
-  {"action":"text","content":"SHORT TEXT OR WORD"}
-  {"action":"scatter"}
-  {"action":"fail","pct":10}
-  {"action":"recover"}
-
-Examples:
-"show a running horse" -> {"action":"formation","preset":"horse"}
-"display the word RUVON" -> {"action":"text","content":"RUVON"}
-"write TEST" -> {"action":"text","content":"TEST"}
-"spell HELLO WORLD" -> {"action":"text","content":"HELLO WORLD"}
-"form a galaxy" -> {"action":"formation","preset":"spiral"}
-"arrange like a blooming flower" -> {"action":"formation","preset":"spiral"}
-"scatter" -> {"action":"scatter"}
-"fail 20 percent" -> {"action":"fail","pct":20}`;
-
-let _wllama_loaded_model = null;  // track which model is currently loaded
-
-async function ensureWllama() {
-  if (_wllamaClass) return;
-  try {
-    const mod = await import(WLLAMA_CDN);
-    _wllamaClass = mod.Wllama || mod.default;
-  } catch (_) {
-    _wllamaClass = null;
-  }
-}
-
-async function runLLM(text, reqId) {
-  const cfg = MODEL_CONFIGS[_activeModel];
-  self.postMessage({ type: "MODEL_LOADING", model: _activeModel, ramMb: cfg.ramMb });
-
-  await ensureWllama();
-  if (!_wllamaClass) {
-    // wllama unavailable — graceful fallback
-    self.postMessage({ type: "MODEL_READY", model: _activeModel });
-    return null;
-  }
-
-  // Evict if different model loaded
-  if (_wllama && _wllama_loaded_model !== _activeModel) {
-    try { await _wllama.exit(); } catch (_) {}
-    _wllama = null;
-    _wllama_loaded_model = null;
-  }
-
-  if (!_wllama) {
-    _wllama = new _wllamaClass(WLLAMA_PATHS);
-    try {
-      // loadModelFromHF handles HuggingFace redirects and CORS correctly.
-      // useCache: true → wllama stores in OPFS keyed by SHA-1(url)+filename;
-      // second load (same session or after restart) reads directly from OPFS.
-      await _wllama.loadModelFromHF(cfg.hfRepo, cfg.hfFile, {
-        useCache: true,
-        progressCallback: ({ loaded, total }) => {
-          self.postMessage({ type: "MODEL_PROGRESS", loaded, total, model: _activeModel });
-        },
-      });
-    } catch (loadErr) {
-      // Clear broken instance so the next call gets a clean retry
-      try { await _wllama.exit(); } catch (_) {}
-      _wllama = null;
-      _wllama_loaded_model = null;
-      throw loadErr;  // bubble up to outer catch → posts ERROR, falls back to MiniLM
-    }
-    _wllama_loaded_model = _activeModel;
-    self.postMessage({ type: "MODEL_READY", model: _activeModel });
-    self.postMessage({ type: "LLM_READY" });
-  }
-
-  self.postMessage({ type: "MODEL_THINKING" });
-
-  // Build chat prompt
-  const prompt = `<|system|>\n${SYSTEM_PROMPT}\n<|user|>\n${text}\n<|assistant|>\n`;
-  let accumulated = "";
-  await _wllama.createCompletion(prompt, {
-    nPredict: cfg.maxTokens,
-    temperature: 0.1,
-    onNewToken: (_, piece) => {
-      accumulated += piece;
-      self.postMessage({ type: "TOKEN", piece });
-    },
-  });
-
-  return accumulated;
-}
-
-// ---------------------------------------------------------------------------
-// Command parser — extract first valid JSON object from LLM output
-// ---------------------------------------------------------------------------
-const VALID_ACTIONS = new Set(["formation", "text", "scatter", "fail", "recover"]);
-const VALID_PRESETS = new Set(["circle","heart","horse","birds","waterfall","spiral","diamond","ruvon"]);
-
-function parseCommand(raw) {
-  if (!raw) return null;
-  // Find first {...} block
-  const m = raw.match(/\{[^}]+\}/);
-  if (!m) return null;
-  try {
-    const obj = JSON.parse(m[0]);
-    if (!VALID_ACTIONS.has(obj.action)) return null;
-    if (obj.action === "formation" && !VALID_PRESETS.has(obj.preset)) obj.preset = "circle";
-    if (obj.action === "text" && (!obj.content || typeof obj.content !== "string")) return null;
-    if (obj.action === "fail") obj.pct = Math.max(1, Math.min(100, Number(obj.pct) || 10));
-    return obj;
-  } catch (_) {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main resolve entry point
+// Resolve entry point
 // ---------------------------------------------------------------------------
 async function resolve(text, reqId) {
   const trimmed = text.trim();
   if (!trimmed) return;
 
-  // Tier 1: MiniLM
   const { preset: miniLmPreset, confidence } = await runMiniLm(trimmed);
   const needsEscalation = confidence < 0.4 || ESCALATION_RE.test(trimmed);
 
   if (!needsEscalation) {
-    // Fast path — MiniLM is confident, no LLM needed
-    self.postMessage({
-      type: "COMMAND",
-      action: "formation",
-      preset: miniLmPreset,
-      confidence,
-      reqId,
-    });
+    // Fast path — MiniLM confident, no LLM needed
+    self.postMessage({ type: "COMMAND", action: "formation", preset: miniLmPreset, confidence, reqId });
     return;
   }
 
-  // Tier 2: LLM
-  let release;
-  const prev = _modelMutex;
-  _modelMutex = new Promise(r => { release = r; });
-  await prev;
-  try {
-    const raw = await runLLM(trimmed, reqId);
-    const cmd = parseCommand(raw);
-    if (cmd) {
-      self.postMessage({ type: "COMMAND", ...cmd, reqId });
-    } else {
-      // LLM output not parseable — fall back to MiniLM result
-      self.postMessage({
-        type: "COMMAND",
-        action: "formation",
-        preset: miniLmPreset,
-        confidence,
-        reqId,
-      });
-    }
-  } finally {
-    release();
-  }
+  // Signal main thread to run wllama (LLM lives on main thread, not in worker)
+  self.postMessage({
+    type: "ESCALATE",
+    text: trimmed,
+    reqId,
+    miniLmFallback: { preset: miniLmPreset, confidence },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -349,37 +157,15 @@ async function resolve(text, reqId) {
 self.onmessage = async (evt) => {
   const msg = evt.data;
   if (!msg?.type) return;
-
   try {
     switch (msg.type) {
       case "INIT":
         await loadMiniLm();
         break;
-
-      case "SET_MODEL": {
-        const model = msg.model;
-        if (!MODEL_CONFIGS[model]) {
-          self.postMessage({ type: "ERROR", message: `Unknown model: ${model}` });
-          break;
-        }
-        _activeModel = model;
-        // Evict loaded wllama so next inference reloads with new URLs
-        // (wllama OPFS cache is preserved — won't re-download)
-        if (_wllama && _wllama_loaded_model !== model) {
-          let release;
-          const prev = _modelMutex;
-          _modelMutex = new Promise(r => { release = r; });
-          await prev;
-          try {
-            try { await _wllama.exit(); } catch (_) {}
-            _wllama = null;
-            _wllama_loaded_model = null;
-          } finally { release(); }
-        }
-        self.postMessage({ type: "MODEL_SWITCHED", model, config: MODEL_CONFIGS[model] });
+      case "SET_MODEL":
+        // wllama lives on the main thread — forward the model switch request
+        self.postMessage({ type: "MODEL_SWITCH_REQUEST", model: msg.model });
         break;
-      }
-
       case "RESOLVE":
         await resolve(msg.text, msg.reqId);
         break;

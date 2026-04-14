@@ -38,7 +38,14 @@ function normalize(pts, margin = 0.05) {
 
 // Add grid-jittered fill points to reach target count
 function fillToCount(pts, n, jitter = 0.015) {
-  if (pts.length >= n) return pts.slice(0, n);
+  if (pts.length === 0) return [];
+  if (pts.length > n) {
+    // Uniform subsample — stride through the full array so all rows are represented,
+    // not just the top (pts are in row-major order from the canvas raster scan)
+    const step = pts.length / n;
+    return Array.from({ length: n }, (_, i) => pts[Math.floor(i * step)]);
+  }
+  // pts.length <= n: keep all originals and pad with jittered duplicates
   const result = [...pts];
   let i = 0;
   while (result.length < n) {
@@ -239,6 +246,154 @@ function ruvonFormation(n) {
 }
 
 // ---------------------------------------------------------------------------
+// STAR — 5-pointed
+// ---------------------------------------------------------------------------
+function starFormation(n) {
+  const R = 0.45, r = 0.18, spikes = 5;
+  const verts = [];
+  for (let i = 0; i < spikes * 2; i++) {
+    const a = -Math.PI / 2 + (i / (spikes * 2)) * 2 * Math.PI;
+    verts.push({ x: 0.5 + (i % 2 === 0 ? R : r) * Math.cos(a),
+                 y: 0.5 + (i % 2 === 0 ? R : r) * Math.sin(a) });
+  }
+  verts.push(verts[0]);
+  return fillToCount(normalize(_polyline(verts, 0.018), 0.04), n, 0.02);
+}
+
+// ---------------------------------------------------------------------------
+// TRIANGLE — equilateral
+// ---------------------------------------------------------------------------
+function triangleFormation(n) {
+  const h = Math.sqrt(3) / 2;
+  const verts = [
+    { x: 0.5, y: 0 }, { x: 0, y: h }, { x: 1, y: h }, { x: 0.5, y: 0 },
+  ];
+  return fillToCount(normalize(_polyline(verts, 0.015), 0.04), n, 0.02);
+}
+
+// ---------------------------------------------------------------------------
+// CROSS — plus sign
+// ---------------------------------------------------------------------------
+function crossFormation(n) {
+  const w = 0.15;
+  const verts = [
+    { x: 0.5 - w, y: 0 },     { x: 0.5 + w, y: 0 },
+    { x: 0.5 + w, y: 0.5 - w }, { x: 1,       y: 0.5 - w },
+    { x: 1,       y: 0.5 + w }, { x: 0.5 + w, y: 0.5 + w },
+    { x: 0.5 + w, y: 1 },     { x: 0.5 - w, y: 1 },
+    { x: 0.5 - w, y: 0.5 + w }, { x: 0,       y: 0.5 + w },
+    { x: 0,       y: 0.5 - w }, { x: 0.5 - w, y: 0.5 - w },
+    { x: 0.5 - w, y: 0 },
+  ];
+  return fillToCount(normalize(_polyline(verts, 0.015), 0.04), n, 0.015);
+}
+
+// ---------------------------------------------------------------------------
+// ARROW — right-pointing
+// ---------------------------------------------------------------------------
+function arrowFormation(n) {
+  const verts = [
+    { x: 0,    y: 0.3 }, { x: 0.55, y: 0.3  },
+    { x: 0.55, y: 0.05}, { x: 1,    y: 0.5  },
+    { x: 0.55, y: 0.95}, { x: 0.55, y: 0.7  },
+    { x: 0,    y: 0.7 }, { x: 0,    y: 0.3  },
+  ];
+  return fillToCount(normalize(_polyline(verts, 0.015), 0.04), n, 0.015);
+}
+
+// ---------------------------------------------------------------------------
+// HEXAGON
+// ---------------------------------------------------------------------------
+function hexagonFormation(n) {
+  const verts = [];
+  for (let i = 0; i <= 6; i++) {
+    const a = (i / 6) * 2 * Math.PI - Math.PI / 6;
+    verts.push({ x: 0.5 + 0.46 * Math.cos(a), y: 0.5 + 0.46 * Math.sin(a) });
+  }
+  return fillToCount(normalize(_polyline(verts, 0.015), 0.04), n, 0.02);
+}
+
+// ---------------------------------------------------------------------------
+// SMILEY face
+// ---------------------------------------------------------------------------
+function smileyFormation(n) {
+  const pts = [];
+  // Face outline
+  for (let t = 0; t < Math.PI * 2; t += 0.025)
+    pts.push({ x: 0.5 + 0.46 * Math.cos(t), y: 0.5 + 0.46 * Math.sin(t) });
+  // Left eye
+  for (let t = 0; t < Math.PI * 2; t += 0.08)
+    pts.push({ x: 0.34 + 0.07 * Math.cos(t), y: 0.38 + 0.07 * Math.sin(t) });
+  // Right eye
+  for (let t = 0; t < Math.PI * 2; t += 0.08)
+    pts.push({ x: 0.66 + 0.07 * Math.cos(t), y: 0.38 + 0.07 * Math.sin(t) });
+  // Smile (lower arc)
+  for (let t = 0.15; t < Math.PI - 0.15; t += 0.035)
+    pts.push({ x: 0.5 + 0.28 * Math.cos(Math.PI + t), y: 0.62 - 0.16 * Math.sin(Math.PI + t) });
+  return fillToCount(pts, n, 0.015);
+}
+
+// ---------------------------------------------------------------------------
+// LIGHTNING bolt
+// ---------------------------------------------------------------------------
+function lightningFormation(n) {
+  const verts = [
+    { x: 0.62, y: 0    }, { x: 0.30, y: 0.48 },
+    { x: 0.52, y: 0.48 }, { x: 0.20, y: 1    },
+    { x: 0.56, y: 0.52 }, { x: 0.36, y: 0.52 },
+    { x: 0.62, y: 0    },
+  ];
+  return fillToCount(normalize(_polyline(verts, 0.015), 0.04), n, 0.02);
+}
+
+// ---------------------------------------------------------------------------
+// ROCKET
+// ---------------------------------------------------------------------------
+function rocketFormation(n) {
+  const pts = [];
+  // Nose cone
+  for (let t = 0; t <= 1; t += 0.03) {
+    const hw = 0.14 * (1 - t);
+    pts.push({ x: 0.5 - hw, y: 0.05 + t * 0.22 });
+    pts.push({ x: 0.5 + hw, y: 0.05 + t * 0.22 });
+  }
+  // Body
+  for (let t = 0; t <= 1; t += 0.02) {
+    pts.push({ x: 0.36, y: 0.27 + t * 0.45 });
+    pts.push({ x: 0.64, y: 0.27 + t * 0.45 });
+  }
+  // Left fin
+  _polyline([{x:0.36,y:0.60},{x:0.16,y:0.88},{x:0.36,y:0.72}], 0.02)
+    .forEach(p => pts.push(p));
+  // Right fin
+  _polyline([{x:0.64,y:0.60},{x:0.84,y:0.88},{x:0.64,y:0.72}], 0.02)
+    .forEach(p => pts.push(p));
+  // Nozzle + exhaust
+  for (let t = 0; t <= 1; t += 0.04) {
+    pts.push({ x: 0.5 + (Math.random() - 0.5) * 0.16 * (1 + t), y: 0.72 + t * 0.22 });
+  }
+  return fillToCount(normalize(pts, 0.04), n, 0.02);
+}
+
+// ---------------------------------------------------------------------------
+// Shared polyline sampler — densely interpolates a list of vertices
+// ---------------------------------------------------------------------------
+function _polyline(verts, density = 0.015) {
+  const pts = [];
+  for (let i = 0; i < verts.length - 1; i++) {
+    const a = verts[i], b = verts[i + 1];
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(2, Math.ceil(d / density));
+    for (let j = 0; j < steps; j++) {
+      const t = j / steps;
+      pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  pts.push(verts[verts.length - 1]);
+  return pts;
+}
+
+// ---------------------------------------------------------------------------
 // Lookup table + fuzzy matcher
 // ---------------------------------------------------------------------------
 export const PRESETS = {
@@ -250,6 +405,14 @@ export const PRESETS = {
   spiral:    spiralFormation,
   diamond:   diamondFormation,
   ruvon:     ruvonFormation,
+  star:      starFormation,
+  triangle:  triangleFormation,
+  cross:     crossFormation,
+  arrow:     arrowFormation,
+  hexagon:   hexagonFormation,
+  smiley:    smileyFormation,
+  lightning: lightningFormation,
+  rocket:    rocketFormation,
 };
 
 // Aliases and common variants
@@ -258,9 +421,16 @@ const ALIASES = {
   "flock": "birds", "flocking birds": "birds", "bird flock": "birds", "v formation": "birds",
   "pulsing heart": "heart", "love": "heart",
   "cascading waterfall": "waterfall", "cascade": "waterfall", "falling water": "waterfall",
-  "helix": "spiral", "swirl": "spiral",
-  "rhombus": "diamond", "square": "diamond",
-  "logo": "ruvon", "r": "ruvon",
+  "helix": "spiral", "swirl": "spiral", "galaxy": "spiral", "vortex": "spiral",
+  "rhombus": "diamond", "gem": "diamond",
+  "logo": "ruvon",
+  "five pointed star": "star", "5 point star": "star", "shooting star": "star",
+  "plus": "cross", "plus sign": "cross", "swiss cross": "cross",
+  "right arrow": "arrow", "pointer": "arrow",
+  "pentagon": "hexagon", "hex": "hexagon",
+  "happy face": "smiley", "smile": "smiley", "emoji": "smiley",
+  "bolt": "lightning", "thunder": "lightning", "lightning bolt": "lightning",
+  "spaceship": "rocket", "space rocket": "rocket",
 };
 
 /** Levenshtein distance for fuzzy matching */
@@ -287,43 +457,98 @@ function levenshtein(a, b) {
  * @param {number} n      — number of drones
  * @returns Array<{x, y}> normalized [0, 1] coordinates
  */
+// Detect if a string is emoji-only (no ASCII printable characters).
+// A lone period "." or "?" is NOT emoji — only Unicode codepoints above U+00FF qualify.
+function isEmojiOnly(text) {
+  const stripped = text.replace(/[\u200D\uFE0E\uFE0F]/g, "").trim();
+  if (!stripped) return false;
+  // Reject anything that contains ASCII printable chars (0x20–0x7E)
+  if (/[\x20-\x7E]/.test(stripped)) return false;
+  // Must contain at least one actual emoji / high codepoint
+  return /[\u{100}-\u{10FFFF}]/u.test(stripped);
+}
+
+/**
+ * Rescale sampled points so they fill [margin, 1-margin] × [margin, 1-margin].
+ * Each axis is normalised independently — this guarantees the formation always
+ * uses the full canvas regardless of the original glyph aspect ratio or font metrics.
+ */
+function rescalePts(pts, margin = 0.04) {
+  if (pts.length === 0) return pts;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const spanX = maxX - minX || 1e-6;
+  const spanY = maxY - minY || 1e-6;
+  const available = 1 - 2 * margin;
+  // Independent scale per axis — both always fill [margin, 1-margin]
+  const scaleX = available / spanX;
+  const scaleY = available / spanY;
+  const offX = margin;
+  const offY = margin;
+  return pts.map(p => ({
+    x: offX + (p.x - minX) * scaleX,
+    y: offY + (p.y - minY) * scaleY,
+  }));
+}
+
 export function textFormation(text, n) {
-  const W = 1200, H = 300;
+  const emoji = isEmojiOnly(text);
+
+  // Use a large canvas so font rasterisation has full resolution.
+  // Aspect ratio: emoji → square; text → wide letterbox.
+  const W = emoji ? 512 : 1200;
+  const H = emoji ? 512 : 320;
+
   const canvas = document.createElement("canvas");
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d");
 
-  // White background
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, W, H);
+  // Transparent background — sample alpha channel so both text and emoji work
+  ctx.clearRect(0, 0, W, H);
 
-  // Auto-size font to fill canvas width
-  let fontSize = 220;
-  ctx.font = `bold ${fontSize}px monospace`;
-  while (ctx.measureText(text).width > W * 0.94 && fontSize > 18) {
+  // Emoji need a colour-emoji font stack; text uses monospace for crisp strokes
+  const fontFamily = emoji
+    ? `"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`
+    : `monospace`;
+
+  // Start large and shrink until the glyph fits the canvas width
+  let fontSize = emoji ? Math.min(W, H) * 0.85 : 220;
+  const makeFontStr = () => emoji
+    ? `${fontSize}px ${fontFamily}`
+    : `bold ${fontSize}px ${fontFamily}`;
+  ctx.font = makeFontStr();
+  while (ctx.measureText(text).width > W * 0.92 && fontSize > 18) {
     fontSize -= 4;
-    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.font = makeFontStr();
   }
 
-  // Render black text centred
+  // Render centred
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, W / 2, H / 2);
 
-  // Sample dark pixels — adaptive step targets ~6× more candidates than n
+  // Sample occupied pixels via alpha — works for dark text AND colour emoji
   const data = ctx.getImageData(0, 0, W, H).data;
   const step = Math.max(1, Math.floor(Math.sqrt((W * H) / (n * 6))));
-  const pts = [];
+  const raw = [];
   for (let y = 0; y < H; y += step)
     for (let x = 0; x < W; x += step)
-      if ((data[(y * W + x) * 4] ?? 255) < 128)
-        pts.push({ x: x / W, y: y / H });
+      if ((data[(y * W + x) * 4 + 3] ?? 0) > 40)  // alpha > ~16%
+        raw.push({ x: x / W, y: y / H });
 
-  // Fallback to circle if text produced no pixels (e.g. empty string)
-  if (pts.length === 0) return circleFormation(n);
+  // Fallback to circle if nothing rendered (e.g. unsupported emoji on this OS)
+  if (raw.length === 0) return circleFormation(n);
 
-  // Tight jitter so letter shapes stay legible
+  // Normalise bounding box → fill canvas evenly regardless of font metric padding
+  const pts = rescalePts(raw, emoji ? 0.05 : 0.03);
+
+  // Tight jitter so letter/shape strokes stay legible
   return fillToCount(pts, n, 0.002);
 }
 

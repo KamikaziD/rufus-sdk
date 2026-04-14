@@ -267,8 +267,22 @@ canvas { display: block; width: 100%; height: 100%; }
           Nemotron<span>2.7 GB · paged</span>
         </button>
       </div>
+      <button class="model-btn" id="btn-ollama" style="width:100%;text-align:left;padding:6px 8px">
+        ⚡ Ollama (local)<span>native · any model</span>
+      </button>
+      <div id="ollama-row" style="display:none;flex-direction:column;gap:4px">
+        <input id="ollama-model-input" type="text" style="
+          width:100%;padding:6px 8px;background:#101827;border:1px solid #4a7bc4;
+          border-radius:6px;color:#e0e6ef;font-size:11px;outline:none;font-family:monospace"
+          placeholder="model name (e.g. nemotron-3-nano:4b)"
+          value="nemotron-3-nano:4b"/>
+        <div style="font-size:9px;color:#4a607a">
+          Run: <code style="color:#6a9fd4">OLLAMA_ORIGINS=* ollama serve</code>
+        </div>
+      </div>
       <div id="model-status"></div>
       <div id="token-stream"></div>
+      <button id="btn-clear-cache" class="sim-btn" style="font-size:10px">🗑 Clear LLM Cache</button>
     </div>
 
     <!-- Simulation -->
@@ -347,6 +361,7 @@ let animFrame = null;
 let partitioned = false;
 let meshBrain = null;
 let _toastTimer;
+let _computeNodeCount = 1;
 let _physicsActive = true;   // false when this tab is a mesh follower
 let isSovereignLocal = true; // updated by READY / ELECTION messages
 
@@ -358,6 +373,314 @@ let _pendingIntentText = null;
 
 // Shared compute mesh — maps commandBrain reqId → mesh task_id for shards
 const _shardCallbacks = new Map();
+
+// ── wllama main-thread (Tier-2 LLM) ──────────────────────────────────────────
+const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/index.js";
+const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/";
+const WLLAMA_PATHS = {
+  "single-thread/wllama.wasm": WLLAMA_BASE + "single-thread/wllama.wasm",
+  "multi-thread/wllama.wasm":  WLLAMA_BASE + "multi-thread/wllama.wasm",
+};
+const MODEL_CONFIGS = {
+  "SmolLM2-135M": {
+    repo: "bartowski/SmolLM2-135M-Instruct-GGUF",
+    file: "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    ramMb: 88,
+  },
+  "Qwen2.5-0.5B": {
+    repo: "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+    file: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+    ramMb: 395,
+  },
+  "Nemotron-Mini-4B": {
+    repo: "bartowski/Nemotron-Mini-4B-Instruct-GGUF",
+    file: "Nemotron-Mini-4B-Instruct-Q4_K_M.gguf",
+    ramMb: 2700,
+  },
+};
+const SYSTEM_PROMPT =
+`You are a drone swarm controller. Reply with a single JSON object and nothing else.
+
+Valid responses:
+{"action":"formation","preset":"NAME"}  where NAME is one of: circle heart horse birds waterfall spiral diamond ruvon star triangle cross arrow hexagon smiley lightning rocket
+{"action":"text","content":"WORD"}  to spell a word with drones
+{"action":"text","content":"EMOJI"}  to form any object/animal as an emoji silhouette
+{"action":"scatter"}
+{"action":"recover"}
+
+Q: write HELLO
+A: {"action":"text","content":"HELLO"}
+Q: make a circle
+A: {"action":"formation","preset":"circle"}
+Q: draw a hat
+A: {"action":"text","content":"🎩"}
+Q: show a dragon
+A: {"action":"text","content":"🐉"}
+Q: horse
+A: {"action":"formation","preset":"horse"}
+Q: scatter
+A: {"action":"scatter"}
+Q:`;
+
+let _wllamaClass = null;
+let _wllama = null;
+let _wllama_loaded_model = null;
+let _activeModel = "SmolLM2-135M";
+let _useOllama = false;
+let _ollamaModel = "nemotron-3-nano:4b";
+let _modelMutex = Promise.resolve();
+const _textDecoder = new TextDecoder();
+
+// Clear all OPFS files (wllama cache lives here)
+async function clearWllamaCache() {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const names = [];
+    for await (const [name] of root.entries()) names.push(name);
+    await Promise.all(names.map(n => root.removeEntry(n, { recursive: true }).catch(() => {})));
+    console.log(`[wllama] OPFS cache cleared (${names.length} entries removed)`);
+    return names.length;
+  } catch (e) {
+    console.warn("[wllama] Cache clear failed:", e);
+    return 0;
+  }
+}
+
+async function ensureWllama(modelKey, { _retry } = {}) {
+  if (!_wllamaClass) {
+    const mod = await import(WLLAMA_CDN);
+    _wllamaClass = mod.Wllama;
+  }
+  if (_wllama && _wllama_loaded_model === modelKey) return;
+
+  // Evict old model
+  if (_wllama) {
+    try { await _wllama.exit(); } catch (_) {}
+    _wllama = null;
+    _wllama_loaded_model = null;
+  }
+
+  const cfg = MODEL_CONFIGS[modelKey] ?? MODEL_CONFIGS["SmolLM2-135M"];
+  const modelStatusEl = document.getElementById("model-status");
+  modelStatusEl.textContent = `⬇ Loading ${modelKey} (${cfg.ramMb} MB)…`;
+
+  _wllama = new _wllamaClass(WLLAMA_PATHS, {
+    logger: { debug: () => {}, log: () => {}, warn: console.warn, error: console.error },
+  });
+
+  try {
+    await _wllama.loadModelFromHF(cfg.repo, cfg.file, {
+      n_ctx: 4096,      // enough for system prompt + chat template overhead
+      progressCallback: ({ loaded, total }) => {
+        if (total > 0) {
+          modelStatusEl.textContent = `⬇ ${modelKey} ${Math.round(loaded / total * 100)}%`;
+        }
+      },
+    });
+  } catch (err) {
+    const isCorrupt = err?.message?.includes("magic") || err?.message?.includes("ftell")
+      || err?.message?.includes("Invalid");
+    if (isCorrupt && !_retry) {
+      console.warn("[wllama] Corrupt cache detected — clearing OPFS and retrying…", err.message);
+      modelStatusEl.textContent = "⚠ Corrupt cache — clearing and retrying…";
+      try { await _wllama.exit(); } catch (_) {}
+      _wllama = null;
+      await clearWllamaCache();
+      return ensureWllama(modelKey, { _retry: true });
+    }
+    throw err;
+  }
+
+  _wllama_loaded_model = modelKey;
+  modelStatusEl.textContent = `✓ ${modelKey} loaded`;
+  meshBrain.postMessage({ type: "MODEL_LOADED" });
+}
+
+function parseCommandMain(raw) {
+  // Strip markdown code fences if the model wrapped its output
+  const cleaned = raw.replace(/```[a-z]*\n?/gi, "").trim();
+  const match = cleaned.match(/\{[^}]+\}/s);
+  if (!match) return null;
+  try {
+    const cmd = JSON.parse(match[0]);
+    // Normalise action aliases small models invent
+    if (cmd?.action === "response" || cmd?.action === "write" || cmd?.action === "display") {
+      cmd.action = "text";
+    }
+    // Fix BPE tokenizer space artifacts: "H I"→"HI", "Ha nd"→"Hand", "R U V O N"→"RUVON"
+    // If ALL space-separated segments are ≤3 chars, treat spaces as BPE artifacts and join.
+    if (cmd?.content && typeof cmd.content === "string") {
+      const segs = cmd.content.trim().split(" ");
+      if (segs.length > 1 && segs.every(s => s.length <= 3)) {
+        cmd.content = segs.join("");
+      } else {
+        cmd.content = cmd.content.trim();
+      }
+    }
+    return cmd;
+  } catch (_) { return null; }
+}
+
+// ---------------------------------------------------------------------------
+// Ollama backend (http://localhost:11434) — streaming chat completion
+// ---------------------------------------------------------------------------
+async function runWithOllama(text) {
+  const tokenStreamEl = document.getElementById("token-stream");
+  const modelStatusEl = document.getElementById("model-status");
+  modelStatusEl.textContent = `⟳ Ollama (${_ollamaModel})…`;
+  tokenStreamEl.textContent = "";
+
+  const t0 = performance.now();
+  const resp = await fetch("http://localhost:11434/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: _ollamaModel,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user",   content: text },
+      ],
+      stream: true,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Ollama HTTP ${resp.status}: ${body.slice(0, 200)}`);
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let accumulated = "";
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();             // keep incomplete last line
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const data = JSON.parse(line);
+        const piece = data.message?.content ?? "";
+        if (piece) { accumulated += piece; tokenStreamEl.textContent += piece; }
+      } catch (_) {}
+    }
+  }
+
+  const elapsed = Math.round(performance.now() - t0);
+  console.log(`[ollama] Raw output (${elapsed}ms):`, accumulated);
+  const cmd = parseCommandMain(accumulated);
+  console.log("[ollama] Parsed command:", cmd);
+  tokenStreamEl.textContent = "";
+  modelStatusEl.textContent = `✓ Ollama ${elapsed}ms`;
+  return { result: accumulated, cmd, elapsed };
+}
+
+async function runWllamaMainThread(text, reqId, miniLmFallback, isShardRequest, taskId) {
+  const modelStatusEl = document.getElementById("model-status");
+  const tokenStreamEl = document.getElementById("token-stream");
+  const statusEl = document.getElementById("intent-status");
+
+  _modelMutex = _modelMutex.then(async () => {
+    let cmd = null, elapsed = 0;
+    try {
+      if (_useOllama) {
+        // ── Ollama path ────────────────────────────────────────────────────
+        ({ cmd, elapsed } = await runWithOllama(text));
+      } else {
+        // ── wllama WASM path ───────────────────────────────────────────────
+        await ensureWllama(_activeModel);
+        modelStatusEl.textContent = "⟳ Thinking…";
+        tokenStreamEl.textContent = "";
+
+        console.log(`[wllama] Prompt: "${text}" (model: ${_activeModel})`);
+        const t0 = performance.now();
+
+        const result = await _wllama.createChatCompletion(
+          [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user",   content: text },
+          ],
+          {
+            nPredict: 50,       // JSON is short — cap to speed up generation
+            temperature: 0.05,  // near-deterministic for structured output
+            onNewToken: (_tok, piece) => {
+              const s = piece instanceof Uint8Array
+                ? _textDecoder.decode(piece, { stream: true })
+                : String(piece);
+              tokenStreamEl.textContent += s;
+            },
+          }
+        );
+
+        elapsed = Math.round(performance.now() - t0);
+        console.log(`[wllama] Raw output (${elapsed}ms):`, result);
+        tokenStreamEl.textContent = "";
+        cmd = parseCommandMain(result);
+        console.log("[wllama] Parsed command:", cmd);
+      }
+
+      const action_obj = cmd ?? { action: "formation", preset: miniLmFallback?.preset ?? "circle" };
+
+      if (isShardRequest) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj,
+          preset: action_obj.preset ?? null,
+          confidence: cmd ? 1 : (miniLmFallback?.confidence ?? 0),
+        });
+        return;
+      }
+
+      const inputEl = document.getElementById("intent-input");
+      const userText = inputEl.value.trim();
+      const backend = _useOllama ? "Ollama" : "LLM";
+      if (action_obj.action === "formation" && action_obj.preset) {
+        statusEl.textContent = `✓ "${userText}" → ${action_obj.preset} (${backend}, ${elapsed}ms)`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      } else {
+        statusEl.textContent = `✓ "${userText}" → ${action_obj.action}${action_obj.content ? ": " + action_obj.content : ""} (${backend}, ${elapsed}ms)`;
+      }
+      handleCommand(action_obj);
+    } catch (err) {
+      console.error("[llm-main]", err);
+
+      // wllama WASM crash (RuntimeError: unreachable) — evict so next call reloads
+      const isWasmCrash = err?.message?.includes("unreachable") || err?.message?.includes("RuntimeError");
+      if (isWasmCrash && _wllama) {
+        console.warn("[wllama] WASM crashed — evicting model for next call");
+        try { await _wllama.exit(); } catch (_) {}
+        _wllama = null;
+        _wllama_loaded_model = null;
+      }
+
+      const isOllamaErr = _useOllama && (err?.message?.includes("fetch") || err?.message?.includes("Ollama"));
+      if (isOllamaErr) {
+        modelStatusEl.textContent = "⚠ Ollama unreachable — is it running?";
+      } else {
+        modelStatusEl.textContent = "⚠ LLM error — using MiniLM fallback";
+      }
+
+      const fallback = { action: "formation", preset: miniLmFallback?.preset ?? "circle" };
+      if (isShardRequest) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj: fallback,
+          preset: fallback.preset,
+          confidence: miniLmFallback?.confidence ?? 0,
+        });
+      } else {
+        statusEl.textContent = `✓ "${text}" → ${fallback.preset} (fallback)`;
+        handleCommand(fallback);
+      }
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Init
@@ -444,7 +767,7 @@ function loop() {
   if (_physicsActive) {
     for (const drone of drones) {
       drone.score = scoreDrone(drone);
-      stepDrone(drone, drones, w, h);
+      stepDrone(drone, drones, w, h, currentPreset);
     }
   }
   renderFrame(drones, sovereignId);
@@ -482,9 +805,20 @@ function handleCommand(cmd) {
     case "formation":
       applyFormation(cmd.preset ?? "circle");
       break;
-    case "text":
-      if (cmd.content) applyTextFormation(cmd.content);
+    case "text": {
+      const content = cmd.content?.trim();
+      if (!content) break;
+      // Guard against bad model output: single ASCII punctuation (e.g. "." "?" "!")
+      // is not a valid emoji or word — fall back to circle formation
+      if (content.length <= 2 && /^[\x20-\x7E]+$/.test(content) && !/[A-Za-z0-9]/.test(content)) {
+        console.warn(`[handleCommand] Bad model content "${content}" — falling back to circle`);
+        toast("(model output unclear — try again)");
+        applyFormation("circle");
+        break;
+      }
+      applyTextFormation(content);
       break;
+    }
     case "scatter":
       scatterDrones();
       break;
@@ -517,10 +851,20 @@ function applyTextFormation(content) {
   // textFormation runs on main thread where document/canvas is available
   const pts = textFormation(content, drones.length);
   const targets = pts.map(pt => ({ x: pt.x * w, y: pt.y * h }));
+  if (pts.length > 0) {
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const xRange = `[${Math.min(...xs).toFixed(2)}, ${Math.max(...xs).toFixed(2)}]`;
+    const yRange = `[${Math.min(...ys).toFixed(2)}, ${Math.max(...ys).toFixed(2)}]`;
+    console.log(`[text] "${content}" → ${pts.length} targets, canvas ${w}×${h}, x=${xRange} y=${yRange}`);
+  } else {
+    console.warn(`[text] "${content}" → EMPTY (falling back to circle)`);
+  }
   assignFormationTargets(drones, targets);
   currentPreset = "text";
   meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: "text" });
-  toast(`Writing: "${content}"`);
+  // Distinguish emoji shapes from text display in the toast
+  const isEmoji = content.length <= 4 && !/[A-Za-z0-9]/.test(content);
+  toast(isEmoji ? `Forming: ${content}` : `Writing: "${content}"`);
 }
 
 function scatterDrones() {
@@ -646,7 +990,6 @@ function updateStats() {
   document.getElementById("stat-saf").textContent    = safTotal;
 }
 
-let _computeNodeCount = 1;
 function updateComputeNodes(peers) {
   const capable = peers.filter(p => p.tier >= 2 && p.cpu_load < 0.8).length;
   _computeNodeCount = 1 + capable;
@@ -683,33 +1026,30 @@ function handleCommandMsg(evt) {
       }
       break;
 
-    // LLM model lifecycle
-    case "MODEL_LOADING":
-      modelStatusEl.textContent = `⬇ Loading ${msg.model} (${msg.ramMb} MB)…`;
-      tokenStreamEl.textContent = "";
-      break;
-    case "MODEL_PROGRESS": {
-      const pct = msg.total > 0 ? Math.round(msg.loaded / msg.total * 100) : 0;
-      modelStatusEl.textContent = `⬇ ${msg.model} ${pct}%`;
+    // command_brain escalates to main-thread wllama when confidence is low or trigger word matched
+    case "ESCALATE": {
+      const isShardRequest = _shardCallbacks.has(msg.reqId);
+      const taskId = isShardRequest ? _shardCallbacks.get(msg.reqId) : null;
+      if (isShardRequest) _shardCallbacks.delete(msg.reqId);
+      runWllamaMainThread(msg.text, msg.reqId, msg.miniLmFallback, isShardRequest, taskId);
       break;
     }
-    case "MODEL_READY":
-      modelStatusEl.textContent = `✓ ${msg.model} loaded`;
-      // Signal mesh so it can boost our sovereignty score
-      meshBrain.postMessage({ type: "MODEL_LOADED" });
+
+    // command_brain forwards model switch request (from SET_MODEL it received)
+    case "MODEL_SWITCH_REQUEST": {
+      if (!_useOllama) {
+        _activeModel = msg.model;
+        if (_wllama && _wllama_loaded_model !== _activeModel) {
+          const toExit = _wllama;
+          _wllama = null;
+          _wllama_loaded_model = null;
+          toExit.exit().catch(() => {});
+        }
+        modelStatusEl.textContent = `Model: ${_activeModel}`;
+        tokenStreamEl.textContent = "";
+      }
       break;
-    case "MODEL_THINKING":
-      modelStatusEl.textContent = "⟳ Thinking…";
-      tokenStreamEl.textContent = "";
-      break;
-    case "TOKEN":
-      tokenStreamEl.textContent += msg.piece;
-      break;
-    case "MODEL_SWITCHED":
-      toast(`Brain: ${msg.model}`);
-      modelStatusEl.textContent = `Model: ${msg.model}`;
-      tokenStreamEl.textContent = "";
-      break;
+    }
 
     // Resolved command — apply it
     case "COMMAND": {
@@ -894,12 +1234,66 @@ document.getElementById("tog-sovereign").addEventListener("change", e => {
   setOverlayVisible(overlayScore || overlaySOV);
 });
 
-// Model selector
-document.querySelectorAll(".model-btn").forEach(btn => {
+// Clear LLM Cache button
+document.getElementById("btn-clear-cache").addEventListener("click", async () => {
+  if (_wllama) {
+    try { await _wllama.exit(); } catch (_) {}
+    _wllama = null;
+    _wllama_loaded_model = null;
+  }
+  const n = await clearWllamaCache();
+  document.getElementById("model-status").textContent = n > 0 ? `✓ Cache cleared (${n} files)` : "Cache already empty";
+  toast("LLM cache cleared");
+});
+
+// Ollama button
+document.getElementById("btn-ollama").addEventListener("click", () => {
+  document.querySelectorAll(".model-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("btn-ollama").classList.add("active");
+  _useOllama = true;
+  _ollamaModel = document.getElementById("ollama-model-input").value.trim() || "qwen2.5:0.5b";
+  document.getElementById("ollama-row").style.display = "flex";
+  document.getElementById("model-status").textContent = `Ollama: ${_ollamaModel}`;
+  document.getElementById("token-stream").textContent = "";
+  // Evict any loaded wllama model to free RAM
+  if (_wllama) {
+    const toExit = _wllama; _wllama = null; _wllama_loaded_model = null;
+    toExit.exit().catch(() => {});
+  }
+  toast(`Brain: Ollama (${_ollamaModel})`);
+});
+
+// Ollama model name input — update _ollamaModel on change
+document.getElementById("ollama-model-input").addEventListener("change", () => {
+  _ollamaModel = document.getElementById("ollama-model-input").value.trim() || "qwen2.5:0.5b";
+  if (_useOllama) {
+    document.getElementById("model-status").textContent = `Ollama: ${_ollamaModel}`;
+    toast(`Ollama model: ${_ollamaModel}`);
+  }
+});
+
+// Model selector — update active model on both main thread (wllama) and worker (MiniLM)
+document.querySelectorAll("#model-selector .model-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".model-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("btn-ollama").classList.remove("active");
     btn.classList.add("active");
-    commandBrain.postMessage({ type: "SET_MODEL", model: btn.dataset.model });
+    _useOllama = false;
+    document.getElementById("ollama-row").style.display = "none";
+    const model = btn.dataset.model;
+    if (_activeModel !== model) {
+      _activeModel = model;
+      if (_wllama && _wllama_loaded_model !== model) {
+        const toExit = _wllama;
+        _wllama = null;
+        _wllama_loaded_model = null;
+        toExit.exit().catch(() => {});
+      }
+      document.getElementById("model-status").textContent = `Model: ${model}`;
+      document.getElementById("token-stream").textContent = "";
+      toast(`Brain: ${model}`);
+    }
+    commandBrain.postMessage({ type: "SET_MODEL", model });
   });
 });
 
@@ -935,6 +1329,17 @@ document.getElementById("btn-join-mesh").addEventListener("click", () => {
     meshBrain.postMessage({ type: "INIT", drone_count: droneCount, group_key: code, is_founder: false });
   }, 200);
 });
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
 
 // Resize
 window.addEventListener("resize", () => {

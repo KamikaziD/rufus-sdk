@@ -97,10 +97,22 @@ function normalize2(vx, vy) {
 // ---------------------------------------------------------------------------
 // Per-drone physics step
 // ---------------------------------------------------------------------------
-export function stepDrone(drone, allDrones, canvasW, canvasH) {
+export function stepDrone(drone, allDrones, canvasW, canvasH, preset) {
   if (drone.status === "offline") return;
 
   const { x, y, vx, vy } = drone;
+
+  // Text mode: drones pack tightly into letter strokes — standard SEP_RADIUS (28px)
+  // is larger than the average inter-drone gap (~11px for 300 drones in text), so
+  // every drone pushes every neighbour away, defeating formation attraction.
+  // Solution: shrink sep radius, mute flocking, amplify formation pull.
+  const textMode = preset === "text";
+  const sepRadius = textMode ? 14  : SEP_RADIUS;
+  const sepWeight = textMode ? 0.3 : SEP_WEIGHT;
+  const aliWeight = textMode ? 0.0 : ALI_WEIGHT;
+  const cohWeight = textMode ? 0.0 : COH_WEIGHT;
+  const formWeight = textMode ? 4.5 : FORM_WEIGHT;
+  const maxSpd    = textMode ? 5.0 : MAX_SPEED;
 
   // Build neighbour lists
   const sepNeighbours = [],
@@ -109,7 +121,7 @@ export function stepDrone(drone, allDrones, canvasW, canvasH) {
   for (const other of allDrones) {
     if (other.id === drone.id || other.status === "offline") continue;
     const d = dist(drone, other);
-    if (d < SEP_RADIUS) sepNeighbours.push({ other, d });
+    if (d < sepRadius) sepNeighbours.push({ other, d });
     if (d < ALI_RADIUS) aliNeighbours.push(other);
     if (d < COH_RADIUS) cohNeighbours.push(other);
   }
@@ -122,17 +134,17 @@ export function stepDrone(drone, allDrones, canvasW, canvasH) {
     let sx = 0,
       sy = 0;
     for (const { other, d } of sepNeighbours) {
-      const weight = (SEP_RADIUS - d) / SEP_RADIUS; // stronger when closer
+      const weight = (sepRadius - d) / sepRadius; // stronger when closer
       sx += (x - other.x) * weight;
       sy += (y - other.y) * weight;
     }
     const [nx, ny] = normalize2(sx, sy);
-    ax += nx * SEP_WEIGHT * MAX_FORCE;
-    ay += ny * SEP_WEIGHT * MAX_FORCE;
+    ax += nx * sepWeight * MAX_FORCE;
+    ay += ny * sepWeight * MAX_FORCE;
   }
 
   // 2. Alignment — steer toward average velocity of neighbours
-  if (aliNeighbours.length > 0) {
+  if (aliWeight > 0 && aliNeighbours.length > 0) {
     let avgVx = 0,
       avgVy = 0;
     for (const o of aliNeighbours) {
@@ -142,12 +154,12 @@ export function stepDrone(drone, allDrones, canvasW, canvasH) {
     avgVx /= aliNeighbours.length;
     avgVy /= aliNeighbours.length;
     const [nvx, nvy] = normalize2(avgVx - vx, avgVy - vy);
-    ax += nvx * ALI_WEIGHT * MAX_FORCE;
-    ay += nvy * ALI_WEIGHT * MAX_FORCE;
+    ax += nvx * aliWeight * MAX_FORCE;
+    ay += nvy * aliWeight * MAX_FORCE;
   }
 
   // 3. Cohesion — steer toward centre of mass of neighbours
-  if (cohNeighbours.length > 0) {
+  if (cohWeight > 0 && cohNeighbours.length > 0) {
     let cx = 0,
       cy = 0;
     for (const o of cohNeighbours) {
@@ -157,8 +169,8 @@ export function stepDrone(drone, allDrones, canvasW, canvasH) {
     cx /= cohNeighbours.length;
     cy /= cohNeighbours.length;
     const [nx, ny] = normalize2(cx - x, cy - y);
-    ax += nx * COH_WEIGHT * MAX_FORCE;
-    ay += ny * COH_WEIGHT * MAX_FORCE;
+    ax += nx * cohWeight * MAX_FORCE;
+    ay += ny * cohWeight * MAX_FORCE;
   }
 
   // 4. Formation attraction — steer toward assigned target
@@ -168,17 +180,17 @@ export function stepDrone(drone, allDrones, canvasW, canvasH) {
   if (tdist > 1) {
     const scale = Math.min(tdist / 60, 1); // ramp up force with distance
     const [nx, ny] = normalize2(tdx, tdy);
-    ax += nx * FORM_WEIGHT * MAX_FORCE * scale;
-    ay += ny * FORM_WEIGHT * MAX_FORCE * scale;
+    ax += nx * formWeight * MAX_FORCE * scale;
+    ay += ny * formWeight * MAX_FORCE * scale;
   }
 
   // Clamp total acceleration
-  [drone.ax, drone.ay] = limit(ax, ay, MAX_FORCE * 3);
+  [drone.ax, drone.ay] = limit(ax, ay, MAX_FORCE * 4);
 
   // Integrate velocity
   let nvx = vx + drone.ax,
     nvy = vy + drone.ay;
-  [nvx, nvy] = limit(nvx * DAMPING, nvy * DAMPING, MAX_SPEED);
+  [nvx, nvy] = limit(nvx * DAMPING, nvy * DAMPING, maxSpd);
   drone.vx = nvx;
   drone.vy = nvy;
 

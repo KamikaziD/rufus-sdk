@@ -76,8 +76,18 @@ class CompressedHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Encoding", encoding)
         self.send_header("Content-Length", str(len(compressed)))
         self.send_header("Vary", "Accept-Encoding")
-        self.end_headers()
+        self.end_headers()  # _send_security_headers called here via override
         self.wfile.write(compressed)
+
+    def _send_security_headers(self):
+        """Required for SharedArrayBuffer → wllama multi-thread WASM (2-4× faster)."""
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
+
+    def end_headers(self):
+        self._send_security_headers()
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         # Suppress 200/304 noise; still show errors

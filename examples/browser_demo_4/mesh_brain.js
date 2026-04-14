@@ -282,7 +282,7 @@ function processIncomingMsg(msg) {
         _assignNext();
       }
       if (msg.submitter_pod_id === POD_ID) {
-        self.postMessage({ type: "TASK_COMPLETED", ...msg });
+        self.postMessage({ ...msg, type: "TASK_COMPLETED" });
       }
       break;
     }
