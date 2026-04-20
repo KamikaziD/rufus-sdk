@@ -2,7 +2,7 @@
 
 ## 📊 Discovery Summary
 
-Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmProjects/rufus/confucius/`:
+Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmProjects/ruvon/confucius/`:
 
 - ✅ Complete Celery app with auto-discovery
 - ✅ 8 production Celery tasks (async, parallel, sub-workflows, HTTP, scheduled)
@@ -11,7 +11,7 @@ Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmPro
 - ✅ Event publishing system (Redis Pub/Sub + Streams)
 - ✅ 5 database migrations (production schema)
 - ✅ Complete persistence layer with encryption
-- ✅ All step types (already similar to Rufus)
+- ✅ All step types (already similar to Ruvon)
 
 ---
 
@@ -19,18 +19,18 @@ Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmPro
 
 ### Phase 1: Core Celery Infrastructure (2-3 hours)
 
-**Files to Extract →  Rufus:**
+**Files to Extract →  Ruvon:**
 
 1. **`confucius/src/confucius/celery_app.py`** (144 lines)
-   - **→ `src/rufus/celery_app.py`** (new)
+   - **→ `src/ruvon/celery_app.py`** (new)
    - **Changes needed:**
-     - Replace `confucius.tasks` → `rufus.tasks`
-     - Replace `confucius.worker_registry` → `rufus.worker_registry`
-     - Replace `confucius.events` → `rufus.events`
+     - Replace `confucius.tasks` → `ruvon.tasks`
+     - Replace `confucius.worker_registry` → `ruvon.worker_registry`
+     - Replace `confucius.events` → `ruvon.events`
      - Update import paths
 
 2. **`confucius/src/confucius/tasks.py`** (545 lines)
-   - **→ `src/rufus/tasks.py`** (new)
+   - **→ `src/ruvon/tasks.py`** (new)
    - **Extract these 8 tasks:**
      - `execute_http_request()` - HTTP polyglot steps
      - `resume_from_async_task()` - Async callback
@@ -41,18 +41,18 @@ Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmPro
      - `trigger_scheduled_workflow()` - Cron workflows
      - `poll_scheduled_workflows()` - Schedule polling
    - **Changes needed:**
-     - Update imports to use `rufus.*`
-     - Use `rufus.builder.WorkflowBuilder`
-     - Use `rufus.implementations.persistence.postgres`
+     - Update imports to use `ruvon.*`
+     - Use `ruvon.builder.WorkflowBuilder`
+     - Use `ruvon.implementations.persistence.postgres`
 
 3. **`confucius/src/confucius/worker_registry.py`** (97 lines)
-   - **→ `src/rufus/worker_registry.py`** (new)
+   - **→ `src/ruvon/worker_registry.py`** (new)
    - **Minimal changes:**
      - Update logger name
      - Already uses asyncpg directly (no Confucius dependencies)
 
 4. **`confucius/src/confucius/postgres_executor.py`** (120+ lines)
-   - **→ `src/rufus/postgres_executor.py`** (new)
+   - **→ `src/ruvon/postgres_executor.py`** (new)
    - **Why:** Solves "another operation in progress" errors with PostgreSQL
    - **No changes needed** - Pure utility module
 
@@ -60,7 +60,7 @@ Found **~5,000 lines** of production-ready Celery code in `/Users/kim/PycharmPro
 
 ### Phase 2: Celery Execution Provider (1 hour)
 
-**New File:** `src/rufus/implementations/execution/celery_executor.py`
+**New File:** `src/ruvon/implementations/execution/celery_executor.py`
 
 **Implementation:**
 ```python
@@ -70,7 +70,7 @@ Celery-based execution provider using production-tested task patterns.
 
 from typing import Dict, Any, Optional, List
 from celery import Celery, current_app
-from rufus.providers.execution import ExecutionProvider
+from ruvon.providers.execution import ExecutionProvider
 import logging
 
 logger = logging.getLogger(__name__)
@@ -93,10 +93,10 @@ class CeleryExecutionProvider(ExecutionProvider):
         user_input: Dict[str, Any]
     ) -> str:
         """Dispatch async step to Celery queue."""
-        from rufus.tasks import resume_from_async_task
+        from ruvon.tasks import resume_from_async_task
 
         # Import and execute function
-        from rufus.builder import WorkflowBuilder
+        from ruvon.builder import WorkflowBuilder
         func = WorkflowBuilder._import_from_string(function_path)
 
         # Execute sync (function itself is sync)
@@ -123,7 +123,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         context_dict: Dict[str, Any]
     ) -> List[str]:
         """Dispatch parallel tasks to Celery."""
-        from rufus.tasks import merge_and_resume_parallel_tasks
+        from ruvon.tasks import merge_and_resume_parallel_tasks
         from celery import group
 
         # Create task group
@@ -146,14 +146,14 @@ class CeleryExecutionProvider(ExecutionProvider):
 
     def _create_parallel_task(self, workflow_id, task_config, state_dict, context_dict):
         """Create a single parallel task signature."""
-        from rufus.builder import WorkflowBuilder
+        from ruvon.builder import WorkflowBuilder
 
         func = WorkflowBuilder._import_from_string(task_config['function_path'])
 
         # Return Celery signature
         from celery import signature
         return signature(
-            'rufus.tasks.execute_parallel_task_function',
+            'ruvon.tasks.execute_parallel_task_function',
             kwargs={
                 'function_path': task_config['function_path'],
                 'state_dict': state_dict,
@@ -171,7 +171,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         data_region: Optional[str] = None
     ) -> str:
         """Dispatch sub-workflow creation."""
-        from rufus.tasks import execute_sub_workflow
+        from ruvon.tasks import execute_sub_workflow
 
         result = execute_sub_workflow.apply_async(
             kwargs={
@@ -212,13 +212,13 @@ class CeleryExecutionProvider(ExecutionProvider):
 ```bash
 # Copy all 5 production migrations
 cp confucius/migrations/postgresql/001_init_postgresql_schema.sql \
-   src/rufus/alembic/versions/002_celery_support.sql
+   src/ruvon/alembic/versions/002_celery_support.sql
 
 cp confucius/migrations/postgresql/002_add_scheduled_workflows.sql \
-   src/rufus/alembic/versions/003_scheduled_workflows.sql
+   src/ruvon/alembic/versions/003_scheduled_workflows.sql
 
 cp confucius/migrations/postgresql/005_add_worker_registry.sql \
-   src/rufus/alembic/versions/004_worker_registry.sql
+   src/ruvon/alembic/versions/004_worker_registry.sql
 ```
 
 **What they add:**
@@ -240,7 +240,7 @@ Create Alembic migration that runs these SQL files.
 
 **Extract:** `confucius/src/confucius/events.py` (150+ lines)
 
-**→** `src/rufus/events.py` (new)
+**→** `src/ruvon/events.py` (new)
 
 **What it provides:**
 - Redis Streams + Pub/Sub dual publishing
@@ -251,7 +251,7 @@ Create Alembic migration that runs these SQL files.
 **Integration:**
 ```python
 # In workflow.py
-from rufus.events import event_publisher
+from ruvon.events import event_publisher
 
 # Publish workflow events
 await event_publisher.publish_event(
@@ -267,7 +267,7 @@ await event_publisher.publish_event(
 
 **Extract:** `confucius/src/confucius/persistence_postgres.py`
 
-**→** Compare with `src/rufus/implementations/persistence/postgres.py`
+**→** Compare with `src/ruvon/implementations/persistence/postgres.py`
 
 **What Confucius adds:**
 - Encryption-at-rest support
@@ -280,7 +280,7 @@ await event_publisher.publish_event(
 **Strategy:**
 1. Compare both files
 2. Extract missing methods from Confucius
-3. Add to Rufus PostgresPersistenceProvider
+3. Add to Ruvon PostgresPersistenceProvider
 4. Mark encryption as optional feature
 
 ---
@@ -311,9 +311,9 @@ all = [
 ## 📁 File Structure After Extraction
 
 ```
-rufus-sdk/
+ruvon-sdk/
 ├── src/
-│   └── rufus/
+│   └── ruvon/
 │       ├── celery_app.py              # ← From Confucius
 │       ├── tasks.py                   # ← From Confucius (8 tasks)
 │       ├── worker_registry.py         # ← From Confucius
@@ -339,16 +339,16 @@ rufus-sdk/
 ```bash
 # This file has NO Confucius dependencies
 cp confucius/src/confucius/worker_registry.py \
-   src/rufus/worker_registry.py
+   src/ruvon/worker_registry.py
 
 # Update logger name
-sed -i '' 's/confucius.worker_registry/rufus.worker_registry/g' \
-   src/rufus/worker_registry.py
+sed -i '' 's/confucius.worker_registry/ruvon.worker_registry/g' \
+   src/ruvon/worker_registry.py
 ```
 
 **Test:**
 ```python
-from rufus.worker_registry import WorkerRegistry
+from ruvon.worker_registry import WorkerRegistry
 import os
 
 db_url = os.environ['DATABASE_URL']
@@ -363,7 +363,7 @@ registry.register()
 
 ```bash
 cp confucius/src/confucius/postgres_executor.py \
-   src/rufus/postgres_executor.py
+   src/ruvon/postgres_executor.py
 
 # No changes needed - utility module
 ```
@@ -374,16 +374,16 @@ cp confucius/src/confucius/postgres_executor.py \
 
 ```bash
 cp confucius/src/confucius/tasks.py \
-   src/rufus/tasks.py
+   src/ruvon/tasks.py
 
 # Update imports
-sed -i '' 's/from confucius./from rufus./g' src/rufus/tasks.py
-sed -i '' 's/import confucius./import rufus./g' src/rufus/tasks.py
+sed -i '' 's/from confucius./from ruvon./g' src/ruvon/tasks.py
+sed -i '' 's/import confucius./import ruvon./g' src/ruvon/tasks.py
 ```
 
 **Manual updates needed:**
-1. Import `WorkflowBuilder` from `rufus.builder`
-2. Import `PostgresPersistenceProvider` from `rufus.implementations.persistence.postgres`
+1. Import `WorkflowBuilder` from `ruvon.builder`
+2. Import `PostgresPersistenceProvider` from `ruvon.implementations.persistence.postgres`
 3. Update `event_publisher` imports if using events
 
 ---
@@ -392,17 +392,17 @@ sed -i '' 's/import confucius./import rufus./g' src/rufus/tasks.py
 
 ```bash
 cp confucius/src/confucius/celery_app.py \
-   src/rufus/celery_app.py
+   src/ruvon/celery_app.py
 
 # Update imports
-sed -i '' 's/from confucius./from rufus./g' src/rufus/celery_app.py
-sed -i '' 's/import confucius./import rufus./g' src/rufus/celery_app.py
+sed -i '' 's/from confucius./from ruvon./g' src/ruvon/celery_app.py
+sed -i '' 's/import confucius./import ruvon./g' src/ruvon/celery_app.py
 ```
 
 **Also create root-level celery_app.py:**
 ```python
 # Root celery_app.py (for celery CLI)
-from src.rufus.celery_app import celery_app
+from src.ruvon.celery_app import celery_app
 
 __all__ = ['celery_app']
 ```
@@ -413,17 +413,17 @@ __all__ = ['celery_app']
 
 ```bash
 cp confucius/src/confucius/events.py \
-   src/rufus/events.py
+   src/ruvon/events.py
 
 # Update logger
-sed -i '' 's/confucius.events/rufus.events/g' src/rufus/events.py
+sed -i '' 's/confucius.events/ruvon.events/g' src/ruvon/events.py
 ```
 
 ---
 
 ### Step 6: Create Celery Execution Provider
 
-Create `src/rufus/implementations/execution/celery_executor.py` using code from Phase 2 above.
+Create `src/ruvon/implementations/execution/celery_executor.py` using code from Phase 2 above.
 
 ---
 
@@ -431,7 +431,7 @@ Create `src/rufus/implementations/execution/celery_executor.py` using code from 
 
 ```bash
 # Create Alembic migration that includes Confucius SQL
-cd src/rufus/alembic/versions
+cd src/ruvon/alembic/versions
 
 # Create new migration
 alembic revision -m "Add Celery support tables"
@@ -447,7 +447,7 @@ alembic revision -m "Add Celery support tables"
 
 ```python
 import asyncio
-from rufus.worker_registry import WorkerRegistry
+from ruvon.worker_registry import WorkerRegistry
 
 async def test_registry():
     registry = WorkerRegistry("postgresql://...")
@@ -461,10 +461,10 @@ asyncio.run(test_registry())
 ### Test 2: Async Task Execution
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.celery_executor import CeleryExecutionProvider
-from rufus.celery_app import celery_app
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.celery_executor import CeleryExecutionProvider
+from ruvon.celery_app import celery_app
 
 async def test_async_workflow():
     persistence = PostgresPersistenceProvider(db_url)
@@ -501,13 +501,13 @@ asyncio.run(test_async_workflow())
 
 ---
 
-## 📊 Comparison: Confucius vs Rufus Architecture
+## 📊 Comparison: Confucius vs Ruvon Architecture
 
-| Component | Confucius | Rufus | Action |
+| Component | Confucius | Ruvon | Action |
 |-----------|-----------|-------|--------|
-| **Core Engine** | `workflow.py` (step types) | `workflow.py` (similar) | ✅ Compare, enhance Rufus |
+| **Core Engine** | `workflow.py` (step types) | `workflow.py` (similar) | ✅ Compare, enhance Ruvon |
 | **Builder** | `workflow_loader.py` | `builder.py` | ✅ Already similar |
-| **Persistence** | `persistence_postgres.py` | `postgres.py` | ⚠️ Enhance Rufus with Confucius features |
+| **Persistence** | `persistence_postgres.py` | `postgres.py` | ⚠️ Enhance Ruvon with Confucius features |
 | **Celery Tasks** | `tasks.py` (8 tasks) | ❌ Missing | 🔧 Extract |
 | **Celery App** | `celery_app.py` | ❌ Missing | 🔧 Extract |
 | **Worker Registry** | `worker_registry.py` | ❌ Missing | 🔧 Extract |
@@ -524,33 +524,33 @@ asyncio.run(test_async_workflow())
 
 1. **Copy 3 files:**
    ```bash
-   cp confucius/src/confucius/worker_registry.py src/rufus/
-   cp confucius/src/confucius/postgres_executor.py src/rufus/
-   cp confucius/src/confucius/tasks.py src/rufus/
+   cp confucius/src/confucius/worker_registry.py src/ruvon/
+   cp confucius/src/confucius/postgres_executor.py src/ruvon/
+   cp confucius/src/confucius/tasks.py src/ruvon/
    ```
 
 2. **Update imports** in `tasks.py`:
    ```bash
-   sed -i '' 's/from confucius./from rufus./g' src/rufus/tasks.py
+   sed -i '' 's/from confucius./from ruvon./g' src/ruvon/tasks.py
    ```
 
 3. **Create minimal celery_app.py:**
    ```python
-   # src/rufus/celery_app.py
+   # src/ruvon/celery_app.py
    from celery import Celery
    import os
 
-   celery_app = Celery('rufus')
+   celery_app = Celery('ruvon')
    celery_app.conf.update(
        broker_url=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
        result_backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
-       include=['rufus.tasks'],
+       include=['ruvon.tasks'],
    )
    ```
 
 4. **Test:**
    ```bash
-   celery -A src.rufus.celery_app worker --loglevel=info
+   celery -A src.ruvon.celery_app worker --loglevel=info
    ```
 
 ---
@@ -571,7 +571,7 @@ asyncio.run(test_async_workflow())
 
 ### Nice to Have (Advanced Features):
 9. 📊 Scheduled workflows - Cron support
-10. 📊 Worker CLI commands - `rufus worker start/stop`
+10. 📊 Worker CLI commands - `ruvon worker start/stop`
 11. 📊 Monitoring dashboards - Prometheus metrics
 
 ---
@@ -612,12 +612,12 @@ By extracting Confucius code, you get:
 - Iterate on enhancements
 
 **Option B: Deep dive comparison**
-- Compare Confucius workflow.py vs Rufus workflow.py
+- Compare Confucius workflow.py vs Ruvon workflow.py
 - Identify all differences
 - Plan unified architecture
 - Higher upfront cost, better long-term result
 
-**Recommendation:** Start with Option A, since Confucius code is proven and Rufus architecture is already similar.
+**Recommendation:** Start with Option A, since Confucius code is proven and Ruvon architecture is already similar.
 
 ---
 

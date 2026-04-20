@@ -8,29 +8,29 @@ services:
   # PostgreSQL - Production database
   postgres:
     image: postgres:15-alpine
-    container_name: rufus-postgres
+    container_name: ruvon-postgres
     command: postgres -c max_connections=200 -c shared_buffers=256MB
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-rufus_production}
-      POSTGRES_USER: ${POSTGRES_USER:-rufus}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rufus_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-ruvon_production}
+      POSTGRES_USER: ${POSTGRES_USER:-ruvon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ruvon_secret_2024}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rufus -d rufus_production"]
+      test: ["CMD-SHELL", "pg_isready -U ruvon -d ruvon_production"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
   # Redis - Message broker and result backend
   redis:
     image: redis:7-alpine
-    container_name: rufus-redis
+    container_name: ruvon-redis
     command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
@@ -42,7 +42,7 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
   # Celery Worker - Horizontally scalable
@@ -51,11 +51,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.celery-worker
     environment:
-      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      DATABASE_URL: postgresql://ruvon:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/ruvon_production
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # CRITICAL: Must match server RUFUS_ENCRYPTION_KEY to decrypt workflows
-      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
+      # CRITICAL: Must match server RUVON_ENCRYPTION_KEY to decrypt workflows
+      RUVON_ENCRYPTION_KEY: ${RUVON_ENCRYPTION_KEY:-}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
       WORKER_POOL: ${WORKER_POOL:-prefork}
       WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-info}
@@ -67,7 +67,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
     deploy:
       mode: replicated
@@ -86,7 +86,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.celery-worker
     environment:
-      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      DATABASE_URL: postgresql://ruvon:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/ruvon_production
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       WORKER_CONCURRENCY: 2
@@ -95,7 +95,7 @@ services:
       WORKER_REGION: ${WORKER_REGION:-us-east-1}
       WORKER_ZONE: ${WORKER_ZONE:-zone-a}
     command: >
-      celery -A rufus.celery_app worker
+      celery -A ruvon.celery_app worker
       --loglevel=info
       --concurrency=2
       --pool=prefork
@@ -107,7 +107,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
     deploy:
       replicas: 1
@@ -121,7 +121,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.celery-worker
-    command: celery -A rufus.celery_app flower --port=5555
+    command: celery -A ruvon.celery_app flower --port=5555
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -130,29 +130,29 @@ services:
     depends_on:
       - redis
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
-  # Rufus API Server (optional - for REST API)
-  rufus-server:
+  # Ruvon API Server (optional - for REST API)
+  ruvon-server:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.rufus-server
+      dockerfile: docker/Dockerfile.ruvon-server
     environment:
-      DATABASE_URL: postgresql://rufus:${POSTGRES_PASSWORD:-rufus_secret_2024}@postgres:5432/rufus_production
+      DATABASE_URL: postgresql://ruvon:${POSTGRES_PASSWORD:-ruvon_secret_2024}@postgres:5432/ruvon_production
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       REDIS_URL: redis://redis:6379/0
       WORKFLOW_STORAGE: postgres
-      RUFUS_CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:8081,http://localhost:8082"
+      RUVON_CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:8081,http://localhost:8082"
       # CRITICAL: Set this to a persistent key to decrypt workflows across restarts
-      RUFUS_ENCRYPTION_KEY: ${RUFUS_ENCRYPTION_KEY:-}
+      RUVON_ENCRYPTION_KEY: ${RUVON_ENCRYPTION_KEY:-}
       WORKFLOW_EXECUTION_BACKEND: celery 
       ENABLE_ENCRYPTION_AT_REST: "false"
-      RUFUS_REGISTRATION_KEY: ${RUFUS_REGISTRATION_KEY:-dev-registration-key}
+      RUVON_REGISTRATION_KEY: ${RUVON_REGISTRATION_KEY:-dev-registration-key}
       POSTGRES_POOL_MIN_SIZE: "10"
       POSTGRES_POOL_MAX_SIZE: "100"
-      RUFUS_NATS_URL: nats://nats:4222
+      RUVON_NATS_URL: nats://nats:4222
     ports:
       - "8000:8000"
     healthcheck:
@@ -169,27 +169,27 @@ services:
       nats:
         condition: service_healthy
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
     command: >
       sh -c "
-        cd src/rufus &&
+        cd src/ruvon &&
         alembic upgrade head &&
         cd ../.. &&
-        uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+        uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
       "
 
-  rufus-dashboard:
+  ruvon-dashboard:
     image: node:22-alpine
-    container_name: test-rufus-dashboard
+    container_name: test-ruvon-dashboard
     build:
       context: ..
-      dockerfile: docker/Dockerfile.rufus-dashboard-prod
+      dockerfile: docker/Dockerfile.ruvon-dashboard-prod
     # working_dir: /app
     # command: sh -c "npm install --prefer-offline && npx next dev --port 3000"
     # command: node server.js
     # volumes:
-    #   - /Users/kim/PycharmProjects/rufus/packages/rufus-dashboard:/app
+    #   - /Users/kim/PycharmProjects/ruvon/packages/ruvon-dashboard:/app
     #   - dashboard_node_modules:/app/node_modules
     ports:
       - "3000:3000"
@@ -197,21 +197,21 @@ services:
       PORT: "3000"
       WATCHPACK_POLLING: "true"
       NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-rufus-dashboard-2026-x}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-ruvon-dashboard-2026-x}
       KEYCLOAK_SECRET: ${KEYCLOAK_SECRET:-}
-      KEYCLOAK_CLIENT_ID: rufus-dashboard
+      KEYCLOAK_CLIENT_ID: ruvon-dashboard
       # KC_PROXY=edge disables Keycloak's HTTPS-only requirement for non-loopback IPs,
       # so host.docker.internal (192.168.65.254) can reach OIDC endpoints over HTTP.
       # On macOS Docker Desktop, host.docker.internal resolves to 127.0.0.1 in the
       # browser too (Docker Desktop adds it to /etc/hosts), so browser redirects work.
-      KEYCLOAK_ISSUER: http://localhost:8080/realms/rufus
-      NEXT_PUBLIC_RUFUS_API_URL: http://localhost:8000
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/ruvon
+      NEXT_PUBLIC_RUVON_API_URL: http://localhost:8000
       NEXT_PUBLIC_NATS_WS_URL: ws://localhost:8081   # NATS WebSocket — real-time dashboard events
     depends_on:
       keycloak:
         condition: service_healthy
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
   keycloak:
@@ -232,7 +232,7 @@ services:
       KC_PROXY: edge
     command: ["start-dev", "--import-realm"]
     volumes:
-      - ./keycloak/rufus-realm.json:/opt/keycloak/data/import/rufus-realm.json:ro
+      - ./keycloak/ruvon-realm.json:/opt/keycloak/data/import/ruvon-realm.json:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -245,7 +245,7 @@ services:
       retries: 15
       start_period: 60s
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
   # NATS JetStream — sub-ms pub/sub for command delivery and workflow events
@@ -269,11 +269,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - rufus-network
+      - ruvon-network
     restart: unless-stopped
 
 networks:
-  rufus-network:
+  ruvon-network:
     driver: bridge
 
 volumes:

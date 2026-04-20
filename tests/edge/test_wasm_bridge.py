@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rufus_edge.platform.wasm_bridge import (
+from ruvon_edge.platform.wasm_bridge import (
     NativeWasmBridge,
     PyodideWasmBridge,
     WasiWasmBridge,
@@ -48,7 +48,7 @@ class TestNativeWasmBridge:
     def test_delegates_to_call_component(self):
         bridge = NativeWasmBridge()
         with patch(
-            "rufus.implementations.execution.component_runtime.ComponentStepRuntime._call_component",
+            "ruvon.implementations.execution.component_runtime.ComponentStepRuntime._call_component",
             return_value='{"score": 42}',
         ) as mock_call:
             result = bridge.execute_component(CM_BINARY, '{"amount": 100}', "execute")
@@ -59,7 +59,7 @@ class TestNativeWasmBridge:
     def test_propagates_runtime_error(self):
         bridge = NativeWasmBridge()
         with patch(
-            "rufus.implementations.execution.component_runtime.ComponentStepRuntime._call_component",
+            "ruvon.implementations.execution.component_runtime.ComponentStepRuntime._call_component",
             side_effect=RuntimeError("wasmtime exploded"),
         ):
             with pytest.raises(RuntimeError, match="wasmtime exploded"):
@@ -76,16 +76,16 @@ class TestPyodideWasmBridge:
         with pytest.raises(NotImplementedError, match="Component Model"):
             bridge.execute_component(CM_BINARY, "{}", "execute")
 
-    def test_calls_js_rufus_wasm_execute_for_core_module(self):
+    def test_calls_js_ruvon_wasm_execute_for_core_module(self):
         bridge = PyodideWasmBridge()
 
         fake_js = MagicMock()
-        fake_js.rufusWasmExecute.return_value = MagicMock()  # JS Promise proxy
+        fake_js.ruvonWasmExecute.return_value = MagicMock()  # JS Promise proxy
 
         fake_run_sync = MagicMock(return_value='{"ok": true}')
 
         with patch.dict("sys.modules", {"js": fake_js}):
-            with patch("rufus_edge.platform.wasm_bridge.PyodideWasmBridge.execute_component") as mock_exec:
+            with patch("ruvon_edge.platform.wasm_bridge.PyodideWasmBridge.execute_component") as mock_exec:
                 mock_exec.return_value = '{"ok": true}'
                 result = bridge.execute_component.__wrapped__(bridge, CORE_BINARY, "{}", "execute") \
                     if hasattr(bridge.execute_component, "__wrapped__") else None
@@ -93,7 +93,7 @@ class TestPyodideWasmBridge:
         # Direct path: mock the full call chain
         bridge2 = PyodideWasmBridge()
         with patch.dict("sys.modules", {"js": fake_js, "pyodide": MagicMock(), "pyodide.ffi": MagicMock(run_sync=fake_run_sync)}):
-            with patch("rufus_edge.platform.wasm_bridge.PyodideWasmBridge.execute_component", return_value='{"ok": true}') as m:
+            with patch("ruvon_edge.platform.wasm_bridge.PyodideWasmBridge.execute_component", return_value='{"ok": true}') as m:
                 res = m(CORE_BINARY, "{}", "execute")
                 assert res == '{"ok": true}'
 
@@ -122,7 +122,7 @@ class TestWasiWasmBridge:
         fake_result = b'{"processed": true}'
 
         with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
+            "ruvon.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
             return_value=fake_result,
         ) as mock_wasi:
             result = bridge.execute_component(CORE_BINARY, '{"x": 1}', "main")
@@ -137,7 +137,7 @@ class TestWasiWasmBridge:
         # it proceeds to _execute_wasi (which handles bytes as-is)
         fake_result = b'{"native": true}'
         with patch(
-            "rufus.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
+            "ruvon.implementations.execution.wasm_runtime.WasmRuntime._execute_wasi",
             return_value=fake_result,
         ):
             result = bridge.execute_component(CM_BINARY, "{}", "execute")

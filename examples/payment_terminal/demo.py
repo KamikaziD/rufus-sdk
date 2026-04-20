@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Payment Terminal Demo - Rufus Edge SDK
+Payment Terminal Demo - Ruvon Edge SDK
 
 Demonstrates payment processing with online/offline support.
 
@@ -22,20 +22,20 @@ from decimal import Decimal
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
-from rufus_edge.models import PaymentState
+from ruvon_edge.models import PaymentState
 
 
 async def run_payment_demo():
     """Run the payment terminal demo."""
     print("\n" + "=" * 60)
-    print("  RUFUS EDGE - Payment Terminal Demo")
+    print("  RUVON EDGE - Payment Terminal Demo")
     print("=" * 60 + "\n")
 
     # Initialize persistence (in-memory for demo)
@@ -62,7 +62,7 @@ async def run_payment_demo():
     workflow_registry = {
         "PaymentAuthorization": {
             "type": "PaymentAuthorization",
-            "initial_state_model_path": "rufus_edge.models.PaymentState",
+            "initial_state_model_path": "ruvon_edge.models.PaymentState",
             "steps": workflow_config.get("steps", []),
         }
     }

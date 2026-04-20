@@ -1,10 +1,10 @@
 # Planning Documents Archive
 
-This directory contains **historical implementation planning documents** from Rufus SDK development.
+This directory contains **historical implementation planning documents** from Ruvon SDK development.
 
 ## Purpose
 
-These documents capture the design decisions, implementation strategies, and technical analysis that guided Rufus's development. They are preserved for:
+These documents capture the design decisions, implementation strategies, and technical analysis that guided Ruvon's development. They are preserved for:
 
 - **Historical reference** - Understanding why certain decisions were made
 - **Project archaeology** - Tracing feature evolution and architectural changes
@@ -33,8 +33,8 @@ Documents describing how features were implemented:
 
 ### Analysis Documents
 Technical analysis and comparison documents:
-- `CONFUCIUS_VS_RUFUS_ANALYSIS.md` - Feature parity analysis (Confucius → Rufus)
-- `CONFUCIUS_VS_RUFUS_ANALYSIS_ADDENDUM.md` - Additional analysis
+- `CONFUCIUS_VS_RUVON_ANALYSIS.md` - Feature parity analysis (Confucius → Ruvon)
+- `CONFUCIUS_VS_RUVON_ANALYSIS_ADDENDUM.md` - Additional analysis
 - `PHASE3_GO_NO_GO_DECISION.md` - SQLAlchemy migration decision
 - `REASSESSMENT.md` - Project reassessment and direction
 
@@ -54,7 +54,7 @@ Planning and status documents:
 - `PRODUCTION_READINESS.md` - Production readiness checklist
 - `PHASE_1_COMPLETE.md` - Phase 1 completion summary
 - `REMAINING_TASKS.md` - Historical task tracking
-- `RUFUS_SOLUTION.md` - Solution architecture document
+- `RUVON_SOLUTION.md` - Solution architecture document
 - `ai_pilot_b_bidding.md` - AI feature exploration
 
 ### Testing & Quality

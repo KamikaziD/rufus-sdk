@@ -50,15 +50,15 @@ git push origin v0.1.0
 Send testers this one-liner:
 
 ```bash
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 ```
 
 ### Verify Installation
 
 ```bash
 # Clone repo to get verification script
-git clone https://github.com/KamikaziD/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/KamikaziD/ruvon-sdk.git
+cd ruvon-sdk
 python verify_installation.py
 ```
 
@@ -66,7 +66,7 @@ Or without cloning:
 
 ```bash
 # Download and run verification script
-curl -O https://raw.githubusercontent.com/KamikaziD/rufus-sdk/main/verify_installation.py
+curl -O https://raw.githubusercontent.com/KamikaziD/ruvon-sdk/main/verify_installation.py
 python verify_installation.py
 ```
 
@@ -75,31 +75,31 @@ python verify_installation.py
 ## 📧 Email Template for Testers
 
 ```
-Subject: Rufus SDK Beta - Installation Instructions
+Subject: Ruvon SDK Beta - Installation Instructions
 
 Hi team,
 
-I'm excited to share the Rufus SDK beta for testing! Here's how to get started:
+I'm excited to share the Ruvon SDK beta for testing! Here's how to get started:
 
 **Installation (5 minutes):**
 
 1. Install the package:
-   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+   pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 2. Verify it works:
-   rufus --version
+   ruvon --version
 
 3. (Optional) Run verification script:
-   git clone https://github.com/KamikaziD/rufus-sdk.git
-   cd rufus-sdk
+   git clone https://github.com/KamikaziD/ruvon-sdk.git
+   cd ruvon-sdk
    python verify_installation.py
 
 **Documentation:**
-- Quickstart Guide: https://github.com/KamikaziD/rufus-sdk/blob/main/QUICKSTART.md
-- Full Installation Guide: https://github.com/KamikaziD/rufus-sdk/blob/main/INSTALLATION_FOR_DEVELOPERS.md
+- Quickstart Guide: https://github.com/KamikaziD/ruvon-sdk/blob/main/QUICKSTART.md
+- Full Installation Guide: https://github.com/KamikaziD/ruvon-sdk/blob/main/INSTALLATION_FOR_DEVELOPERS.md
 
 **Getting Help:**
-- GitHub Issues: https://github.com/KamikaziD/rufus-sdk/issues
+- GitHub Issues: https://github.com/KamikaziD/ruvon-sdk/issues
 - Slack/Discord: [your channel]
 - Email: [your email]
 
@@ -122,15 +122,15 @@ Thanks,
 Testers will need GitHub access. Two options:
 
 ### Option A: Add as Collaborators
-1. Go to: https://github.com/KamikaziD/rufus-sdk/settings/access
+1. Go to: https://github.com/KamikaziD/ruvon-sdk/settings/access
 2. Click "Add people"
 3. Add tester GitHub usernames
-4. They install with SSH: `pip install git+ssh://git@github.com/KamikaziD/rufus-sdk.git`
+4. They install with SSH: `pip install git+ssh://git@github.com/KamikaziD/ruvon-sdk.git`
 
 ### Option B: Personal Access Token
 1. Tester creates PAT: GitHub Settings → Developer settings → Personal access tokens
 2. Select scope: `repo`
-3. Install with: `pip install git+https://USERNAME:TOKEN@github.com/KamikaziD/rufus-sdk.git`
+3. Install with: `pip install git+https://USERNAME:TOKEN@github.com/KamikaziD/ruvon-sdk.git`
 
 ---
 
@@ -138,11 +138,11 @@ Testers will need GitHub access. Two options:
 
 | Method | Command | Use Case |
 |--------|---------|----------|
-| **Latest from main** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git` | Most stable |
-| **Specific branch** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git@BRANCH` | Test features |
-| **Specific version** | `pip install git+https://github.com/KamikaziD/rufus-sdk.git@v0.1.0` | Reproducible |
-| **With extras** | `pip install "git+...#egg=rufus[all]"` | Full features |
-| **SSH (private)** | `pip install git+ssh://git@github.com/KamikaziD/rufus-sdk.git` | Private repo |
+| **Latest from main** | `pip install git+https://github.com/KamikaziD/ruvon-sdk.git` | Most stable |
+| **Specific branch** | `pip install git+https://github.com/KamikaziD/ruvon-sdk.git@BRANCH` | Test features |
+| **Specific version** | `pip install git+https://github.com/KamikaziD/ruvon-sdk.git@v0.1.0` | Reproducible |
+| **With extras** | `pip install "git+...#egg=ruvon[all]"` | Full features |
+| **SSH (private)** | `pip install git+ssh://git@github.com/KamikaziD/ruvon-sdk.git` | Private repo |
 
 ---
 
@@ -153,7 +153,7 @@ Testers will need GitHub access. Two options:
 3. ✅ **MANIFEST.in** - Ensures all files are included in package
 4. ✅ **verify_installation.py** - Script for testers to verify installation
 5. ✅ **INSTALLATION_FOR_DEVELOPERS.md** - Comprehensive installation guide
-6. ✅ **Package structure** - Already correctly set up with src/rufus/
+6. ✅ **Package structure** - Already correctly set up with src/ruvon/
 
 ---
 
@@ -163,7 +163,7 @@ Testers will need GitHub access. Two options:
 1. Commit and push the packaging files (commands above)
 2. Test the installation yourself:
    ```bash
-   pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@feature/alembic-migration"
+   pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git@feature/alembic-migration"
    python verify_installation.py
    ```
 
@@ -201,16 +201,16 @@ git commit -m "fix: Your fix description"
 git push
 
 # Testers update with:
-pip install --force-reinstall git+https://github.com/KamikaziD/rufus-sdk.git
+pip install --force-reinstall git+https://github.com/KamikaziD/ruvon-sdk.git
 ```
 
 ---
 
 ## 📝 Additional Notes
 
-- **Package name**: `rufus` (what pip installs)
-- **Import name**: `rufus` (what Python imports)
-- **CLI command**: `rufus` (command line tool)
+- **Package name**: `ruvon` (what pip installs)
+- **Import name**: `ruvon` (what Python imports)
+- **CLI command**: `ruvon` (command line tool)
 - **Extras available**: `all`, `server`, `postgres`, `cli`, `performance`
 
 ---

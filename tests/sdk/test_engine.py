@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from rufus.engine import WorkflowEngine
-from rufus.workflow import Workflow
-from rufus.models import WorkflowStep
+from ruvon.engine import WorkflowEngine
+from ruvon.workflow import Workflow
+from ruvon.models import WorkflowStep
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, Callable, Type
 import importlib
@@ -114,7 +114,7 @@ async def test_get_workflow_success(mock_providers):
     mock_providers["persistence"].load_workflow.return_value = mock_workflow_data
 
     # Mock Workflow.from_dict directly as it's a class method
-    with patch('rufus.workflow.Workflow.from_dict') as mock_from_dict:
+    with patch('ruvon.workflow.Workflow.from_dict') as mock_from_dict:
         mock_workflow_instance = MagicMock(spec=Workflow)
         mock_from_dict.return_value = mock_workflow_instance
         
@@ -201,7 +201,7 @@ async def test_report_child_status_auto_resume_async_executor(mock_providers):
     Tests that auto-resume is triggered for async executors when child completes.
     """
     # Create a non-SyncExecutor mock (simulates Celery/ThreadPool)
-    from rufus.implementations.execution.sync import SyncExecutor
+    from ruvon.implementations.execution.sync import SyncExecutor
 
     # Ensure the executor is NOT a SyncExecutor
     async_executor = MagicMock()

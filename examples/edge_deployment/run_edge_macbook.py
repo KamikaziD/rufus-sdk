@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Rufus Edge Runner for MacBook (Apple Silicon)
+Ruvon Edge Runner for MacBook (Apple Silicon)
 
-Demonstrates running a Rufus Edge agent on a MacBook Pro M-series chip,
+Demonstrates running a Ruvon Edge agent on a MacBook Pro M-series chip,
 with hardware detection and live workflow-push support.
 
 Usage:
@@ -15,7 +15,7 @@ Usage:
 Requirements:
     - MacBook with Apple Silicon (M1/M2/M3/M4)
     - Docker running the cloud platform on localhost:8000
-    - Python 3.10+ with rufus-sdk installed (pip install -e ".[postgres,performance,cli]")
+    - Python 3.10+ with ruvon-sdk installed (pip install -e ".[postgres,performance,cli]")
 """
 
 import asyncio
@@ -35,17 +35,17 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("rufus.edge.macbook")
+logger = logging.getLogger("ruvon.edge.macbook")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-CLOUD_URL = os.getenv("RUFUS_CLOUD_URL", "http://localhost:8000")
-DEVICE_ID = os.getenv("RUFUS_DEVICE_ID", "macbook-m4-001")
-DB_PATH = os.getenv("RUFUS_DB_PATH", "/tmp/rufus_macbook_edge.db")
-ENCRYPTION_KEY = os.getenv("RUFUS_ENCRYPTION_KEY", "") or None
-REGISTRATION_KEY = os.getenv("RUFUS_REGISTRATION_KEY", "dev-registration-key")
+CLOUD_URL = os.getenv("RUVON_CLOUD_URL", "http://localhost:8000")
+DEVICE_ID = os.getenv("RUVON_DEVICE_ID", "macbook-m4-001")
+DB_PATH = os.getenv("RUVON_DB_PATH", "/tmp/ruvon_macbook_edge.db")
+ENCRYPTION_KEY = os.getenv("RUVON_ENCRYPTION_KEY", "") or None
+REGISTRATION_KEY = os.getenv("RUVON_REGISTRATION_KEY", "dev-registration-key")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ async def detect_hardware():
     print("=" * 60 + "\n")
 
     try:
-        from rufus.utils.platform import (
+        from ruvon.utils.platform import (
             get_platform_info,
             has_apple_neural_engine,
             get_recommended_onnx_providers,
@@ -144,7 +144,7 @@ async def register_device(hw_info=None) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def run_edge_agent(api_key: str):
-    """Start the RufusEdgeAgent and keep it running for workflow push testing."""
+    """Start the RuvonEdgeAgent and keep it running for workflow push testing."""
     print("\n" + "=" * 60)
     print("  EDGE AGENT")
     print("=" * 60 + "\n")
@@ -154,9 +154,9 @@ async def run_edge_agent(api_key: str):
     print("\n  Agent running. Press Ctrl+C to stop.")
     print("  Push workflow YAMLs via the dashboard → Admin → Server → Push to Devices\n")
 
-    from rufus_edge import RufusEdgeAgent
+    from ruvon_edge import RuvonEdgeAgent
 
-    agent = RufusEdgeAgent(
+    agent = RuvonEdgeAgent(
         device_id=DEVICE_ID,
         cloud_url=CLOUD_URL,
         api_key=api_key,
@@ -187,7 +187,7 @@ async def run_edge_agent(api_key: str):
 async def main():
     print("\n" + "#" * 60)
     print("#" + " " * 58 + "#")
-    print("#    RUFUS EDGE — MacBook" + " " * 34 + "#")
+    print("#    RUVON EDGE — MacBook" + " " * 34 + "#")
     print("#" + " " * 58 + "#")
     print("#" * 60)
 

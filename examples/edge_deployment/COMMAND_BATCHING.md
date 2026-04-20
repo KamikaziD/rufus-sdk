@@ -1,6 +1,6 @@
 # Command Batching
 
-Atomic multi-command operations for Rufus Edge devices.
+Atomic multi-command operations for Ruvon Edge devices.
 
 ## Overview
 

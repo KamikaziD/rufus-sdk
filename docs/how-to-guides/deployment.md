@@ -1,10 +1,10 @@
-# How to deploy Rufus
+# How to deploy Ruvon
 
-This guide covers deploying Rufus workflows to production environments.
+This guide covers deploying Ruvon workflows to production environments.
 
 ## Overview
 
-Rufus supports multiple deployment models:
+Ruvon supports multiple deployment models:
 
 - **Embedded SDK** - Run in your existing Python application
 - **Standalone service** - Deploy as FastAPI application
@@ -19,7 +19,7 @@ Set these for production deployments:
 
 ```bash
 # Database
-export DATABASE_URL="postgresql://user:password@host:5432/rufus_prod"
+export DATABASE_URL="postgresql://user:password@host:5432/ruvon_prod"
 export POSTGRES_POOL_MIN_SIZE=20
 export POSTGRES_POOL_MAX_SIZE=100
 
@@ -28,8 +28,8 @@ export CELERY_BROKER_URL="redis://redis:6379/0"
 export CELERY_RESULT_BACKEND="redis://redis:6379/0"
 
 # Performance optimizations
-export RUFUS_USE_UVLOOP=true
-export RUFUS_USE_ORJSON=true
+export RUVON_USE_UVLOOP=true
+export RUVON_USE_ORJSON=true
 
 # Application settings
 export ENVIRONMENT=production
@@ -42,8 +42,8 @@ Initialize PostgreSQL schema:
 
 ```bash
 # Apply migrations
-cd src/rufus
-export DATABASE_URL="postgresql://user:password@host:5432/rufus_prod"
+cd src/ruvon
+export DATABASE_URL="postgresql://user:password@host:5432/ruvon_prod"
 alembic upgrade head
 
 # Verify migration status
@@ -54,19 +54,19 @@ alembic current
 
 ### Model 1: Embedded SDK
 
-Embed Rufus in your existing application:
+Embed Ruvon in your existing application:
 
 ```python
 # app.py
 import asyncio
 from fastapi import FastAPI
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
 
 app = FastAPI()
 
-# Initialize Rufus
+# Initialize Ruvon
 persistence = None
 builder = None
 
@@ -76,7 +76,7 @@ async def startup():
 
     # Initialize providers
     persistence = PostgresPersistenceProvider(
-        db_url="postgresql://user:password@host:5432/rufus_prod",
+        db_url="postgresql://user:password@host:5432/ruvon_prod",
         pool_min_size=20,
         pool_max_size=100
     )
@@ -119,11 +119,11 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
 
 ### Model 2: Standalone FastAPI service
 
-Deploy Rufus server separately:
+Deploy Ruvon server separately:
 
 ```bash
-# Start Rufus server
-uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+# Start Ruvon server
+uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
 ```
 
 Use REST API from your application:
@@ -134,7 +134,7 @@ import httpx
 # Create workflow via API
 async with httpx.AsyncClient() as client:
     response = await client.post(
-        "http://rufus-server:8000/workflows/start",
+        "http://ruvon-server:8000/workflows/start",
         json={
             "workflow_type": "OrderProcessing",
             "initial_data": order_data
@@ -156,13 +156,13 @@ export DATABASE_URL="postgresql://..."
 export CELERY_BROKER_URL="redis://..."
 export CELERY_RESULT_BACKEND="redis://..."
 
-celery -A rufus.celery_app worker \
+celery -A ruvon.celery_app worker \
     --loglevel=info \
     --concurrency=10 \
     --hostname=worker1@%h
 
 # Worker 2
-celery -A rufus.celery_app worker \
+celery -A ruvon.celery_app worker \
     --loglevel=info \
     --concurrency=10 \
     --hostname=worker2@%h
@@ -171,7 +171,7 @@ celery -A rufus.celery_app worker \
 **Start API server:**
 
 ```bash
-uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Docker deployment
@@ -199,7 +199,7 @@ RUN chmod +x /docker-entrypoint.sh
 EXPOSE 8000
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["uvicorn", "rufus_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "ruvon_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ```bash
@@ -208,7 +208,7 @@ CMD ["uvicorn", "rufus_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 set -e
 
 # Apply migrations
-cd /app/src/rufus
+cd /app/src/ruvon
 alembic upgrade head
 
 # Start application
@@ -219,13 +219,13 @@ exec "$@"
 Build and run:
 
 ```bash
-docker build -t rufus:latest .
+docker build -t ruvon:latest .
 
 docker run -d \
-    --name rufus-server \
+    --name ruvon-server \
     -p 8000:8000 \
     -e DATABASE_URL="postgresql://..." \
-    rufus:latest
+    ruvon:latest
 ```
 
 ### Docker Compose
@@ -238,13 +238,13 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: rufus
-      POSTGRES_PASSWORD: rufus_secret_2024
-      POSTGRES_DB: rufus_prod
+      POSTGRES_USER: ruvon
+      POSTGRES_PASSWORD: ruvon_secret_2024
+      POSTGRES_DB: ruvon_prod
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rufus"]
+      test: ["CMD-SHELL", "pg_isready -U ruvon"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -257,12 +257,12 @@ services:
       timeout: 5s
       retries: 5
 
-  rufus-server:
+  ruvon-server:
     build: .
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_prod
+      DATABASE_URL: postgresql://ruvon:ruvon_secret_2024@postgres:5432/ruvon_prod
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
     depends_on:
@@ -273,9 +273,9 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A rufus.celery_app worker --loglevel=info --concurrency=10
+    command: celery -A ruvon.celery_app worker --loglevel=info --concurrency=10
     environment:
-      DATABASE_URL: postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_prod
+      DATABASE_URL: postgresql://ruvon:ruvon_secret_2024@postgres:5432/ruvon_prod
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
     depends_on:
@@ -295,7 +295,7 @@ Deploy:
 ```bash
 docker compose up -d
 docker compose ps
-docker compose logs -f rufus-server
+docker compose logs -f ruvon-server
 ```
 
 ## Kubernetes deployment
@@ -307,27 +307,27 @@ docker compose logs -f rufus-server
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-server
+  name: ruvon-server
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: rufus-server
+      app: ruvon-server
   template:
     metadata:
       labels:
-        app: rufus-server
+        app: ruvon-server
     spec:
       containers:
-      - name: rufus
-        image: rufus:latest
+      - name: ruvon
+        image: ruvon:latest
         ports:
         - containerPort: 8000
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: rufus-secrets
+              name: ruvon-secrets
               key: database-url
         resources:
           requests:
@@ -365,11 +365,11 @@ spec:
     spec:
       containers:
       - name: celery
-        image: rufus:latest
+        image: ruvon:latest
         command: ["celery"]
         args:
           - "-A"
-          - "rufus.celery_app"
+          - "ruvon.celery_app"
           - "worker"
           - "--loglevel=info"
           - "--concurrency=10"
@@ -377,12 +377,12 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: rufus-secrets
+              name: ruvon-secrets
               key: database-url
         - name: CELERY_BROKER_URL
           valueFrom:
             secretKeyRef:
-              name: rufus-secrets
+              name: ruvon-secrets
               key: celery-broker-url
         resources:
           requests:
@@ -395,10 +395,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: rufus-server
+  name: ruvon-server
 spec:
   selector:
-    app: rufus-server
+    app: ruvon-server
   ports:
   - port: 80
     targetPort: 8000
@@ -410,10 +410,10 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: rufus-secrets
+  name: ruvon-secrets
 type: Opaque
 stringData:
-  database-url: postgresql://user:password@postgres:5432/rufus_prod
+  database-url: postgresql://user:password@postgres:5432/ruvon_prod
   celery-broker-url: redis://redis:6379/0
   celery-result-backend: redis://redis:6379/0
 ```
@@ -425,7 +425,7 @@ kubectl apply -f kubernetes/secrets.yaml
 kubectl apply -f kubernetes/deployment.yaml
 
 kubectl get pods
-kubectl logs -f deployment/rufus-server
+kubectl logs -f deployment/ruvon-server
 ```
 
 ### Horizontal Pod Autoscaler
@@ -435,12 +435,12 @@ kubectl logs -f deployment/rufus-server
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: rufus-server-hpa
+  name: ruvon-server-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: rufus-server
+    name: ruvon-server
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -591,7 +591,7 @@ class JSONFormatter(logging.Formatter):
 handler = logging.StreamHandler()
 handler.setFormatter(JSONFormatter())
 
-logger = logging.getLogger("rufus")
+logger = logging.getLogger("ruvon")
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 ```
@@ -627,7 +627,7 @@ Add more instances:
 
 ```bash
 # Check connection pool exhaustion
-kubectl logs deployment/rufus-server | grep "pool exhausted"
+kubectl logs deployment/ruvon-server | grep "pool exhausted"
 
 # Increase pool size
 export POSTGRES_POOL_MAX_SIZE=200
@@ -640,7 +640,7 @@ export POSTGRES_POOL_MAX_SIZE=200
 kubectl top pods
 
 # Restart pods
-kubectl rollout restart deployment/rufus-server
+kubectl rollout restart deployment/ruvon-server
 ```
 
 ### Slow workflow execution
@@ -650,7 +650,7 @@ kubectl rollout restart deployment/rufus-server
 # Query slow queries log
 
 # Check Celery queue backlog
-celery -A rufus.celery_app inspect active
+celery -A ruvon.celery_app inspect active
 ```
 
 ## Next steps

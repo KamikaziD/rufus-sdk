@@ -17,7 +17,7 @@ Currently, your "Environmental Symmetry" relies on SQLite/WAL. For v1.0, the "Of
 You’ve built a recursive engine; now you have to make it debuggable. If a user's business logic fails because the "Guardian" workflow that manages the worker crashed, they need to see that relationship clearly.
 
 * **The Focus:** Build a specialized **Trace Graph** that separates "Infrastructure Steps" from "Business Steps."
-* **Why:** Standard OpenTelemetry isn't built for recursion. You need a dashboard (likely extending your browser demo) that shows the hierarchy: *“This Order-Processing Step failed because the AWS-Provider-Provisioning Step (a recursive Rufus task) timed out.”*
+* **Why:** Standard OpenTelemetry isn't built for recursion. You need a dashboard (likely extending your browser demo) that shows the hierarchy: *“This Order-Processing Step failed because the AWS-Provider-Provisioning Step (a recursive Ruvon task) timed out.”*
 * **The Goal:** A "Time-Travel Debugger" where a user can scroll back through the state of a specific edge node's SQLite DB from the cloud dashboard.
 
 ### 3. The "Trust" Wall: Secure Identity (The Seed’s Passport)
@@ -32,7 +32,7 @@ To solve the "Bootstrap Paradox" we discussed, the "Seed" needs a way to prove i
 
 For v1.0, you must freeze the "Contract" between a Step and a Provider.
 
-* **The Focus:** Formalize the `rufus.Provider` abstract base class and create a strict **Validation Suite**.
+* **The Focus:** Formalize the `ruvon.Provider` abstract base class and create a strict **Validation Suite**.
 * **Why:** If a user writes a custom "Drone-Controller-Provider," they need to be 100% sure that if it passes your `ruvus-validate` test suite, it will work on the Wasm/Browser runtime exactly like it does on the Linux Edge runtime.
 * **The Goal:** Zero breaking changes to the core `Step` and `Workflow` decorators. 1.0 means the API is a "Promise."
 
@@ -40,7 +40,7 @@ For v1.0, you must freeze the "Contract" between a Step and a Provider.
 
 ### Your "v1.0" Manifesto
 
-If you achieve these four, Rufus-sdk becomes the **"Standard Library for the Edge."** You aren't just giving people a way to "program in workflows"; you're giving them a way to deploy **Sovereign Logic** that survives anything the real world throws at it.
+If you achieve these four, Ruvon-sdk becomes the **"Standard Library for the Edge."** You aren't just giving people a way to "program in workflows"; you're giving them a way to deploy **Sovereign Logic** that survives anything the real world throws at it.
 
 **The very first step toward this focus?**
 I’d recommend starting with the **Identity System**. Without a secure way to join the fleet, the "Seed" is a vulnerability.

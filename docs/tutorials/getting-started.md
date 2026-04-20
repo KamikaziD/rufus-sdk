@@ -1,4 +1,4 @@
-# Getting Started with Rufus
+# Getting Started with Ruvon
 
 **Time:** 5 minutes
 **Goal:** Create and run your first workflow
@@ -6,7 +6,7 @@
 ## What You'll Learn
 
 In this tutorial, you'll:
-1. Install Rufus
+1. Install Ruvon
 2. Create a simple workflow
 3. Run it and see results
 4. Understand the basics of workflow execution
@@ -17,13 +17,13 @@ In this tutorial, you'll:
 - Basic Python knowledge
 - 5 minutes of your time
 
-## Step 1: Install Rufus
+## Step 1: Install Ruvon
 
 ```bash
 pip install -r requirements.txt
 ```
 
-That's it! Rufus includes SQLite support by default, so no database setup is needed for this tutorial.
+That's it! Ruvon includes SQLite support by default, so no database setup is needed for this tutorial.
 
 ## Step 2: Create Your First Workflow
 
@@ -33,7 +33,7 @@ Create a new file called `hello_workflow.yaml`:
 # hello_workflow.yaml
 workflow_type: "HelloWorkflow"
 workflow_version: "1.0.0"
-description: "My first Rufus workflow"
+description: "My first Ruvon workflow"
 initial_state_model: "builtins.dict"
 
 steps:
@@ -59,7 +59,7 @@ Create `hello_steps.py` in the same directory:
 
 ```python
 # hello_steps.py
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 def greet_user(state: dict, context: StepContext, name: str = "World") -> dict:
     """Greet the user."""
@@ -98,7 +98,7 @@ workflows:
 
 ```bash
 # Start the workflow
-rufus start HelloWorkflow --data '{"name": "Alice"}'
+ruvon start HelloWorkflow --data '{"name": "Alice"}'
 
 # Output:
 # ✅ Workflow started: <workflow-id>
@@ -111,10 +111,10 @@ rufus start HelloWorkflow --data '{"name": "Alice"}'
 ```python
 # run_workflow.py
 import asyncio
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 async def main():
     # Create persistence (in-memory SQLite)
@@ -161,9 +161,9 @@ python run_workflow.py
 
 ## Step 6: Check the Results
 
-You just ran your first Rufus workflow! Let's understand what happened:
+You just ran your first Ruvon workflow! Let's understand what happened:
 
-1. **Workflow Created**: Rufus loaded the YAML definition and created a workflow instance
+1. **Workflow Created**: Ruvon loaded the YAML definition and created a workflow instance
 2. **Step 1 Executed**: `greet_user()` ran, returned data, merged into state
 3. **Step 2 Auto-Started**: Because `automate_next: true`, the next step ran immediately
 4. **Step 2 Executed**: `say_goodbye()` ran with the updated state
@@ -171,7 +171,7 @@ You just ran your first Rufus workflow! Let's understand what happened:
 
 ## What You've Learned
 
-✅ **Install Rufus** - Single pip command
+✅ **Install Ruvon** - Single pip command
 ✅ **Define Workflows** - Simple YAML files
 ✅ **Write Step Functions** - Regular Python functions
 ✅ **Register Workflows** - Central registry file

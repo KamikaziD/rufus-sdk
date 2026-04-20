@@ -1,5 +1,5 @@
 """
-Rufus SDK — Comprehensive Benchmark Suite
+Ruvon SDK — Comprehensive Benchmark Suite
 ==========================================
 
 Covers 16 sections:
@@ -15,10 +15,10 @@ Covers 16 sections:
  10. API Key Hashing
  11. Full SAF Pipeline       (requires cryptography)
  12. msgspec Typed Codec     (requires msgspec)
- 13. WASM Bridge Dispatch    (requires rufus-sdk-edge)
+ 13. WASM Bridge Dispatch    (requires ruvon-edge)
  14. Proto Codec             (requires betterproto; generated code optional)
- 15. RUVON Capability Gossip (requires rufus-sdk-edge)
- 16. NKey Patch Verification (requires cryptography + rufus-sdk-edge)
+ 15. RUVON Capability Gossip (requires ruvon-edge)
+ 16. NKey Patch Verification (requires cryptography + ruvon-edge)
 
 Usage:
     python tests/benchmarks/benchmark_suite.py            # full suite (~60 s)
@@ -89,13 +89,13 @@ except ImportError:
     _BETTERPROTO_AVAILABLE = False
 
 try:
-    from rufus_edge.capability_gossip import CapabilityVector, NodeTier, classify_node_tier
+    from ruvon_edge.capability_gossip import CapabilityVector, NodeTier, classify_node_tier
     _RUVON_GOSSIP_AVAILABLE = True
 except ImportError:
     _RUVON_GOSSIP_AVAILABLE = False
 
 try:
-    from rufus_edge.nkey_verifier import NKeyPatchVerifier
+    from ruvon_edge.nkey_verifier import NKeyPatchVerifier
     _NKEY_AVAILABLE = True and _CRYPTO_AVAILABLE
 except ImportError:
     _NKEY_AVAILABLE = False
@@ -279,14 +279,14 @@ def bench_json_serialization(n: int) -> Section:
 def bench_import_caching(n: int) -> Section:
     sec = Section("2. Import Caching")
 
-    from rufus.builder import WorkflowBuilder
+    from ruvon.builder import WorkflowBuilder
 
     paths = [
-        "rufus.utils.serialization.serialize",
-        "rufus.utils.serialization.deserialize",
-        "rufus.builder.WorkflowBuilder",
-        "rufus.implementations.persistence.memory.InMemoryPersistence",
-        "rufus.implementations.execution.sync.SyncExecutor",
+        "ruvon.utils.serialization.serialize",
+        "ruvon.utils.serialization.deserialize",
+        "ruvon.builder.WorkflowBuilder",
+        "ruvon.implementations.persistence.memory.InMemoryPersistence",
+        "ruvon.implementations.execution.sync.SyncExecutor",
     ]
 
     # NOTE: intentional use of private API for caching benchmark
@@ -325,7 +325,7 @@ def bench_import_caching(n: int) -> Section:
 async def bench_sqlite(n: int) -> Section:
     sec = Section("3. SQLite Persistence (in-memory)")
 
-    from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+    from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
     provider = SQLitePersistenceProvider(db_path=":memory:")
     await provider.initialize()
@@ -397,12 +397,12 @@ async def bench_sqlite(n: int) -> Section:
 async def bench_e2e_workflow(n: int) -> Section:
     sec = Section("4. E2E Workflow (InMemory + SyncExecutor)")
 
-    from rufus.builder import WorkflowBuilder
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.observability.noop import NoopWorkflowObserver
-    from rufus.implementations.persistence.memory import InMemoryPersistence
-    from rufus.implementations.execution.sync import SyncExecutor
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.builder import WorkflowBuilder
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.observability.noop import NoopWorkflowObserver
+    from ruvon.implementations.persistence.memory import InMemoryPersistence
+    from ruvon.implementations.execution.sync import SyncExecutor
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
     persistence = InMemoryPersistence()
     await persistence.initialize()
@@ -719,7 +719,7 @@ def bench_ed25519(n: int) -> Section:
     sec.add("verify tampered (rejected)", ops_per_sec=st["ops_per_sec"], p95_ms=st["p95_ms"])
 
     # import cold vs warm
-    from rufus.builder import WorkflowBuilder
+    from ruvon.builder import WorkflowBuilder
     import_path = "cryptography.hazmat.primitives.asymmetric.ed25519.Ed25519PrivateKey"
 
     # NOTE: intentional use of private API for caching benchmark
@@ -793,7 +793,7 @@ async def bench_saf_pipeline(n: int) -> Section:
         sec.note("cryptography not installed — skipping")
         return sec
 
-    from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+    from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
     fernet_key = Fernet.generate_key()
     fernet = Fernet(fernet_key)
@@ -867,8 +867,8 @@ def bench_msgspec_codec(n: int) -> Section:
         sec.note("msgspec not installed — skipping")
         return sec
 
-    from rufus.providers.dtos import WorkflowRecord
-    from rufus.utils.serialization import decode_typed, encode_struct, deserialize, serialize_bytes
+    from ruvon.providers.dtos import WorkflowRecord
+    from ruvon.utils.serialization import decode_typed, encode_struct, deserialize, serialize_bytes
 
     record = WorkflowRecord(
         id="wf-bench-001",
@@ -935,14 +935,14 @@ async def bench_wasm_bridge_dispatch(n: int) -> Section:
     sec = Section("13. WASM Bridge Dispatch")
 
     try:
-        from rufus_edge.platform.wasm_bridge import (
+        from ruvon_edge.platform.wasm_bridge import (
             NativeWasmBridge,
             detect_wasm_bridge,
         )
-        from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
-        from rufus.implementations.execution.component_runtime import ComponentStepRuntime
+        from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+        from ruvon.implementations.execution.component_runtime import ComponentStepRuntime
     except ImportError as exc:
-        sec.note(f"rufus-sdk-edge not installed — skipping ({exc})")
+        sec.note(f"ruvon-edge not installed — skipping ({exc})")
         return sec
 
     # ------------------------------------------------------------------
@@ -1238,9 +1238,9 @@ def bench_proto_codec(n: int) -> "Section":
     sec = Section("14. Proto Codec (pack_message)")
 
     try:
-        from rufus.utils.serialization import pack_message, unpack_message, _USING_PROTO
+        from ruvon.utils.serialization import pack_message, unpack_message, _USING_PROTO
     except ImportError as exc:
-        sec.note(f"rufus SDK not on path — skipping ({exc})")
+        sec.note(f"ruvon SDK not on path — skipping ({exc})")
         return sec
 
     hb_dict = {
@@ -1290,7 +1290,7 @@ def bench_proto_codec(n: int) -> "Section":
     # ------------------------------------------------------------------
     if _USING_PROTO and _BETTERPROTO_AVAILABLE:
         try:
-            from rufus.proto.gen import HeartbeatMsg  # type: ignore
+            from ruvon.proto.gen import HeartbeatMsg  # type: ignore
             proto_msg = HeartbeatMsg(**hb_dict)
 
             for _ in range(500):
@@ -1331,7 +1331,7 @@ def bench_proto_codec(n: int) -> "Section":
         except ImportError:
             sec.note(
                 "betterproto installed but generated code not found — "
-                "run `make proto` to generate src/rufus/proto/gen/. "
+                "run `make proto` to generate src/ruvon/proto/gen/. "
                 "JSON envelope benchmark above still valid."
             )
     else:
@@ -1352,8 +1352,8 @@ def bench_ruvon_gossip(n: int) -> Section:
 
     if not _RUVON_GOSSIP_AVAILABLE:
         sec.note(
-            "rufus-sdk-edge not installed or capability_gossip not found — "
-            "pip install -e 'packages/rufus-sdk-edge[edge]'"
+            "ruvon-edge not installed or capability_gossip not found — "
+            "pip install -e 'packages/ruvon-edge[edge]'"
         )
         return sec
 
@@ -1428,7 +1428,7 @@ def bench_ruvon_gossip(n: int) -> Section:
     # --- find_best_builder() selection across N peers (synchronous equivalent) ---
     # Replicate the synchronous portion of find_best_builder without async overhead
     def _find_best(peers: Dict[str, "CapabilityVector"]) -> Optional[str]:
-        from rufus_edge.capability_gossip import _tier_to_int
+        from ruvon_edge.capability_gossip import _tier_to_int
         candidates = [
             v for v in peers.values()
             if _tier_to_int(v.node_tier) >= 2 and v.available_ram_mb > 256
@@ -1491,8 +1491,8 @@ def bench_nkey_verification(n: int) -> Section:
             sec.note("cryptography not installed — pip install cryptography")
         else:
             sec.note(
-                "rufus-sdk-edge not installed or nkey_verifier not found — "
-                "pip install -e 'packages/rufus-sdk-edge[edge]'"
+                "ruvon-edge not installed or nkey_verifier not found — "
+                "pip install -e 'packages/ruvon-edge[edge]'"
             )
         return sec
 
@@ -1603,15 +1603,15 @@ async def _run(args) -> List[Section]:
     sections: List[Section] = []
 
     print("\n" + "=" * 78)
-    print("  RUFUS SDK — COMPREHENSIVE BENCHMARK SUITE")
+    print("  RUVON SDK — COMPREHENSIVE BENCHMARK SUITE")
     print("=" * 78)
     print(f"  orjson      : {'yes' if _ORJSON_AVAILABLE else 'no'}")
     print(f"  msgspec     : {'yes' if _MSGSPEC_AVAILABLE else 'no'}")
     print(f"  betterproto : {'yes' if _BETTERPROTO_AVAILABLE else 'no'}")
     print(f"  cryptography: {'yes' if _CRYPTO_AVAILABLE else 'no'}")
     print(f"  uvloop      : {'yes' if _UVLOOP_AVAILABLE else 'no'}")
-    print(f"  ruvon gossip: {'yes' if _RUVON_GOSSIP_AVAILABLE else 'no (pip install rufus-sdk-edge[edge])'}")
-    print(f"  nkey verify : {'yes' if _NKEY_AVAILABLE else 'no (requires cryptography + rufus-sdk-edge)'}")
+    print(f"  ruvon gossip: {'yes' if _RUVON_GOSSIP_AVAILABLE else 'no (pip install ruvon-edge[edge])'}")
+    print(f"  nkey verify : {'yes' if _NKEY_AVAILABLE else 'no (requires cryptography + ruvon-edge)'}")
     if skip_security and not args.no_security:
         print("  NOTE: cryptography not installed — sections 7–11 will be skipped")
     print()
@@ -1682,7 +1682,7 @@ async def _run(args) -> List[Section]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rufus SDK benchmark suite")
+    parser = argparse.ArgumentParser(description="Ruvon SDK benchmark suite")
     parser.add_argument("--iterations", type=int, default=None,
                         help="Override iteration count for all sections")
     parser.add_argument("--quick", action="store_true",

@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from unittest.mock import Mock, AsyncMock, patch
 
-from rufus.zombie_scanner import ZombieScanner, ZombieScannerPersistence
+from ruvon.zombie_scanner import ZombieScanner, ZombieScannerPersistence
 
 
 class MockZombiePersistence:

@@ -1,10 +1,10 @@
 """
 Cross-Platform Workflow State Models
 =====================================
-Shared across all three Rufus runtime targets:
+Shared across all three Ruvon runtime targets:
   - Browser  (Pyodide + BrowserSyncExecutor)
   - Cloud     (FastAPI server + Celery workers + PostgreSQL)
-  - Edge      (RufusEdgeAgent + SQLite)
+  - Edge      (RuvonEdgeAgent + SQLite)
 
 Same YAML drives all three; only the execution backend and AI
 inference quality differ.

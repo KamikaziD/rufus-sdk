@@ -14,7 +14,7 @@ import statistics
 import uuid
 from typing import List, Dict
 
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 class BenchmarkResult:
@@ -52,7 +52,7 @@ async def main():
     print()
 
     # Connect to PostgreSQL
-    db_url = "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+    db_url = "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
     provider = PostgresPersistenceProvider(db_url)
     await provider.initialize()
 

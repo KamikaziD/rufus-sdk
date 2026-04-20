@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from pydantic import BaseModel, ConfigDict
 from typing import List
 
-from rufus.workflow import Workflow
-from rufus.models import (
+from ruvon.workflow import Workflow
+from ruvon.models import (
     WorkflowStep, ParallelWorkflowStep,
     StepContext, MergeStrategy, MergeConflictBehavior,
 )
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ def _make_workflow(steps, state, executor, persistence, observer):
 
 
 def _import(dotted_path: str):
-    from rufus.builder import WorkflowBuilder
+    from ruvon.builder import WorkflowBuilder
     return WorkflowBuilder._import_from_string(dotted_path)
 
 

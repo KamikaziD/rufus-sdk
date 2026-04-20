@@ -14,7 +14,7 @@
 
 ### Current State Analysis
 
-**What Rufus Has:**
+**What Ruvon Has:**
 - ✅ Raw asyncpg with manual SQL queries (high performance)
 - ✅ Custom schema.yaml with compile_schema.py (database-agnostic)
 - ✅ Dual migration system (docker/init-db.sql + migrations/*.sql)
@@ -117,7 +117,7 @@
 
 2. **Create SQLAlchemy models:**
    ```python
-   # src/rufus/models/database.py
+   # src/ruvon/models/database.py
    from sqlalchemy import Table, Column, Integer, String, DateTime, JSON
    from sqlalchemy.dialects.postgresql import UUID, JSONB
    from sqlalchemy import MetaData
@@ -138,14 +138,14 @@
 
 3. **Initialize Alembic:**
    ```bash
-   cd src/rufus
+   cd src/ruvon
    alembic init alembic
    ```
 
 4. **Configure Alembic for dual database support:**
    ```python
    # alembic/env.py
-   from rufus.models.database import metadata
+   from ruvon.models.database import metadata
 
    def run_migrations_online():
        # Detect database type and enable batch mode for SQLite
@@ -188,7 +188,7 @@
 **Tasks:**
 1. **Update docker-compose.yml:**
    ```yaml
-   rufus-server:
+   ruvon-server:
      environment:
        RUN_ALEMBIC_MIGRATIONS: "true"
      command: >
@@ -196,13 +196,13 @@
          if [ \"$RUN_ALEMBIC_MIGRATIONS\" = \"true\" ]; then
            alembic upgrade head
          fi &&
-         uvicorn rufus_server.main:app --host 0.0.0.0
+         uvicorn ruvon_server.main:app --host 0.0.0.0
        "
    ```
 
 2. **Add migration health check:**
    ```python
-   # rufus/migrations/checker.py
+   # ruvon/migrations/checker.py
    async def verify_schema_version(persistence):
        """Check if database schema matches expected version."""
        async with persistence.pool.acquire() as conn:
@@ -244,9 +244,9 @@
 **Tasks:**
 1. **Add SQLAlchemy Core query helpers:**
    ```python
-   # src/rufus/implementations/persistence/postgres.py
+   # src/ruvon/implementations/persistence/postgres.py
    from sqlalchemy import select, insert, update
-   from rufus.models.database import workflow_executions
+   from ruvon.models.database import workflow_executions
 
    class PostgresPersistenceProvider(PersistenceProvider):
        def __init__(self, db_url: str):
@@ -295,7 +295,7 @@
 4. **Type safety improvements:**
    ```python
    # With SQLAlchemy models, get IDE autocomplete
-   from rufus.models.database import workflow_executions
+   from ruvon.models.database import workflow_executions
 
    # Type-safe column references
    stmt = select(workflow_executions.c.id, workflow_executions.c.status)
@@ -334,13 +334,13 @@
      volumes:
        - postgres_data:/var/lib/postgresql/data
 
-   rufus-server:
+   ruvon-server:
      environment:
        AUTO_MIGRATE: "true"
      command: >
        sh -c "
          alembic upgrade head &&
-         uvicorn rufus_server.main:app --host 0.0.0.0
+         uvicorn ruvon_server.main:app --host 0.0.0.0
        "
    ```
 
@@ -367,7 +367,7 @@
    - name: Verify schema
      run: |
        alembic check  # Verifies no pending migrations
-       python -c "from rufus.migrations import verify_schema; verify_schema()"
+       python -c "from ruvon.migrations import verify_schema; verify_schema()"
    ```
 
 **Deliverables:**
@@ -389,7 +389,7 @@
 ### SQLAlchemy Models Structure
 
 ```python
-# src/rufus/models/database.py
+# src/ruvon/models/database.py
 from sqlalchemy import MetaData, Table, Column, Index
 from sqlalchemy import String, Integer, Boolean, DateTime, Text, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
@@ -459,7 +459,7 @@ workflow_executions = Table(
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool, create_engine
 from alembic import context
-from rufus.models.database import metadata
+from ruvon.models.database import metadata
 
 config = context.config
 
@@ -508,7 +508,7 @@ else:
 
 ```bash
 # 1. Make model changes
-vim src/rufus/models/database.py
+vim src/ruvon/models/database.py
 
 # 2. Generate migration
 alembic revision --autogenerate -m "add user preferences table"
@@ -542,7 +542,7 @@ git commit -m "migration: add user preferences table"
 import asyncio
 import asyncpg
 from sqlalchemy import select, insert
-from rufus.models.database import workflow_executions
+from ruvon.models.database import workflow_executions
 
 async def benchmark_raw_sql():
     """Baseline: raw asyncpg."""
@@ -654,7 +654,7 @@ If Alembic migration fails:
 
 1. **Restore from backup:**
    ```bash
-   pg_restore -d rufus_cloud backup.sql
+   pg_restore -d ruvon_cloud backup.sql
    ```
 
 2. **Revert code:**

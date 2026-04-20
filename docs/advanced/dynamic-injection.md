@@ -49,7 +49,7 @@ This is **debugging hell** in production.
 
 Use dynamic injection only when:
 
-1. **Plugin Systems**: Steps defined by external packages (e.g., `rufus-plugins`)
+1. **Plugin Systems**: Steps defined by external packages (e.g., `ruvon-plugins`)
    ```python
    # Customer uploads custom validation plugin
    plugin_step = customer.get_validation_plugin()
@@ -582,7 +582,7 @@ def process_order(state: OrderState, context: StepContext):
 
 If you're considering dynamic injection:
 
-1. **Post your use case** to Rufus community forum
+1. **Post your use case** to Ruvon community forum
 2. **Ask for design review** before implementing
 3. **Explore alternatives** suggested by maintainers
 4. **Start with DECISION steps**, only use injection if truly necessary

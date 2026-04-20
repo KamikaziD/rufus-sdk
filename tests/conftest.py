@@ -17,27 +17,27 @@ from unittest.mock import AsyncMock, patch
 
 # Set environment variables before importing the app.
 # conftest.py is loaded by pytest before any test module, so these take effect
-# before the first import of rufus_server.main.
+# before the first import of ruvon_server.main.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 os.environ.setdefault("WORKFLOW_STORAGE", "memory")
-os.environ.setdefault("RUFUS_WORKFLOW_REGISTRY_PATH", "tests/fixtures/test_registry.yaml")
-os.environ.setdefault("RUFUS_CONFIG_DIR", "tests/fixtures")
+os.environ.setdefault("RUVON_WORKFLOW_REGISTRY_PATH", "tests/fixtures/test_registry.yaml")
+os.environ.setdefault("RUVON_CONFIG_DIR", "tests/fixtures")
 
 try:
     from fastapi.testclient import TestClient
-    from rufus_server.main import app
+    from ruvon_server.main import app
     _FASTAPI_AVAILABLE = True
 except Exception:
     TestClient = None  # type: ignore[assignment,misc]
     app = None  # type: ignore[assignment]
     _FASTAPI_AVAILABLE = False
 
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.engine import WorkflowEngine
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.engine import WorkflowEngine
 
 
 def _make_mock_redis():
@@ -104,7 +104,7 @@ def setup_test_workflow():
     execution._thread_pool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
     if _FASTAPI_AVAILABLE:
-        import rufus_server.main as main_module
+        import ruvon_server.main as main_module
         main_module.workflow_engine = engine
         main_module.persistence_provider = persistence
         main_module.execution_provider = execution

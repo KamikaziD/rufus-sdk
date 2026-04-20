@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# build_wasi.sh — Build rufus-sdk-edge as a WASI 0.3 component.
+# build_wasi.sh — Build ruvon-edge as a WASI 0.3 component.
 #
 # Prerequisites:
 #   pip install py2wasm          # Nuitka-based CPython → wasm32-wasi compiler
-#   pip install rufus-sdk-edge[wasi]
+#   pip install ruvon-edge[wasi]
 #
 # Usage:
-#   bash scripts/build_wasi.sh [--output dist/rufus_edge.wasm]
+#   bash scripts/build_wasi.sh [--output dist/ruvon_edge.wasm]
 #
 # Output:
-#   dist/rufus_edge.wasm   (~15 MB before brotli compression)
+#   dist/ruvon_edge.wasm   (~15 MB before brotli compression)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-ENTRY_POINT="${REPO_ROOT}/src/rufus_edge/wasi_main.py"
+ENTRY_POINT="${REPO_ROOT}/src/ruvon_edge/wasi_main.py"
 OUTPUT_DIR="${REPO_ROOT}/dist"
-OUTPUT_FILE="${OUTPUT_DIR}/rufus_edge.wasm"
+OUTPUT_FILE="${OUTPUT_DIR}/ruvon_edge.wasm"
 
 # Allow override via CLI argument
 while [[ $# -gt 0 ]]; do
@@ -55,7 +55,7 @@ py2wasm "${ENTRY_POINT}" \
   --nofollow-import-to=websockets \
   --nofollow-import-to=wasmtime \
   --include-package=rufus \
-  --include-package=rufus_edge
+  --include-package=ruvon_edge
 
 echo "==> Build complete: ${OUTPUT_FILE}"
 echo "    Size: $(du -sh "${OUTPUT_FILE}" | cut -f1)"
@@ -64,7 +64,7 @@ echo "    Size: $(du -sh "${OUTPUT_FILE}" | cut -f1)"
 # Target: <5ms boot time instead of 300ms-2s
 # Install: cargo install wizer --all-features
 if command -v wizer &>/dev/null; then
-    SNAPSHOT_OUT="${OUTPUT_DIR}/rufus_edge_snapshotted.wasm"
+    SNAPSHOT_OUT="${OUTPUT_DIR}/ruvon_edge_snapshotted.wasm"
     echo "==> Snapshotting Python runtime with Wizer..."
     wizer \
         --allow-wasi \
@@ -90,7 +90,7 @@ fi
 
 echo ""
 echo "Deploy the component:"
-echo "  wasmtime run --env RUFUS_DEVICE_ID=pos-001 \\"
-echo "               --env RUFUS_CLOUD_URL=https://control.example.com \\"
-echo "               --env RUFUS_API_KEY=your-key \\"
+echo "  wasmtime run --env RUVON_DEVICE_ID=pos-001 \\"
+echo "               --env RUVON_CLOUD_URL=https://control.example.com \\"
+echo "               --env RUVON_API_KEY=your-key \\"
 echo "               ${OUTPUT_FILE}"

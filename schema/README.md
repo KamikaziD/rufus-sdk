@@ -1,6 +1,6 @@
-# Rufus Workflow JSON Schema
+# Ruvon Workflow JSON Schema
 
-This directory contains JSON Schema definitions for Rufus workflow YAML files. These schemas provide IDE autocomplete, validation, and documentation for workflow definitions.
+This directory contains JSON Schema definitions for Ruvon workflow YAML files. These schemas provide IDE autocomplete, validation, and documentation for workflow definitions.
 
 ## Files
 
@@ -53,7 +53,7 @@ This applies schemas automatically based on file patterns.
 
 1. Open Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings
 2. Click `+` to add new mapping
-3. **Name**: Rufus Workflow Schema
+3. **Name**: Ruvon Workflow Schema
 4. **Schema file or URL**: Browse to `schema/workflow_schema.json`
 5. **Schema version**: JSON Schema version 7
 6. **File path pattern**: Add patterns like `**/*_workflow.yaml`
@@ -70,7 +70,7 @@ Install the LSP and LSP-yaml packages:
 {
   "settings": {
     "yaml.schemas": {
-      "/path/to/rufus-sdk/schema/workflow_schema.json": ["*_workflow.yaml"]
+      "/path/to/ruvon-sdk/schema/workflow_schema.json": ["*_workflow.yaml"]
     }
   }
 }
@@ -78,17 +78,17 @@ Install the LSP and LSP-yaml packages:
 
 ## CLI Validation
 
-Use the enhanced `rufus validate` command with JSON Schema validation:
+Use the enhanced `ruvon validate` command with JSON Schema validation:
 
 ```bash
 # Basic validation (structure and references)
-rufus validate workflow.yaml
+ruvon validate workflow.yaml
 
 # Strict validation (includes function imports)
-rufus validate workflow.yaml --strict
+ruvon validate workflow.yaml --strict
 
 # JSON output for CI/CD
-rufus validate workflow.yaml --json
+ruvon validate workflow.yaml --json
 ```
 
 The validator checks:
@@ -214,7 +214,7 @@ steps:
 
 CLI validation catches this:
 ```bash
-$ rufus validate workflow.yaml
+$ ruvon validate workflow.yaml
 ✗ Validation failed for workflow.yaml
 
 1 Error(s):
@@ -239,7 +239,7 @@ $ rufus validate workflow.yaml
 
 ## Extending the Schema
 
-If you add custom step types or fields to Rufus, update the schema:
+If you add custom step types or fields to Ruvon, update the schema:
 
 1. Edit `workflow_schema.json`
 2. Add new types to the `type` enum in the step definition
@@ -283,12 +283,12 @@ After modifying the schema, test it:
 
 ```bash
 # Validate an example workflow against the schema
-rufus validate examples/fastapi_api/order_workflow.yaml --strict
+ruvon validate examples/fastapi_api/order_workflow.yaml --strict
 
 # Check all example workflows
 for f in examples/**/*_workflow.yaml; do
     echo "Validating $f..."
-    rufus validate "$f"
+    ruvon validate "$f"
 done
 ```
 
@@ -313,7 +313,7 @@ done
 - Check file is recognized as YAML (bottom right of VS Code)
 
 **Validation seems too strict**:
-- Use basic mode first: `rufus validate workflow.yaml`
+- Use basic mode first: `ruvon validate workflow.yaml`
 - Use `--strict` only when you want import checks
 - Some warnings (like PascalCase naming) are suggestions, not errors
 

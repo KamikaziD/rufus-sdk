@@ -17,12 +17,12 @@ from unittest.mock import patch
 
 import pytest
 
-_SIDECAR_BASE = pathlib.Path(__file__).parents[2] / "src" / "rufus_edge" / "sidecar"
+_SIDECAR_BASE = pathlib.Path(__file__).parents[2] / "src" / "ruvon_edge" / "sidecar"
 
 
 def _import_sidecar(module_leaf: str):
     path = _SIDECAR_BASE / (module_leaf + ".py")
-    spec = importlib.util.spec_from_file_location(f"rufus_edge.sidecar.{module_leaf}", path)
+    spec = importlib.util.spec_from_file_location(f"ruvon_edge.sidecar.{module_leaf}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -167,7 +167,7 @@ def test_wasm_binary_executes_hot_swap(tmp_path):
 
     wasm_path = _SIDECAR_BASE / "wasm" / "apply_config.wasm"
     if not wasm_path.exists():
-        pytest.skip("apply_config.wasm not compiled — run: python -m rufus_edge.sidecar.build_wasm")
+        pytest.skip("apply_config.wasm not compiled — run: python -m ruvon_edge.sidecar.build_wasm")
 
     proposal = json.dumps({"key": "fraud_threshold", "value": 0.9, "approved": True})
 

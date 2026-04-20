@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build rufus-sdk wheel
+      - name: Build ruvon-sdk wheel
         run: |
           pip install build
           python -m build --wheel --outdir dist
@@ -36,7 +36,7 @@ jobs:
       - name: Assemble demo site
         run: |
           mkdir -p _site/dist
-          cp dist/rufus_sdk-*.whl _site/dist/
+          cp dist/ruvon_sdk-*.whl _site/dist/
           # Demo 1 — Browser Runtime (Pyodide + WebGPU) at site root
           cp -r examples/browser_demo/. _site/
           rm -f _site/serve.py _site/README.md _site/README.pdf
@@ -44,6 +44,10 @@ jobs:
           mkdir -p _site/browser_demo_3
           cp -r examples/browser_demo_3/. _site/browser_demo_3/
           rm -f _site/browser_demo_3/serve.py _site/browser_demo_3/README.md
+          # Demo 4 — Swarm Studio (drone mesh + shared compute) at /browser_demo_4/
+          mkdir -p _site/browser_demo_4
+          cp -r examples/browser_demo_4/. _site/browser_demo_4/
+          rm -f _site/browser_demo_4/serve.py _site/browser_demo_4/README.md
 
       - uses: actions/configure-pages@v5
 

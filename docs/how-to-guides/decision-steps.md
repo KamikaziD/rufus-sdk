@@ -36,7 +36,7 @@ steps:
 ### Implement decision function
 
 ```python
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from my_app.state_models import OrderState
 
 def check_order_amount(state: OrderState, context: StepContext) -> dict:
@@ -117,7 +117,7 @@ Create complex routing logic:
 Use `WorkflowJumpDirective` for programmatic control:
 
 ```python
-from rufus.models import StepContext, WorkflowJumpDirective
+from ruvon.models import StepContext, WorkflowJumpDirective
 from my_app.state_models import OrderState
 
 def check_fraud_score(state: OrderState, context: StepContext) -> dict:
@@ -285,7 +285,7 @@ Test all routing paths:
 
 ```python
 import pytest
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 
 @pytest.mark.asyncio
 async def test_high_value_routing():

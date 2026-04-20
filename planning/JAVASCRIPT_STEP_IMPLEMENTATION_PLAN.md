@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-This document outlines the implementation plan for adding a JavaScript step type to the Rufus SDK, enabling workflows to execute JavaScript/TypeScript code within a sandboxed V8 environment. This complements HTTP steps for polyglot workflows by providing fast, in-process script execution without external service dependencies.
+This document outlines the implementation plan for adding a JavaScript step type to the Ruvon SDK, enabling workflows to execute JavaScript/TypeScript code within a sandboxed V8 environment. This complements HTTP steps for polyglot workflows by providing fast, in-process script execution without external service dependencies.
 
 ---
 
@@ -23,7 +23,7 @@ This document outlines the implementation plan for adding a JavaScript step type
 8. [File Structure](#8-file-structure)
 9. [Implementation Phases](#9-implementation-phases)
 10. [YAML Configuration](#10-yaml-configuration)
-11. [Built-in Utilities (rufus object)](#11-built-in-utilities-rufus-object)
+11. [Built-in Utilities (ruvon object)](#11-built-in-utilities-ruvon-object)
 12. [Error Handling](#12-error-handling)
 13. [Testing Strategy](#13-testing-strategy)
 14. [Documentation Updates](#14-documentation-updates)
@@ -139,7 +139,7 @@ pip install pyright  # Type checking only, use tsc for transpilation
 │  │  └─────────────────────────────────────────────────────┘    │    │
 │  │  ┌─────────────────────────────────────────────────────┐    │    │
 │  │  │  RuntimeBridge                                       │    │    │
-│  │  │  - Injects state, context, rufus utilities          │    │    │
+│  │  │  - Injects state, context, ruvon utilities          │    │    │
 │  │  │  - Extracts return value                            │    │    │
 │  │  │  - Handles errors                                   │    │    │
 │  │  └─────────────────────────────────────────────────────┘    │    │
@@ -164,7 +164,7 @@ pip install pyright  # Type checking only, use tsc for transpilation
 ### 4.1 JavaScriptConfig (Pydantic Model)
 
 ```python
-# src/rufus/models.py
+# src/ruvon/models.py
 
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, Dict, Any, Literal
@@ -231,7 +231,7 @@ class JavaScriptConfig(BaseModel):
 ### 4.2 JavaScriptWorkflowStep
 
 ```python
-# src/rufus/models.py
+# src/ruvon/models.py
 
 class JavaScriptWorkflowStep(WorkflowStep):
     """Workflow step that executes JavaScript/TypeScript code."""
@@ -246,7 +246,7 @@ class JavaScriptWorkflowStep(WorkflowStep):
 ### 4.3 Execution Result
 
 ```python
-# src/rufus/javascript/types.py
+# src/ruvon/javascript/types.py
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
@@ -295,7 +295,7 @@ class JSExecutionResult:
    ├── Create V8 context from pool
    ├── Inject 'state' global (frozen object)
    ├── Inject 'context' global (frozen object)
-   ├── Inject 'rufus' utilities (frozen object)
+   ├── Inject 'ruvon' utilities (frozen object)
    └── Return prepared context
 
 5. Script Execution (V8ContextPool)
@@ -331,9 +331,9 @@ Scripts are wrapped in a harness that:
 "use strict";
 
 // Injected by RuntimeBridge
-const state = __RUFUS_STATE__;
-const context = __RUFUS_CONTEXT__;
-const rufus = __RUFUS_UTILS__;
+const state = __RUVON_STATE__;
+const context = __RUVON_CONTEXT__;
+const ruvon = __RUVON_UTILS__;
 
 // User script executed here
 const __result__ = (function() {
@@ -362,7 +362,7 @@ __result__;
 ### 6.2 esbuild Configuration
 
 ```python
-# src/rufus/javascript/typescript.py
+# src/ruvon/javascript/typescript.py
 
 import subprocess
 import json
@@ -412,12 +412,12 @@ class TypeScriptTranspiler:
         return self.transpile(source, filename=file_path.name)
 ```
 
-### 6.3 Type Definitions for Rufus Utilities
+### 6.3 Type Definitions for Ruvon Utilities
 
 Provide `.d.ts` files for TypeScript intellisense:
 
 ```typescript
-// types/rufus.d.ts (shipped with SDK for IDE support)
+// types/ruvon.d.ts (shipped with SDK for IDE support)
 
 declare global {
     /**
@@ -437,9 +437,9 @@ declare global {
     }>;
 
     /**
-     * Rufus utility functions.
+     * Ruvon utility functions.
      */
-    const rufus: {
+    const ruvon: {
         /** Current ISO timestamp */
         now(): string;
 
@@ -525,7 +525,7 @@ discountPercent = Math.min(discountPercent, 0.25);
 const discountAmount = subtotal * discountPercent;
 const finalTotal = subtotal - discountAmount;
 
-rufus.log(`Calculated discount: ${discountPercent * 100}% for ${orderState.customer_tier} tier`);
+ruvon.log(`Calculated discount: ${discountPercent * 100}% for ${orderState.customer_tier} tier`);
 
 // Return result (will be merged into workflow state)
 const result: DiscountResult = {
@@ -533,7 +533,7 @@ const result: DiscountResult = {
     discount_percent: discountPercent * 100,
     discount_amount: Math.round(discountAmount * 100) / 100,
     final_total: Math.round(finalTotal * 100) / 100,
-    applied_at: rufus.now()
+    applied_at: ruvon.now()
 };
 
 return result;
@@ -577,7 +577,7 @@ return result;
 ### 7.2 Blocked APIs
 
 ```python
-# src/rufus/javascript/sandbox.py
+# src/ruvon/javascript/sandbox.py
 
 BLOCKED_GLOBALS = [
     'eval',
@@ -633,7 +633,7 @@ def inject_state(ctx: MiniRacer, state: dict, context: dict) -> None:
 ## 8. File Structure
 
 ```
-src/rufus/
+src/ruvon/
 ├── javascript/
 │   ├── __init__.py              # Public API exports
 │   ├── executor.py              # JavaScriptExecutor main class
@@ -642,7 +642,7 @@ src/rufus/
 │   ├── bridge.py                # RuntimeBridge (state injection)
 │   ├── typescript.py            # TypeScriptTranspiler
 │   ├── sandbox.py               # Security sandbox setup
-│   ├── builtins.py              # Rufus utility functions
+│   ├── builtins.py              # Ruvon utility functions
 │   └── types.py                 # Type definitions (JSExecutionResult)
 ├── models.py                    # Add JavaScriptConfig, JavaScriptWorkflowStep
 ├── builder.py                   # Add JAVASCRIPT step type parsing
@@ -651,7 +651,7 @@ src/rufus/
         └── sync.py              # Update to handle JS steps
 
 types/
-└── rufus.d.ts                   # TypeScript declarations for IDE support
+└── ruvon.d.ts                   # TypeScript declarations for IDE support
 
 tests/
 └── javascript/
@@ -694,7 +694,7 @@ examples/
 | 1.1 | `models.py` | Add `JavaScriptConfig`, `JavaScriptWorkflowStep` |
 | 1.2 | `javascript/types.py` | Add `JSExecutionResult` dataclass |
 | 1.3 | `javascript/sandbox.py` | Security sandbox setup code |
-| 1.4 | `javascript/builtins.py` | Rufus utility functions (JS code) |
+| 1.4 | `javascript/builtins.py` | Ruvon utility functions (JS code) |
 | 1.5 | `javascript/bridge.py` | State injection, result extraction |
 | 1.6 | `javascript/context_pool.py` | V8 context pool management |
 | 1.7 | `javascript/loader.py` | Script file loading with caching |
@@ -709,7 +709,7 @@ examples/
 |------|-------|-------------|
 | 2.1 | `javascript/typescript.py` | esbuild-based transpilation |
 | 2.2 | `javascript/loader.py` | Update to handle .ts files |
-| 2.3 | `types/rufus.d.ts` | TypeScript declarations |
+| 2.3 | `types/ruvon.d.ts` | TypeScript declarations |
 | 2.4 | `requirements.txt` | Add esbuild dependency |
 
 ### Phase 3: Integration
@@ -839,14 +839,14 @@ steps:
 
 ---
 
-## 11. Built-in Utilities (rufus object)
+## 11. Built-in Utilities (ruvon object)
 
 ### 11.1 JavaScript Implementation
 
 ```javascript
-// src/rufus/javascript/builtins.py -> RUFUS_BUILTINS_JS
+// src/ruvon/javascript/builtins.py -> RUVON_BUILTINS_JS
 
-const rufus = Object.freeze({
+const ruvon = Object.freeze({
     // Logging (captured for audit)
     log: (msg) => __rufus_log__('info', String(msg)),
     warn: (msg) => __rufus_log__('warn', String(msg)),
@@ -866,7 +866,7 @@ const rufus = Object.freeze({
     },
     avg: (arr) => {
         if (!Array.isArray(arr) || arr.length === 0) return 0;
-        return rufus.sum(arr) / arr.length;
+        return ruvon.sum(arr) / arr.length;
     },
     min: (arr) => Array.isArray(arr) ? Math.min(...arr) : 0,
     max: (arr) => Array.isArray(arr) ? Math.max(...arr) : 0,
@@ -942,13 +942,13 @@ const rufus = Object.freeze({
 ### 11.2 Python Bridge Functions
 
 ```python
-# src/rufus/javascript/builtins.py
+# src/ruvon/javascript/builtins.py
 
 import uuid
 from typing import List, Tuple
 
 class BuiltinsBridge:
-    """Python-side implementation of rufus.* functions that need Python."""
+    """Python-side implementation of ruvon.* functions that need Python."""
 
     def __init__(self):
         self.logs: List[Tuple[str, str]] = []  # (level, message)
@@ -1031,8 +1031,8 @@ steps:
 # tests/javascript/test_executor.py
 
 import pytest
-from rufus.javascript import JavaScriptExecutor
-from rufus.javascript.types import JSExecutionResult
+from ruvon.javascript import JavaScriptExecutor
+from ruvon.javascript.types import JSExecutionResult
 
 class TestJavaScriptExecutor:
 
@@ -1060,12 +1060,12 @@ class TestJavaScriptExecutor:
         assert result.success
         assert result.result == {"doubled": 42}
 
-    def test_rufus_utilities(self, executor):
-        """Test rufus.* utility functions."""
+    def test_ruvon_utilities(self, executor):
+        """Test ruvon.* utility functions."""
         result = executor.execute(
             code="""
-                const total = rufus.sum([1, 2, 3, 4, 5]);
-                return { total, timestamp: rufus.now() };
+                const total = ruvon.sum([1, 2, 3, 4, 5]);
+                return { total, timestamp: ruvon.now() };
             """,
             state={},
             context={}
@@ -1140,7 +1140,7 @@ class TestJavaScriptExecutor:
 # tests/javascript/test_typescript.py
 
 import pytest
-from rufus.javascript.typescript import TypeScriptTranspiler
+from ruvon.javascript.typescript import TypeScriptTranspiler
 
 class TestTypeScriptTranspiler:
 
@@ -1186,9 +1186,9 @@ class TestTypeScriptTranspiler:
 
 import pytest
 from pathlib import Path
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
 
 class TestJavaScriptWorkflowIntegration:
 
@@ -1205,11 +1205,11 @@ class TestJavaScriptWorkflowIntegration:
 
         # Write test script
         (scripts_dir / "calculate.js").write_text("""
-            const total = rufus.sum(state.items.map(i => i.price));
+            const total = ruvon.sum(state.items.map(i => i.price));
             return {
                 total: total,
                 item_count: state.items.length,
-                calculated_at: rufus.now()
+                calculated_at: ruvon.now()
             };
         """)
 
@@ -1309,16 +1309,16 @@ steps:
 // Access workflow state
 const subtotal = state.items.reduce((sum, item) => sum + item.price, 0);
 
-// Use rufus utilities
+// Use ruvon utilities
 const discountRate = state.is_member ? 0.10 : 0;
-rufus.log(`Applying ${discountRate * 100}% discount`);
+ruvon.log(`Applying ${discountRate * 100}% discount`);
 
 // Return result (merged into workflow state)
 return {
     subtotal: subtotal,
     discount: subtotal * discountRate,
     total: subtotal * (1 - discountRate),
-    calculated_at: rufus.now()
+    calculated_at: ruvon.now()
 };
 ```
 
@@ -1358,50 +1358,50 @@ return result;
 |--------|-------------|
 | `state` | Workflow state (read-only) |
 | `context` | Step context (workflow_id, step_name, etc.) |
-| `rufus` | Utility functions (see below) |
+| `ruvon` | Utility functions (see below) |
 
-#### Rufus Utilities
+#### Ruvon Utilities
 
 ```javascript
 // Logging
-rufus.log("Info message");
-rufus.warn("Warning message");
-rufus.error("Error message");
+ruvon.log("Info message");
+ruvon.warn("Warning message");
+ruvon.error("Error message");
 
 // Date/Time
-rufus.now();        // ISO timestamp
-rufus.timestamp();  // Unix milliseconds
+ruvon.now();        // ISO timestamp
+ruvon.timestamp();  // Unix milliseconds
 
 // Identifiers
-rufus.uuid();       // UUID v4
+ruvon.uuid();       // UUID v4
 
 // Math
-rufus.sum([1, 2, 3]);      // 6
-rufus.avg([1, 2, 3]);      // 2
-rufus.min([1, 2, 3]);      // 1
-rufus.max([1, 2, 3]);      // 3
-rufus.round(3.14159, 2);   // 3.14
+ruvon.sum([1, 2, 3]);      // 6
+ruvon.avg([1, 2, 3]);      // 2
+ruvon.min([1, 2, 3]);      // 1
+ruvon.max([1, 2, 3]);      // 3
+ruvon.round(3.14159, 2);   // 3.14
 
 // Strings
-rufus.slugify("Hello World");     // "hello-world"
-rufus.truncate("Long text", 10);  // "Long te..."
+ruvon.slugify("Hello World");     // "hello-world"
+ruvon.truncate("Long text", 10);  // "Long te..."
 
 // JSON
-rufus.parseJSON('{"a":1}');  // {a: 1} or null on error
+ruvon.parseJSON('{"a":1}');  // {a: 1} or null on error
 
 // Objects
-rufus.pick(obj, ['a', 'b']);  // Pick keys
-rufus.omit(obj, ['c', 'd']);  // Omit keys
+ruvon.pick(obj, ['a', 'b']);  // Pick keys
+ruvon.omit(obj, ['c', 'd']);  // Omit keys
 
 // Arrays
-rufus.unique([1, 1, 2]);           // [1, 2]
-rufus.groupBy(arr, 'category');    // Group by key
-rufus.sortBy(arr, 'name');         // Sort by key
+ruvon.unique([1, 1, 2]);           // [1, 2]
+ruvon.groupBy(arr, 'category');    // Group by key
+ruvon.sortBy(arr, 'name');         // Sort by key
 
 // Validation
-rufus.isEmail("test@example.com");  // true
-rufus.isURL("https://...");         // true
-rufus.isEmpty(value);               // true if null/empty
+ruvon.isEmail("test@example.com");  // true
+ruvon.isURL("https://...");         // true
+ruvon.isEmpty(value);               // true if null/empty
 ```
 
 #### Security Model
@@ -1554,16 +1554,16 @@ if (order.shipping_address) {
 
 // Log validation result
 if (errors.length > 0) {
-    rufus.warn(`Order validation failed: ${errors.length} errors`);
+    ruvon.warn(`Order validation failed: ${errors.length} errors`);
 } else {
-    rufus.log('Order validation passed');
+    ruvon.log('Order validation passed');
 }
 
 // Return validation result
 const result: ValidationResult = {
     is_valid: errors.length === 0,
     errors: errors,
-    validated_at: rufus.now()
+    validated_at: ruvon.now()
 };
 
 return result;
@@ -1687,11 +1687,11 @@ return result;
 
 7. **Script caching**: Cache compiled scripts in memory? LRU with size limit?
 
-8. **Log capture**: Capture `console.log` or only `rufus.log`?
+8. **Log capture**: Capture `console.log` or only `ruvon.log`?
 
 9. **Error details**: How much error detail to expose? Stack traces in production?
 
-10. **TypeScript declarations**: Ship `rufus.d.ts` with SDK? Or separate package?
+10. **TypeScript declarations**: Ship `ruvon.d.ts` with SDK? Or separate package?
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implemented webhook notification system for real-time event delivery from the Rufus Edge Cloud Control Plane (Tier 4).
+Implemented webhook notification system for real-time event delivery from the Ruvon Edge Cloud Control Plane (Tier 4).
 
 **Status:** ✅ Complete Implementation
 
@@ -60,7 +60,7 @@ Implemented webhook notification system for real-time event delivery from the Ru
 
 ### 1. Webhook Service (`webhook_service.py`)
 
-**Location:** `/Users/kim/PycharmProjects/rufus/src/rufus_server/webhook_service.py`
+**Location:** `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/webhook_service.py`
 
 **Data Models:**
 ```python
@@ -198,8 +198,8 @@ All webhooks receive a standardized JSON payload:
 **Headers:**
 ```http
 Content-Type: application/json
-User-Agent: Rufus-Edge-Webhook/1.0
-X-Rufus-Signature: sha256=<hmac_signature>  # If secret configured
+User-Agent: Ruvon-Edge-Webhook/1.0
+X-Ruvon-Signature: sha256=<hmac_signature>  # If secret configured
 Authorization: Bearer <token>  # If custom header configured
 ```
 
@@ -236,7 +236,7 @@ def verify_webhook_signature(payload: dict, signature: str, secret: str) -> bool
 # In your webhook endpoint:
 @app.post("/webhook")
 def receive_webhook(request: Request):
-    signature = request.headers.get("X-Rufus-Signature")
+    signature = request.headers.get("X-Ruvon-Signature")
     payload = await request.json()
 
     if not verify_webhook_signature(payload, signature, "your-secret"):
@@ -398,9 +398,9 @@ def verify_signature(payload: dict, signature: str) -> bool:
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    """Receive webhook from Rufus Edge."""
+    """Receive webhook from Ruvon Edge."""
     # Get signature from headers
-    signature = request.headers.get("X-Rufus-Signature")
+    signature = request.headers.get("X-Ruvon-Signature")
 
     # Parse payload
     payload = await request.json()
@@ -458,7 +458,7 @@ function verifySignature(payload, signature) {
 }
 
 app.post('/webhook', (req, res) => {
-  const signature = req.headers['x-rufus-signature'];
+  const signature = req.headers['x-ruvon-signature'];
   const payload = req.body;
 
   if (!verifySignature(payload, signature)) {
@@ -549,7 +549,7 @@ webhook_deliveries:
 
 1. **Always Use HTTPS**: Webhook URLs must use HTTPS in production
 2. **Use HMAC Signatures**: Configure secrets for all production webhooks
-3. **Verify Signatures**: Always verify `X-Rufus-Signature` header
+3. **Verify Signatures**: Always verify `X-Ruvon-Signature` header
 4. **Use Timing-Safe Comparison**: Use `hmac.compare_digest()` to prevent timing attacks
 5. **Validate Payloads**: Validate event_type and data structure
 6. **Rate Limiting**: Implement rate limiting on your webhook endpoint
@@ -605,7 +605,7 @@ curl http://localhost:8000/api/v1/webhooks/my-webhook/deliveries?status=failed
 
 1. **Start Server:**
    ```bash
-   uvicorn rufus_server.main:app --reload
+   uvicorn ruvon_server.main:app --reload
    ```
 
 2. **Register Webhook:**
@@ -658,16 +658,16 @@ curl http://localhost:8000/api/v1/webhooks/my-webhook/deliveries?status=failed
 ## Files Created/Modified
 
 ### Created
-1. `/Users/kim/PycharmProjects/rufus/src/rufus_server/webhook_service.py` (~650 lines)
-2. `/Users/kim/PycharmProjects/rufus/WEBHOOK_NOTIFICATIONS.md` (this file)
+1. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/webhook_service.py` (~650 lines)
+2. `/Users/kim/PycharmProjects/ruvon/WEBHOOK_NOTIFICATIONS.md` (this file)
 
 ### Modified
-1. `/Users/kim/PycharmProjects/rufus/src/rufus_server/main.py`
+1. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/main.py`
    - Added `webhook_service` global
    - Initialized webhook service in startup
    - Added 7 API endpoints
 
-2. `/Users/kim/PycharmProjects/rufus/src/rufus_server/device_service.py`
+2. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/device_service.py`
    - Added `webhook_service` parameter to `__init__`
    - Dispatches `device.registered` event on device registration
    - Dispatches `command.created` event on command creation
@@ -710,7 +710,7 @@ This implementation is part of the Tier 4 Advanced Features roadmap:
 ## Support
 
 For questions or issues:
-1. Check `/Users/kim/PycharmProjects/rufus/CLAUDE.md` for project overview
+1. Check `/Users/kim/PycharmProjects/ruvon/CLAUDE.md` for project overview
 2. Review migration file: `docker/migrations/add_webhooks_and_ratelimiting.sql`
 3. Test with validation script: `test_webhooks.py`
 4. Webhook receiver examples in this document

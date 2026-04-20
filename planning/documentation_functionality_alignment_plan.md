@@ -1,5 +1,5 @@
 # Documentation & Functionality Alignment Plan
-## Rufus SDK - Fresh Install Validation & Testing
+## Ruvon SDK - Fresh Install Validation & Testing
 
 **Created**: 2026-02-11
 **Status**: Ready for Review
@@ -9,11 +9,11 @@
 
 ## Executive Summary
 
-This plan validates the Rufus SDK installation, migration, and testing process from a **clean slate** (no existing database, no containers). We'll follow the documentation step-by-step, identify gaps, fix issues, and update documentation for accuracy.
+This plan validates the Ruvon SDK installation, migration, and testing process from a **clean slate** (no existing database, no containers). We'll follow the documentation step-by-step, identify gaps, fix issues, and update documentation for accuracy.
 
 ### Scope
-1. ✅ Fresh pip install of Rufus SDK
-2. ✅ Docker container setup (PostgreSQL + Rufus Server)
+1. ✅ Fresh pip install of Ruvon SDK
+2. ✅ Docker container setup (PostgreSQL + Ruvon Server)
 3. ✅ Database migrations (both SQLite and PostgreSQL)
 4. ✅ Test data seeding for load tests
 5. ✅ Documentation accuracy verification
@@ -45,7 +45,7 @@ This plan validates the Rufus SDK installation, migration, and testing process f
 - ✅ `setup.py` - **MISSING** (relies on pyproject.toml only)
 
 **Docker Configuration**:
-- ✅ `docker/docker-compose.yml` - PostgreSQL + Rufus Server
+- ✅ `docker/docker-compose.yml` - PostgreSQL + Ruvon Server
 - ✅ `docker/Dockerfile.server` - FastAPI server image
 - ✅ `docker/init-db.sql` - Database initialization (850+ lines)
 - ⚠️ `.env.example` - Present but not referenced in docker-compose.yml
@@ -81,7 +81,7 @@ This plan validates the Rufus SDK installation, migration, and testing process f
 **What Works Well**:
 1. ✅ SQLite auto-initialization (`auto_init=True`) enables zero-setup development
 2. ✅ Unified schema definition (`schema.yaml`) with type mappings
-3. ✅ CLI commands (`rufus db init`, `rufus db migrate`) are user-friendly
+3. ✅ CLI commands (`ruvon db init`, `ruvon db migrate`) are user-friendly
 4. ✅ Docker setup includes health checks
 5. ✅ Comprehensive examples for different use cases
 
@@ -115,31 +115,31 @@ This plan validates the Rufus SDK installation, migration, and testing process f
 **Starting State**:
 ```bash
 # Verify clean state
-docker ps -a  # Should show no rufus containers
-docker volume ls  # Should show no rufus volumes
-ls ~/.rufus/  # Should not exist or be empty
-ls /Users/kim/PycharmProjects/rufus/.venv/  # Should not exist
+docker ps -a  # Should show no ruvon containers
+docker volume ls  # Should show no ruvon volumes
+ls ~/.ruvon/  # Should not exist or be empty
+ls /Users/kim/PycharmProjects/ruvon/.venv/  # Should not exist
 ```
 
 **System Requirements**:
 - Python 3.11+ installed
 - Docker Desktop running
 - Git repository cloned
-- No existing Rufus configuration
+- No existing Ruvon configuration
 
 ### 2.2 Installation Path 1: Development (SQLite)
 
-**Goal**: Get working Rufus environment in <5 minutes
+**Goal**: Get working Ruvon environment in <5 minutes
 
 ```bash
 # Step 1: Navigate to project
-cd /Users/kim/PycharmProjects/rufus
+cd /Users/kim/PycharmProjects/ruvon
 
 # Step 2: Install dependencies
 pip install -r requirements.txt
 
 # Step 3: Verify installation
-python -c "import rufus; print(rufus.__version__)"
+python -c "import ruvon; print(ruvon.__version__)"
 
 # Step 4: Run SQLite example (auto-initializes database)
 python examples/sqlite_task_manager/simple_demo.py
@@ -178,7 +178,7 @@ sqlite3 examples/sqlite_task_manager/workflow.db \
 
 ```bash
 # Step 1: Navigate to Docker directory
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 
 # Step 2: Ensure no existing containers
 docker compose down -v  # Remove containers AND volumes
@@ -191,21 +191,21 @@ docker compose logs -f postgres
 # Wait for: "database system is ready to accept connections"
 
 # Step 5: Verify database schema
-docker exec -it rufus-postgres psql -U postgres -d rufus_cloud -c "\dt"
+docker exec -it ruvon-postgres psql -U postgres -d ruvon_cloud -c "\dt"
 
 # Expected Output:
 # List of relations showing: workflow_executions, edge_devices, etc.
 
-# Step 6: Verify Rufus server
+# Step 6: Verify Ruvon server
 curl http://localhost:8000/health
 # Expected: {"status": "healthy"}
 ```
 
 **Success Criteria**:
 - ✅ PostgreSQL container starts successfully
-- ✅ Database `rufus_cloud` created
+- ✅ Database `ruvon_cloud` created
 - ✅ Schema applied via `init-db.sql`
-- ✅ Rufus server responds to health checks
+- ✅ Ruvon server responds to health checks
 - ✅ All tables present in database
 
 **Validation Commands**:
@@ -215,12 +215,12 @@ docker compose ps
 # Expected: All services "Up" and "healthy"
 
 # Check database schema version
-docker exec -it rufus-postgres psql -U postgres -d rufus_cloud \
+docker exec -it ruvon-postgres psql -U postgres -d ruvon_cloud \
   -c "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 1;"
 # Expected: Latest migration version
 
 # Check connection from host
-psql "postgresql://postgres:postgres@localhost:5433/rufus_cloud" -c "\dt"
+psql "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" -c "\dt"
 ```
 
 ### 2.4 Installation Path 3: CLI-Based Setup
@@ -228,15 +228,15 @@ psql "postgresql://postgres:postgres@localhost:5433/rufus_cloud" -c "\dt"
 **Goal**: Manual control over database initialization
 
 ```bash
-# Step 1: Install Rufus CLI
+# Step 1: Install Ruvon CLI
 pip install -r requirements.txt
 
 # Step 2: Configure database URL
-export RUFUS_DB_URL="postgresql://postgres:postgres@localhost:5433/rufus_cloud"
-# OR: Create ~/.rufus/config.yaml with database URL
+export RUVON_DB_URL="postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
+# OR: Create ~/.ruvon/config.yaml with database URL
 
 # Step 3: Initialize database
-rufus db init --db-url "$RUFUS_DB_URL"
+ruvon db init --db-url "$RUVON_DB_URL"
 
 # Expected Output:
 # ✓ Connected to database
@@ -245,17 +245,17 @@ rufus db init --db-url "$RUFUS_DB_URL"
 # ✓ Database initialized successfully
 
 # Step 4: Verify initialization
-rufus db status --db-url "$RUFUS_DB_URL"
+ruvon db status --db-url "$RUVON_DB_URL"
 
 # Expected Output:
-# Database: rufus_cloud (PostgreSQL)
+# Database: ruvon_cloud (PostgreSQL)
 # Applied migrations: 002_postgres_standardized.sql
 # Schema version: 2.0.0
 # Status: Up to date
 ```
 
 **Success Criteria**:
-- ✅ `rufus db init` completes without errors
+- ✅ `ruvon db init` completes without errors
 - ✅ Migrations applied in correct order
 - ✅ Schema matches `schema.yaml` definition
 - ✅ `schema_migrations` table tracks versions
@@ -278,7 +278,7 @@ rufus db status --db-url "$RUFUS_DB_URL"
 - **Files**: `migrations/002_postgres_standardized.sql`, `003_sqlite_fixed.sql`
 - **Source**: Generated from `migrations/schema.yaml`
 - **Purpose**: Consistent schema across SQLite and PostgreSQL
-- **Trigger**: Manual (`rufus db migrate`) or auto (SQLite `auto_init`)
+- **Trigger**: Manual (`ruvon db migrate`) or auto (SQLite `auto_init`)
 - **Pros**: Single source of truth, version tracking
 - **Cons**: Requires manual execution for PostgreSQL
 
@@ -301,7 +301,7 @@ diff /tmp/docker_tables.txt /tmp/migration_tables.txt
 
 **Analysis**:
 - ⚠️ `docker/init-db.sql` is a **superset** of migrations
-- ⚠️ Includes Rufus Edge and Rufus Server tables not in core SDK
+- ⚠️ Includes Ruvon Edge and Ruvon Server tables not in core SDK
 - ✅ Core workflow tables are consistent
 
 ### 3.3 Recommended Migration Strategy
@@ -317,14 +317,14 @@ services:
     command: postgres
     # Remove init-db.sql
 
-  rufus_server:
+  ruvon_server:
     depends_on:
       postgres:
         condition: service_healthy
     command: >
       sh -c "
-        rufus db init --db-url postgresql://postgres:postgres@postgres:5432/rufus_cloud &&
-        uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+        ruvon db init --db-url postgresql://postgres:postgres@postgres:5432/ruvon_cloud &&
+        uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000
       "
 ```
 
@@ -344,14 +344,14 @@ services:
 **Test 1: Fresh PostgreSQL Database**
 ```bash
 # Drop and recreate database
-docker exec -it rufus-postgres psql -U postgres -c "DROP DATABASE IF EXISTS rufus_cloud;"
-docker exec -it rufus-postgres psql -U postgres -c "CREATE DATABASE rufus_cloud;"
+docker exec -it ruvon-postgres psql -U postgres -c "DROP DATABASE IF EXISTS ruvon_cloud;"
+docker exec -it ruvon-postgres psql -U postgres -c "CREATE DATABASE ruvon_cloud;"
 
 # Run migration via CLI
-rufus db init --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
+ruvon db init --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
 
 # Verify schema
-docker exec -it rufus-postgres psql -U postgres -d rufus_cloud -c "\dt"
+docker exec -it ruvon-postgres psql -U postgres -d ruvon_cloud -c "\dt"
 
 # Expected: All core workflow tables present
 ```
@@ -359,15 +359,15 @@ docker exec -it rufus-postgres psql -U postgres -d rufus_cloud -c "\dt"
 **Test 2: SQLite Auto-Init**
 ```bash
 # Remove existing database
-rm -f /tmp/test_rufus.db
+rm -f /tmp/test_ruvon.db
 
 # Create persistence provider with auto_init=True
 python3 << 'EOF'
 import asyncio
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 async def test():
-    persistence = SQLitePersistenceProvider(db_path="/tmp/test_rufus.db", auto_init=True)
+    persistence = SQLitePersistenceProvider(db_path="/tmp/test_ruvon.db", auto_init=True)
     await persistence.initialize()
     print("✓ Database initialized automatically")
 
@@ -375,15 +375,15 @@ asyncio.run(test())
 EOF
 
 # Verify schema
-sqlite3 /tmp/test_rufus.db ".tables"
+sqlite3 /tmp/test_ruvon.db ".tables"
 # Expected: workflow_executions, tasks, workflow_audit_log, etc.
 ```
 
 **Test 3: Migration Idempotency**
 ```bash
 # Run migration twice - should not error
-rufus db migrate --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
-rufus db migrate --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
+ruvon db migrate --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
+ruvon db migrate --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
 
 # Expected: Second run shows "Already up to date"
 ```
@@ -442,8 +442,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 async def seed_demo_workflows(persistence):
@@ -483,9 +483,9 @@ async def seed_edge_devices(persistence):
         await persistence.conn.execute("""
             INSERT INTO edge_devices (device_id, registration_key, status, last_heartbeat)
             VALUES
-                ('device-001', 'rufus-registration-key', 'active', NOW()),
-                ('device-002', 'rufus-registration-key', 'active', NOW()),
-                ('device-003', 'rufus-registration-key', 'inactive', NOW() - INTERVAL '1 day')
+                ('device-001', 'ruvon-registration-key', 'active', NOW()),
+                ('device-002', 'ruvon-registration-key', 'active', NOW()),
+                ('device-003', 'ruvon-registration-key', 'inactive', NOW() - INTERVAL '1 day')
             ON CONFLICT (device_id) DO NOTHING;
         """)
         print(f"✓ Seeded 3 edge devices")
@@ -499,7 +499,7 @@ async def seed_registration_keys(persistence):
     try:
         await persistence.conn.execute("""
             INSERT INTO registration_keys (key_value, max_uses, expires_at)
-            VALUES ('rufus-registration-key', 1000, NOW() + INTERVAL '1 year')
+            VALUES ('ruvon-registration-key', 1000, NOW() + INTERVAL '1 year')
             ON CONFLICT (key_value) DO NOTHING;
         """)
         print(f"✓ Seeded registration keys")
@@ -509,7 +509,7 @@ async def seed_registration_keys(persistence):
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Seed Rufus database with test data")
+    parser = argparse.ArgumentParser(description="Seed Ruvon database with test data")
     parser.add_argument("--db-url", required=True, help="Database URL")
     parser.add_argument("--type", choices=["all", "workflows", "edge", "keys"], default="all")
     args = parser.parse_args()
@@ -550,7 +550,7 @@ python tools/seed_data.py --db-url "sqlite:///workflow.db" --type all
 
 # Seed PostgreSQL (Docker)
 python tools/seed_data.py \
-  --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   --type all
 ```
 
@@ -568,14 +568,14 @@ async def ensure_seed_data(db_url: str):
 
     # Check for registration key
     result = await persistence.conn.fetchval(
-        "SELECT COUNT(*) FROM registration_keys WHERE key_value = 'rufus-registration-key'"
+        "SELECT COUNT(*) FROM registration_keys WHERE key_value = 'ruvon-registration-key'"
     )
 
     if result == 0:
         print("⚠ No registration key found. Seeding default data...")
         await persistence.conn.execute("""
             INSERT INTO registration_keys (key_value, max_uses, expires_at)
-            VALUES ('rufus-registration-key', 10000, NOW() + INTERVAL '1 year');
+            VALUES ('ruvon-registration-key', 10000, NOW() + INTERVAL '1 year');
         """)
         print("✓ Seeded registration key")
 
@@ -606,17 +606,17 @@ sqlite3 demo.db "SELECT workflow_type, status FROM workflow_executions;"
 ```bash
 # Seed PostgreSQL
 python tools/seed_data.py \
-  --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   --type keys
 
 # Verify
-psql "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+psql "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   -c "SELECT key_value, max_uses FROM registration_keys;"
 
 # Expected Output:
 # key_value              | max_uses
 # ---------------------- | --------
-# rufus-registration-key | 1000
+# ruvon-registration-key | 1000
 ```
 
 ---
@@ -699,7 +699,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-rufus_cloud}
+      POSTGRES_DB: ${POSTGRES_DB:-ruvon_cloud}
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
 ```
@@ -735,7 +735,7 @@ async def main():
 ```markdown
 ## Database Initialization Strategies
 
-Rufus supports three database initialization approaches:
+Ruvon supports three database initialization approaches:
 
 ### 1. SQLite Auto-Initialization (Recommended for Development)
 SQLite databases auto-initialize on first use:
@@ -760,7 +760,7 @@ docker compose up -d  # Schema created on first start
 Manual control via CLI commands:
 
 \`\`\`bash
-rufus db init --db-url postgresql://localhost/rufus
+ruvon db init --db-url postgresql://localhost/ruvon
 \`\`\`
 
 **When to use**: Custom deployments, migration troubleshooting
@@ -785,7 +785,7 @@ rufus db init --db-url postgresql://localhost/rufus
 
 **Path 3: Custom Setup (10 minutes)**
 - Manual database configuration
-- Use: `rufus db init`
+- Use: `ruvon db init`
 - Best for: Advanced users, custom deployments
 ```
 
@@ -794,7 +794,7 @@ rufus db init --db-url postgresql://localhost/rufus
 
 **Fix #7: Create docker/README.md**
 ```markdown
-# Rufus Docker Setup
+# Ruvon Docker Setup
 
 ## Quick Start
 
@@ -819,7 +819,7 @@ lsof -i :5433
 docker compose logs postgres
 
 # Manually initialize
-docker exec -it rufus-postgres psql -U postgres -d rufus_cloud -f /docker-entrypoint-initdb.d/init-db.sql
+docker exec -it ruvon-postgres psql -U postgres -d ruvon_cloud -f /docker-entrypoint-initdb.d/init-db.sql
 \`\`\`
 
 ### Containers Fail Health Checks
@@ -842,13 +842,13 @@ healthcheck:
 
 1. **Database Seeding**:
    \`\`\`bash
-   python tools/seed_data.py --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
+   python tools/seed_data.py --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
    \`\`\`
 
 2. **Environment Variables**:
    \`\`\`bash
-   export RUFUS_DB_URL="postgresql://postgres:postgres@localhost:5433/rufus_cloud"
-   export RUFUS_REGISTRATION_KEY="rufus-registration-key"
+   export RUVON_DB_URL="postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
+   export RUVON_REGISTRATION_KEY="ruvon-registration-key"
    \`\`\`
 
 3. **Run Tests**:
@@ -870,7 +870,7 @@ healthcheck:
 **Needed**: Add "Quick Start" section at top
 
 ```markdown
-# Rufus SDK
+# Ruvon SDK
 
 ## Quick Start
 
@@ -898,7 +898,7 @@ cd docker && docker compose up -d
 ```markdown
 ## Fresh Install Validation
 
-To verify your Rufus installation:
+To verify your Ruvon installation:
 
 1. **SQLite (Development)**:
    \`\`\`bash
@@ -915,8 +915,8 @@ To verify your Rufus installation:
 
 3. **CLI Commands**:
    \`\`\`bash
-   rufus --version
-   rufus config show
+   ruvon --version
+   ruvon config show
    # Expected: Config displayed without errors
    \`\`\`
 ```
@@ -964,12 +964,12 @@ set -e
 echo "=== Checkpoint 1: SQLite Fresh Install ==="
 
 # Clean slate
-rm -rf /tmp/rufus_test
-mkdir -p /tmp/rufus_test
-cd /tmp/rufus_test
+rm -rf /tmp/ruvon_test
+mkdir -p /tmp/ruvon_test
+cd /tmp/ruvon_test
 
 # Clone repo (or use existing)
-git clone https://github.com/yourorg/rufus.git .
+git clone https://github.com/yourorg/ruvon.git .
 
 # Install
 pip install -r requirements.txt
@@ -1010,7 +1010,7 @@ set -e
 
 echo "=== Checkpoint 2: Docker Setup ==="
 
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 
 # Clean slate
 docker compose down -v
@@ -1023,7 +1023,7 @@ echo "Waiting for services to be healthy..."
 timeout 60 bash -c 'until [ "$(docker compose ps --format json | jq -r ".[] | select(.Service == \"postgres\") | .Health")" == "healthy" ]; do sleep 2; done'
 
 # Verify database
-docker exec rufus-postgres psql -U postgres -d rufus_cloud -c "\dt" > /tmp/tables.txt
+docker exec ruvon-postgres psql -U postgres -d ruvon_cloud -c "\dt" > /tmp/tables.txt
 
 if grep -q "workflow_executions" /tmp/tables.txt; then
   echo "✓ Database schema initialized"
@@ -1035,9 +1035,9 @@ fi
 # Verify server
 response=$(curl -s http://localhost:8000/health)
 if [[ "$response" == *"healthy"* ]]; then
-  echo "✓ Rufus server responding"
+  echo "✓ Ruvon server responding"
 else
-  echo "✗ Rufus server not responding"
+  echo "✗ Ruvon server not responding"
   exit 1
 fi
 
@@ -1058,17 +1058,17 @@ set -e
 echo "=== Checkpoint 3: CLI Migrations ==="
 
 # Use Docker PostgreSQL instance
-export RUFUS_DB_URL="postgresql://postgres:postgres@localhost:5433/rufus_test"
+export RUVON_DB_URL="postgresql://postgres:postgres@localhost:5433/ruvon_test"
 
 # Create fresh database
-docker exec rufus-postgres psql -U postgres -c "DROP DATABASE IF EXISTS rufus_test;"
-docker exec rufus-postgres psql -U postgres -c "CREATE DATABASE rufus_test;"
+docker exec ruvon-postgres psql -U postgres -c "DROP DATABASE IF EXISTS ruvon_test;"
+docker exec ruvon-postgres psql -U postgres -c "CREATE DATABASE ruvon_test;"
 
 # Run migration
-rufus db init --db-url "$RUFUS_DB_URL"
+ruvon db init --db-url "$RUVON_DB_URL"
 
 # Verify status
-rufus db status --db-url "$RUFUS_DB_URL" > /tmp/status.txt
+ruvon db status --db-url "$RUVON_DB_URL" > /tmp/status.txt
 
 if grep -q "Up to date" /tmp/status.txt; then
   echo "✓ Migrations applied"
@@ -1078,7 +1078,7 @@ else
 fi
 
 # Verify schema
-docker exec rufus-postgres psql -U postgres -d rufus_test -c "\dt" > /tmp/tables.txt
+docker exec ruvon-postgres psql -U postgres -d ruvon_test -c "\dt" > /tmp/tables.txt
 if grep -q "workflow_executions" /tmp/tables.txt; then
   echo "✓ Schema correct"
 else
@@ -1116,12 +1116,12 @@ fi
 
 # Verify registration keys (PostgreSQL only - will skip for SQLite)
 python tools/seed_data.py \
-  --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   --type keys
 
 # Check key exists
-key_count=$(docker exec rufus-postgres psql -U postgres -d rufus_cloud -t -c \
-  "SELECT COUNT(*) FROM registration_keys WHERE key_value = 'rufus-registration-key';")
+key_count=$(docker exec ruvon-postgres psql -U postgres -d ruvon_cloud -t -c \
+  "SELECT COUNT(*) FROM registration_keys WHERE key_value = 'ruvon-registration-key';")
 
 if [ "$key_count" -ge 1 ]; then
   echo "✓ Registration key seeded"
@@ -1148,13 +1148,13 @@ echo "=== Checkpoint 5: Load Test ==="
 
 # Ensure seed data exists
 python tools/seed_data.py \
-  --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   --type all
 
 # Run mini load test (10 devices, 60 seconds)
 cd tests/load
 python run_load_test.py \
-  --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \
   --devices 10 \
   --duration 60 \
   --scenario heartbeat
@@ -1419,7 +1419,7 @@ python examples/sqlite_task_manager/simple_demo.py
 cd docker && docker compose up -d
 
 # CLI Setup
-rufus db init --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
+ruvon db init --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
 ```
 
 ### Validation Commands
@@ -1429,10 +1429,10 @@ rufus db init --db-url "postgresql://postgres:postgres@localhost:5433/rufus_clou
 sqlite3 workflow.db ".tables"
 
 # Check PostgreSQL schema
-docker exec -it rufus-postgres psql -U postgres -d rufus_cloud -c "\dt"
+docker exec -it ruvon-postgres psql -U postgres -d ruvon_cloud -c "\dt"
 
 # Check migration status
-rufus db status --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud"
+ruvon db status --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud"
 
 # Run load test
 python tests/load/run_load_test.py --devices 10 --duration 60 --scenario heartbeat
@@ -1443,10 +1443,10 @@ python tests/load/run_load_test.py --devices 10 --duration 60 --scenario heartbe
 ```bash
 # Docker logs
 docker compose logs -f postgres
-docker compose logs -f rufus_server
+docker compose logs -f ruvon_server
 
 # Database connection test
-psql "postgresql://postgres:postgres@localhost:5433/rufus_cloud" -c "SELECT 1;"
+psql "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" -c "SELECT 1;"
 
 # Reset Docker
 docker compose down -v && docker compose up -d

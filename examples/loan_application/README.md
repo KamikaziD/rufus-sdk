@@ -1,6 +1,6 @@
 # Loan Application Workflow Example
 
-This example demonstrates a complex, production-ready loan application workflow using the Rufus SDK. It showcases advanced features including parallel execution, conditional branching, dynamic step injection, saga compensation patterns, and human-in-the-loop processes.
+This example demonstrates a complex, production-ready loan application workflow using the Ruvon SDK. It showcases advanced features including parallel execution, conditional branching, dynamic step injection, saga compensation patterns, and human-in-the-loop processes.
 
 ## Overview
 
@@ -138,9 +138,9 @@ class UserProfileState(BaseModel):
 
 ### Prerequisites
 
-1. Install Rufus SDK:
+1. Install Ruvon SDK:
 ```bash
-cd /path/to/rufus
+cd /path/to/ruvon
 pip install -e .
 ```
 
@@ -376,14 +376,14 @@ initial_data = LoanApplicationState(
 
 ## Resources
 
-- [Rufus SDK Documentation](../../README.md)
+- [Ruvon SDK Documentation](../../README.md)
 - [Quickstart Example](../quickstart/)
 - [Technical Documentation](../../TECHNICAL_DOCUMENTATION.md)
 - [SDK Development Plan](../../updated_sdk_plan.md)
 
 ## Contributing
 
-This example demonstrates the Rufus SDK's capabilities for complex workflow orchestration. If you encounter bugs or have suggestions for improvements, please open an issue or submit a pull request.
+This example demonstrates the Ruvon SDK's capabilities for complex workflow orchestration. If you encounter bugs or have suggestions for improvements, please open an issue or submit a pull request.
 
 ---
 

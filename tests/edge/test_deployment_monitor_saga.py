@@ -6,7 +6,7 @@ Verifies that when ApplyChange raises an exception:
 
 The test uses the actual `apply_approved_change` / `rollback_change` functions from
 `config_applier` — they are patched so no filesystem or signal I/O happens — proving
-the compensation wiring is correct end-to-end through the Rufus saga engine.
+the compensation wiring is correct end-to-end through the Ruvon saga engine.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from rufus.workflow import Workflow
-from rufus.models import CompensatableStep
+from ruvon.workflow import Workflow
+from ruvon.models import CompensatableStep
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ async def test_apply_change_triggers_rollback_on_failure(mock_providers):
       3. The saga engine should call rollback_change (ApplyChange's compensate_func) in reverse.
       4. Workflow status must become FAILED_ROLLED_BACK.
     """
-    from rufus.models import WorkflowStep
+    from ruvon.models import WorkflowStep
 
     rollback_calls: list[dict] = []
 

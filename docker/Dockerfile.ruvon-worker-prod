@@ -1,0 +1,47 @@
+FROM python:3.11-slim
+
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine — Celery Worker"
+LABEL version="0.1.3"
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ruvon-sdk + ruvon-server from PyPI
+RUN pip install --no-cache-dir \
+    'ruvon-sdk[postgres,performance]==0.1.3' \
+    'ruvon-server[celery]==0.1.3'
+
+RUN pip install --no-cache-dir \
+    'asyncpg>=0.27' \
+    'uvloop>=0.19' \
+    'celery[redis]>=5.3' \
+    'redis>=5.0' \
+    'psycopg2-binary>=2.9' \
+    'prometheus-client>=0.19'
+
+RUN mkdir -p /app/config /app/user_code
+
+ENV PYTHONPATH=/app:/app/user_code
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+ENV DATABASE_URL=postgresql://ruvon:ruvon_secret@postgres:5432/ruvon_production
+ENV WORKER_CONCURRENCY=4
+ENV WORKER_POOL=prefork
+ENV WORKER_LOG_LEVEL=info
+ENV WORKER_REGION=default
+ENV WORKER_ZONE=default
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD celery -A ruvon.celery_app inspect ping -d celery@${HOSTNAME} || exit 1
+
+CMD celery -A ruvon.celery_app worker \
+    --loglevel=${WORKER_LOG_LEVEL} \
+    --concurrency=${WORKER_CONCURRENCY} \
+    --pool=${WORKER_POOL} \
+    --hostname=worker@${HOSTNAME} \
+    -Q default,high_priority,low_priority

@@ -1,0 +1,50 @@
+[project]
+name = "ruvon-edge"
+version = "0.1.3"
+description = "Ruvon edge agent for offline-first fintech devices (POS, ATM, kiosks)"
+authors = [{name = "Ruvon Team", email = "team@ruvon.dev"}]
+license = {text = "Apache-2.0"}
+readme = "README.md"
+requires-python = ">=3.9"
+keywords = ["workflow", "fintech", "pos", "edge", "offline", "store-and-forward", "payment"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Point-Of-Sale",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = ["ruvon-sdk>=0.1.3"]
+
+[project.urls]
+Homepage = "https://github.com/KamikaziD/ruvon-edge"
+Repository = "https://github.com/KamikaziD/ruvon-edge"
+
+[project.optional-dependencies]
+# Default edge install (native CPython on POS/ATM/kiosk)
+edge    = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24"]
+# Browser target (Pyodide) — no psutil, no websockets; js.fetch replaces httpx
+browser = ["numpy>=1.24"]
+# WASI 0.3 target — zero extra runtime deps (pure Python + stdlib)
+wasi    = []
+# Native CPython with Component Model support
+native  = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
+# Everything
+all     = ["websockets>=12.0", "psutil>=5.9", "numpy>=1.24", "wasmtime>=20.0"]
+# Peer relay / mesh networking HTTP server (needed when PEER_LISTEN_PORT > 0)
+relay   = ["fastapi>=0.100", "uvicorn[standard]>=0.20"]
+# NATS JetStream transport for edge mesh networking
+# Install with: pip install 'ruvon-edge[nats]'
+nats    = ["nats-py>=2.3", "betterproto>=0.9.0", "protobuf>=4.21", "nkeys>=0.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ruvon_edge"]

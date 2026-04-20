@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from rufus.models import (
+from ruvon.models import (
     AILLMInferenceConfig, AILLMInferenceWorkflowStep,
     HumanApprovalConfig, HumanApprovalWorkflowStep,
     AuditEmitConfig, AuditEmitWorkflowStep,
@@ -20,7 +20,7 @@ from rufus.models import (
     WorkflowPauseDirective,
     MergeStrategy, MergeConflictBehavior,
 )
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ class TestEdgeModelCallConfig:
 class TestWorkflowBuilderMetaStep:
     def test_defaults(self):
         cfg = WorkflowBuilderMetaConfig()
-        assert cfg.generated_by == "rufus-workflow-builder/0.1"
+        assert cfg.generated_by == "ruvon-workflow-builder/0.1"
         assert cfg.human_reviewed is False
 
     def test_with_prompt(self):
@@ -229,9 +229,9 @@ class SimpleState(BaseModel):
 
 def _make_workflow(steps, state=None):
     """Create a minimal Workflow with mocked providers."""
-    from rufus.workflow import Workflow
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.workflow import Workflow
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
     persistence = AsyncMock()
     persistence.save_workflow = AsyncMock()
@@ -391,7 +391,7 @@ async def test_compliance_check_with_ruleset(tmp_path):
 
 @pytest.mark.asyncio
 async def test_compliance_check_ruleset_not_found():
-    from rufus.models import WorkflowFailedException
+    from ruvon.models import WorkflowFailedException
     cfg = ComplianceCheckConfig(ruleset="/nonexistent/rules.yaml")
     step = ComplianceCheckWorkflowStep(name="Check", compliance_config=cfg)
     workflow, _ = _make_workflow([step])
@@ -403,7 +403,7 @@ async def test_compliance_check_ruleset_not_found():
 
 @pytest.mark.asyncio
 async def test_edge_model_call_requires_inference_provider():
-    from rufus.models import WorkflowFailedException
+    from ruvon.models import WorkflowFailedException
     cfg = EdgeModelCallConfig(model_id="bitnet-v2", prompt="classify")
     step = EdgeModelCallWorkflowStep(name="Edge", edge_config=cfg)
     workflow, _ = _make_workflow([step])

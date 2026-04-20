@@ -1,5 +1,5 @@
 """
-Tests for database commands (rufus db *).
+Tests for database commands (ruvon db *).
 """
 import pytest
 import json
@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 from tests.cli.utils import assert_output_contains
 
 
 class TestDbInit:
-    """Tests for 'rufus db init' command."""
+    """Tests for 'ruvon db init' command."""
 
     @pytest.mark.skip(reason="Requires db init implementation")
     def test_db_init_sqlite_explicit(self, cli_runner, temp_config_dir, tmp_path):
@@ -38,7 +38,7 @@ class TestDbInit:
     @pytest.mark.skip(reason="Requires PostgreSQL connection - mock or integration test only")
     def test_db_init_postgres(self, cli_runner, temp_config_dir):
         """Test initializing PostgreSQL database."""
-        db_url = "postgresql://user:pass@localhost/rufus"
+        db_url = "postgresql://user:pass@localhost/ruvon"
 
         result = cli_runner.invoke(
             app,
@@ -50,7 +50,7 @@ class TestDbInit:
 
 
 class TestDbMigrate:
-    """Tests for 'rufus db migrate' command."""
+    """Tests for 'ruvon db migrate' command."""
 
     @pytest.mark.skip(reason="Requires schema and migration system - implement after core tests")
     def test_db_migrate_no_pending(self, cli_runner, temp_config_dir):
@@ -71,7 +71,7 @@ class TestDbMigrate:
 
 
 class TestDbStatus:
-    """Tests for 'rufus db status' command."""
+    """Tests for 'ruvon db status' command."""
 
     def test_db_status_basic(self, cli_runner, sample_config):
         """Test showing database status."""
@@ -87,7 +87,7 @@ class TestDbStatus:
 
 
 class TestDbValidate:
-    """Tests for 'rufus db validate' command."""
+    """Tests for 'ruvon db validate' command."""
 
     @pytest.mark.skip(reason="Requires schema validation system")
     def test_db_validate_success(self, cli_runner, temp_config_dir):
@@ -101,7 +101,7 @@ class TestDbValidate:
 
 
 class TestDbStats:
-    """Tests for 'rufus db stats' command."""
+    """Tests for 'ruvon db stats' command."""
 
     def test_db_stats_basic(self, cli_runner, sample_config):
         """Test showing database statistics."""

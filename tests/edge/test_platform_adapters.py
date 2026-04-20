@@ -1,5 +1,5 @@
 """
-Unit tests for rufus_edge.platform adapters.
+Unit tests for ruvon_edge.platform adapters.
 
 All three adapters (Native, Pyodide, WASI) are tested with mocked HTTP so
 the tests run on native CPython without a browser or WASI runtime.
@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rufus_edge.platform.base import HttpResponse, PlatformAdapter, SystemMetrics
+from ruvon_edge.platform.base import HttpResponse, PlatformAdapter, SystemMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ def make_response(status: int, body: dict | bytes | str, headers: dict = None) -
 
 class TestNativePlatformAdapter:
     def _make_adapter(self):
-        from rufus_edge.platform.native import NativePlatformAdapter
+        from ruvon_edge.platform.native import NativePlatformAdapter
         return NativePlatformAdapter(default_headers={"X-App": "test"})
 
     @pytest.mark.asyncio
@@ -81,7 +81,7 @@ class TestNativePlatformAdapter:
     @pytest.mark.asyncio
     async def test_default_headers_merged(self):
         """default_headers must be merged into every outgoing request."""
-        from rufus_edge.platform.native import NativePlatformAdapter
+        from ruvon_edge.platform.native import NativePlatformAdapter
         adapter = NativePlatformAdapter(default_headers={"Authorization": "Bearer tok"})
 
         captured: Dict = {}
@@ -103,7 +103,7 @@ class TestNativePlatformAdapter:
 
     @pytest.mark.asyncio
     async def test_aclose_is_idempotent(self):
-        from rufus_edge.platform.native import NativePlatformAdapter
+        from ruvon_edge.platform.native import NativePlatformAdapter
         adapter = NativePlatformAdapter()
         # Should not raise even if client was never created
         await adapter.aclose()
@@ -116,7 +116,7 @@ class TestNativePlatformAdapter:
 
 class TestWasiPlatformAdapter:
     def _make_adapter(self):
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
+        from ruvon_edge.platform.wasi import WasiPlatformAdapter
         adapter = WasiPlatformAdapter()
         # Force native (httpx) path regardless of sys.platform
         adapter._in_wasi = False
@@ -149,7 +149,7 @@ class TestWasiPlatformAdapter:
         assert resp.status_code == 200
 
     def test_system_metrics_are_zeros_in_wasi(self):
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
+        from ruvon_edge.platform.wasi import WasiPlatformAdapter
         adapter = WasiPlatformAdapter()
         adapter._in_wasi = True
         m = adapter.get_system_metrics()
@@ -183,7 +183,7 @@ class TestPyodidePlatformAdapter:
         sys.modules.setdefault("pyodide", pyodide_mod)
         sys.modules.setdefault("pyodide.ffi", pyodide_ffi)
 
-        from rufus_edge.platform.pyodide import PyodidePlatformAdapter
+        from ruvon_edge.platform.pyodide import PyodidePlatformAdapter
         return PyodidePlatformAdapter(default_headers={"X-Test": "1"})
 
     def test_system_metrics_are_zeros(self):
@@ -204,7 +204,7 @@ class TestDetectPlatform:
     def test_returns_native_on_cpython(self, monkeypatch):
         import sys
         import importlib
-        from rufus_edge.platform.native import NativePlatformAdapter
+        from ruvon_edge.platform.native import NativePlatformAdapter
 
         if sys.platform == "wasm32":
             pytest.skip("Running inside WASM")
@@ -215,7 +215,7 @@ class TestDetectPlatform:
         monkeypatch.delitem(sys.modules, "pyodide.ffi", raising=False)
 
         # Reload the platform package so detect_platform() re-evaluates
-        import rufus_edge.platform as platform_pkg
+        import ruvon_edge.platform as platform_pkg
         importlib.reload(platform_pkg)
 
         adapter = platform_pkg.detect_platform()
@@ -223,11 +223,11 @@ class TestDetectPlatform:
 
     def test_returns_wasi_on_wasm32(self, monkeypatch):
         import sys
-        from rufus_edge.platform.wasi import WasiPlatformAdapter
+        from ruvon_edge.platform.wasi import WasiPlatformAdapter
 
         monkeypatch.setattr(sys, "platform", "wasm32")
         from importlib import reload
-        import rufus_edge.platform as platform_pkg
+        import ruvon_edge.platform as platform_pkg
         reload(platform_pkg)
         adapter = platform_pkg.detect_platform()
         assert isinstance(adapter, WasiPlatformAdapter)

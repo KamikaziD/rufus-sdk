@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Cleanup Rufus database and reset to seed data.
+Cleanup Ruvon database and reset to seed data.
 
 This script removes test data from the database and optionally re-seeds
 with default demo data. Useful for resetting after load tests.
 
 Usage:
     # Clean PostgreSQL and re-seed
-    python tools/cleanup_database.py --db-url "postgresql://rufus:pass@localhost:5433/rufus_cloud"
+    python tools/cleanup_database.py --db-url "postgresql://ruvon:pass@localhost:5433/ruvon_cloud"
 
     # Clean SQLite and re-seed
     python tools/cleanup_database.py --db-url "sqlite:///workflow.db"
@@ -30,8 +30,8 @@ from typing import Optional
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 async def delete_all_data(persistence, verbose: bool = False):
@@ -236,13 +236,13 @@ async def run_seed_script(db_url: str, verbose: bool = False):
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Cleanup Rufus database and reset to seed data",
+        description="Cleanup Ruvon database and reset to seed data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Clean PostgreSQL database and re-seed with demo data
   python tools/cleanup_database.py \\
-    --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+    --db-url "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 
   # Clean SQLite database and re-seed
   python tools/cleanup_database.py --db-url "sqlite:///workflow.db"

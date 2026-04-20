@@ -5,7 +5,7 @@ These tasks are designed to run in parallel.
 """
 import time
 import random
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 
 @celery_app.task

@@ -1,5 +1,5 @@
 """
-edge_admin_tool.py — Interactive host-side CLI for Rufus Edge management.
+edge_admin_tool.py — Interactive host-side CLI for Ruvon Edge management.
 
 Runs on the host machine against http://localhost:8000 (or --server override).
 No authentication required — require_admin dev-mode bypass is active.
@@ -51,7 +51,7 @@ def show_device_config(server: str, device_id: str):
     with _client(server) as c:
         r = c.get(
             f"/api/v1/devices/{device_id}/config",
-            headers={"X-API-Key": os.getenv("RUFUS_API_KEY", "dev")},
+            headers={"X-API-Key": os.getenv("RUVON_API_KEY", "dev")},
         )
     print(json.dumps(r.json(), indent=2))
 
@@ -127,14 +127,14 @@ def show_device_heartbeat(server: str, device_id: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rufus Edge Admin Tool")
-    parser.add_argument("--server", default=BASE, help="Rufus server URL")
+    parser = argparse.ArgumentParser(description="Ruvon Edge Admin Tool")
+    parser.add_argument("--server", default=BASE, help="Ruvon server URL")
     args = parser.parse_args()
     server = args.server.rstrip("/")
 
     while True:
         print(f"\n╔════════════════════════════════╗")
-        print(f"║  Rufus Edge Admin              ║")
+        print(f"║  Ruvon Edge Admin              ║")
         print(f"║  {server[:28]:<28}  ║")
         print(f"╠════════════════════════════════╣")
         print(f"║ [1] List devices               ║")

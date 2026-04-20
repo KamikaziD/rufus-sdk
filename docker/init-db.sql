@@ -1,6 +1,6 @@
 -- Rufus Edge - PostgreSQL Bootstrap Extensions
 --
--- All table schema is managed by Alembic (src/rufus/alembic/).
+-- All table schema is managed by Alembic (src/ruvon/alembic/).
 -- All seed data (roles, policies, rate limit rules, default config, command
 -- versions) is inserted by the Alembic migration:
 --   a1b2c3d4e5f6_consolidate_schema_add_missing_tables_v1.py
@@ -12,7 +12,7 @@
 --   2. Run Alembic to create all tables and seed data:
 --        alembic upgrade head
 --      Or via Docker Compose:
---        docker-compose run --rm rufus-server alembic upgrade head
+--        docker-compose run --rm ruvon-server alembic upgrade head
 
 -- PostgreSQL extensions required before schema creation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";    -- uuid_generate_v4()

@@ -9,7 +9,7 @@ Only the functions used as PARALLEL step tasks need wrappers here.
 """
 import random
 
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 
 @celery_app.task

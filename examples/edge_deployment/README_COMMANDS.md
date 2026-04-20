@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rufus Edge platform now supports **remote command execution** for device management. Commands are delivered using a hybrid approach:
+The Ruvon Edge platform now supports **remote command execution** for device management. Commands are delivered using a hybrid approach:
 
 - **Routine commands** (restart, backup, config) → Heartbeat delivery (0-30s latency)
 - **Critical commands** (emergency stop, fraud alert) → WebSocket delivery (<1s latency)
@@ -264,5 +264,5 @@ python cloud_admin.py command-status macbook-m4-001 <command-id>
 
 For issues or questions:
 - Review logs on edge device: Check console output
-- Review logs on cloud: `docker compose logs -f rufus-server`
+- Review logs on cloud: `docker compose logs -f ruvon-server`
 - Check database: Command records in `device_commands` table

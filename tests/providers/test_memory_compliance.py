@@ -3,7 +3,7 @@
 import pytest
 import pytest_asyncio
 
-from rufus.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.persistence.memory import InMemoryPersistence
 from tests.providers.base_persistence_compliance import BasePersistenceCompliance
 
 

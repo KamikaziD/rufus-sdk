@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implemented command schema versioning with JSON Schema validation, changelog tracking, and version management APIs for the Rufus Edge Cloud Control Plane (Tier 4 - Priority 2).
+Implemented command schema versioning with JSON Schema validation, changelog tracking, and version management APIs for the Ruvon Edge Cloud Control Plane (Tier 4 - Priority 2).
 
 **Status:** ✅ Core Implementation Complete
 
@@ -12,7 +12,7 @@ Implemented command schema versioning with JSON Schema validation, changelog tra
 
 ### 1. Schema Validation (`schema_validator.py`)
 
-**Location:** `/Users/kim/PycharmProjects/rufus/src/rufus_server/schema_validator.py`
+**Location:** `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/schema_validator.py`
 
 **Features:**
 - JSON Schema validation using `jsonschema` library (Draft7)
@@ -39,7 +39,7 @@ generate_example_from_schema(schema) -> Dict
 
 ### 2. Version Service (`version_service.py`)
 
-**Location:** `/Users/kim/PycharmProjects/rufus/src/rufus_server/version_service.py`
+**Location:** `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/version_service.py`
 
 **Features:**
 - CRUD operations for command versions
@@ -93,7 +93,7 @@ check_compatibility(command_type, from_version, to_version) -> CompatibilityResu
 
 ### 3. Device Service Integration
 
-**Modified:** `/Users/kim/PycharmProjects/rufus/src/rufus_server/device_service.py`
+**Modified:** `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/device_service.py`
 
 **Changes:**
 ```python
@@ -115,7 +115,7 @@ async def send_command(
 
 ### 4. API Endpoints
 
-**Modified:** `/Users/kim/PycharmProjects/rufus/src/rufus_server/main.py`
+**Modified:** `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/main.py`
 
 #### Public Endpoints
 
@@ -260,7 +260,7 @@ pip install jsonschema
 
 **1. Start Server:**
 ```bash
-uvicorn rufus_server.main:app --reload
+uvicorn ruvon_server.main:app --reload
 ```
 
 **2. List Versions:**
@@ -329,7 +329,7 @@ curl -X POST http://localhost:8000/api/v1/devices/test-device/commands \
 ### Creating a New Command Version
 
 ```python
-from rufus_server.version_service import CommandVersion
+from ruvon_server.version_service import CommandVersion
 
 # Define new schema
 new_version = CommandVersion(
@@ -499,26 +499,26 @@ VERSION_STRICT_MODE=false        # Reject deprecated versions (default: false)
 ## Files Modified/Created
 
 ### Created
-1. `/Users/kim/PycharmProjects/rufus/src/rufus_server/schema_validator.py` (150 lines)
-2. `/Users/kim/PycharmProjects/rufus/src/rufus_server/version_service.py` (450 lines)
-3. `/Users/kim/PycharmProjects/rufus/COMMAND_VERSIONING.md` (this file)
+1. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/schema_validator.py` (150 lines)
+2. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/version_service.py` (450 lines)
+3. `/Users/kim/PycharmProjects/ruvon/COMMAND_VERSIONING.md` (this file)
 
 ### Modified
-1. `/Users/kim/PycharmProjects/rufus/src/rufus_server/device_service.py`
+1. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/device_service.py`
    - Added `version_service` parameter to `__init__`
    - Added `command_version` parameter to `send_command`
    - Added validation logic
 
-2. `/Users/kim/PycharmProjects/rufus/src/rufus_server/main.py`
+2. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/main.py`
    - Added `version_service` global
    - Updated startup to initialize `VersionService`
    - Updated `DeviceService` initialization
    - Added 8 API endpoints
 
-3. `/Users/kim/PycharmProjects/rufus/src/rufus_server/command_types.py`
+3. `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/command_types.py`
    - Added `version` field to `DeviceCommand` model
 
-4. `/Users/kim/PycharmProjects/rufus/requirements.txt`
+4. `/Users/kim/PycharmProjects/ruvon/requirements.txt`
    - Added `jsonschema>=4.17.3,<5.0.0`
 
 ### Test Files
@@ -557,6 +557,6 @@ This implementation is part of the Tier 4 Advanced Features roadmap:
 ## Support
 
 For questions or issues:
-1. Check `/Users/kim/PycharmProjects/rufus/CLAUDE.md` for project overview
+1. Check `/Users/kim/PycharmProjects/ruvon/CLAUDE.md` for project overview
 2. Review migration file: `docker/migrations/add_command_versioning.sql`
 3. Test with validation script: `test_validation_only.py`

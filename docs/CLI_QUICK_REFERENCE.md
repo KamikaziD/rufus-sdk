@@ -1,126 +1,126 @@
-# Rufus CLI Quick Reference
+# Ruvon CLI Quick Reference
 
-One-page command reference for the Rufus CLI. For detailed documentation, see [CLI_USAGE_GUIDE.md](CLI_USAGE_GUIDE.md).
+One-page command reference for the Ruvon CLI. For detailed documentation, see [CLI_USAGE_GUIDE.md](CLI_USAGE_GUIDE.md).
 
 ## Installation
 
 | Deployment target | Install command |
 |-------------------|----------------|
-| Core SDK + CLI (dev / general use) | `pip install rufus-sdk` |
-| Edge device (POS, ATM, kiosk) | `pip install 'rufus-sdk-edge[edge]'` |
-| Cloud REST API server | `pip install 'rufus-sdk-server[server,auth]'` |
-| Celery workers | `pip install 'rufus-sdk-server[celery]'` |
-| Full server stack | `pip install 'rufus-sdk-server[all]'` |
+| Core SDK + CLI (dev / general use) | `pip install ruvon-sdk` |
+| Edge device (POS, ATM, kiosk) | `pip install 'ruvon-edge[edge]'` |
+| Cloud REST API server | `pip install 'ruvon-server[server,auth]'` |
+| Celery workers | `pip install 'ruvon-server[celery]'` |
+| Full server stack | `pip install 'ruvon-server[all]'` |
 
 ```bash
 # Development (all packages from source)
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 
-rufus --help      # Verify installation
+ruvon --help      # Verify installation
 ```
 
-## Configuration (`rufus config`)
+## Configuration (`ruvon config`)
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `show` | Display configuration | `rufus config show` |
-| `path` | Show config file location | `rufus config path` |
-| `set-persistence` | Set database (interactive) | `rufus config set-persistence` |
-| `set-execution` | Set executor (interactive) | `rufus config set-execution` |
-| `set-default` | Set defaults (interactive) | `rufus config set-default` |
-| `reset` | Reset to defaults | `rufus config reset --yes` |
+| `show` | Display configuration | `ruvon config show` |
+| `path` | Show config file location | `ruvon config path` |
+| `set-persistence` | Set database (interactive) | `ruvon config set-persistence` |
+| `set-execution` | Set executor (interactive) | `ruvon config set-execution` |
+| `set-default` | Set defaults (interactive) | `ruvon config set-default` |
+| `reset` | Reset to defaults | `ruvon config reset --yes` |
 
-**Config File:** `~/.rufus/config.yaml`
+**Config File:** `~/.ruvon/config.yaml`
 
-## Workflow Management (`rufus workflow` or top-level)
+## Workflow Management (`ruvon workflow` or top-level)
 
 ### List & Search
 
 ```bash
-rufus list                              # List all workflows
-rufus list --status ACTIVE              # Filter by status
-rufus list --type OrderProcessing       # Filter by type
-rufus list --limit 100                  # Increase limit
-rufus list --json                       # JSON output
+ruvon list                              # List all workflows
+ruvon list --status ACTIVE              # Filter by status
+ruvon list --type OrderProcessing       # Filter by type
+ruvon list --limit 100                  # Increase limit
+ruvon list --json                       # JSON output
 ```
 
 ### Start & Monitor
 
 ```bash
-rufus start MyWorkflow --data '{"user_id": "123"}'    # Start workflow
-rufus start MyWorkflow --data '{}' --interactive     # Interactive mode (prompts at HITL steps)
-rufus interactive run MyWorkflow --config wf.yaml    # Interactive run with config file
-rufus show <id>                                       # Show details
-rufus show <id> --state --logs --metrics              # Show everything
-rufus show <id> --json                                # JSON output
+ruvon start MyWorkflow --data '{"user_id": "123"}'    # Start workflow
+ruvon start MyWorkflow --data '{}' --interactive     # Interactive mode (prompts at HITL steps)
+ruvon interactive run MyWorkflow --config wf.yaml    # Interactive run with config file
+ruvon show <id>                                       # Show details
+ruvon show <id> --state --logs --metrics              # Show everything
+ruvon show <id> --json                                # JSON output
 ```
 
 ### Resume & Retry
 
 ```bash
-rufus resume <id> --input '{"approved": true}'  # Resume paused
-rufus retry <id>                                # Retry failed
-rufus retry <id> --from-step Process_Payment    # Retry from step
+ruvon resume <id> --input '{"approved": true}'  # Resume paused
+ruvon retry <id>                                # Retry failed
+ruvon retry <id> --from-step Process_Payment    # Retry from step
 ```
 
 ### Logs & Metrics
 
 ```bash
-rufus logs <id>                          # View logs
-rufus logs <id> --step Payment           # Filter by step
-rufus logs <id> --level ERROR            # Filter by level
-rufus logs <id> --limit 100              # Limit results
-rufus logs <id> --follow                 # (not yet implemented — shows latest logs only)
-rufus logs <id> --json                   # JSON output
+ruvon logs <id>                          # View logs
+ruvon logs <id> --step Payment           # Filter by step
+ruvon logs <id> --level ERROR            # Filter by level
+ruvon logs <id> --limit 100              # Limit results
+ruvon logs <id> --follow                 # (not yet implemented — shows latest logs only)
+ruvon logs <id> --json                   # JSON output
 
-rufus metrics --workflow-id <id>         # View metrics
-rufus metrics --type OrderProcessing     # By workflow type
-rufus metrics --summary                  # Show summary stats
+ruvon metrics --workflow-id <id>         # View metrics
+ruvon metrics --type OrderProcessing     # By workflow type
+ruvon metrics --summary                  # Show summary stats
 ```
 
 ### Cancel
 
 ```bash
-rufus cancel <id>                               # Cancel with confirmation
-rufus cancel <id> --reason "Duplicate order"    # With reason
-rufus cancel <id> --force                       # Skip confirmation
+ruvon cancel <id>                               # Cancel with confirmation
+ruvon cancel <id> --reason "Duplicate order"    # With reason
+ruvon cancel <id> --force                       # Skip confirmation
 ```
 
-## Database Management (`rufus db`)
+## Database Management (`ruvon db`)
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `init` | Initialize schema | `rufus db init` |
-| `migrate` | Apply migrations | `rufus db migrate` |
-| `migrate --dry-run` | Preview migrations | `rufus db migrate --dry-run` |
-| `status` | Show migration status | `rufus db status` |
-| `stats` | Show database statistics | `rufus db stats` |
-| `validate` | Validate schema | `rufus db validate` |
+| `init` | Initialize schema | `ruvon db init` |
+| `migrate` | Apply migrations | `ruvon db migrate` |
+| `migrate --dry-run` | Preview migrations | `ruvon db migrate --dry-run` |
+| `status` | Show migration status | `ruvon db status` |
+| `stats` | Show database statistics | `ruvon db stats` |
+| `validate` | Validate schema | `ruvon db validate` |
 
 **Override database:**
 ```bash
-rufus db init --db-url sqlite:///path/to/db.sqlite
-rufus db init --db-url postgresql://user:pass@host/db
+ruvon db init --db-url sqlite:///path/to/db.sqlite
+ruvon db init --db-url postgresql://user:pass@host/db
 ```
 
 ## Zombie Recovery
 
 ```bash
-rufus scan-zombies --db postgresql://localhost/rufus          # Scan (dry-run)
-rufus scan-zombies --db postgresql://localhost/rufus --fix    # Recover zombies
-rufus scan-zombies --db sqlite:///workflows.db --json        # JSON output
-rufus zombie-daemon --db postgresql://localhost/rufus         # Continuous daemon
-rufus zombie-daemon --db postgresql://localhost/rufus --interval 30
+ruvon scan-zombies --db postgresql://localhost/ruvon          # Scan (dry-run)
+ruvon scan-zombies --db postgresql://localhost/ruvon --fix    # Recover zombies
+ruvon scan-zombies --db sqlite:///workflows.db --json        # JSON output
+ruvon zombie-daemon --db postgresql://localhost/ruvon         # Continuous daemon
+ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 30
 ```
 
 ## Legacy Commands
 
 ```bash
-rufus validate config/workflow.yaml         # Validate YAML syntax
-rufus validate config/workflow.yaml --strict --graph  # Full validation + dependency graph
-rufus run config/workflow.yaml -d '{}'      # Run locally (in-memory)
+ruvon validate config/workflow.yaml         # Validate YAML syntax
+ruvon validate config/workflow.yaml --strict --graph  # Full validation + dependency graph
+ruvon run config/workflow.yaml -d '{}'      # Run locally (in-memory)
 ```
 
 ## Common Workflows
@@ -129,47 +129,47 @@ rufus run config/workflow.yaml -d '{}'      # Run locally (in-memory)
 
 ```bash
 # 1. Configure
-rufus config set-persistence  # Choose SQLite
+ruvon config set-persistence  # Choose SQLite
 
 # 2. Initialize
-rufus db init
+ruvon db init
 
 # 3. Verify
-rufus db stats
+ruvon db stats
 
 # 4. Test
-rufus run config/my_workflow.yaml -d '{}'
+ruvon run config/my_workflow.yaml -d '{}'
 ```
 
 ### Production Setup
 
 ```bash
 # 1. Configure
-rufus config set-persistence  # Choose PostgreSQL
+ruvon config set-persistence  # Choose PostgreSQL
 
 # 2. Migrate
-rufus db migrate --dry-run
-rufus db migrate
+ruvon db migrate --dry-run
+ruvon db migrate
 
 # 3. Verify
-rufus db status
-rufus db validate
+ruvon db status
+ruvon db validate
 ```
 
 ### Monitoring
 
 ```bash
 # Active workflows
-rufus list --status ACTIVE --limit 100
+ruvon list --status ACTIVE --limit 100
 
 # View logs
-rufus logs <id> --level ERROR --limit 100
+ruvon logs <id> --level ERROR --limit 100
 
 # View metrics
-rufus metrics --type OrderProcessing --summary
+ruvon metrics --type OrderProcessing --summary
 
 # Troubleshoot
-rufus show <id> --verbose
+ruvon show <id> --verbose
 ```
 
 ## Status Values
@@ -202,21 +202,21 @@ rufus show <id> --verbose
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--help` | Show help | `rufus logs --help` |
-| `--json` | JSON output | `rufus list --json` |
-| `--verbose`, `-v` | Verbose output | `rufus list -v` |
-| `--limit` | Limit results | `rufus list --limit 100` |
-| `--status` | Filter by status | `rufus list --status ACTIVE` |
-| `--type` | Filter by type | `rufus list --type OrderProcessing` |
+| `--help` | Show help | `ruvon logs --help` |
+| `--json` | JSON output | `ruvon list --json` |
+| `--verbose`, `-v` | Verbose output | `ruvon list -v` |
+| `--limit` | Limit results | `ruvon list --limit 100` |
+| `--status` | Filter by status | `ruvon list --status ACTIVE` |
+| `--type` | Filter by type | `ruvon list --type OrderProcessing` |
 
 ## Environment Variables
 
 ```bash
 # Override config file
-export RUFUS_CONFIG_PATH=/custom/config.yaml
+export RUVON_CONFIG_PATH=/custom/config.yaml
 
 # Override database URL
-export RUFUS_DB_URL=postgresql://user:pass@localhost/rufus
+export RUVON_DB_URL=postgresql://user:pass@localhost/ruvon
 
 # Disable colors (for CI/CD)
 export NO_COLOR=1
@@ -230,9 +230,9 @@ version: "1.0"
 persistence:
   provider: sqlite  # or postgres, memory
   sqlite:
-    db_path: ~/.rufus/workflows.db
+    db_path: ~/.ruvon/workflows.db
   postgres:
-    db_url: postgresql://user:pass@localhost/rufus
+    db_url: postgresql://user:pass@localhost/ruvon
     pool_min_size: 10
     pool_max_size: 50
 
@@ -253,31 +253,31 @@ defaults:
 ### Configuration Issues
 
 ```bash
-rufus config path          # Find config file
-rufus config reset --yes   # Reset if corrupted
+ruvon config path          # Find config file
+ruvon config reset --yes   # Reset if corrupted
 ```
 
 ### Database Issues
 
 ```bash
-rufus db init              # Initialize if tables missing
-rufus db status            # Check migration status
-rufus db stats             # Verify tables exist
+ruvon db init              # Initialize if tables missing
+ruvon db status            # Check migration status
+ruvon db stats             # Verify tables exist
 ```
 
 ### Workflow Issues
 
 ```bash
-rufus show <id> --verbose          # Full workflow details
-rufus logs <id> --level ERROR      # Check for errors
-rufus cancel <id> --force          # Force cancel stuck workflow
+ruvon show <id> --verbose          # Full workflow details
+ruvon logs <id> --level ERROR      # Check for errors
+ruvon cancel <id> --force          # Force cancel stuck workflow
 ```
 
 ### CLI Issues
 
 ```bash
-rufus --version                    # Check version
-rufus --help                       # Show all commands
+ruvon --version                    # Check version
+ruvon --help                       # Show all commands
 pip install -e . --force-reinstall # Reinstall if broken
 ```
 
@@ -286,18 +286,18 @@ pip install -e . --force-reinstall # Reinstall if broken
 1. **Use SQLite for development**, PostgreSQL for production
 2. **Always run `db init`** before first workflow
 3. **Use `--dry-run`** before applying migrations in production
-4. **Export to JSON** for analysis: `rufus logs <id> --json > logs.json`
+4. **Export to JSON** for analysis: `ruvon logs <id> --json > logs.json`
 5. **Use filters** to narrow down large result sets
 6. **Add `--help`** to any command for detailed options
 
 ## Getting Help
 
 ```bash
-rufus --help               # General help
-rufus config --help        # Config commands
-rufus workflow --help      # Workflow commands
-rufus db --help            # Database commands
-rufus logs --help          # Specific command help
+ruvon --help               # General help
+ruvon config --help        # Config commands
+ruvon workflow --help      # Workflow commands
+ruvon db --help            # Database commands
+ruvon logs --help          # Specific command help
 ```
 
 **Documentation:**
@@ -305,8 +305,8 @@ rufus logs --help          # Specific command help
 - [CLAUDE.md](../CLAUDE.md) - Developer guide
 - [README.md](../README.md) - Project overview
 
-**Issues:** https://github.com/your-org/rufus-sdk/issues
+**Issues:** https://github.com/your-org/ruvon-sdk/issues
 
 ---
 
-**Version:** 0.6.0 | **Last Updated:** 2026-02-25 | **Rufus SDK:** 0.6.0
+**Version:** 0.6.0 | **Last Updated:** 2026-02-25 | **Ruvon SDK:** 0.6.0

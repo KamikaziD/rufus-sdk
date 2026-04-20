@@ -7,7 +7,7 @@ Tests the RateLimitService, API endpoints, and CLI commands.
 import pytest
 import asyncio
 from datetime import datetime, timedelta
-from rufus_server.rate_limit_service import RateLimitService, RateLimitRule, RateLimitResult
+from ruvon_server.rate_limit_service import RateLimitService, RateLimitRule, RateLimitResult
 
 
 class MockPool:

@@ -4,7 +4,7 @@ Step functions for task management workflow
 
 from datetime import datetime
 from examples.sqlite_task_manager.models import TaskState
-from rufus.models import StepContext, WorkflowPauseDirective
+from ruvon.models import StepContext, WorkflowPauseDirective
 
 
 def create_task(state: TaskState, context: StepContext, **user_input) -> dict:

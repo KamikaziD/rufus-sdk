@@ -147,7 +147,7 @@ class TestWebhookRetryWorker:
 
     async def test_retry_worker_imports(self):
         """Test that retry worker can be imported and instantiated."""
-        from rufus_server.webhook_retry_worker import WebhookRetryWorker
+        from ruvon_server.webhook_retry_worker import WebhookRetryWorker
 
         # Mock webhook service
         class MockWebhookService:
@@ -171,7 +171,7 @@ class TestWebhookRetryWorker:
 
     async def test_retry_worker_configuration(self):
         """Test retry worker configuration options."""
-        from rufus_server.webhook_retry_worker import WebhookRetryWorker
+        from ruvon_server.webhook_retry_worker import WebhookRetryWorker
 
         class MockWebhookService:
             async def get_delivery_history(self, status=None, limit=100):
@@ -191,7 +191,7 @@ class TestWebhookRetryWorker:
 
     async def test_retry_worker_graceful_shutdown(self):
         """Test that retry worker stops gracefully."""
-        from rufus_server.webhook_retry_worker import WebhookRetryWorker
+        from ruvon_server.webhook_retry_worker import WebhookRetryWorker
 
         class MockWebhookService:
             async def get_delivery_history(self, status=None, limit=100):

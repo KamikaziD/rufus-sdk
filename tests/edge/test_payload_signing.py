@@ -63,8 +63,8 @@ def test_sync_manager_adds_signature_header_when_key_set(tmp_path):
     import asyncio
 
     async def _run():
-        from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-        from rufus_edge.sync_manager import SyncManager
+        from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+        from ruvon_edge.sync_manager import SyncManager
 
         persistence = SQLitePersistenceProvider(db_path=str(tmp_path / "sign_test.db"))
         await persistence.initialize()

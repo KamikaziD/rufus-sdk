@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Seed Rufus database with test data.
+Seed Ruvon database with test data.
 
 This script seeds databases (SQLite or PostgreSQL) with default data
 for testing, demos, and development. It's designed to be idempotent -
@@ -12,7 +12,7 @@ Usage:
 
     # Seed PostgreSQL (Docker)
     python tools/seed_data.py \\
-        --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \\
+        --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \\
         --type all
 
     # Seed only workflows
@@ -20,7 +20,7 @@ Usage:
 
     # Seed only registration keys (PostgreSQL)
     python tools/seed_data.py \\
-        --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \\
+        --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \\
         --type keys
 """
 
@@ -36,8 +36,8 @@ import uuid
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 async def seed_demo_workflows(persistence, verbose: bool = False):
@@ -64,7 +64,7 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             },
             "current_step": "3",
             "workflow_version": "1.0.0",
-            "state_model_path": "rufus.models.BaseModel",
+            "state_model_path": "ruvon.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
             "blocked_on_child_id": None,  # Not waiting on any child
@@ -102,7 +102,7 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             },
             "current_step": "1",
             "workflow_version": "1.0.0",
-            "state_model_path": "rufus.models.BaseModel",
+            "state_model_path": "ruvon.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
             "blocked_on_child_id": None,  # Not waiting on any child
@@ -140,7 +140,7 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             },
             "current_step": "2",
             "workflow_version": "1.0.0",
-            "state_model_path": "rufus.models.BaseModel",
+            "state_model_path": "ruvon.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
             "blocked_on_child_id": None,  # Not waiting on any child
@@ -178,7 +178,7 @@ async def seed_demo_workflows(persistence, verbose: bool = False):
             },
             "current_step": "1",
             "workflow_version": "1.0.0",
-            "state_model_path": "rufus.models.BaseModel",
+            "state_model_path": "ruvon.models.BaseModel",
             "steps_config": [],  # Empty steps for demo workflows
             "parent_execution_id": None,  # Top-level workflows
             "blocked_on_child_id": None,  # Not waiting on any child
@@ -209,7 +209,7 @@ async def seed_edge_devices(persistence, verbose: bool = False):
     Seed sample edge devices (PostgreSQL only).
 
     Creates example edge devices in various states for testing
-    Rufus Edge functionality.
+    Ruvon Edge functionality.
     """
     # Only works with PostgreSQL
     if not hasattr(persistence, 'pool'):
@@ -314,7 +314,7 @@ async def verify_seed_data(persistence, verbose: bool = False):
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Seed Rufus database with test data",
+        description="Seed Ruvon database with test data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -323,7 +323,7 @@ Examples:
 
   # Seed PostgreSQL (Docker) with all data types
   python tools/seed_data.py \\
-    --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \\
+    --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \\
     --type all
 
   # Seed only demo workflows
@@ -331,7 +331,7 @@ Examples:
 
   # Seed only registration keys (PostgreSQL)
   python tools/seed_data.py \\
-    --db-url "postgresql://postgres:postgres@localhost:5433/rufus_cloud" \\
+    --db-url "postgresql://postgres:postgres@localhost:5433/ruvon_cloud" \\
     --type keys --verbose
         """
     )

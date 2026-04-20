@@ -3,13 +3,13 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from rufus.builder_ai.stages.stub_filler import StubFiller
-from rufus.builder_ai.stages.stub_generator import StubGenerator
+from ruvon.builder_ai.stages.stub_filler import StubFiller
+from ruvon.builder_ai.stages.stub_generator import StubGenerator
 
 
 SAMPLE_STUBS = (
     '"""Auto-generated step stubs."""\n'
-    "from rufus.models import StepContext\n\n\n"
+    "from ruvon.models import StepContext\n\n\n"
     "def parse_bid(state, context: StepContext):\n"
     '    """Step: Parse_Bid"""\n'
     "    # TODO: implement\n"

@@ -48,7 +48,7 @@ steps:
 
 ### 1. Definition Snapshot on Creation
 
-When a workflow is created, Rufus captures a complete snapshot:
+When a workflow is created, Ruvon captures a complete snapshot:
 
 ```python
 workflow = await builder.create_workflow(
@@ -56,7 +56,7 @@ workflow = await builder.create_workflow(
     initial_data={"order_id": "ORD-123"}
 )
 
-# Rufus automatically snapshots:
+# Ruvon automatically snapshots:
 workflow.definition_snapshot = {
     "workflow_type": "OrderProcessing",
     "workflow_version": "1.0.0",

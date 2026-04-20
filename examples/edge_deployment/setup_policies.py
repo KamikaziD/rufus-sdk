@@ -23,7 +23,7 @@ from datetime import datetime
 from uuid import uuid4
 
 # Configuration
-CLOUD_URL = os.getenv('RUFUS_CLOUD_URL', 'http://localhost:8000')
+CLOUD_URL = os.getenv('RUVON_CLOUD_URL', 'http://localhost:8000')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sample Policies
@@ -142,41 +142,41 @@ SAMPLE_POLICIES = [
     },
     {
         "policy_name": "Edge_Runtime_Update",
-        "description": "Deploy Rufus runtime updates based on platform",
+        "description": "Deploy Ruvon runtime updates based on platform",
         "version": "0.2.0",
         "status": "active",
         "rules": [
             {
                 "condition": "platform == 'Darwin' and arch == 'arm64'",
-                "artifact": "rufus_runtime_v0.2.0_macos_arm64.pex",
+                "artifact": "ruvon_runtime_v0.2.0_macos_arm64.pex",
                 "artifact_hash": "sha256:runtime_macos_arm",
                 "description": "macOS ARM64 runtime (Apple Silicon)",
                 "priority": 100
             },
             {
                 "condition": "platform == 'Darwin'",
-                "artifact": "rufus_runtime_v0.2.0_macos_x64.pex",
+                "artifact": "ruvon_runtime_v0.2.0_macos_x64.pex",
                 "artifact_hash": "sha256:runtime_macos_x64",
                 "description": "macOS x64 runtime (Intel Macs)",
                 "priority": 90
             },
             {
                 "condition": "platform == 'Linux' and arch == 'aarch64'",
-                "artifact": "rufus_runtime_v0.2.0_linux_arm64.pex",
+                "artifact": "ruvon_runtime_v0.2.0_linux_arm64.pex",
                 "artifact_hash": "sha256:runtime_linux_arm",
                 "description": "Linux ARM64 runtime (Raspberry Pi, Jetson)",
                 "priority": 100
             },
             {
                 "condition": "platform == 'Linux'",
-                "artifact": "rufus_runtime_v0.2.0_linux_x64.pex",
+                "artifact": "ruvon_runtime_v0.2.0_linux_x64.pex",
                 "artifact_hash": "sha256:runtime_linux_x64",
                 "description": "Linux x64 runtime (generic servers)",
                 "priority": 90
             },
             {
                 "condition": "default",
-                "artifact": "rufus_runtime_v0.2.0_generic.pex",
+                "artifact": "ruvon_runtime_v0.2.0_generic.pex",
                 "artifact_hash": "sha256:runtime_generic",
                 "description": "Generic Python runtime (fallback)",
                 "priority": 0
@@ -318,7 +318,7 @@ async def test_hardware_matching(client: httpx.AsyncClient):
 async def main():
     """Main entry point."""
     print("\n" + "#"*60)
-    print("#    RUFUS CLOUD - Policy Setup" + " "*25 + "#")
+    print("#    RUVON CLOUD - Policy Setup" + " "*25 + "#")
     print("#"*60)
 
     # Check cloud connectivity

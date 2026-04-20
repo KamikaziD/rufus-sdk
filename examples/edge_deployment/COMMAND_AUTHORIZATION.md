@@ -669,7 +669,7 @@ python cloud_admin.py audit-query "" "" "" "auth_*"
 
 ## Summary
 
-Command Authorization provides **production-grade security** for Rufus Edge:
+Command Authorization provides **production-grade security** for Ruvon Edge:
 
 - ✅ Role-Based Access Control (RBAC)
 - ✅ Multi-level approval workflows

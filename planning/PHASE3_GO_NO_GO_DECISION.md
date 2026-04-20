@@ -96,7 +96,7 @@ After benchmarking SQLAlchemy Core queries against raw SQL, the performance degr
 ## Deliverables Completed
 
 ### Phase 1 ✅
-- SQLAlchemy models created (`src/rufus/db_schema/`)
+- SQLAlchemy models created (`src/ruvon/db_schema/`)
 - Dependencies added (sqlalchemy, alembic)
 - Models match existing schema
 

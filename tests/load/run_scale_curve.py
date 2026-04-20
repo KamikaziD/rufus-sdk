@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run_scale_curve.py — Scale-out curve runner for Rufus load test suite.
+run_scale_curve.py — Scale-out curve runner for Ruvon load test suite.
 
 Runs a chosen scenario at increasing device counts (N) and writes a unified
 JSON file with throughput / p50 / p95 / p99 / error-rate per data point.
@@ -280,7 +280,7 @@ async def async_main(args) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rufus scale-out curve runner",
+        description="Ruvon scale-out curve runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -315,8 +315,8 @@ def main():
     )
     parser.add_argument(
         "--cloud-url",
-        default=os.getenv("RUFUS_CLOUD_URL", "http://localhost:8000"),
-        help="Cloud control-plane URL (default: RUFUS_CLOUD_URL or http://localhost:8000)",
+        default=os.getenv("RUVON_CLOUD_URL", "http://localhost:8000"),
+        help="Cloud control-plane URL (default: RUVON_CLOUD_URL or http://localhost:8000)",
     )
     parser.add_argument(
         "--output-dir",

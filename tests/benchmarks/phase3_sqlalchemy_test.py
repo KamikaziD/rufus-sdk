@@ -14,8 +14,8 @@ from typing import List, Dict
 import asyncpg
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from rufus.db_schema import workflow_executions
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.db_schema import workflow_executions
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 
 class HybridBenchmark:
@@ -162,7 +162,7 @@ async def main():
     print()
 
     # Connect
-    db_url = "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+    db_url = "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
     provider = PostgresPersistenceProvider(db_url)
     await provider.initialize()
 

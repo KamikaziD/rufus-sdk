@@ -1,15 +1,15 @@
-# Rufus SDK Documentation
+# Ruvon SDK Documentation
 
-**Welcome to the Rufus SDK documentation!** This directory contains comprehensive documentation for building production workflows with Rufus.
+**Welcome to the Ruvon SDK documentation!** This directory contains comprehensive documentation for building production workflows with Ruvon.
 
 ---
 
 ## 🚀 Getting Started
 
-**New to Rufus?** Start here:
+**New to Ruvon?** Start here:
 
 1. **[Quickstart Guide](../QUICKSTART.md)** (5 minutes)
-   - Install Rufus
+   - Install Ruvon
    - Run your first workflow
    - Understand the basics
 
@@ -40,7 +40,7 @@
 
 | Document | Description | When to Use |
 |----------|-------------|-------------|
-| **[FEATURES_AND_CAPABILITIES.md](FEATURES_AND_CAPABILITIES.md)** | Complete feature catalog | Discover what Rufus can do |
+| **[FEATURES_AND_CAPABILITIES.md](FEATURES_AND_CAPABILITIES.md)** | Complete feature catalog | Discover what Ruvon can do |
 | **[OUTSTANDING_FEATURES.md](OUTSTANDING_FEATURES.md)** | Roadmap and planned features | See what's coming next |
 
 ---
@@ -80,7 +80,7 @@
 | Document | Description |
 |----------|-------------|
 | **[MIGRATION_GUIDE.md](../MIGRATION_GUIDE.md)** | Migrating from Confucius or other workflow engines |
-| **[UPGRADE_GUIDE.md](../UPGRADE_GUIDE.md)** | Upgrading between Rufus versions |
+| **[UPGRADE_GUIDE.md](../UPGRADE_GUIDE.md)** | Upgrading between Ruvon versions |
 
 ### Database & Schema
 
@@ -180,10 +180,10 @@ All examples are located in [../examples/](../examples/)
 **...use the CLI**
 → [CLI_REFERENCE.md](CLI_REFERENCE.md)
 
-**...integrate Rufus into my app**
+**...integrate Ruvon into my app**
 → [API_REFERENCE.md](../API_REFERENCE.md)
 
-**...see what Rufus can do**
+**...see what Ruvon can do**
 → [FEATURES_AND_CAPABILITIES.md](FEATURES_AND_CAPABILITIES.md)
 
 **...know what's coming next**
@@ -227,10 +227,10 @@ Documentation improvements are welcome!
 
 **Can't find what you need?**
 
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions) - Ask questions
-- 🐛 [GitHub Issues](https://github.com/your-org/rufus-sdk/issues) - Report problems
-- 📖 [Full Documentation](https://rufus-sdk.readthedocs.io) - Coming soon
-- 💼 [Professional Support](mailto:support@rufus-sdk.dev) - Coming soon
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions) - Ask questions
+- 🐛 [GitHub Issues](https://github.com/your-org/ruvon-sdk/issues) - Report problems
+- 📖 [Full Documentation](https://ruvon-sdk.readthedocs.io) - Coming soon
+- 💼 [Professional Support](mailto:support@ruvon-sdk.dev) - Coming soon
 
 ---
 

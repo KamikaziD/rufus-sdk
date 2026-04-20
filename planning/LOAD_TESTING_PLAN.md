@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This document outlines a comprehensive load testing strategy to validate Rufus Edge system performance at scale (1000+ concurrent edge devices).
+This document outlines a comprehensive load testing strategy to validate Ruvon Edge system performance at scale (1000+ concurrent edge devices).
 
 **Goals**:
 1. Validate system handles 1000+ concurrent devices
@@ -251,7 +251,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  rufus-server:
+  ruvon-server:
     build: .
     environment:
       DATABASE_URL: postgresql://postgres@postgres/rufus_load_test
@@ -317,38 +317,38 @@ from prometheus_client import Counter, Histogram, Gauge
 
 # Request metrics
 http_requests_total = Counter(
-    'rufus_http_requests_total',
+    'ruvon_http_requests_total',
     'Total HTTP requests',
     ['method', 'endpoint', 'status']
 )
 
 request_duration = Histogram(
-    'rufus_request_duration_seconds',
+    'ruvon_request_duration_seconds',
     'Request duration',
     ['method', 'endpoint']
 )
 
 # SAF metrics
 saf_transactions_total = Counter(
-    'rufus_saf_transactions_total',
+    'ruvon_saf_transactions_total',
     'Total SAF transactions',
     ['device_id', 'status']  # status: accepted, rejected, duplicate
 )
 
 saf_sync_duration = Histogram(
-    'rufus_saf_sync_duration_seconds',
+    'ruvon_saf_sync_duration_seconds',
     'SAF sync duration',
     ['device_id']
 )
 
 # Database metrics
 db_connections = Gauge(
-    'rufus_db_connections',
+    'ruvon_db_connections',
     'Active database connections'
 )
 
 db_query_duration = Histogram(
-    'rufus_db_query_duration_seconds',
+    'ruvon_db_query_duration_seconds',
     'Database query duration',
     ['query_type']
 )

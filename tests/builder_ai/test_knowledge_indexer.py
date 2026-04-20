@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 # ---------------------------------------------------------------------------
 
 def test_split_text_respects_max_chars():
-    from rufus.builder_ai.knowledge.indexer import _split_text
+    from ruvon.builder_ai.knowledge.indexer import _split_text
 
     long_text = ("word " * 300).strip()  # ~1500 chars
     chunks = _split_text(long_text, max_chars=500)
@@ -22,7 +22,7 @@ def test_split_text_respects_max_chars():
 
 
 def test_split_text_no_split_needed():
-    from rufus.builder_ai.knowledge.indexer import _split_text
+    from ruvon.builder_ai.knowledge.indexer import _split_text
 
     short = "This is a short paragraph."
     result = _split_text(short, max_chars=500)
@@ -30,7 +30,7 @@ def test_split_text_no_split_needed():
 
 
 def test_chunk_yaml_file(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _chunk_yaml_file
+    from ruvon.builder_ai.knowledge.indexer import _chunk_yaml_file
 
     yaml_file = tmp_path / "test_workflow.yaml"
     yaml_file.write_text("workflow_type: TestWorkflow\nsteps:\n  - name: Step1\n")
@@ -43,7 +43,7 @@ def test_chunk_yaml_file(tmp_path):
 
 
 def test_chunk_markdown_extracts_yaml_fences(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _chunk_markdown
+    from ruvon.builder_ai.knowledge.indexer import _chunk_markdown
 
     md_file = tmp_path / "guide.md"
     md_file.write_text(
@@ -62,7 +62,7 @@ def test_chunk_markdown_extracts_yaml_fences(tmp_path):
 
 
 def test_chunk_markdown_dedup_by_id(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _chunk_markdown
+    from ruvon.builder_ai.knowledge.indexer import _chunk_markdown
 
     md_file = tmp_path / "guide.md"
     md_file.write_text("# Section\n\nParagraph A.\n\nParagraph B.\n")
@@ -76,7 +76,7 @@ def test_chunk_markdown_dedup_by_id(tmp_path):
 
 
 def test_file_hash_consistency(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _file_hash
+    from ruvon.builder_ai.knowledge.indexer import _file_hash
 
     f = tmp_path / "test.md"
     f.write_text("Hello world")
@@ -87,7 +87,7 @@ def test_file_hash_consistency(tmp_path):
 
 
 def test_file_hash_changes_on_content_change(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _file_hash
+    from ruvon.builder_ai.knowledge.indexer import _file_hash
 
     f = tmp_path / "test.md"
     f.write_text("content A")
@@ -98,7 +98,7 @@ def test_file_hash_changes_on_content_change(tmp_path):
 
 
 def test_load_and_chunk_skips_binary_files(tmp_path):
-    from rufus.builder_ai.knowledge.indexer import _load_and_chunk
+    from ruvon.builder_ai.knowledge.indexer import _load_and_chunk
 
     (tmp_path / "doc.md").write_text("# Title\n\nText.")
     (tmp_path / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -112,7 +112,7 @@ def test_load_and_chunk_skips_binary_files(tmp_path):
 
 
 def test_chunk_type_from_path():
-    from rufus.builder_ai.knowledge.indexer import _chunk_type_from_path
+    from ruvon.builder_ai.knowledge.indexer import _chunk_type_from_path
 
     assert _chunk_type_from_path(Path("docs/lessons.md")) == "lesson"
     assert _chunk_type_from_path(Path("config/payment.yaml")) == "yaml_example"
@@ -132,7 +132,7 @@ def test_knowledge_base_build_and_retrieve(tmp_path):
     fastembed = pytest.importorskip("fastembed")
     lancedb = pytest.importorskip("lancedb")
 
-    from rufus.builder_ai.knowledge.indexer import KnowledgeBase
+    from ruvon.builder_ai.knowledge.indexer import KnowledgeBase
 
     # Create minimal docs
     docs = tmp_path / "docs"

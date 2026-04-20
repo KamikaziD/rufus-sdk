@@ -1,4 +1,4 @@
-# Tutorial: Build a Task Manager with Rufus
+# Tutorial: Build a Task Manager with Ruvon
 
 **Learning Objectives:**
 - Create a complete workflow application from scratch
@@ -36,8 +36,8 @@ This demonstrates real-world patterns like automated decision-making, human appr
 Let's create a new directory for our task manager:
 
 ```bash
-mkdir rufus-task-manager
-cd rufus-task-manager
+mkdir ruvon-task-manager
+cd ruvon-task-manager
 ```
 
 Create a Python virtual environment:
@@ -47,10 +47,10 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-Install Rufus SDK:
+Install Ruvon SDK:
 
 ```bash
-pip install rufus
+pip install ruvon
 ```
 
 Create the project structure:
@@ -66,7 +66,7 @@ touch main.py
 Your structure should look like:
 
 ```
-rufus-task-manager/
+ruvon-task-manager/
 ├── task_manager/
 │   ├── __init__.py
 │   ├── models.py     # State models
@@ -145,7 +145,7 @@ Step functions for task management workflow
 
 from datetime import datetime
 from task_manager.models import TaskState
-from rufus.models import StepContext, WorkflowPauseDirective
+from ruvon.models import StepContext, WorkflowPauseDirective
 
 
 def create_task(state: TaskState, context: StepContext, **user_input) -> dict:
@@ -349,18 +349,18 @@ Now let's wire everything together. Open `main.py`:
 """
 Task Manager Application
 
-Demonstrates a complete Rufus workflow with SQLite persistence.
+Demonstrates a complete Ruvon workflow with SQLite persistence.
 """
 
 import asyncio
 from pathlib import Path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def initialize_database(db_path: str):
@@ -643,7 +643,7 @@ Now that you have a working workflow, try these enhancements:
 
 ## Full Code
 
-The complete working example is available in the Rufus repository:
+The complete working example is available in the Ruvon repository:
 ```
 examples/sqlite_task_manager/
 ```

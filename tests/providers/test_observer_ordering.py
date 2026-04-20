@@ -10,8 +10,8 @@ Verifies that:
 import pytest
 from pydantic import BaseModel
 
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.observability.noop import NoopWorkflowObserver
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.observability.noop import NoopWorkflowObserver
 
 
 class _State(BaseModel):

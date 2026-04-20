@@ -2,24 +2,24 @@
 
 ## Overview
 
-This document describes the rate limiting implementation for the Rufus Edge Cloud Control Plane. Rate limiting protects the API from abuse and ensures fair resource allocation across users and devices.
+This document describes the rate limiting implementation for the Ruvon Edge Cloud Control Plane. Rate limiting protects the API from abuse and ensures fair resource allocation across users and devices.
 
 ## Architecture
 
 ### Components
 
-1. **RateLimitService** (`src/rufus_server/rate_limit_service.py`)
+1. **RateLimitService** (`src/ruvon_server/rate_limit_service.py`)
    - Core service class managing rate limits
    - In-memory caching of rules (60s TTL)
    - In-memory request tracking with periodic cleanup
    - Fixed window algorithm for simplicity and performance
 
-2. **Middleware Integration** (`src/rufus_server/main.py`)
+2. **Middleware Integration** (`src/ruvon_server/main.py`)
    - `rate_limit_check()` dependency for endpoint protection
    - Response middleware adds X-RateLimit-* headers
    - Automatic 429 responses when limits exceeded
 
-3. **Management API** (`src/rufus_server/main.py`)
+3. **Management API** (`src/ruvon_server/main.py`)
    - 5 endpoints for managing rate limit rules
    - Admin-only access (TODO: implement authentication)
 
@@ -367,7 +367,7 @@ RATE_LIMIT_CLEANUP_INTERVAL=300
 
 **1. Start the server:**
 ```bash
-uvicorn rufus_server.main:app --reload
+uvicorn ruvon_server.main:app --reload
 ```
 
 **2. Test rate limit headers:**
@@ -530,8 +530,8 @@ Schema already exists (created via `add_webhooks_and_ratelimiting.sql`). No migr
 ## References
 
 - **Database Schema**: `/docker/migrations/add_webhooks_and_ratelimiting.sql`
-- **Service Implementation**: `/src/rufus_server/rate_limit_service.py`
-- **API Integration**: `/src/rufus_server/main.py`
+- **Service Implementation**: `/src/ruvon_server/rate_limit_service.py`
+- **API Integration**: `/src/ruvon_server/main.py`
 - **CLI Commands**: `/examples/edge_deployment/cloud_admin.py`
 - **Tier 4 Plan**: Implementation plan document
 

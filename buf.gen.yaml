@@ -1,8 +1,8 @@
 version: v1
 plugins:
   - plugin: buf.build/community/danielgtaylor-python-betterproto
-    out: src/rufus/proto/gen
+    out: src/ruvon/proto/gen
     opt:
-      - python_package=rufus.proto.gen
+      - python_package=ruvon.proto.gen
   - plugin: buf.build/protocolbuffers/python:v28
-    out: src/rufus/proto/gen
+    out: src/ruvon/proto/gen

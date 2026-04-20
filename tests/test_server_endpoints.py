@@ -1,5 +1,5 @@
 """
-Tests for Rufus server endpoints: health, registry, workflow lifecycle, and error contracts.
+Tests for Ruvon server endpoints: health, registry, workflow lifecycle, and error contracts.
 
 Fixtures (test_client, setup_test_workflow) are defined in tests/conftest.py.
 """
@@ -17,12 +17,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Env vars are set in conftest.py before the app import, but keeping them here
 # is harmless and ensures the correct config if this file is ever loaded standalone.
 os.environ["WORKFLOW_STORAGE"] = "memory"
-os.environ["RUFUS_WORKFLOW_REGISTRY_PATH"] = "tests/fixtures/test_registry.yaml"
-os.environ["RUFUS_CONFIG_DIR"] = "tests/fixtures"
+os.environ["RUVON_WORKFLOW_REGISTRY_PATH"] = "tests/fixtures/test_registry.yaml"
+os.environ["RUVON_CONFIG_DIR"] = "tests/fixtures"
 
 try:
     from fastapi.testclient import TestClient
-    from rufus_server.main import app
+    from ruvon_server.main import app
     _FASTAPI_AVAILABLE = True
 except Exception:
     TestClient = None  # type: ignore[assignment,misc]
@@ -34,10 +34,10 @@ pytestmark = pytest.mark.skipif(
     reason="FastAPI/server dependencies not available in this environment",
 )
 
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.engine import WorkflowEngine
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.engine import WorkflowEngine
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ async def test_get_available_workflows(test_client, setup_test_workflow):
 @pytest.mark.asyncio
 async def test_get_available_workflows_engine_not_initialized(test_client):
     """GET /api/v1/workflows returns 503 when engine is None."""
-    import rufus_server.main as main_module
+    import ruvon_server.main as main_module
     original = main_module.workflow_engine
     try:
         main_module.workflow_engine = None
@@ -109,7 +109,7 @@ async def test_start_workflow_unknown_type(test_client, setup_test_workflow):
 async def test_start_workflow_engine_not_initialized(test_client, setup_test_workflow):
     """POST /api/v1/workflow/start returns 503 when engine is None."""
     engine, persistence = setup_test_workflow
-    import rufus_server.main as main_module
+    import ruvon_server.main as main_module
     original = main_module.workflow_engine
     try:
         main_module.workflow_engine = None
@@ -415,7 +415,7 @@ async def test_retry_endpoint_success(test_client, setup_test_workflow):
     await persistence.save_workflow(str(workflow_id), workflow_dict)
 
     # Mock Celery task
-    with patch('rufus.tasks.resume_from_async_task') as mock_task:
+    with patch('ruvon.tasks.resume_from_async_task') as mock_task:
         mock_task.delay = Mock()
 
         # Call retry endpoint

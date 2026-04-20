@@ -6,13 +6,13 @@ Complete reference for installed package size across all edge deployment scenari
 
 ## What Ships in Each Wheel (v0.6.0+)
 
-As of v0.6.0, Rufus ships as **three separate wheels**. Edge devices install only `rufus-sdk-edge`,
-which pulls in `rufus-sdk` (core) but never installs the 10 MB cloud control plane.
+As of v0.6.0, Ruvon ships as **three separate wheels**. Edge devices install only `ruvon-edge`,
+which pulls in `ruvon-sdk` (core) but never installs the 10 MB cloud control plane.
 
 ```
-rufus_sdk-0.6.0-py3-none-any.whl  (~2.5 MB)
+ruvon_sdk-0.6.0-py3-none-any.whl  (~2.5 MB)
 │
-├── rufus/                          1.9 MB  57 files  — Core SDK + all implementations
+├── ruvon/                          1.9 MB  57 files  — Core SDK + all implementations
 │   ├── workflow.py                 (970 lines) — Workflow orchestrator
 │   ├── builder.py                  (554 lines) — YAML loader + importlib resolver
 │   ├── models.py                   (287 lines) — Pydantic step/workflow models
@@ -29,12 +29,12 @@ rufus_sdk-0.6.0-py3-none-any.whl  (~2.5 MB)
 │       ├── templating/   jinja2.py
 │       └── expression_evaluator/ simple.py
 │
-└── rufus_cli/                      520 KB  12 files  — CLI tool
+└── ruvon_cli/                      520 KB  12 files  — CLI tool
 
-rufus_sdk_edge-0.6.0-py3-none-any.whl  (~250 KB)
+ruvon_sdk_edge-0.6.0-py3-none-any.whl  (~250 KB)
 │
-└── rufus_edge/                     232 KB  8 files   — Edge agent
-    ├── agent.py                    (465 lines) — RufusEdgeAgent main class
+└── ruvon_edge/                     232 KB  8 files   — Edge agent
+    ├── agent.py                    (465 lines) — RuvonEdgeAgent main class
     ├── config_manager.py           (787 lines) — ETag-based config polling
     ├── sync_manager.py             (430 lines) — Store-and-Forward queuing
     ├── models.py                   (294 lines) — PaymentState, SAFTransaction
@@ -42,20 +42,20 @@ rufus_sdk_edge-0.6.0-py3-none-any.whl  (~250 KB)
     ├── delta_updates.py            (379 lines) — Config diff/patch logic
     └── payment_steps.py            (212 lines) — Reference payment step functions
 
-rufus_sdk_server-0.6.0-py3-none-any.whl  (~10 MB)
+ruvon_sdk_server-0.6.0-py3-none-any.whl  (~10 MB)
 │
-└── rufus_server/                   10 MB   42 files  — Cloud control plane
+└── ruvon_server/                   10 MB   42 files  — Cloud control plane
 ```
 
 ### What is and is not included in each wheel
 
-| Item | `rufus-sdk` | `rufus-sdk-edge` | `rufus-sdk-server` |
+| Item | `ruvon-sdk` | `ruvon-edge` | `ruvon-server` |
 |------|:-----------:|:----------------:|:-----------------:|
-| `rufus/implementations/` | Yes | via dependency | via dependency |
-| `rufus_cli/` | Yes | No | No |
-| `rufus_edge/` | No | Yes | No |
-| `rufus_server/` | No | No | Yes |
-| `rufus/examples/` | **No** | **No** | **No** |
+| `ruvon/implementations/` | Yes | via dependency | via dependency |
+| `ruvon_cli/` | Yes | No | No |
+| `ruvon_edge/` | No | Yes | No |
+| `ruvon_server/` | No | No | Yes |
+| `ruvon/examples/` | **No** | **No** | **No** |
 | User-written step functions | **No** | **No** | **No** |
 
 > **User step functions are not part of the package footprint.**
@@ -66,7 +66,7 @@ rufus_sdk_server-0.6.0-py3-none-any.whl  (~10 MB)
 
 ## Core Dependencies (always installed)
 
-These 17 packages install with any `pip install rufus-sdk`:
+These 17 packages install with any `pip install ruvon-sdk`:
 
 | Package | Purpose | Approx size |
 |---------|---------|-------------|
@@ -91,9 +91,9 @@ These 17 packages install with any `pip install rufus-sdk`:
 
 ## Optional Extras
 
-### `rufus-sdk` extras
+### `ruvon-sdk` extras
 
-Install with `pip install 'rufus-sdk[extra1,extra2]'`:
+Install with `pip install 'ruvon-sdk[extra1,extra2]'`:
 
 | Extra | Packages added | Added size | Use on edge? |
 |-------|---------------|------------|--------------|
@@ -101,17 +101,17 @@ Install with `pip install 'rufus-sdk[extra1,extra2]'`:
 | `[performance]` | `uvloop` | +2 MB | Yes — 2–4× faster async I/O |
 | `[cli]` | `rich` | +2 MB | Optional — richer terminal output |
 
-### `rufus-sdk-edge` extras
+### `ruvon-edge` extras
 
-Install with `pip install 'rufus-sdk-edge[edge]'`:
+Install with `pip install 'ruvon-edge[edge]'`:
 
 | Extra | Packages added | Added size | Use on edge? |
 |-------|---------------|------------|--------------|
 | `[edge]` | `websockets`, `psutil`, `numpy` | +14 MB | Yes — WebSocket commands, health metrics |
 
-### `rufus-sdk-server` extras
+### `ruvon-server` extras
 
-Install with `pip install 'rufus-sdk-server[server,celery,auth]'`:
+Install with `pip install 'ruvon-server[server,celery,auth]'`:
 
 | Extra | Packages added | Added size | Use on edge? |
 |-------|---------------|------------|--------------|
@@ -130,13 +130,13 @@ Install with `pip install 'rufus-sdk-server[server,celery,auth]'`:
 ### Scenario A — Minimal (offline payment, no AI, no monitoring)
 
 ```bash
-pip install rufus-sdk-edge
+pip install ruvon-edge
 ```
 
 | Layer | Size |
 |-------|------|
-| `rufus-sdk` wheel (core + CLI) | ~2.5 MB |
-| `rufus-sdk-edge` wheel (edge agent) | ~250 KB |
+| `ruvon-sdk` wheel (core + CLI) | ~2.5 MB |
+| `ruvon-edge` wheel (edge agent) | ~250 KB |
 | Core dependencies | ~15–20 MB |
 | **Total on disk** | **~15–20 MB** |
 
@@ -149,7 +149,7 @@ pip install rufus-sdk-edge
 ### Scenario B — Edge with system monitoring and WebSocket commands
 
 ```bash
-pip install 'rufus-sdk-edge[edge]'
+pip install 'ruvon-edge[edge]'
 ```
 
 | Layer | Size |
@@ -169,7 +169,7 @@ pip install 'rufus-sdk-edge[edge]'
 ### Scenario C — Edge with ONNX inference (fraud detection, risk scoring)
 
 ```bash
-pip install 'rufus-sdk-edge[edge]'
+pip install 'ruvon-edge[edge]'
 pip install onnxruntime>=1.16.0
 # Download model files separately
 ```
@@ -190,7 +190,7 @@ pip install onnxruntime>=1.16.0
 ### Scenario D — Edge with TensorFlow Lite
 
 ```bash
-pip install 'rufus-sdk-edge[edge]'
+pip install 'ruvon-edge[edge]'
 pip install tflite-runtime
 ```
 
@@ -210,8 +210,8 @@ Preferred over full TensorFlow on constrained devices. Full TF is ~700 MB instal
 ### Scenario E — Full cloud deployment (reference)
 
 ```bash
-pip install 'rufus-sdk[postgres,performance,cli]'
-pip install 'rufus-sdk-server[all]'
+pip install 'ruvon-sdk[postgres,performance,cli]'
+pip install 'ruvon-server[all]'
 ```
 
 | Layer | Size |
@@ -225,7 +225,7 @@ pip install 'rufus-sdk-server[all]'
 
 Resident set size while the process is running — distinct from disk footprint.
 
-| Scenario | Python runtime | Rufus + deps | Models loaded | RSS |
+| Scenario | Python runtime | Ruvon + deps | Models loaded | RSS |
 |----------|---------------|--------------|---------------|-----|
 | Minimal, no AI | 30 MB | 20 MB | — | **~50 MB** |
 | With `[edge]` | 30 MB | 35 MB | — | **~65 MB** |
@@ -234,43 +234,43 @@ Resident set size while the process is running — distinct from disk footprint.
 
 ---
 
-## What `rufus_edge` Actually Imports from Core
+## What `ruvon_edge` Actually Imports from Core
 
-Only a subset of the 57-file `rufus/` package is imported by the edge agent.
+Only a subset of the 57-file `ruvon/` package is imported by the edge agent.
 The rest is on disk but never loaded into memory.
 
 **Imported at runtime (edge):**
 
 ```
-rufus.workflow                          ← Workflow orchestrator
-rufus.builder                           ← YAML loader
-rufus.models                            ← StepContext, directives
-rufus.providers.*                       ← Protocol interfaces (7 files)
-rufus.implementations.persistence.sqlite
-rufus.implementations.execution.sync
-rufus.implementations.observability.logging
-rufus.implementations.templating.jinja2
-rufus.implementations.expression_evaluator.simple
-rufus.implementations.security.crypto_utils
-rufus.implementations.inference.*       ← Only if AI inference enabled
+ruvon.workflow                          ← Workflow orchestrator
+ruvon.builder                           ← YAML loader
+ruvon.models                            ← StepContext, directives
+ruvon.providers.*                       ← Protocol interfaces (7 files)
+ruvon.implementations.persistence.sqlite
+ruvon.implementations.execution.sync
+ruvon.implementations.observability.logging
+ruvon.implementations.templating.jinja2
+ruvon.implementations.expression_evaluator.simple
+ruvon.implementations.security.crypto_utils
+ruvon.implementations.inference.*       ← Only if AI inference enabled
 ```
 
 **Never imported on edge (on disk but not loaded):**
 
 | Module | Purpose |
 |--------|---------|
-| `rufus.celery_app` | Celery initialization (cloud workers only) |
-| `rufus.tasks` | Celery task definitions (cloud workers only) |
-| `rufus.worker_registry` | Celery fleet tracking (cloud only) |
-| `rufus.zombie_scanner` | Zombie workflow detection (monitoring only) |
-| `rufus.heartbeat` | Worker heartbeat (cloud workers only) |
-| `rufus.engine` | Legacy WorkflowEngine (deprecated) |
-| `rufus.implementations.execution.celery` | Celery executor (cloud only) |
-| `rufus.implementations.execution.thread_pool` | Thread-based parallel (optional) |
-| `rufus.implementations.persistence.postgres` | PostgreSQL (cloud only) |
-| `rufus.implementations.persistence.redis` | Redis stub (not implemented) |
-| `rufus_cli.*` | CLI tool (cloud/dev only) |
-| `rufus_server.*` | REST API server (cloud only) |
+| `ruvon.celery_app` | Celery initialization (cloud workers only) |
+| `ruvon.tasks` | Celery task definitions (cloud workers only) |
+| `ruvon.worker_registry` | Celery fleet tracking (cloud only) |
+| `ruvon.zombie_scanner` | Zombie workflow detection (monitoring only) |
+| `ruvon.heartbeat` | Worker heartbeat (cloud workers only) |
+| `ruvon.engine` | Legacy WorkflowEngine (deprecated) |
+| `ruvon.implementations.execution.celery` | Celery executor (cloud only) |
+| `ruvon.implementations.execution.thread_pool` | Thread-based parallel (optional) |
+| `ruvon.implementations.persistence.postgres` | PostgreSQL (cloud only) |
+| `ruvon.implementations.persistence.redis` | Redis stub (not implemented) |
+| `ruvon_cli.*` | CLI tool (cloud/dev only) |
+| `ruvon_server.*` | REST API server (cloud only) |
 
 ---
 
@@ -287,21 +287,21 @@ rufus.implementations.inference.*       ← Only if AI inference enabled
 
 ## Reducing Footprint
 
-As of v0.6.0, `pip install rufus-sdk-edge` installs only the core engine and edge agent —
+As of v0.6.0, `pip install ruvon-edge` installs only the core engine and edge agent —
 the CLI and cloud control plane are in separate wheels and are not installed.
 
 **For severely flash-constrained hardware (<64 MB storage):**
 
 Option 1 — Install only the edge package (no CLI):
 ```bash
-pip install rufus-sdk-edge  # Only rufus + rufus_edge, no rufus_cli or rufus_server
+pip install ruvon-edge  # Only ruvon + ruvon_edge, no ruvon_cli or ruvon_server
 ```
 
 Option 2 — Install from source in editable mode:
 ```bash
-git clone https://github.com/KamikaziD/rufus-sdk
-cd rufus-sdk
-pip install -e packages/rufus-sdk-edge
+git clone https://github.com/KamikaziD/ruvon-sdk
+cd ruvon-sdk
+pip install -e packages/ruvon-edge
 ```
 
 Option 3 — Use a virtual environment with stripped system Python for embedded builds.
@@ -310,7 +310,7 @@ Option 3 — Use a virtual environment with stripped system Python for embedded 
 
 ## Version History
 
-| Version | `rufus-sdk` size | `rufus-sdk-edge` size | `rufus-sdk-server` size | Notes |
+| Version | `ruvon-sdk` size | `ruvon-edge` size | `ruvon-server` size | Notes |
 |---------|:----------------:|:---------------------:|:-----------------------:|-------|
 | 0.6.0 | ~2.5 MB | ~250 KB | ~10 MB | Package split — edge devices no longer ship cloud code |
 | 0.5.4 | 9.3 MB (monolithic) | — | — | JavaScript step type removed |

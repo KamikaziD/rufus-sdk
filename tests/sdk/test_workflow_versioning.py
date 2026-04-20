@@ -14,8 +14,8 @@ import copy
 from typing import Dict, Any
 from pydantic import BaseModel
 
-from rufus.builder import WorkflowBuilder
-from rufus.workflow import Workflow
+from ruvon.builder import WorkflowBuilder
+from ruvon.workflow import Workflow
 
 
 class SimpleState(BaseModel):

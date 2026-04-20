@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 # ---------------------------------------------------------------------------
 
 def _scrubber():
-    from rufus.builder_ai.knowledge.scrubber import PIIScrubber
+    from ruvon.builder_ai.knowledge.scrubber import PIIScrubber
     return PIIScrubber()
 
 
@@ -90,7 +90,7 @@ def test_pii_scrubber_cumulative_count():
 # ---------------------------------------------------------------------------
 
 def _make_chunk(text: str = "Hello world", chunk_type: str = "explanation"):
-    from rufus.builder_ai.knowledge.indexer import Chunk
+    from ruvon.builder_ai.knowledge.indexer import Chunk
     return Chunk(
         id="c1", text=text, source="docs/test.md",
         section="## Test", chunk_type=chunk_type, score=0.8,
@@ -130,14 +130,14 @@ def test_scrub_chunks_returns_new_objects():
 # ---------------------------------------------------------------------------
 
 def test_build_knowledge_block_includes_injection_guard():
-    from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+    from ruvon.builder_ai.knowledge.scrubber import build_knowledge_block
     chunks = [_make_chunk("Some important doc content")]
     block = build_knowledge_block(chunks)
-    assert "SYSTEM NOTICE" in block or "read-only" in block or "RUFUS_KNOWLEDGE" in block
+    assert "SYSTEM NOTICE" in block or "read-only" in block or "RUVON_KNOWLEDGE" in block
 
 
 def test_build_knowledge_block_respects_focus_types():
-    from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+    from ruvon.builder_ai.knowledge.scrubber import build_knowledge_block
     yaml_chunk = _make_chunk("yaml content", chunk_type="yaml_example")
     lesson_chunk = _make_chunk("lesson content", chunk_type="lesson")
     block = build_knowledge_block(
@@ -149,21 +149,21 @@ def test_build_knowledge_block_respects_focus_types():
 
 def test_build_knowledge_block_fallback_when_no_focus_match():
     """If focus_types produces no matches, include all chunks."""
-    from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+    from ruvon.builder_ai.knowledge.scrubber import build_knowledge_block
     chunk = _make_chunk("some explanation", chunk_type="explanation")
     block = build_knowledge_block([chunk], focus_types=["yaml_example"])
     assert "some explanation" in block
 
 
 def test_build_knowledge_block_empty_chunks_returns_empty():
-    from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+    from ruvon.builder_ai.knowledge.scrubber import build_knowledge_block
     block = build_knowledge_block([])
     assert block == "" or block is None or len(block.strip()) == 0
 
 
 def test_build_knowledge_block_respects_token_budget():
     """Chunks that would exceed max_context_tokens should be dropped."""
-    from rufus.builder_ai.knowledge.scrubber import build_knowledge_block
+    from ruvon.builder_ai.knowledge.scrubber import build_knowledge_block
     # Each chunk is ~250 chars ≈ 62 tokens; budget of 60 fits one chunk
     big_text = "word " * 50  # ~250 chars, ~62 tokens
     chunks = [_make_chunk(big_text) for _ in range(5)]
@@ -177,8 +177,8 @@ def test_build_knowledge_block_respects_token_budget():
 # ---------------------------------------------------------------------------
 
 def _make_router_with_kb(chunks, privacy_level):
-    from rufus.builder_ai.knowledge.raft_router import RAFTRouter, PrivacyLevel
-    from rufus.builder_ai.knowledge.indexer import KnowledgeBase
+    from ruvon.builder_ai.knowledge.raft_router import RAFTRouter, PrivacyLevel
+    from ruvon.builder_ai.knowledge.indexer import KnowledgeBase
     kb = MagicMock(spec=KnowledgeBase)
     kb.retrieve_fast = AsyncMock(return_value=chunks)
     kb.retrieve = AsyncMock(return_value=chunks)
@@ -193,7 +193,7 @@ def _domain_chunks():
 @pytest.mark.asyncio
 async def test_strict_privacy_forces_none_for_cloud_backend():
     """STRICT + cloud backend → strategy must be NONE, no chunks returned."""
-    from rufus.builder_ai.knowledge.raft_router import RetrievalStrategy
+    from ruvon.builder_ai.knowledge.raft_router import RetrievalStrategy
     router = _make_router_with_kb(_domain_chunks(), "strict")
     decision = await router.decide("HUMAN_IN_LOOP configuration", backend="anthropic")
     assert decision.strategy == RetrievalStrategy.NONE
@@ -204,7 +204,7 @@ async def test_strict_privacy_forces_none_for_cloud_backend():
 @pytest.mark.asyncio
 async def test_strict_privacy_allows_ollama():
     """STRICT + ollama → allowed; strategy can be RAG or RAFT."""
-    from rufus.builder_ai.knowledge.raft_router import RetrievalStrategy
+    from ruvon.builder_ai.knowledge.raft_router import RetrievalStrategy
     router = _make_router_with_kb(_domain_chunks(), "strict")
     decision = await router.decide("HUMAN_IN_LOOP configuration", backend="ollama")
     assert decision.strategy in (RetrievalStrategy.RAG, RetrievalStrategy.RAFT, RetrievalStrategy.NONE)
@@ -214,7 +214,7 @@ async def test_strict_privacy_allows_ollama():
 @pytest.mark.asyncio
 async def test_balanced_privacy_sends_metadata_only_to_cloud():
     """BALANCED + cloud → chunk text replaced with metadata summary, not full content."""
-    from rufus.builder_ai.knowledge.raft_router import RetrievalStrategy
+    from ruvon.builder_ai.knowledge.raft_router import RetrievalStrategy
     router = _make_router_with_kb(_domain_chunks(), "balanced")
     decision = await router.decide("HUMAN_IN_LOOP step timeout configuration", backend="anthropic")
 
@@ -230,7 +230,7 @@ async def test_balanced_privacy_sends_metadata_only_to_cloud():
 @pytest.mark.asyncio
 async def test_cloud_privacy_allows_full_chunks():
     """CLOUD → full chunks may be sent to cloud LLM."""
-    from rufus.builder_ai.knowledge.raft_router import RetrievalStrategy
+    from ruvon.builder_ai.knowledge.raft_router import RetrievalStrategy
     router = _make_router_with_kb(_domain_chunks(), "cloud")
     decision = await router.decide("HUMAN_IN_LOOP step timeout configuration", backend="anthropic")
 
@@ -241,8 +241,8 @@ async def test_cloud_privacy_allows_full_chunks():
 @pytest.mark.asyncio
 async def test_pii_scrubbing_applied_before_retrieval_decision():
     """PII in chunk text should be redacted regardless of privacy tier."""
-    from rufus.builder_ai.knowledge.raft_router import PrivacyLevel, RAFTRouter
-    from rufus.builder_ai.knowledge.indexer import KnowledgeBase
+    from ruvon.builder_ai.knowledge.raft_router import PrivacyLevel, RAFTRouter
+    from ruvon.builder_ai.knowledge.indexer import KnowledgeBase
 
     pii_chunk = _make_chunk("Contact admin@example.com or call 4111-1111-1111-1111", "explanation")
 

@@ -1,5 +1,5 @@
 # Example docker-compose for USER PROJECTS
-# Uses pre-built Rufus images from Docker Hub
+# Uses pre-built Ruvon images from Docker Hub
 # Users mount their custom code as volumes
 
 # INSTRUCTIONS:
@@ -52,10 +52,10 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Rufus Server - REST API (pre-built image)
-  rufus-server:
-    image: yourname/rufus-server:latest  # TODO: Change 'yourname' to your Docker Hub username
-    container_name: my-app-rufus-server
+  # Ruvon Server - REST API (pre-built image)
+  ruvon-server:
+    image: yourname/ruvon-server:latest  # TODO: Change 'yourname' to your Docker Hub username
+    container_name: my-app-ruvon-server
     ports:
       - "8000:8000"
     volumes:
@@ -71,7 +71,7 @@ services:
       WORKFLOW_STORAGE: postgres
       PYTHONPATH: /app:/app/my_app
       # Optional: Mount custom FastAPI routers (dotted path to APIRouter object)
-      # RUFUS_CUSTOM_ROUTERS: my_app.routes.router
+      # RUVON_CUSTOM_ROUTERS: my_app.routes.router
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,9 +81,9 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Rufus Worker - Executes workflows (pre-built image)
-  rufus-worker:
-    image: yourname/rufus-worker:latest  # TODO: Change 'yourname' to your Docker Hub username
+  # Ruvon Worker - Executes workflows (pre-built image)
+  ruvon-worker:
+    image: ruvondev/ruvon-worker:latest  # TODO: Change 'yourname' to your Docker Hub username
     volumes:
       # Mount YOUR project code (same as server)
       - ./my_app:/app/my_app
@@ -109,7 +109,7 @@ services:
 
   # Flower - Monitoring UI (pre-built image)
   flower:
-    image: yourname/rufus-flower:latest  # TODO: Change 'yourname' to your Docker Hub username
+    image: ruvondev/ruvon-flower:latest  # TODO: Change 'yourname' to your Docker Hub username
     container_name: my-app-flower
     ports:
       - "5555:5555"

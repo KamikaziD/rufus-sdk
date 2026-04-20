@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rufus Demo 3 — How It Works</title>
+<title>Ruvon Demo 3 — How It Works</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -202,9 +202,9 @@
 <body>
 
 <header>
-  <h1>Rufus — Demo 3: Regenerative Pod Mesh</h1>
+  <h1>Ruvon — Demo 3: Regenerative Pod Mesh</h1>
   <a href="index.html">← Back to Demo</a>
-  <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank" style="margin-left:auto">GitHub ↗</a>
+  <a href="https://github.com/KamikaziD/ruvon-sdk" target="_blank" style="margin-left:auto">GitHub ↗</a>
 </header>
 
 <div class="page">
@@ -239,14 +239,14 @@
   </p>
 
   <p>
-    Each tab is a <strong>Rufus pod</strong> running a stripped-down edge agent in a Web Worker.
+    Each tab is a <strong>Ruvon pod</strong> running a stripped-down edge agent in a Web Worker.
     The pods run simulated payment transactions, gossip their capacity scores to neighbours,
     elect a <em>Sovereign</em> to coordinate relay routing, and queue offline transactions in
     an in-memory Store-and-Forward buffer when they simulate going offline.
   </p>
 
   <div class="tip">
-    <strong>Entirely serverless.</strong> No Rufus server, no database, no WebSocket relay.
+    <strong>Entirely serverless.</strong> No Ruvon server, no database, no WebSocket relay.
     PeerJS uses <code>peerjs.com</code> only for the initial handshake (SDP + ICE). All
     RUVON gossip data travels directly peer-to-peer — it never touches peerjs.com.
   </div>
@@ -297,7 +297,7 @@
   <h2 id="ruvon">3. RUVON: the gossip protocol</h2>
 
   <p>
-    <strong>RUVON</strong> (Rufus Vectored Observation Network) is a lightweight gossip protocol
+    <strong>RUVON</strong> is a lightweight gossip protocol
     running entirely in a Web Worker. Each pod periodically broadcasts a signed <em>heartbeat</em>
     to all neighbours. A heartbeat carries:
   </p>
@@ -520,11 +520,11 @@
   <ol class="steps">
     <li>
       Every pod registers with PeerJS using the ID
-      <code>rufus-{groupKey}-{podId}</code>.
+      <code>ruvon-{groupKey}-{podId}</code>.
     </li>
     <li>
       Simultaneously, every pod tries to connect to the <em>well-known anchor</em>
-      <code>rufus-{groupKey}-anchor</code>.
+      <code>ruvon-{groupKey}-anchor</code>.
     </li>
     <li>
       If the anchor responds (room already exists): the anchor sends a
@@ -574,7 +574,7 @@
   <h2 id="saf">9. Store-and-Forward (SAF)</h2>
 
   <p>
-    SAF simulates one of Rufus's core fintech features: processing payments when the network
+    SAF simulates one of Ruvon's core fintech features: processing payments when the network
     is unavailable, then syncing when back online.
   </p>
 
@@ -588,7 +588,7 @@
 
   <p>
     In the browser demo, "online" and "offline" are simulated states — no actual network
-    change occurs. In production Rufus deployments, the SAF layer uses SQLite for durability.
+    change occurs. In production Ruvon deployments, the SAF layer uses SQLite for durability.
   </p>
 
   <!-- ── ARCH ───────────────────────────────────────────────────────────────── -->
@@ -596,7 +596,7 @@
 
   <div class="arch-diagram"><span class="hi">index.html (main thread)</span>
   ├── Modal UI + share link
-  ├── <span class="gr">BroadcastChannel("rufus-mesh")</span>  ←── same-device tabs
+  ├── <span class="gr">BroadcastChannel("ruvon-mesh")</span>  ←── same-device tabs
   ├── <span class="hi">PeerJS DataChannels</span>             ←── cross-device peers
   │       └── relay REMOTE_SEND ↔ REMOTE_MSG with worker
   └── Canvas / peer table / event log renderer
@@ -667,9 +667,9 @@
 
   <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border);
               color: var(--muted); font-size: 11px; line-height: 2;">
-    <strong style="color: var(--text)">Rufus SDK</strong> — Edge-first Python workflow engine.<br>
+    <strong style="color: var(--text)">Ruvon SDK</strong> — Edge-first Python workflow engine.<br>
     Browser Demo 3 is a standalone static demo of the RUVON gossip layer. No SDK installation required.<br>
-    <a href="https://github.com/KamikaziD/rufus-sdk" target="_blank">github.com/KamikaziD/rufus-sdk</a>
+    <a href="https://github.com/KamikaziD/ruvon-sdk" target="_blank">github.com/KamikaziD/ruvon-sdk</a>
     &nbsp;·&nbsp;
     <a href="index.html">← Back to Demo</a>
   </div>

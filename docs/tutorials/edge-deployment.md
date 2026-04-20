@@ -1,7 +1,7 @@
-# Tutorial: Deploy Rufus to Edge Hardware
+# Tutorial: Deploy Ruvon to Edge Hardware
 
 **Learning Objectives:**
-- Deploy Rufus workflows to edge devices (Raspberry Pi, IoT hardware)
+- Deploy Ruvon workflows to edge devices (Raspberry Pi, IoT hardware)
 - Configure SQLite for offline-first operation
 - Implement Store-and-Forward (SAF) for network resilience
 - Test workflows in offline mode
@@ -48,7 +48,7 @@ TRADITIONAL (Cloud-Only):          EDGE (Hybrid):
 ┌─────────────────────────────────────────┐
 │         EDGE DEVICE (SQLite)            │
 │  ┌──────────────────────────────────┐   │
-│  │  Rufus Edge Agent                │   │
+│  │  Ruvon Edge Agent                │   │
 │  │  - Workflows run locally         │   │
 │  │  - SQLite persistence            │   │
 │  │  - Offline queue                 │   │
@@ -61,7 +61,7 @@ TRADITIONAL (Cloud-Only):          EDGE (Hybrid):
 ┌────────────▼────────────────────────────┐
 │    CLOUD CONTROL PLANE (PostgreSQL)     │
 │  ┌──────────────────────────────────┐   │
-│  │  Rufus Cloud Server              │   │
+│  │  Ruvon Cloud Server              │   │
 │  │  - Device registry               │   │
 │  │  - Config push (ETag)            │   │
 │  │  - Transaction aggregation       │   │
@@ -76,8 +76,8 @@ TRADITIONAL (Cloud-Only):          EDGE (Hybrid):
 Create a new project for edge deployment:
 
 ```bash
-mkdir rufus-edge-demo
-cd rufus-edge-demo
+mkdir ruvon-edge-demo
+cd ruvon-edge-demo
 mkdir -p edge_app config
 touch edge_app/__init__.py
 ```
@@ -85,7 +85,7 @@ touch edge_app/__init__.py
 Project structure:
 
 ```
-rufus-edge-demo/
+ruvon-edge-demo/
 ├── edge_app/
 │   ├── __init__.py
 │   ├── models.py          # State models
@@ -161,7 +161,7 @@ Edge payment workflow steps
 import uuid
 from datetime import datetime
 from edge_app.models import PaymentState
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 def check_network(state: PaymentState, context: StepContext, **kwargs) -> dict:
@@ -475,7 +475,7 @@ Create `edge_agent.py`:
 
 ```python
 """
-Rufus Edge Agent
+Ruvon Edge Agent
 
 Runs workflows on edge devices with offline support.
 """
@@ -485,12 +485,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 from edge_app.sync_manager import SyncManager
 
@@ -802,30 +802,30 @@ Sync Result:
 
 1. **Copy files to device**:
    ```bash
-   scp -r rufus-edge-demo/ pi@raspberrypi:~/
+   scp -r ruvon-edge-demo/ pi@raspberrypi:~/
    ```
 
 2. **Install dependencies**:
    ```bash
    ssh pi@raspberrypi
-   cd ~/rufus-edge-demo
+   cd ~/ruvon-edge-demo
    python -m venv venv
    source venv/bin/activate
-   pip install 'rufus-sdk-edge[edge]'
+   pip install 'ruvon-edge[edge]'
    ```
 
 3. **Run as systemd service**:
    ```ini
-   # /etc/systemd/system/rufus-edge.service
+   # /etc/systemd/system/ruvon-edge.service
    [Unit]
-   Description=Rufus Edge Agent
+   Description=Ruvon Edge Agent
    After=network.target
 
    [Service]
    Type=simple
    User=pi
-   WorkingDirectory=/home/pi/rufus-edge-demo
-   ExecStart=/home/pi/rufus-edge-demo/venv/bin/python edge_agent.py
+   WorkingDirectory=/home/pi/ruvon-edge-demo
+   ExecStart=/home/pi/ruvon-edge-demo/venv/bin/python edge_agent.py
    Restart=always
 
    [Install]
@@ -833,8 +833,8 @@ Sync Result:
    ```
 
    ```bash
-   sudo systemctl enable rufus-edge
-   sudo systemctl start rufus-edge
+   sudo systemctl enable ruvon-edge
+   sudo systemctl start ruvon-edge
    ```
 
 ---
@@ -880,8 +880,8 @@ def encrypt_card_data(card_number: str, key: bytes) -> bytes:
 # Never hardcode API keys!
 import os
 
-API_KEY = os.getenv("RUFUS_API_KEY")  # From environment
-CLOUD_URL = os.getenv("RUFUS_CLOUD_URL")
+API_KEY = os.getenv("RUVON_API_KEY")  # From environment
+CLOUD_URL = os.getenv("RUVON_CLOUD_URL")
 ```
 
 ---

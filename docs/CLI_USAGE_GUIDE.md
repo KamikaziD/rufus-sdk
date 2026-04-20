@@ -1,6 +1,6 @@
-# Rufus CLI Usage Guide
+# Ruvon CLI Usage Guide
 
-Complete guide to using the Rufus command-line interface for workflow orchestration, database management, and monitoring.
+Complete guide to using the Ruvon command-line interface for workflow orchestration, database management, and monitoring.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ Complete guide to using the Rufus command-line interface for workflow orchestrat
 
 ## Introduction
 
-The Rufus CLI provides a comprehensive command-line interface for managing workflows, databases, and monitoring your Rufus workflow orchestration system. It features:
+The Ruvon CLI provides a comprehensive command-line interface for managing workflows, databases, and monitoring your Ruvon workflow orchestration system. It features:
 
 - **21 commands** across 4 categories
 - **Beautiful terminal output** with color-coded tables
@@ -30,16 +30,16 @@ The Rufus CLI provides a comprehensive command-line interface for managing workf
 ### Command Structure
 
 ```
-rufus <command> [subcommand] [options] [arguments]
+ruvon <command> [subcommand] [options] [arguments]
 ```
 
 **Command Groups:**
-- `rufus config` - Configuration management
-- `rufus workflow` - Workflow operations
-- `rufus db` - Database management
+- `ruvon config` - Configuration management
+- `ruvon workflow` - Workflow operations
+- `ruvon db` - Database management
 
 **Top-level Aliases:**
-- `rufus list`, `rufus start`, `rufus show`, etc. (shortcuts to workflow commands)
+- `ruvon list`, `ruvon start`, `ruvon show`, etc. (shortcuts to workflow commands)
 
 ---
 
@@ -53,8 +53,8 @@ rufus <command> [subcommand] [options] [arguments]
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/your-org/ruvon-sdk.git
+cd ruvon-sdk
 
 # Install with pip
 pip install -e .
@@ -63,13 +63,13 @@ pip install -e .
 poetry install
 
 # Verify installation
-rufus --help
+ruvon --help
 ```
 
 ### Install from PyPI (when published)
 
 ```bash
-pip install rufus-sdk
+pip install ruvon-sdk
 ```
 
 ---
@@ -80,54 +80,54 @@ pip install rufus-sdk
 
 ```bash
 # Interactive configuration
-rufus config set-persistence
+ruvon config set-persistence
 
 # Choose SQLite for development
 # Select: 2 (sqlite)
 # Path: ./workflows.db
 
 # Verify configuration
-rufus config show
+ruvon config show
 ```
 
 ### 2. Initialize Database
 
 ```bash
 # Create database schema
-rufus db init
+ruvon db init
 
 # Verify database
-rufus db stats
+ruvon db stats
 ```
 
 ### 3. Start a Workflow
 
 ```bash
 # Start a workflow (requires workflow definition)
-rufus start MyWorkflow --data '{"user_id": "123"}'
+ruvon start MyWorkflow --data '{"user_id": "123"}'
 
 # List all workflows
-rufus list
+ruvon list
 
 # View workflow details
-rufus show <workflow-id>
+ruvon show <workflow-id>
 ```
 
 ---
 
 ## Configuration Commands
 
-Manage persistent CLI configuration stored at `~/.rufus/config.yaml`.
+Manage persistent CLI configuration stored at `~/.ruvon/config.yaml`.
 
-### `rufus config show`
+### `ruvon config show`
 
 Display current configuration.
 
 ```bash
-rufus config show
+ruvon config show
 
 # Output as JSON
-rufus config show --json
+ruvon config show --json
 ```
 
 **Example Output:**
@@ -146,23 +146,23 @@ rufus config show --json
 }
 ```
 
-### `rufus config path`
+### `ruvon config path`
 
 Show configuration file location.
 
 ```bash
-rufus config path
+ruvon config path
 
 # Output:
-# ~/.rufus/config.yaml
+# ~/.ruvon/config.yaml
 ```
 
-### `rufus config set-persistence`
+### `ruvon config set-persistence`
 
 Configure persistence provider (interactive).
 
 ```bash
-rufus config set-persistence
+ruvon config set-persistence
 ```
 
 **Interactive Prompts:**
@@ -174,7 +174,7 @@ Available persistence providers:
 
 Select provider (1-3): 2
 
-Database path [~/.rufus/workflows.db]: ./workflows.db
+Database path [~/.ruvon/workflows.db]: ./workflows.db
 
 ✅ Persistence provider set to: sqlite
 ℹ️  Database path: ./workflows.db
@@ -185,12 +185,12 @@ Database path [~/.rufus/workflows.db]: ./workflows.db
 - **sqlite** - SQLite file-based database
 - **postgres** - PostgreSQL database (requires connection URL)
 
-### `rufus config set-execution`
+### `ruvon config set-execution`
 
 Configure execution provider (interactive).
 
 ```bash
-rufus config set-execution
+ruvon config set-execution
 ```
 
 **Interactive Prompts:**
@@ -209,12 +209,12 @@ Select provider (1-2): 1
 - **thread_pool** - Thread-based parallel execution
 - **celery** - Distributed execution (requires Celery setup)
 
-### `rufus config set-default`
+### `ruvon config set-default`
 
 Configure default behaviors (interactive).
 
 ```bash
-rufus config set-default
+ruvon config set-default
 ```
 
 **Interactive Prompts:**
@@ -230,16 +230,16 @@ Enable interactive? [y/N]: y
 ✅ Default 'interactive' set to: True
 ```
 
-### `rufus config reset`
+### `ruvon config reset`
 
 Reset configuration to defaults.
 
 ```bash
 # With confirmation
-rufus config reset
+ruvon config reset
 
 # Skip confirmation
-rufus config reset --yes
+ruvon config reset --yes
 ```
 
 ---
@@ -248,33 +248,33 @@ rufus config reset --yes
 
 Manage workflow lifecycle: list, start, monitor, resume, retry.
 
-### `rufus list`
+### `ruvon list`
 
 List workflows with optional filtering.
 
 ```bash
 # List all workflows (default: 20)
-rufus list
+ruvon list
 
 # Filter by status
-rufus list --status ACTIVE
-rufus list --status COMPLETED
-rufus list --status FAILED
+ruvon list --status ACTIVE
+ruvon list --status COMPLETED
+ruvon list --status FAILED
 
 # Filter by workflow type
-rufus list --type OrderProcessing
+ruvon list --type OrderProcessing
 
 # Increase limit
-rufus list --limit 100
+ruvon list --limit 100
 
 # Verbose output (more details)
-rufus list --verbose
+ruvon list --verbose
 
 # JSON output
-rufus list --json
+ruvon list --json
 
 # Combine filters
-rufus list --status ACTIVE --type OrderProcessing --limit 50
+ruvon list --status ACTIVE --type OrderProcessing --limit 50
 ```
 
 **Example Output:**
@@ -302,25 +302,25 @@ rufus list --status ACTIVE --type OrderProcessing --limit 50
 - **FAILED_CHILD_WORKFLOW** - Child workflow failed
 - **CANCELLED** - Manually cancelled
 
-### `rufus start`
+### `ruvon start`
 
 Start a new workflow.
 
 ```bash
 # Start workflow with inline JSON data
-rufus start OrderProcessing --data '{"customer_id": "123", "amount": 99.99}'
+ruvon start OrderProcessing --data '{"customer_id": "123", "amount": 99.99}'
 
 # Start workflow from JSON file
-rufus start OrderProcessing --data-file order.json
+ruvon start OrderProcessing --data-file order.json
 
 # Specify workflow config file
-rufus start OrderProcessing --config config/order_workflow.yaml --data '{}'
+ruvon start OrderProcessing --config config/order_workflow.yaml --data '{}'
 
 # Auto-execute all steps (non-interactive)
-rufus start OrderProcessing --data '{}' --auto
+ruvon start OrderProcessing --data '{}' --auto
 
 # Dry run (validate only, don't execute)
-rufus start OrderProcessing --data '{}' --dry-run
+ruvon start OrderProcessing --data '{}' --dry-run
 ```
 
 **Example Output:**
@@ -332,8 +332,8 @@ Status: ACTIVE
 Current Step: Validate_Order
 
 Next steps:
-  • View details: rufus show wf_abc123def456
-  • Resume: rufus resume wf_abc123def456
+  • View details: ruvon show wf_abc123def456
+  • Resume: ruvon resume wf_abc123def456
 ```
 
 **Data Format:**
@@ -341,28 +341,28 @@ Next steps:
 - Keys match workflow's initial state model
 - Use `--data-file` for complex data
 
-### `rufus show`
+### `ruvon show`
 
 Show detailed workflow information.
 
 ```bash
 # Basic workflow info
-rufus show <workflow-id>
+ruvon show <workflow-id>
 
 # Include full state
-rufus show <workflow-id> --state
+ruvon show <workflow-id> --state
 
 # Include execution logs
-rufus show <workflow-id> --logs
+ruvon show <workflow-id> --logs
 
 # Include metrics
-rufus show <workflow-id> --metrics
+ruvon show <workflow-id> --metrics
 
 # Show everything
-rufus show <workflow-id> --verbose
+ruvon show <workflow-id> --verbose
 
 # JSON output
-rufus show <workflow-id> --json
+ruvon show <workflow-id> --json
 ```
 
 **Example Output:**
@@ -384,58 +384,58 @@ rufus show <workflow-id> --json
 ╰───────────────────────────────────────────────────────────────────╯
 ```
 
-### `rufus resume`
+### `ruvon resume`
 
 Resume a paused workflow.
 
 ```bash
 # Resume workflow (interactive prompts for input if needed)
-rufus resume <workflow-id>
+ruvon resume <workflow-id>
 
 # Provide input as JSON
-rufus resume <workflow-id> --input '{"approved": true}'
+ruvon resume <workflow-id> --input '{"approved": true}'
 
 # Provide input from file
-rufus resume <workflow-id> --input-file approval.json
+ruvon resume <workflow-id> --input-file approval.json
 
 # Auto-execute remaining steps
-rufus resume <workflow-id> --auto
+ruvon resume <workflow-id> --auto
 ```
 
 **Note:** Resume/retry are partially implemented. Full workflow reconstruction coming in future release.
 
-### `rufus retry`
+### `ruvon retry`
 
 Retry a failed workflow.
 
 ```bash
 # Retry from beginning
-rufus retry <workflow-id>
+ruvon retry <workflow-id>
 
 # Retry from specific step
-rufus retry <workflow-id> --from-step Process_Payment
+ruvon retry <workflow-id> --from-step Process_Payment
 
 # Auto-execute remaining steps
-rufus retry <workflow-id> --auto
+ruvon retry <workflow-id> --auto
 ```
 
 ---
 
 ## Database Management
 
-Initialize, migrate, and monitor your Rufus database.
+Initialize, migrate, and monitor your Ruvon database.
 
-### `rufus db init`
+### `ruvon db init`
 
 Initialize database schema by applying all migrations.
 
 ```bash
 # Initialize using configured database
-rufus db init
+ruvon db init
 
 # Initialize specific database
-rufus db init --db-url sqlite:///path/to/db.sqlite
-rufus db init --db-url postgresql://user:pass@localhost/rufus
+ruvon db init --db-url sqlite:///path/to/db.sqlite
+ruvon db init --db-url postgresql://user:pass@localhost/ruvon
 ```
 
 **How It Works:**
@@ -469,21 +469,21 @@ persistence = SQLitePersistenceProvider(db_path="workflows.db", auto_init=True)
 await persistence.initialize()  # Creates schema if missing
 ```
 
-**Note:** Both `rufus db init` and SQLite auto-init use the same migration files, ensuring schema consistency.
+**Note:** Both `ruvon db init` and SQLite auto-init use the same migration files, ensuring schema consistency.
 
-### `rufus db migrate`
+### `ruvon db migrate`
 
 Apply pending database migrations.
 
 ```bash
 # Apply all pending migrations
-rufus db migrate
+ruvon db migrate
 
 # Dry run (show pending migrations without applying)
-rufus db migrate --dry-run
+ruvon db migrate --dry-run
 
 # Use specific database
-rufus db migrate --db-url postgresql://user:pass@localhost/rufus
+ruvon db migrate --db-url postgresql://user:pass@localhost/ruvon
 ```
 
 **Example Output:**
@@ -500,16 +500,16 @@ Applying pending migrations...
 ✅ Migrations applied successfully
 ```
 
-### `rufus db status`
+### `ruvon db status`
 
 Show database migration status.
 
 ```bash
 # Show migration status for configured database
-rufus db status
+ruvon db status
 
 # Show status for specific database
-rufus db status --db-url sqlite:///workflows.db
+ruvon db status --db-url sqlite:///workflows.db
 ```
 
 **Example Output:**
@@ -526,16 +526,16 @@ Pending migrations: 0
   Database is up to date
 ```
 
-### `rufus db stats`
+### `ruvon db stats`
 
 Show database statistics.
 
 ```bash
 # Show statistics for configured database
-rufus db stats
+ruvon db stats
 
 # Show stats for specific database
-rufus db stats --db-url sqlite:///workflows.db
+ruvon db stats --db-url sqlite:///workflows.db
 ```
 
 **Example Output:**
@@ -554,13 +554,13 @@ Table Statistics:
 ✅ Stats retrieved successfully
 ```
 
-### `rufus db validate`
+### `ruvon db validate`
 
 Validate database schema against definition.
 
 ```bash
 # Validate schema
-rufus db validate
+ruvon db validate
 ```
 
 **What it validates:**
@@ -576,31 +576,31 @@ rufus db validate
 
 View logs, metrics, and manage running workflows.
 
-### `rufus logs`
+### `ruvon logs`
 
 View workflow execution logs.
 
 ```bash
 # View logs for a workflow
-rufus logs <workflow-id>
+ruvon logs <workflow-id>
 
 # Filter by step
-rufus logs <workflow-id> --step Process_Payment
+ruvon logs <workflow-id> --step Process_Payment
 
 # Filter by log level
-rufus logs <workflow-id> --level ERROR
-rufus logs <workflow-id> --level WARNING
+ruvon logs <workflow-id> --level ERROR
+ruvon logs <workflow-id> --level WARNING
 
 # Limit number of logs
-rufus logs <workflow-id> --limit 100
-rufus logs <workflow-id> -n 100
+ruvon logs <workflow-id> --limit 100
+ruvon logs <workflow-id> -n 100
 
 # Follow logs (real-time, coming soon)
-rufus logs <workflow-id> --follow
-rufus logs <workflow-id> -f
+ruvon logs <workflow-id> --follow
+ruvon logs <workflow-id> -f
 
 # JSON output
-rufus logs <workflow-id> --json
+ruvon logs <workflow-id> --json
 ```
 
 **Example Output:**
@@ -623,29 +623,29 @@ Showing 4 log entries
 - **WARNING** - Warning messages
 - **ERROR** - Error messages
 
-### `rufus metrics`
+### `ruvon metrics`
 
 View workflow performance metrics.
 
 ```bash
 # View metrics for specific workflow
-rufus metrics --workflow-id <id>
-rufus metrics -w <id>
+ruvon metrics --workflow-id <id>
+ruvon metrics -w <id>
 
 # View metrics by workflow type
-rufus metrics --type OrderProcessing
+ruvon metrics --type OrderProcessing
 
 # Show summary statistics
-rufus metrics --workflow-id <id> --summary
+ruvon metrics --workflow-id <id> --summary
 
 # Limit results
-rufus metrics --limit 100
+ruvon metrics --limit 100
 
 # JSON output
-rufus metrics --json
+ruvon metrics --json
 
 # Combine filters
-rufus metrics --type OrderProcessing --summary --limit 50
+ruvon metrics --type OrderProcessing --summary --limit 50
 ```
 
 **Example Output:**
@@ -671,19 +671,19 @@ Summary:
 - **memory_mb** - Memory usage in megabytes
 - **custom metrics** - Application-defined metrics
 
-### `rufus cancel`
+### `ruvon cancel`
 
 Cancel a running workflow.
 
 ```bash
 # Cancel workflow (with confirmation)
-rufus cancel <workflow-id>
+ruvon cancel <workflow-id>
 
 # Cancel with reason
-rufus cancel <workflow-id> --reason "Duplicate order detected"
+ruvon cancel <workflow-id> --reason "Duplicate order detected"
 
 # Force cancel (skip compensation/rollback)
-rufus cancel <workflow-id> --force
+ruvon cancel <workflow-id> --force
 ```
 
 **Example Interactive Session:**
@@ -713,13 +713,13 @@ New status: CANCELLED
 
 Preserved commands from original CLI for backward compatibility.
 
-### `rufus validate`
+### `ruvon validate`
 
 Validate workflow YAML syntax.
 
 ```bash
 # Validate workflow file
-rufus validate config/my_workflow.yaml
+ruvon validate config/my_workflow.yaml
 
 # Validates:
 # - YAML syntax
@@ -733,16 +733,16 @@ rufus validate config/my_workflow.yaml
 ✅ Successfully validated config/my_workflow.yaml (syntax and basic structure passed)
 ```
 
-### `rufus run`
+### `ruvon run`
 
 Run workflow locally (in-memory, synchronous).
 
 ```bash
 # Run workflow with initial data
-rufus run config/my_workflow.yaml --data '{"user_id": "123"}'
+ruvon run config/my_workflow.yaml --data '{"user_id": "123"}'
 
 # Short form
-rufus run config/my_workflow.yaml -d '{}'
+ruvon run config/my_workflow.yaml -d '{}'
 ```
 
 **What it does:**
@@ -777,67 +777,67 @@ Final State: {"user_id": "123", "validated": true, "result": "success"}
 
 ```bash
 # 1. Setup
-rufus config set-persistence  # Choose SQLite
-rufus db init
+ruvon config set-persistence  # Choose SQLite
+ruvon db init
 
 # 2. Validate workflow definition
-rufus validate config/my_workflow.yaml
+ruvon validate config/my_workflow.yaml
 
 # 3. Test locally (in-memory)
-rufus run config/my_workflow.yaml --data '{}'
+ruvon run config/my_workflow.yaml --data '{}'
 
 # 4. Start with persistence
-rufus start MyWorkflow --data '{}'
+ruvon start MyWorkflow --data '{}'
 
 # 5. Monitor
-rufus list --status ACTIVE
-rufus logs <workflow-id>
+ruvon list --status ACTIVE
+ruvon logs <workflow-id>
 
 # 6. View results
-rufus show <workflow-id> --state
+ruvon show <workflow-id> --state
 ```
 
 ### Production Workflow
 
 ```bash
 # 1. Setup PostgreSQL
-rufus config set-persistence  # Choose PostgreSQL
-# Enter connection URL: postgresql://user:pass@prod-db:5432/rufus
+ruvon config set-persistence  # Choose PostgreSQL
+# Enter connection URL: postgresql://user:pass@prod-db:5432/ruvon
 
 # 2. Initialize/migrate database
-rufus db init
-rufus db migrate
+ruvon db init
+ruvon db migrate
 
 # 3. Verify setup
-rufus db status
-rufus db stats
+ruvon db status
+ruvon db stats
 
 # 4. Start workflows (via API or CLI)
-rufus start OrderProcessing --data @order.json
+ruvon start OrderProcessing --data @order.json
 
 # 5. Monitor production
-rufus list --status ACTIVE --limit 100
-rufus metrics --type OrderProcessing --summary
+ruvon list --status ACTIVE --limit 100
+ruvon metrics --type OrderProcessing --summary
 
 # 6. Troubleshoot issues
-rufus logs <workflow-id> --level ERROR
-rufus show <workflow-id> --verbose
+ruvon logs <workflow-id> --level ERROR
+ruvon show <workflow-id> --verbose
 
 # 7. Cancel if needed
-rufus cancel <workflow-id> --reason "Customer cancelled order"
+ruvon cancel <workflow-id> --reason "Customer cancelled order"
 ```
 
 ### Testing Workflow
 
 ```bash
 # Use in-memory for unit tests
-rufus config set-persistence  # Choose memory
+ruvon config set-persistence  # Choose memory
 
 # Validate workflow definitions
-rufus validate config/*.yaml
+ruvon validate config/*.yaml
 
 # Run tests with in-memory execution
-rufus run config/test_workflow.yaml --data @test_data.json
+ruvon run config/test_workflow.yaml --data @test_data.json
 
 # Check results (data lost after process ends)
 ```
@@ -848,22 +848,22 @@ rufus run config/test_workflow.yaml --data @test_data.json
 # From old CLI to new CLI
 
 # 1. Check existing setup
-rufus config show
+ruvon config show
 
 # 2. Backup database (if using SQLite)
-cp ~/.rufus/workflows.db ~/.rufus/workflows.db.backup
+cp ~/.ruvon/workflows.db ~/.ruvon/workflows.db.backup
 
 # 3. Run migrations (if needed)
-rufus db migrate --dry-run  # Check first
-rufus db migrate            # Apply
+ruvon db migrate --dry-run  # Check first
+ruvon db migrate            # Apply
 
 # 4. Verify schema
-rufus db validate
-rufus db stats
+ruvon db validate
+ruvon db stats
 
 # 5. Test with existing workflows
-rufus list
-rufus show <existing-workflow-id>
+ruvon list
+ruvon show <existing-workflow-id>
 ```
 
 ---
@@ -875,25 +875,25 @@ rufus show <existing-workflow-id>
 **Problem:** Configuration not persisting
 ```bash
 # Check config file location
-rufus config path
+ruvon config path
 
 # Check file exists and is writable
-ls -la ~/.rufus/config.yaml
+ls -la ~/.ruvon/config.yaml
 
 # Reset if corrupted
-rufus config reset --yes
+ruvon config reset --yes
 ```
 
 **Problem:** Database connection errors
 ```bash
 # Verify database URL
-rufus config show
+ruvon config show
 
 # Test connection
-rufus db stats
+ruvon db stats
 
 # Reinitialize if needed
-rufus db init --db-url sqlite:///new_path.db
+ruvon db init --db-url sqlite:///new_path.db
 ```
 
 ### Database Issues
@@ -901,25 +901,25 @@ rufus db init --db-url sqlite:///new_path.db
 **Problem:** "Table not found" errors
 ```bash
 # Initialize database
-rufus db init
+ruvon db init
 
 # Verify tables exist
-rufus db stats
+ruvon db stats
 
 # Check migration status
-rufus db status
+ruvon db status
 ```
 
 **Problem:** Migration failures
 ```bash
 # Check pending migrations
-rufus db migrate --dry-run
+ruvon db migrate --dry-run
 
 # Verify schema
-rufus db validate
+ruvon db validate
 
 # Check database permissions
-# (PostgreSQL) GRANT ALL ON DATABASE rufus TO user;
+# (PostgreSQL) GRANT ALL ON DATABASE ruvon TO user;
 ```
 
 **Problem:** SQLite database locked
@@ -937,46 +937,46 @@ sqlite3 workflows.db "PRAGMA journal_mode;"
 **Problem:** Workflow not starting
 ```bash
 # Validate workflow definition
-rufus validate config/workflow.yaml
+ruvon validate config/workflow.yaml
 
 # Check initial data format
 echo '{"valid": "json"}' | jq .
 
 # Try dry run
-rufus start MyWorkflow --data '{}' --dry-run
+ruvon start MyWorkflow --data '{}' --dry-run
 
 # Check logs
-rufus logs <workflow-id> --level ERROR
+ruvon logs <workflow-id> --level ERROR
 ```
 
 **Problem:** Workflow stuck/not progressing
 ```bash
 # Check status
-rufus show <workflow-id>
+ruvon show <workflow-id>
 
 # View logs for errors
-rufus logs <workflow-id> --level ERROR
+ruvon logs <workflow-id> --level ERROR
 
 # Check if waiting for input
-rufus show <workflow-id> --state
+ruvon show <workflow-id> --state
 
 # Resume if paused
-rufus resume <workflow-id> --input '{}'
+ruvon resume <workflow-id> --input '{}'
 
 # Cancel if needed
-rufus cancel <workflow-id> --reason "Debugging"
+ruvon cancel <workflow-id> --reason "Debugging"
 ```
 
 **Problem:** Cannot view logs/metrics
 ```bash
 # Verify workflow exists
-rufus show <workflow-id>
+ruvon show <workflow-id>
 
 # Check database has logs table
-rufus db stats
+ruvon db stats
 
 # Reinitialize database if needed
-rufus db init
+ruvon db init
 ```
 
 ### CLI Issues
@@ -984,8 +984,8 @@ rufus db init
 **Problem:** Command not found
 ```bash
 # Verify installation
-which rufus
-rufus --version
+which ruvon
+ruvon --version
 
 # Reinstall
 pip install -e . --force-reinstall
@@ -1009,7 +1009,7 @@ pip install -e .
 pip install --upgrade rich
 
 # Use JSON output as fallback
-rufus list --json
+ruvon list --json
 
 # Check terminal supports colors
 echo $TERM
@@ -1019,20 +1019,20 @@ echo $TERM
 
 **View help for any command:**
 ```bash
-rufus --help
-rufus config --help
-rufus workflow --help
-rufus logs --help
+ruvon --help
+ruvon config --help
+ruvon workflow --help
+ruvon logs --help
 ```
 
 **Check version:**
 ```bash
-rufus --version
+ruvon --version
 ```
 
 **Report issues:**
-- GitHub: https://github.com/your-org/rufus-sdk/issues
-- Include output of: `rufus config show` and `rufus db status`
+- GitHub: https://github.com/your-org/ruvon-sdk/issues
+- Include output of: `ruvon config show` and `ruvon db status`
 
 ---
 
@@ -1048,7 +1048,7 @@ rufus --version
 ### Workflows
 
 1. **Always validate** workflow definitions before deploying
-2. **Test with `rufus run`** before using persistence
+2. **Test with `ruvon run`** before using persistence
 3. **Use meaningful workflow IDs** in logs
 4. **Add comprehensive logging** in step functions
 5. **Monitor metrics** for performance tracking
@@ -1057,14 +1057,14 @@ rufus --version
 
 1. **Initialize database** before first workflow
 2. **Run migrations** in maintenance windows
-3. **Monitor database size** with `rufus db stats`
+3. **Monitor database size** with `ruvon db stats`
 4. **Validate schema** after upgrades
 5. **Back up before migrations** (production)
 
 ### Monitoring
 
 1. **Use filters** to find specific logs/metrics
-2. **Export to JSON** for analysis: `rufus logs <id> --json > logs.json`
+2. **Export to JSON** for analysis: `ruvon logs <id> --json > logs.json`
 3. **Set up alerts** based on ERROR logs
 4. **Track metrics** over time for trends
 5. **Cancel stuck workflows** promptly
@@ -1084,42 +1084,42 @@ rufus --version
 ### All Commands Reference
 
 **Configuration:**
-- `rufus config show` - Show configuration
-- `rufus config path` - Show config file path
-- `rufus config set-persistence` - Set persistence provider
-- `rufus config set-execution` - Set execution provider
-- `rufus config set-default` - Set default behaviors
-- `rufus config reset` - Reset to defaults
+- `ruvon config show` - Show configuration
+- `ruvon config path` - Show config file path
+- `ruvon config set-persistence` - Set persistence provider
+- `ruvon config set-execution` - Set execution provider
+- `ruvon config set-default` - Set default behaviors
+- `ruvon config reset` - Reset to defaults
 
 **Workflows:**
-- `rufus list` - List workflows
-- `rufus start` - Start workflow
-- `rufus show` - Show workflow details
-- `rufus resume` - Resume paused workflow
-- `rufus retry` - Retry failed workflow
-- `rufus logs` - View execution logs
-- `rufus metrics` - View performance metrics
-- `rufus cancel` - Cancel running workflow
+- `ruvon list` - List workflows
+- `ruvon start` - Start workflow
+- `ruvon show` - Show workflow details
+- `ruvon resume` - Resume paused workflow
+- `ruvon retry` - Retry failed workflow
+- `ruvon logs` - View execution logs
+- `ruvon metrics` - View performance metrics
+- `ruvon cancel` - Cancel running workflow
 
 **Database:**
-- `rufus db init` - Initialize schema
-- `rufus db migrate` - Apply migrations
-- `rufus db status` - Show migration status
-- `rufus db stats` - Show database statistics
-- `rufus db validate` - Validate schema
+- `ruvon db init` - Initialize schema
+- `ruvon db migrate` - Apply migrations
+- `ruvon db status` - Show migration status
+- `ruvon db stats` - Show database statistics
+- `ruvon db validate` - Validate schema
 
 **Legacy:**
-- `rufus validate` - Validate workflow YAML
-- `rufus run` - Run workflow locally
+- `ruvon validate` - Validate workflow YAML
+- `ruvon run` - Run workflow locally
 
 ### Environment Variables
 
 ```bash
 # Override config file location
-export RUFUS_CONFIG_PATH=/custom/path/config.yaml
+export RUVON_CONFIG_PATH=/custom/path/config.yaml
 
 # Override database URL
-export RUFUS_DB_URL=postgresql://user:pass@localhost/rufus
+export RUVON_DB_URL=postgresql://user:pass@localhost/ruvon
 
 # Disable colors (for CI/CD)
 export NO_COLOR=1
@@ -1133,9 +1133,9 @@ version: "1.0"
 persistence:
   provider: sqlite  # or postgres, memory, redis
   sqlite:
-    db_path: ~/.rufus/workflows.db
+    db_path: ~/.ruvon/workflows.db
   postgres:
-    db_url: postgresql://user:pass@localhost/rufus
+    db_url: postgresql://user:pass@localhost/ruvon
     pool_min_size: 10
     pool_max_size: 50
 
@@ -1155,4 +1155,4 @@ defaults:
 
 **Last Updated:** 2026-01-24
 **Version:** 1.0
-**Rufus CLI Version:** 0.1.0+
+**Ruvon CLI Version:** 0.1.0+

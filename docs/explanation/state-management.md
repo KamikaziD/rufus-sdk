@@ -1,6 +1,6 @@
 # State Management
 
-Workflow state is the heart of Rufus—it's the data that flows through your workflow, persists across steps, and survives restarts. Understanding how state works is crucial to building reliable workflows.
+Workflow state is the heart of Ruvon—it's the data that flows through your workflow, persists across steps, and survives restarts. Understanding how state works is crucial to building reliable workflows.
 
 ## What is Workflow State?
 
@@ -46,7 +46,7 @@ workflow = await builder.create_workflow(
 )
 ```
 
-Rufus:
+Ruvon:
 1. Loads the state model from `initial_state_model` in YAML
 2. Validates `initial_data` against the model
 3. Creates state instance: `state = OrderState(**initial_data)`
@@ -73,7 +73,7 @@ def process_payment(state: OrderState, context: StepContext) -> dict:
 ```
 
 After step executes:
-1. Rufus merges return value into state: `state.payment_status = "charged"`
+1. Ruvon merges return value into state: `state.payment_status = "charged"`
 2. Pydantic validates the updated state
 3. State is serialized to JSON
 4. Persisted to database
@@ -96,7 +96,7 @@ SET state = '{"order_id": "ORD-12345", "payment_status": "charged", ...}',
 WHERE id = '550e8400-e29b-41d4-a716-446655440000';
 ```
 
-**Performance**: Rufus uses `orjson` for 3-5x faster serialization compared to stdlib `json`.
+**Performance**: Ruvon uses `orjson` for 3-5x faster serialization compared to stdlib `json`.
 
 ### 4. Loading
 
@@ -149,7 +149,7 @@ def calculate_shipping(state: OrderState, context: StepContext) -> dict:
     }
 ```
 
-Rufus merges the dict into state: `state.shipping_cost = cost`.
+Ruvon merges the dict into state: `state.shipping_cost = cost`.
 
 **When to use**: Preferred pattern—explicit, testable, functional style.
 
@@ -173,13 +173,13 @@ def process_order(state: OrderState, context: StepContext) -> dict:
 
 ## State Merging
 
-When a step returns a dict, Rufus merges it into the state model:
+When a step returns a dict, Ruvon merges it into the state model:
 
 ```python
 # Step returns
 return {"payment_status": "charged", "transaction_id": "TXN-123"}
 
-# Rufus merges
+# Ruvon merges
 for key, value in result.items():
     setattr(state, key, value)
 
@@ -309,7 +309,7 @@ Pydantic models serialize to JSON automatically:
 state = OrderState(order_id="ORD-123", total_amount=99.99)
 
 # Serialize (using orjson for performance)
-from rufus.utils.serialization import serialize
+from ruvon.utils.serialization import serialize
 json_str = serialize(state.dict())
 # '{"order_id":"ORD-123","total_amount":99.99,...}'
 ```
@@ -435,7 +435,7 @@ def initialize_defaults(state: OrderState, context: StepContext) -> dict:
 
 ```python
 # Via CLI
-rufus show <workflow-id> --state
+ruvon show <workflow-id> --state
 
 # Via API
 GET /api/v1/workflows/<workflow-id>

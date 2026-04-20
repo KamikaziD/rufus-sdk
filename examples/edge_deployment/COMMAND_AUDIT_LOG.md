@@ -420,7 +420,7 @@ Find authentication failures and API key operations:
 - 10.5: Secure audit trails
 - 10.7: Retain audit trail history for at least one year
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```bash
 # 1. Verify 7-year retention policy is active
 SELECT * FROM audit_retention_policies WHERE policy_name = 'pci_compliance_default';
@@ -445,7 +445,7 @@ python cloud_admin.py audit-stats \
 - Document who made changes and when
 - Retain evidence of control effectiveness
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```bash
 # 1. Query all configuration changes
 python cloud_admin.py audit-query \
@@ -469,7 +469,7 @@ python cloud_admin.py audit-export \
 - Track data processing activities
 - Support right to access (Article 15)
 
-**Rufus Implementation**:
+**Ruvon Implementation**:
 ```json
 {
   "event_types": ["device_registered", "device_updated", "device_deleted"],
@@ -576,7 +576,7 @@ INSERT INTO audit_retention_policies (
 ### Manual Cleanup
 
 ```python
-from rufus_server.audit_service import AuditService
+from ruvon_server.audit_service import AuditService
 
 audit_service = AuditService(persistence)
 
@@ -591,7 +591,7 @@ print(f"Deleted: {stats['deleted']}, Archived: {stats['archived']}")
 ```bash
 # Run monthly cleanup
 0 0 1 * * python -c "
-from rufus_server.audit_service import AuditService
+from ruvon_server.audit_service import AuditService
 import asyncio
 audit_service = AuditService(persistence)
 asyncio.run(audit_service.cleanup_old_logs())
@@ -715,7 +715,7 @@ WHERE tablename = 'command_audit_log';
 
 ## Summary
 
-Command Audit Log provides **comprehensive compliance tracking** for Rufus Edge:
+Command Audit Log provides **comprehensive compliance tracking** for Ruvon Edge:
 
 - ✅ PCI-DSS, SOX, GDPR, HIPAA compliant
 - ✅ Immutable audit trails

@@ -1,6 +1,6 @@
 # System Architecture
 
-Rufus SDK is built on a layered architecture that separates concerns while remaining flexible enough to adapt to different deployment scenarios—from embedded edge devices to large-scale cloud deployments.
+Ruvon SDK is built on a layered architecture that separates concerns while remaining flexible enough to adapt to different deployment scenarios—from embedded edge devices to large-scale cloud deployments.
 
 ## Three Roles, One Runtime
 
@@ -8,7 +8,7 @@ The central architectural insight: **the same SDK powers all three deployment ro
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                         Rufus SDK (Core)                       │
+│                         Ruvon SDK (Core)                       │
 │         WorkflowBuilder · Workflow · Providers · Steps         │
 └─────────────┬──────────────────┬──────────────────┬───────────┘
               │                  │                  │
@@ -25,13 +25,13 @@ The central architectural insight: **the same SDK powers all three deployment ro
 
 **Cloud Worker** — distributed Celery workers processing ASYNC and PARALLEL steps. PostgreSQL for state, Redis for broker. Scales horizontally; used for the heavy computation and long-running tasks that don't need to run on-device.
 
-**Control Plane** — FastAPI server with the full device management API (86 endpoints). Uses PostgreSQL + Celery for its own workflow steps. Configuration rollout, audit aggregation, and policy enforcement are themselves Rufus workflows — the self-hosting model.
+**Control Plane** — FastAPI server with the full device management API (86 endpoints). Uses PostgreSQL + Celery for its own workflow steps. Configuration rollout, audit aggregation, and policy enforcement are themselves Ruvon workflows — the self-hosting model.
 
 ### The Self-Hosting Insight
 
 There is no separate orchestration tier. The control plane that manages edge devices runs on the same SDK as those devices. This means:
 
-- **No magic paths** — everything is a Rufus workflow or a provider implementation
+- **No magic paths** — everything is a Ruvon workflow or a provider implementation
 - **Battle-tested** — the control plane validates the SDK by running it in production
 - **Consistent semantics** — saga rollback, zombie recovery, and versioning work identically on device and cloud
 
@@ -47,7 +47,7 @@ See [Self-Hosting](self-hosting.md) for a full explanation.
 └─────────────────────┬───────────────────────────────────┘
                       │
           ┌───────────▼──────────┐
-          │   Rufus SDK (Core)   │
+          │   Ruvon SDK (Core)   │
           │  ┌──────────────┐    │
           │  │  Workflow    │    │
           │  │   Engine     │    │
@@ -67,28 +67,28 @@ See [Self-Hosting](self-hosting.md) for a full explanation.
           └──────────────────────┘
 
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│   Rufus CLI      │  │  Rufus Server    │  │  Rufus Edge      │
+│   Ruvon CLI      │  │  Ruvon Server    │  │  Ruvon Edge      │
 │  (Management)    │  │   (FastAPI)      │  │  (IoT/POS)       │
 └──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
 The SDK sits at the center, with three optional components built on top:
-- **Rufus CLI**: Command-line management tool
-- **Rufus Server**: REST API server with web UI
-- **Rufus Edge**: Agent for edge devices (POS, ATMs, kiosks)
+- **Ruvon CLI**: Command-line management tool
+- **Ruvon Server**: REST API server with web UI
+- **Ruvon Edge**: Agent for edge devices (POS, ATMs, kiosks)
 
 ## Core Layers
 
-Rufus uses a four-layer architecture, inherited from Confucius and enhanced with provider abstractions:
+Ruvon uses a four-layer architecture, inherited from Confucius and enhanced with provider abstractions:
 
 ### 1. API Layer
 
 **Purpose**: User-facing interfaces for workflow operations.
 
 **Components**:
-- `src/rufus_server/routers/`: REST API endpoints (FastAPI)
-- `src/rufus_cli/`: Command-line interface
-- `src/rufus_edge/`: Edge device agent
+- `src/ruvon_server/routers/`: REST API endpoints (FastAPI)
+- `src/ruvon_cli/`: Command-line interface
+- `src/ruvon_edge/`: Edge device agent
 
 **Key Responsibilities**:
 - Input validation (Pydantic models)
@@ -96,16 +96,16 @@ Rufus uses a four-layer architecture, inherited from Confucius and enhanced with
 - Request routing
 - Response formatting
 
-**Why Separated**: The API layer is decoupled from the core SDK, allowing Rufus to be embedded in any application without requiring FastAPI or the CLI tool.
+**Why Separated**: The API layer is decoupled from the core SDK, allowing Ruvon to be embedded in any application without requiring FastAPI or the CLI tool.
 
 ### 2. Engine Layer
 
 **Purpose**: Orchestrates workflow execution and control flow.
 
 **Components**:
-- `src/rufus/workflow.py`: Main `Workflow` class
-- `src/rufus/builder.py`: `WorkflowBuilder` for loading YAML definitions
-- `src/rufus/models.py`: Core data structures (steps, directives, context)
+- `src/ruvon/workflow.py`: Main `Workflow` class
+- `src/ruvon/builder.py`: `WorkflowBuilder` for loading YAML definitions
+- `src/ruvon/models.py`: Core data structures (steps, directives, context)
 
 **Key Responsibilities**:
 - Workflow lifecycle management (create, start, pause, resume, cancel)
@@ -122,8 +122,8 @@ Rufus uses a four-layer architecture, inherited from Confucius and enhanced with
 **Purpose**: Abstracts storage of workflow state, audit logs, and metrics.
 
 **Components**:
-- `src/rufus/providers/persistence.py`: `PersistenceProvider` protocol
-- `src/rufus/implementations/persistence/`:
+- `src/ruvon/providers/persistence.py`: `PersistenceProvider` protocol
+- `src/ruvon/implementations/persistence/`:
   - `postgres.py`: PostgreSQL with asyncpg
   - `sqlite.py`: SQLite with aiosqlite
   - `memory.py`: In-memory storage for testing
@@ -143,8 +143,8 @@ Rufus uses a four-layer architecture, inherited from Confucius and enhanced with
 **Purpose**: Abstracts how and where step functions execute.
 
 **Components**:
-- `src/rufus/providers/execution.py`: `ExecutionProvider` protocol
-- `src/rufus/implementations/execution/`:
+- `src/ruvon/providers/execution.py`: `ExecutionProvider` protocol
+- `src/ruvon/implementations/execution/`:
   - `sync.py`: Synchronous execution (development/testing)
   - `celery.py`: Distributed async execution (production)
   - `thread_pool.py`: Thread-based parallel execution
@@ -198,9 +198,9 @@ This is the provider pattern in action.
 
 ## Database Schema Architecture
 
-Rufus uses a hybrid approach for database management:
+Ruvon uses a hybrid approach for database management:
 
-**Schema Definition**: SQLAlchemy Core models (`src/rufus/db_schema/database.py`)
+**Schema Definition**: SQLAlchemy Core models (`src/ruvon/db_schema/database.py`)
 - Single source of truth
 - Database-agnostic type mapping
 - Used by Alembic for migration generation
@@ -221,14 +221,14 @@ This design gives us the best of both worlds: migration tooling benefits without
 
 ### State Serialization
 
-All workflow state is JSON-serializable via Pydantic models. Internally, Rufus uses:
+All workflow state is JSON-serializable via Pydantic models. Internally, Ruvon uses:
 - **orjson** for fast serialization (3-5x faster than stdlib `json`)
 - **JSONB** columns in PostgreSQL for efficient queries
 - **TEXT** columns in SQLite for compatibility
 
 ### Async/Sync Bridge
 
-Many Rufus operations are async (persistence, HTTP steps), but Celery tasks run in sync contexts. The solution:
+Many Ruvon operations are async (persistence, HTTP steps), but Celery tasks run in sync contexts. The solution:
 
 **PostgresExecutor** pattern (inherited from Confucius):
 ```python
@@ -247,7 +247,7 @@ This runs async operations in a dedicated background thread, allowing sync Celer
 
 ### Import Caching
 
-Step function resolution uses `importlib.import_module()`, which can be slow. Rufus maintains a class-level cache in `WorkflowBuilder._import_cache`:
+Step function resolution uses `importlib.import_module()`, which can be slow. Ruvon maintains a class-level cache in `WorkflowBuilder._import_cache`:
 - First import: 5-10ms
 - Cached import: ~0.03ms (162x faster)
 
@@ -255,7 +255,7 @@ This eliminates import overhead during workflow execution.
 
 ## Deployment Architectures
 
-Rufus supports three main deployment patterns:
+Ruvon supports three main deployment patterns:
 
 ### 1. Monolithic (Development)
 
@@ -267,7 +267,7 @@ Rufus supports three main deployment patterns:
 │  └────────┬────────┘    │
 │           │              │
 │  ┌────────▼────────┐    │
-│  │ Rufus SDK       │    │
+│  │ Ruvon SDK       │    │
 │  │ (SyncExecutor)  │    │
 │  └────────┬────────┘    │
 │           │              │
@@ -285,7 +285,7 @@ Rufus supports three main deployment patterns:
 ```
 ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
 │  FastAPI Server  │      │  Celery Worker 1 │      │  Celery Worker N │
-│  (Rufus Server)  │      │  (Rufus SDK)     │      │  (Rufus SDK)     │
+│  (Ruvon Server)  │      │  (Ruvon SDK)     │      │  (Ruvon SDK)     │
 └────────┬─────────┘      └────────┬─────────┘      └────────┬─────────┘
          │                         │                         │
          └─────────────────────────┼─────────────────────────┘
@@ -310,7 +310,7 @@ Rufus supports three main deployment patterns:
 ┌─────────────────────────────────────┐
 │          Cloud Control Plane        │
 │  ┌────────────────────────────┐    │
-│  │  Rufus Server (PostgreSQL) │    │
+│  │  Ruvon Server (PostgreSQL) │    │
 │  │  - Device registry         │    │
 │  │  - Config server (ETag)    │    │
 │  │  - Transaction sync        │    │
@@ -321,7 +321,7 @@ Rufus supports three main deployment patterns:
 ┌───────────────▼────────────────────┐
 │      Edge Device (POS/ATM/Kiosk)  │
 │  ┌────────────────────────────┐   │
-│  │  RufusEdgeAgent (SQLite)   │   │
+│  │  RuvonEdgeAgent (SQLite)   │   │
 │  │  - Offline workflows       │   │
 │  │  - Store-and-forward queue │   │
 │  │  - Config sync             │   │
@@ -352,7 +352,7 @@ Workflow definitions are declarative (YAML), not imperative (code). This separat
 
 ### 5. SDK-First Philosophy
 
-Rufus is a library, not a framework. Applications import Rufus and use it as needed, rather than extending a monolithic framework. This keeps the core small and focused.
+Ruvon is a library, not a framework. Applications import Ruvon and use it as needed, rather than extending a monolithic framework. This keeps the core small and focused.
 
 ## Performance Considerations
 

@@ -1,6 +1,6 @@
-# Rufus SDK Reference Documentation
+# Ruvon SDK Reference Documentation
 
-Complete API and configuration reference for Rufus workflow engine.
+Complete API and configuration reference for Ruvon workflow engine.
 
 ---
 
@@ -121,10 +121,10 @@ Installed package size across all edge deployment scenarios.
 Complete command-line interface reference.
 
 **Command Groups:**
-- `rufus config` - Configuration management
-- `rufus workflow` - Workflow operations
-- `rufus db` - Database management
-- `rufus scan-zombies` - Zombie workflow detection
+- `ruvon config` - Configuration management
+- `ruvon workflow` - Workflow operations
+- `ruvon db` - Database management
+- `ruvon scan-zombies` - Zombie workflow detection
 
 **Top-Level Commands:**
 - `list`, `start`, `show`, `resume`, `retry`
@@ -153,8 +153,8 @@ Complete database schema documentation.
 Environment variables and configuration files.
 
 **Configuration Sources:**
-- Environment variables (`DATABASE_URL`, `RUFUS_*`, etc.)
-- CLI config file (`~/.rufus/config.yaml`)
+- Environment variables (`DATABASE_URL`, `RUVON_*`, etc.)
+- CLI config file (`~/.ruvon/config.yaml`)
 - Workflow registry (`config/workflow_registry.yaml`)
 - Provider configurations
 

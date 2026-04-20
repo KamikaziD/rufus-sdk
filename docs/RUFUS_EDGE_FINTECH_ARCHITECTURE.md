@@ -1,10 +1,10 @@
-# Rufus Edge: Fintech Device Architecture
+# Ruvon Edge: Fintech Device Architecture
 
 ## Executive Summary
 
-This document analyzes the feasibility of pivoting Rufus SDK to serve as a **modern, Python-based transaction engine for POS terminals, ATMs, mobile readers, and kiosks**. The analysis is based on thorough research of the existing codebase and the fintech edge computing requirements.
+This document analyzes the feasibility of pivoting Ruvon SDK to serve as a **modern, Python-based transaction engine for POS terminals, ATMs, mobile readers, and kiosks**. The analysis is based on thorough research of the existing codebase and the fintech edge computing requirements.
 
-**Verdict: Highly Viable** - Rufus SDK has 70% of the infrastructure needed. The remaining 30% represents targeted enhancements rather than fundamental architecture changes.
+**Verdict: Highly Viable** - Ruvon SDK has 70% of the infrastructure needed. The remaining 30% represents targeted enhancements rather than fundamental architecture changes.
 
 ---
 
@@ -53,7 +53,7 @@ This document analyzes the feasibility of pivoting Rufus SDK to serve as a **mod
 │  Terminal   │               │  Kiosk      │               │  Reader     │
 │             │               │             │               │             │
 │ ┌─────────┐ │               │ ┌─────────┐ │               │ ┌─────────┐ │
-│ │ Rufus   │ │               │ │ Rufus   │ │               │ │ Rufus   │ │
+│ │ Ruvon   │ │               │ │ Ruvon   │ │               │ │ Ruvon   │ │
 │ │ Edge    │ │               │ │ Edge    │ │               │ │ Edge    │ │
 │ │ Agent   │ │               │ │ Agent   │ │               │ │ Agent   │ │
 │ └────┬────┘ │               │ └────┬────┘ │               │ └────┬────┘ │
@@ -67,7 +67,7 @@ This document analyzes the feasibility of pivoting Rufus SDK to serve as a **mod
 
 ### 1.2 Core Use Cases
 
-| Use Case | Description | Rufus Component |
+| Use Case | Description | Ruvon Component |
 |----------|-------------|-----------------|
 | **Terminal Management System (TMS)** | Push config updates, fraud rules, compliance logic | Config Server + ETag Polling |
 | **Store-and-Forward (SAF)** | Process offline payments, sync when online | SyncManager + Task Queue |
@@ -84,16 +84,16 @@ This document analyzes the feasibility of pivoting Rufus SDK to serve as a **mod
 
 | Component | Status | Location | Fintech Readiness |
 |-----------|--------|----------|-------------------|
-| **SQLite Persistence** | ✅ Production-ready | `src/rufus/implementations/persistence/sqlite.py` | Perfect for offline edge |
+| **SQLite Persistence** | ✅ Production-ready | `src/ruvon/implementations/persistence/sqlite.py` | Perfect for offline edge |
 | **Task Queue** | ✅ Schema complete | `migrations/schema.yaml` | Idempotency keys included |
-| **Saga Pattern** | ✅ Implemented | `src/rufus/workflow.py:232-321` | Compensation logging works |
-| **HTTP Steps** | ⚠️ Model only | `src/rufus/models.py:47-50` | Execution needs porting |
-| **Encryption** | ⚠️ Partial | `src/rufus/implementations/security/crypto_utils.py` | Schema columns missing |
-| **REST API** | ✅ Full CRUD | `src/rufus_server/main.py` | Workflow lifecycle covered |
-| **WebSocket Push** | ✅ Working | `src/rufus_server/main.py:576-628` | Cloud→Edge real-time |
-| **Event Publishing** | ✅ Redis Streams | `src/rufus/implementations/observability/events.py` | Audit trail ready |
-| **Workflow Snapshots** | ✅ Implemented | `src/rufus/builder.py:450-452` | Version protection works |
-| **Zombie Detection** | ✅ CLI ready | `src/rufus/zombie_scanner.py` | Crash recovery available |
+| **Saga Pattern** | ✅ Implemented | `src/ruvon/workflow.py:232-321` | Compensation logging works |
+| **HTTP Steps** | ⚠️ Model only | `src/ruvon/models.py:47-50` | Execution needs porting |
+| **Encryption** | ⚠️ Partial | `src/ruvon/implementations/security/crypto_utils.py` | Schema columns missing |
+| **REST API** | ✅ Full CRUD | `src/ruvon_server/main.py` | Workflow lifecycle covered |
+| **WebSocket Push** | ✅ Working | `src/ruvon_server/main.py:576-628` | Cloud→Edge real-time |
+| **Event Publishing** | ✅ Redis Streams | `src/ruvon/implementations/observability/events.py` | Audit trail ready |
+| **Workflow Snapshots** | ✅ Implemented | `src/ruvon/builder.py:450-452` | Version protection works |
+| **Zombie Detection** | ✅ CLI ready | `src/ruvon/zombie_scanner.py` | Crash recovery available |
 | **Heartbeat Tracking** | ✅ Schema ready | `migrations/schema.yaml` | Worker health tracking |
 | **Worker Registry** | ⚠️ Schema only | `confucius/migrations/005_add_worker_registry.sql` | API not implemented |
 
@@ -125,7 +125,7 @@ CREATE TABLE tasks (
 **3. Offline-First SQLite**
 ```python
 # Zero external dependencies for edge deployment
-persistence = SQLitePersistenceProvider(db_path="/var/lib/rufus/offline.db")
+persistence = SQLitePersistenceProvider(db_path="/var/lib/ruvon/offline.db")
 # WAL mode enabled, foreign keys enforced, full ACID
 ```
 
@@ -165,7 +165,7 @@ WS     /api/v1/devices/{device_id}/stream - Bidirectional events
 
 **Required Components:**
 ```python
-class RufusEdgeAgent:
+class RuvonEdgeAgent:
     """Runs on POS terminal / edge device"""
 
     async def start(self):
@@ -311,8 +311,8 @@ Week 4:
 
 ```
 Week 5:
-├── Create rufus_edge package structure
-├── Implement RufusEdgeAgent base class
+├── Create ruvon_edge package structure
+├── Implement RuvonEdgeAgent base class
 ├── Add SQLite with SQLCipher support
 └── Create local workflow executor
 
@@ -360,9 +360,9 @@ Week 11-12:
 ### 5.1 Edge Agent Architecture
 
 ```python
-# src/rufus_edge/agent.py
+# src/ruvon_edge/agent.py
 
-class RufusEdgeAgent:
+class RuvonEdgeAgent:
     """
     Edge runtime for POS terminals and financial devices.
 
@@ -378,7 +378,7 @@ class RufusEdgeAgent:
         self,
         device_id: str,
         cloud_url: str,
-        db_path: str = "/var/lib/rufus/edge.db",
+        db_path: str = "/var/lib/ruvon/edge.db",
         encryption_key: Optional[str] = None,
         config_poll_interval: int = 60,
         sync_interval: int = 30,
@@ -463,20 +463,20 @@ class RufusEdgeAgent:
 
 workflow_type: "PaymentSAF"
 workflow_version: "1.0.0"
-initial_state_model: "rufus_edge.models.PaymentState"
+initial_state_model: "ruvon_edge.models.PaymentState"
 description: "Store-and-Forward payment processing"
 
 steps:
   # Step 1: Validate card data
   - name: "Validate_Card"
     type: "STANDARD"
-    function: "rufus_edge.steps.validate_card"
+    function: "ruvon_edge.steps.validate_card"
     automate_next: true
 
   # Step 2: Check connectivity
   - name: "Check_Connectivity"
     type: "DECISION"
-    function: "rufus_edge.steps.check_network"
+    function: "ruvon_edge.steps.check_network"
     routes:
       - condition: "state.is_online == True"
         target: "Online_Authorization"
@@ -498,13 +498,13 @@ steps:
         merchant_id: "{{state.merchant_id}}"
       timeout_seconds: 30
     output_key: "gateway_response"
-    compensate_function: "rufus_edge.steps.void_authorization"
+    compensate_function: "ruvon_edge.steps.void_authorization"
     automate_next: true
 
   # Step 3b: Offline path - check floor limit
   - name: "Offline_Check"
     type: "DECISION"
-    function: "rufus_edge.steps.check_floor_limit"
+    function: "ruvon_edge.steps.check_floor_limit"
     routes:
       - condition: "state.amount <= config.floor_limit"
         target: "Store_For_Sync"
@@ -514,24 +514,24 @@ steps:
   # Step 4: Store encrypted transaction for later sync
   - name: "Store_For_Sync"
     type: "STANDARD"
-    function: "rufus_edge.steps.store_saf_transaction"
+    function: "ruvon_edge.steps.store_saf_transaction"
     automate_next: true
 
   # Step 5: Complete transaction
   - name: "Complete_Transaction"
     type: "STANDARD"
-    function: "rufus_edge.steps.complete_transaction"
+    function: "ruvon_edge.steps.complete_transaction"
 
   # Failure paths
   - name: "Decline_Offline"
     type: "STANDARD"
-    function: "rufus_edge.steps.decline_transaction"
+    function: "ruvon_edge.steps.decline_transaction"
 ```
 
 ### 5.3 Cloud Control Plane API
 
 ```python
-# src/rufus_server/edge_api.py
+# src/ruvon_server/edge_api.py
 
 from fastapi import APIRouter, HTTPException, Header, Depends
 from typing import Optional
@@ -739,7 +739,7 @@ async def device_heartbeat(
 ### 5.4 Data Models
 
 ```python
-# src/rufus_edge/models.py
+# src/ruvon_edge/models.py
 
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -935,7 +935,7 @@ class PaymentState(BaseModel):
 ### 6.2 Log Redaction Implementation
 
 ```python
-# src/rufus_edge/security/redaction.py
+# src/ruvon_edge/security/redaction.py
 
 import re
 from typing import Dict, Any
@@ -1003,7 +1003,7 @@ class RedactedLogFormatter(logging.Formatter):
 ### 6.3 SQLCipher Integration
 
 ```python
-# src/rufus_edge/persistence/encrypted_sqlite.py
+# src/ruvon_edge/persistence/encrypted_sqlite.py
 
 from typing import Optional
 import aiosqlite
@@ -1083,13 +1083,13 @@ class EncryptedSQLitePersistenceProvider(SQLitePersistenceProvider):
 
 | Purpose | File Path |
 |---------|-----------|
-| Core Workflow Engine | `src/rufus/workflow.py` |
-| SQLite Persistence | `src/rufus/implementations/persistence/sqlite.py` |
-| PostgreSQL Persistence | `src/rufus/implementations/persistence/postgres.py` |
-| Encryption Utils | `src/rufus/implementations/security/crypto_utils.py` |
-| HTTP Step Model | `src/rufus/models.py:47-50` |
-| Event Publishing | `src/rufus/implementations/observability/events.py` |
-| Server API | `src/rufus_server/main.py` |
+| Core Workflow Engine | `src/ruvon/workflow.py` |
+| SQLite Persistence | `src/ruvon/implementations/persistence/sqlite.py` |
+| PostgreSQL Persistence | `src/ruvon/implementations/persistence/postgres.py` |
+| Encryption Utils | `src/ruvon/implementations/security/crypto_utils.py` |
+| HTTP Step Model | `src/ruvon/models.py:47-50` |
+| Event Publishing | `src/ruvon/implementations/observability/events.py` |
+| Server API | `src/ruvon_server/main.py` |
 | Schema Definition | `migrations/schema.yaml` |
 | Legacy HTTP Tasks | `confucius/src/confucius/tasks.py:48-144` |
 
@@ -1097,7 +1097,7 @@ class EncryptedSQLitePersistenceProvider(SQLitePersistenceProvider):
 
 ## Appendix B: Comparison with Alternatives
 
-| Feature | Rufus Edge | Square Terminal SDK | Stripe Terminal |
+| Feature | Ruvon Edge | Square Terminal SDK | Stripe Terminal |
 |---------|------------|---------------------|-----------------|
 | Language | Python | Java/Kotlin | JavaScript/iOS/Android |
 | Offline Support | Full SAF | Limited | Limited |

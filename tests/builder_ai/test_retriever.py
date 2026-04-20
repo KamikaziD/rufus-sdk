@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ---------------------------------------------------------------------------
 
 def _make_chunk(chunk_type: str = "explanation", score: float = 0.85, text: str = "Some text."):
-    from rufus.builder_ai.knowledge.indexer import Chunk
+    from ruvon.builder_ai.knowledge.indexer import Chunk
     return Chunk(
         id="test-1",
         text=text,
@@ -36,7 +36,7 @@ def _make_kb(chunks_fast=None, chunks_full=None):
 
 @pytest.mark.asyncio
 async def test_retrieve_for_routing_calls_retrieve_fast():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_routing
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_routing
     chunks = [_make_chunk(score=0.9), _make_chunk(score=0.7)]
     kb = _make_kb(chunks_fast=chunks)
 
@@ -48,7 +48,7 @@ async def test_retrieve_for_routing_calls_retrieve_fast():
 
 @pytest.mark.asyncio
 async def test_retrieve_for_routing_custom_top_k():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_routing
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_routing
     kb = _make_kb(chunks_fast=[_make_chunk()])
 
     await retrieve_for_routing(kb, "query", top_k=5)
@@ -58,7 +58,7 @@ async def test_retrieve_for_routing_custom_top_k():
 
 @pytest.mark.asyncio
 async def test_retrieve_for_routing_returns_empty_on_no_match():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_routing
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_routing
     kb = _make_kb(chunks_fast=[])
 
     result = await retrieve_for_routing(kb, "create a workflow")
@@ -71,7 +71,7 @@ async def test_retrieve_for_routing_returns_empty_on_no_match():
 
 @pytest.mark.asyncio
 async def test_retrieve_for_injection_calls_retrieve():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_injection
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_injection
     chunks = [_make_chunk(chunk_type="yaml_example", score=0.88)]
     kb = _make_kb(chunks_full=chunks)
 
@@ -83,7 +83,7 @@ async def test_retrieve_for_injection_calls_retrieve():
 
 @pytest.mark.asyncio
 async def test_retrieve_for_injection_filters_by_focus_types():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_injection
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_injection
     yaml_chunk = _make_chunk(chunk_type="yaml_example", score=0.9)
     explanation_chunk = _make_chunk(chunk_type="explanation", score=0.8)
     kb = _make_kb(chunks_full=[yaml_chunk, explanation_chunk])
@@ -98,7 +98,7 @@ async def test_retrieve_for_injection_filters_by_focus_types():
 @pytest.mark.asyncio
 async def test_retrieve_for_injection_falls_back_when_no_focus_match():
     """If focus_types filter produces nothing, return all chunks (safety fallback)."""
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_injection
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_injection
     explanation_chunk = _make_chunk(chunk_type="explanation", score=0.8)
     kb = _make_kb(chunks_full=[explanation_chunk])
 
@@ -110,7 +110,7 @@ async def test_retrieve_for_injection_falls_back_when_no_focus_match():
 
 @pytest.mark.asyncio
 async def test_retrieve_for_injection_no_focus_types_returns_all():
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_injection
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_injection
     chunks = [_make_chunk("yaml_example"), _make_chunk("lesson"), _make_chunk("explanation")]
     kb = _make_kb(chunks_full=chunks)
 
@@ -123,20 +123,20 @@ async def test_retrieve_for_injection_no_focus_types_returns_all():
 # ---------------------------------------------------------------------------
 
 def test_max_similarity_returns_highest_score():
-    from rufus.builder_ai.knowledge.retriever import max_similarity
-    from rufus.builder_ai.knowledge.indexer import Chunk
+    from ruvon.builder_ai.knowledge.retriever import max_similarity
+    from ruvon.builder_ai.knowledge.indexer import Chunk
 
     chunks = [_make_chunk(score=0.5), _make_chunk(score=0.9), _make_chunk(score=0.3)]
     assert max_similarity(chunks) == 0.9
 
 
 def test_max_similarity_empty_returns_zero():
-    from rufus.builder_ai.knowledge.retriever import max_similarity
+    from ruvon.builder_ai.knowledge.retriever import max_similarity
     assert max_similarity([]) == 0.0
 
 
 def test_max_similarity_single_chunk():
-    from rufus.builder_ai.knowledge.retriever import max_similarity
+    from ruvon.builder_ai.knowledge.retriever import max_similarity
     chunks = [_make_chunk(score=0.72)]
     assert max_similarity(chunks) == 0.72
 
@@ -148,7 +148,7 @@ def test_max_similarity_single_chunk():
 @pytest.mark.asyncio
 async def test_two_stage_routing_does_not_call_full_hybrid():
     """retrieve_for_routing must NOT call kb.retrieve (only kb.retrieve_fast)."""
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_routing
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_routing
     kb = _make_kb(chunks_fast=[_make_chunk(score=0.7)])
 
     await retrieve_for_routing(kb, "any query")
@@ -160,7 +160,7 @@ async def test_two_stage_routing_does_not_call_full_hybrid():
 @pytest.mark.asyncio
 async def test_two_stage_injection_does_not_call_fast():
     """retrieve_for_injection must NOT call kb.retrieve_fast (only kb.retrieve)."""
-    from rufus.builder_ai.knowledge.retriever import retrieve_for_injection
+    from ruvon.builder_ai.knowledge.retriever import retrieve_for_injection
     kb = _make_kb(chunks_full=[_make_chunk(score=0.8)])
 
     await retrieve_for_injection(kb, "any query")

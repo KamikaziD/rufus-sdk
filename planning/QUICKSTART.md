@@ -1,10 +1,10 @@
-# Rufus SDK - Quick Start Guide
+# Ruvon SDK - Quick Start Guide
 
-Get started with Rufus in under 5 minutes. This guide walks you through installation and running your first workflow.
+Get started with Ruvon in under 5 minutes. This guide walks you through installation and running your first workflow.
 
-## What is Rufus?
+## What is Ruvon?
 
-Rufus is a **Python-native, SDK-first workflow engine** for orchestrating complex business processes and AI pipelines. Unlike heavyweight systems like Temporal or Airflow, Rufus embeds directly into your Python applications with zero infrastructure requirements.
+Ruvon is a **Python-native, SDK-first workflow engine** for orchestrating complex business processes and AI pipelines. Unlike heavyweight systems like Temporal or Airflow, Ruvon embeds directly into your Python applications with zero infrastructure requirements.
 
 **Key Benefits:**
 - ✅ **Embedded SDK** - No external servers required, runs in-process
@@ -21,12 +21,12 @@ Rufus is a **Python-native, SDK-first workflow engine** for orchestrating comple
 - Python 3.9 or higher
 - pip
 
-### Install Rufus
+### Install Ruvon
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/rufus-sdk.git
-cd rufus-sdk
+git clone https://github.com/your-org/ruvon-sdk.git
+cd ruvon-sdk
 
 # Install in development mode
 pip install -e .
@@ -39,17 +39,17 @@ pip install aiosqlite orjson asyncpg uvloop
 
 ```bash
 # Test CLI
-rufus --help
+ruvon --help
 
 # Test SDK import
-python -c "from rufus.builder import WorkflowBuilder; print('✅ Rufus SDK ready!')"
+python -c "from ruvon.builder import WorkflowBuilder; print('✅ Ruvon SDK ready!')"
 ```
 
 ---
 
 ## Choose Your Installation Path
 
-Rufus offers three installation paths depending on your needs. Choose the one that fits your use case:
+Ruvon offers three installation paths depending on your needs. Choose the one that fits your use case:
 
 ### 🔀 Decision Tree
 
@@ -81,7 +81,7 @@ docker compose up -d
 
 # Verify services
 docker compose ps
-# Expected: postgres (healthy), rufus-server (healthy)
+# Expected: postgres (healthy), ruvon-server (healthy)
 
 # Check API
 curl http://localhost:8000/health
@@ -99,7 +99,7 @@ curl http://localhost:8000/health
 - Load testing with device simulation
 
 **Ports:**
-- `8000` - Rufus API server
+- `8000` - Ruvon API server
 - `5433` - PostgreSQL database
 
 ### PATH 2: Docker (SDK + PostgreSQL) - Lightweight
@@ -108,7 +108,7 @@ curl http://localhost:8000/health
 
 **What you get:**
 - ✅ PostgreSQL database in Docker
-- ✅ Rufus SDK in your local Python environment
+- ✅ Ruvon SDK in your local Python environment
 - ✅ No server overhead
 
 ```bash
@@ -120,23 +120,23 @@ docker compose up postgres -d
 pip install -r requirements.txt
 
 # Initialize database with Alembic migrations
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 
 # (Optional) Seed demo data
 cd ../..
 python tools/seed_data.py \
-  --db-url "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud" \
+  --db-url "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud" \
   --type all
 
 # Verify
 python -c "
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 import asyncio
 
 async def test():
-    p = PostgresPersistenceProvider('postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud')
+    p = PostgresPersistenceProvider('postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud')
     await p.initialize()
     workflows = await p.list_workflows()
     print(f'✅ PostgreSQL ready! Found {len(workflows)} workflows')
@@ -170,15 +170,15 @@ cd examples/sqlite_task_manager
 python simple_demo.py
 
 # Or use CLI with SQLite
-rufus config set-persistence
+ruvon config set-persistence
 # Choose: SQLite
 # Database path: workflow.db
 
-rufus db init
+ruvon db init
 ```
 
 **When to use:**
-- Learning Rufus SDK
+- Learning Ruvon SDK
 - Running examples
 - Quick prototyping
 - Testing without infrastructure
@@ -204,7 +204,7 @@ rufus db init
 
 ### Option 1: SQLite Task Manager Demo (Recommended)
 
-The simplest way to see Rufus in action:
+The simplest way to see Ruvon in action:
 
 ```bash
 cd examples/sqlite_task_manager
@@ -243,7 +243,7 @@ python simple_demo.py
 Run the full quickstart example with proper Python path:
 
 ```bash
-cd /path/to/rufus-sdk
+cd /path/to/ruvon-sdk
 PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
 ```
 
@@ -346,7 +346,7 @@ class MyWorkflowState(BaseModel):
 **Step 2: Implement Step Functions**
 ```python
 # my_workflow/steps.py
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from state_models import MyWorkflowState
 
 def process_data(state: MyWorkflowState, context: StepContext) -> dict:
@@ -374,9 +374,9 @@ steps:
 ```python
 # my_workflow/run.py
 import asyncio
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
 
 async def main():
     # Initialize providers
@@ -418,7 +418,7 @@ asyncio.run(main())
 
 **Human-in-the-Loop**
 ```python
-from rufus.models import WorkflowPauseDirective
+from ruvon.models import WorkflowPauseDirective
 
 def approval_step(state, context):
     raise WorkflowPauseDirective(result={"awaiting_approval": True})
@@ -444,7 +444,7 @@ def approval_step(state, context):
 
 **Sub-Workflows**
 ```python
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def trigger_kyc(state, context):
     raise StartSubWorkflowDirective(
@@ -457,7 +457,7 @@ def trigger_kyc(state, context):
 
 ## Common Issues
 
-### Import Error: "No module named 'rufus'"
+### Import Error: "No module named 'ruvon'"
 **Solution:** Install the SDK in editable mode:
 ```bash
 pip install -e .
@@ -473,13 +473,13 @@ PYTHONPATH=$PWD:$PYTHONPATH python examples/quickstart/run_quickstart.py
 **Solution:** Initialize database schema with Alembic:
 ```bash
 # For PostgreSQL
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 
 # For SQLite (CLI will auto-create schema)
-rufus config set-persistence  # Choose SQLite
-rufus db init  # Auto-creates SQLite schema
+ruvon config set-persistence  # Choose SQLite
+ruvon db init  # Auto-creates SQLite schema
 ```
 
 ### Missing Dependencies
@@ -494,40 +494,40 @@ pip install aiosqlite orjson asyncpg uvloop
 
 ```bash
 # Configuration
-rufus config show                # Show current config
-rufus config set-persistence     # Choose database (SQLite/PostgreSQL)
-rufus config set-execution       # Choose executor (sync/thread_pool)
+ruvon config show                # Show current config
+ruvon config set-persistence     # Choose database (SQLite/PostgreSQL)
+ruvon config set-execution       # Choose executor (sync/thread_pool)
 
 # Workflow Management
-rufus list                       # List all workflows
-rufus start <workflow-type>      # Start a workflow
-rufus show <workflow-id>         # Show workflow details
-rufus resume <workflow-id>       # Resume paused workflow
-rufus cancel <workflow-id>       # Cancel running workflow
+ruvon list                       # List all workflows
+ruvon start <workflow-type>      # Start a workflow
+ruvon show <workflow-id>         # Show workflow details
+ruvon resume <workflow-id>       # Resume paused workflow
+ruvon cancel <workflow-id>       # Cancel running workflow
 
 # Database Management (Alembic)
-cd src/rufus
+cd src/ruvon
 alembic upgrade head             # Apply all pending migrations
 alembic current                  # Show current migration version
 alembic history                  # Show migration history
 alembic downgrade -1             # Rollback one migration
 
 # Database Management (SQLite - CLI auto-creates schema)
-rufus db init                    # Initialize SQLite schema (auto)
+ruvon db init                    # Initialize SQLite schema (auto)
 
 # Monitoring
-rufus logs <workflow-id>         # View workflow logs
-rufus metrics                    # View performance metrics
+ruvon logs <workflow-id>         # View workflow logs
+ruvon metrics                    # View performance metrics
 
 # Validation
-rufus validate workflow.yaml     # Validate YAML syntax
+ruvon validate workflow.yaml     # Validate YAML syntax
 ```
 
 ---
 
-## What Makes Rufus Different?
+## What Makes Ruvon Different?
 
-| Feature | Rufus | Temporal | Airflow | AWS Step Functions |
+| Feature | Ruvon | Temporal | Airflow | AWS Step Functions |
 |---------|-------|----------|---------|-------------------|
 | **Setup Complexity** | Zero (embedded SQLite) | High (cluster required) | Medium (server + DB) | Low (AWS only) |
 | **Deployment** | In-process | Distributed | Server-based | Cloud-only |
@@ -549,12 +549,12 @@ rufus validate workflow.yaml     # Validate YAML syntax
 
 ---
 
-**🎉 You're ready to build production workflows with Rufus!**
+**🎉 You're ready to build production workflows with Ruvon!**
 
 For questions or issues:
 - 📖 [Full Documentation](docs/README.md)
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
-- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
+- 🐛 [Report Issues](https://github.com/your-org/ruvon-sdk/issues)
 
 ---
 

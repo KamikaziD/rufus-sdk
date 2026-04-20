@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub heavy optional deps before any rufus.implementations.inference import.
+# Stub heavy optional deps before any ruvon.implementations.inference import.
 # tflite.py imports numpy at module level; paged_browser imports js (Pyodide).
 # ---------------------------------------------------------------------------
 if "numpy" not in sys.modules:
@@ -41,7 +41,7 @@ for _tflite_mod in ("tflite_runtime", "tflite_runtime.interpreter"):
         _stub.Interpreter = MagicMock
         sys.modules[_tflite_mod] = _stub
 
-from rufus.models import AIInferenceConfig
+from ruvon.models import AIInferenceConfig
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ def test_aiconfig_paging_strategy_none_has_no_shard_urls():
 @pytest.mark.asyncio
 async def test_paged_browser_provider_ffi_called():
     """Mock js.runPagedInference; verify args forwarded and InferenceResult shape."""
-    from rufus.implementations.inference.paged_browser import PagedBrowserInferenceProvider
+    from ruvon.implementations.inference.paged_browser import PagedBrowserInferenceProvider
 
     # Build a mock JS result object matching what Pyodide would return
     mock_js_result = MagicMock()
@@ -129,7 +129,7 @@ async def test_paged_browser_provider_ffi_called():
 @pytest.mark.asyncio
 async def test_paged_browser_provider_fast_path_label():
     """shards_loaded=1 → path_taken should be 'fast_path'."""
-    from rufus.implementations.inference.paged_browser import PagedBrowserInferenceProvider
+    from ruvon.implementations.inference.paged_browser import PagedBrowserInferenceProvider
 
     mock_js_result = MagicMock()
     mock_js_result.text = "Error E42 = low voltage"
@@ -157,7 +157,7 @@ async def test_paged_browser_provider_fast_path_label():
 @pytest.mark.asyncio
 async def test_llamacpp_paged_uses_mmap_flag():
     """Mock asyncio.create_subprocess_exec; verify --mmap appears in the command."""
-    from rufus.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
+    from ruvon.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
 
     mock_proc = MagicMock()
     mock_proc.returncode = 0
@@ -196,7 +196,7 @@ async def test_llamacpp_paged_uses_mmap_flag():
 @pytest.mark.asyncio
 async def test_llamacpp_paged_binary_not_found():
     """FileNotFoundError → success=False with helpful error_message."""
-    from rufus.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
+    from ruvon.implementations.inference.llamacpp_paged import LlamaCppPagedProvider
 
     with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError("no binary")):
         provider = LlamaCppPagedProvider(binary_path="nonexistent-llama-cli",

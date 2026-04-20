@@ -7,7 +7,7 @@ Reference materials, version history, and supplementary documentation.
 ## Contents
 
 ### [Glossary](glossary.md)
-Comprehensive definitions of terms and concepts used throughout Rufus SDK documentation.
+Comprehensive definitions of terms and concepts used throughout Ruvon SDK documentation.
 
 **Key terms defined:**
 - Workflow, Step, State, Provider, Executor
@@ -74,7 +74,7 @@ Version-to-version upgrade guides and breaking changes.
 ---
 
 ### [Contributing](contributing.md)
-How to contribute code, documentation, and ideas to Rufus SDK.
+How to contribute code, documentation, and ideas to Ruvon SDK.
 
 **Covers:**
 - Code of conduct
@@ -86,7 +86,7 @@ How to contribute code, documentation, and ideas to Rufus SDK.
 - Documentation guidelines
 
 **Use this when:**
-- Want to contribute to Rufus
+- Want to contribute to Ruvon
 - Setting up development environment
 - Preparing a pull request
 - Writing documentation
@@ -110,8 +110,8 @@ How to contribute code, documentation, and ideas to Rufus SDK.
 ### For Contributors
 - 💡 [Contributing Guide](contributing.md)
 - 🗺️ [Roadmap](roadmap.md)
-- 🐛 [Issue Tracker](https://github.com/your-org/rufus-sdk/issues)
-- 💬 [Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 🐛 [Issue Tracker](https://github.com/your-org/ruvon-sdk/issues)
+- 💬 [Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 
 ---
 
@@ -134,4 +134,4 @@ These documents are maintained separately from the main documentation to:
 ---
 
 **Last Updated:** 2026-02-13
-**Maintained By:** Rufus SDK Team
+**Maintained By:** Ruvon SDK Team

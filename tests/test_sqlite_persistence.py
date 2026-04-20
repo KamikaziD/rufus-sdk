@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 # Enable pytest-asyncio
 pytest_plugins = ('pytest_asyncio',)

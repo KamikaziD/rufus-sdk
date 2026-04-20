@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build and push production Rufus images for linux/amd64 + linux/arm64
-# These images install rufus-sdk from PyPI instead of copying source
+# These images install ruvon-sdk from PyPI instead of copying source
 #
 # Usage:
 #   ./build-production-images.sh [VERSION] [REGISTRY] [PUSH=true|false]
@@ -24,11 +24,11 @@ echo "Push:      $PUSH"
 echo ""
 
 # Ensure a buildx builder with multi-platform support exists
-if ! docker buildx inspect rufus-builder &>/dev/null; then
+if ! docker buildx inspect ruvon-builder &>/dev/null; then
     echo "Creating multi-platform buildx builder..."
-    docker buildx create --name rufus-builder --driver docker-container --bootstrap --use
+    docker buildx create --name ruvon-builder --driver docker-container --bootstrap --use
 else
-    docker buildx use rufus-builder
+    docker buildx use ruvon-builder
 fi
 
 # buildx always needs --push or --load; use --push when PUSH=true, --load otherwise.
@@ -44,32 +44,32 @@ else
     echo ""
 fi
 
-echo "Building rufus-server..."
+echo "Building ruvon-server..."
 docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
-    -f Dockerfile.rufus-server-prod \
-    -t ${REGISTRY}/rufus-server:${VERSION} \
-    -t ${REGISTRY}/rufus-server:latest \
+    -f Dockerfile.ruvon-server-prod \
+    -t ${REGISTRY}/ruvon-server:${VERSION} \
+    -t ${REGISTRY}/ruvon-server:latest \
     ..
 
-echo "Building rufus-worker..."
+echo "Building ruvon-worker..."
 docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
-    -f Dockerfile.rufus-worker-prod \
-    -t ${REGISTRY}/rufus-worker:${VERSION} \
-    -t ${REGISTRY}/rufus-worker:latest \
+    -f Dockerfile.ruvon-worker-prod \
+    -t ${REGISTRY}/ruvon-worker:${VERSION} \
+    -t ${REGISTRY}/ruvon-worker:latest \
     ..
 
-echo "Building rufus-flower..."
+echo "Building ruvon-flower..."
 docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
-    -f Dockerfile.rufus-flower-prod \
-    -t ${REGISTRY}/rufus-flower:${VERSION} \
-    -t ${REGISTRY}/rufus-flower:latest \
+    -f Dockerfile.ruvon-flower-prod \
+    -t ${REGISTRY}/ruvon-flower:${VERSION} \
+    -t ${REGISTRY}/ruvon-flower:latest \
     ..
 
-echo "Building rufus-dashboard..."
+echo "Building ruvon-dashboard..."
 docker buildx build ${BUILD_PLATFORMS} ${BUILD_OUTPUT} \
-    -f Dockerfile.rufus-dashboard-prod \
-    -t ${REGISTRY}/rufus-dashboard:${VERSION} \
-    -t ${REGISTRY}/rufus-dashboard:latest \
+    -f Dockerfile.ruvon-dashboard-prod \
+    -t ${REGISTRY}/ruvon-dashboard:${VERSION} \
+    -t ${REGISTRY}/ruvon-dashboard:latest \
     ..
 
 echo ""
@@ -78,23 +78,23 @@ echo ""
 
 if [ "$PUSH" = "true" ]; then
     echo "Images pushed to Docker Hub:"
-    echo "  - ${REGISTRY}/rufus-server:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-server:latest"
-    echo "  - ${REGISTRY}/rufus-worker:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-worker:latest"
-    echo "  - ${REGISTRY}/rufus-flower:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-flower:latest"
-    echo "  - ${REGISTRY}/rufus-dashboard:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-dashboard:latest"
+    echo "  - ${REGISTRY}/ruvon-server:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-server:latest"
+    echo "  - ${REGISTRY}/ruvon-worker:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-worker:latest"
+    echo "  - ${REGISTRY}/ruvon-flower:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-flower:latest"
+    echo "  - ${REGISTRY}/ruvon-dashboard:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-dashboard:latest"
     echo ""
     echo "Verify multi-arch manifests:"
-    echo "  docker buildx imagetools inspect ${REGISTRY}/rufus-server:${VERSION}"
+    echo "  docker buildx imagetools inspect ${REGISTRY}/ruvon-server:${VERSION}"
 else
     echo "Images loaded locally (linux/amd64 only):"
-    echo "  - ${REGISTRY}/rufus-server:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-worker:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-flower:${VERSION}"
-    echo "  - ${REGISTRY}/rufus-dashboard:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-server:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-worker:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-flower:${VERSION}"
+    echo "  - ${REGISTRY}/ruvon-dashboard:${VERSION}"
     echo ""
     echo "To build and push multi-arch:"
     echo "  ./build-production-images.sh $VERSION $REGISTRY true"

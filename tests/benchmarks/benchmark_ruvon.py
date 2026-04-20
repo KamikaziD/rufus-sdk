@@ -35,7 +35,7 @@ if _PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 
 try:
-    from rufus_edge.capability_gossip import (
+    from ruvon_edge.capability_gossip import (
         CapabilityVector,
         NodeTier,
         classify_node_tier,
@@ -45,12 +45,12 @@ try:
 except ImportError:
     _GOSSIP_OK = False
     _GOSSIP_ERR = (
-        "rufus-sdk-edge not installed.\n"
-        "  Fix: pip install -e 'packages/rufus-sdk-edge[edge]'"
+        "ruvon-edge not installed.\n"
+        "  Fix: pip install -e 'packages/ruvon-edge[edge]'"
     )
 
 try:
-    from rufus_edge.nkey_verifier import NKeyPatchVerifier
+    from ruvon_edge.nkey_verifier import NKeyPatchVerifier
     _NKEY_MODULE_OK = True
 except ImportError:
     _NKEY_MODULE_OK = False
@@ -465,7 +465,7 @@ def bench_nkey(n: int):
         if not _CRYPTO_OK:
             _note("cryptography not installed — pip install cryptography")
         else:
-            _note("rufus-sdk-edge not installed — pip install -e 'packages/rufus-sdk-edge[edge]'")
+            _note("ruvon-edge not installed — pip install -e 'packages/ruvon-edge[edge]'")
         return
 
     import base64 as _b64
@@ -524,7 +524,7 @@ def bench_nkey(n: int):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Rufus RUVON standalone benchmark")
+    parser = argparse.ArgumentParser(description="Ruvon RUVON standalone benchmark")
     parser.add_argument("--iterations", type=int, default=5000,
                         help="Base iteration count (default: 5000)")
     parser.add_argument("--quick", action="store_true",
@@ -535,7 +535,7 @@ def main():
     n = 500 if args.quick else args.iterations
 
     print("\n" + "=" * 72)
-    print("  RUFUS SDK — RUVON BENCHMARK SUITE")
+    print("  RUVON SDK — RUVON BENCHMARK SUITE")
     print("=" * 72)
     print(f"  Iterations       : {n}")
     print(f"  capability_gossip: {'available' if _GOSSIP_OK else 'NOT AVAILABLE'}")

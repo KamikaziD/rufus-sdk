@@ -11,7 +11,7 @@ sleep 5
 
 # Run Alembic migrations
 echo "Running database migrations with Alembic..."
-cd /app/src/rufus
+cd /app/src/ruvon
 alembic upgrade head
 
 if [ $? -eq 0 ]; then
@@ -25,4 +25,4 @@ cd /app
 
 # Start the server
 echo "Starting Rufus server..."
-exec uvicorn rufus_server.main:app --host 0.0.0.0 --port 8000
+exec uvicorn ruvon_server.main:app --host 0.0.0.0 --port 8000

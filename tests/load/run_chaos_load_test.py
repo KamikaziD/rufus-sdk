@@ -29,7 +29,7 @@ Output files written to <output-dir>/:
   summary.txt          — human-readable PASS/FAIL
 
 Usage:
-  cd /path/to/rufus
+  cd /path/to/ruvon
   python tests/load/run_chaos_load_test.py \\
       --devices 1000 --duration 600 \\
       --output-dir ./chaos_test_1000/

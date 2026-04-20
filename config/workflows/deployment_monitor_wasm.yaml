@@ -6,8 +6,8 @@
 #
 # Prerequisites:
 #   - apply_config.wasm compiled and present at:
-#     src/rufus_edge/sidecar/wasm/apply_config.wasm
-#   - Compile with: python -m rufus_edge.sidecar.build_wasm
+#     src/ruvon_edge/sidecar/wasm/apply_config.wasm
+#   - Compile with: python -m ruvon_edge.sidecar.build_wasm
 #
 # The STANDARD variant (deployment_monitor.yaml) is the default and requires
 # no binary — use this WASM variant only when sandboxing is required.
@@ -19,26 +19,26 @@ description: "WASM-sandboxed deployment sidecar — same as DeploymentMonitor bu
 cron_expression: "*/15 * * * *"
 timezone: "UTC"
 
-initial_state_model: rufus_edge.sidecar.metrics:SidecarState
+initial_state_model: ruvon_edge.sidecar.metrics:SidecarState
 
 steps:
   - name: CollectMetrics
     type: STANDARD
-    function: rufus_edge.sidecar.metrics:collect_device_metrics
+    function: ruvon_edge.sidecar.metrics:collect_device_metrics
     description: "Collect CPU, RAM, SAF queue depth, and latency percentiles"
     automate_next: true
     timeout_seconds: 10
 
   - name: ScoreHealth
     type: STANDARD
-    function: rufus_edge.sidecar.health_scorer:score_health
+    function: ruvon_edge.sidecar.health_scorer:score_health
     description: "Score device health 0.0–1.0 (ONNX or rule-based fallback)"
     automate_next: true
     timeout_seconds: 5
 
   - name: HealthDecision
     type: DECISION
-    function: rufus_edge.sidecar.decisions:health_gate
+    function: ruvon_edge.sidecar.decisions:health_gate
     description: "Jump to ReportOutcome if health_score >= 0.7"
 
   - name: GenerateSuggestions
@@ -51,7 +51,7 @@ steps:
       max_tokens: 512
       temperature: 0.1
     prompt_template: |
-      You are an expert Rufus edge device operator. Analyse the following
+      You are an expert Ruvon edge device operator. Analyse the following
       device metrics and identify the single most impactful config change.
 
       Device metrics:
@@ -88,7 +88,7 @@ steps:
 
   - name: ApprovalDecision
     type: DECISION
-    function: rufus_edge.sidecar.decisions:approval_gate
+    function: ruvon_edge.sidecar.decisions:approval_gate
     description: "Jump to ReportOutcome if operator rejected the suggestion"
 
   # -------------------------------------------------------------------------
@@ -107,14 +107,14 @@ steps:
   - name: ReportOutcome
     type: HTTP
     method: POST
-    url: "{{ env('RUFUS_CONTROL_PLANE_URL', 'http://localhost:8000') }}/api/v1/devices/{{ env('RUFUS_DEVICE_ID', 'unknown') }}/suggestions"
+    url: "{{ env('RUVON_CONTROL_PLANE_URL', 'http://localhost:8000') }}/api/v1/devices/{{ env('RUVON_DEVICE_ID', 'unknown') }}/suggestions"
     headers:
       Content-Type: "application/json"
-      X-Device-Id: "{{ env('RUFUS_DEVICE_ID', 'unknown') }}"
+      X-Device-Id: "{{ env('RUVON_DEVICE_ID', 'unknown') }}"
     body: |
       {
         "workflow_id": "{{ state.workflow_id }}",
-        "device_id": "{{ env('RUFUS_DEVICE_ID', 'unknown') }}",
+        "device_id": "{{ env('RUVON_DEVICE_ID', 'unknown') }}",
         "suggestion": {{ state.suggestion | tojson }},
         "health_score_before": {{ state.health_score }},
         "metrics_snapshot": {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of real-time workflow updates via WebSocket and control endpoints (retry, rewind, resume) for the Rufus workflow engine.
+This document describes the implementation of real-time workflow updates via WebSocket and control endpoints (retry, rewind, resume) for the Ruvon workflow engine.
 
 **Version**: 0.3.9
 **Date**: 2025-02-18
@@ -428,7 +428,7 @@ All endpoints publish events to Redis for real-time updates and audit logging.
 
 ### Event Publisher
 
-Located in `src/rufus/events.py`, the `EventPublisher` class:
+Located in `src/ruvon/events.py`, the `EventPublisher` class:
 - Publishes to **Redis Streams** (persistent audit log)
 - Publishes to **Redis Pub/Sub** (real-time updates)
 - Supports Prometheus metrics
@@ -442,7 +442,7 @@ All workflow events published to:
 ### Publishing Examples
 
 ```python
-from rufus.events import event_publisher
+from ruvon.events import event_publisher
 
 # Publish status change
 await event_publisher._publish(
@@ -475,7 +475,7 @@ await event_publisher._publish(
 
 The `docker-compose.production.yml` includes:
 - **Redis**: Message broker for events
-- **Rufus Server**: FastAPI server with WebSocket support
+- **Ruvon Server**: FastAPI server with WebSocket support
 - **Celery Workers**: Process async tasks (retry/resume)
 
 **Environment variables**:
@@ -494,7 +494,7 @@ environment:
 docker-compose -f docker/docker-compose.production.yml up -d
 
 # Check logs
-docker-compose -f docker/docker-compose.production.yml logs rufus-server
+docker-compose -f docker/docker-compose.production.yml logs ruvon-server
 docker-compose -f docker/docker-compose.production.yml logs redis
 
 # Test WebSocket
@@ -515,7 +515,7 @@ curl http://localhost:8000/health
 
 ## UI Integration
 
-The debug UI (`src/rufus_server/debug_ui/static/js/app.js`) already has:
+The debug UI (`src/ruvon_server/debug_ui/static/js/app.js`) already has:
 
 ### WebSocket Connection
 
@@ -596,10 +596,10 @@ The implementation was ported from Confucius (`confucius/src/confucius/routers.p
 
 ### Differences
 
-1. **URL Prefix**: Rufus uses `/api/v1/workflow` vs Confucius `/workflow`
-2. **Authentication**: Rufus uses optional `X-User-ID` header
-3. **Event Publisher**: Rufus uses centralized EventPublisher class
-4. **Celery Integration**: Rufus uses `rufus.tasks` module
+1. **URL Prefix**: Ruvon uses `/api/v1/workflow` vs Confucius `/workflow`
+2. **Authentication**: Ruvon uses optional `X-User-ID` header
+3. **Event Publisher**: Ruvon uses centralized EventPublisher class
+4. **Celery Integration**: Ruvon uses `ruvon.tasks` module
 
 ### Compatibility
 
@@ -622,7 +622,7 @@ All endpoints are backward compatible with Confucius UI patterns. The UI require
 ## References
 
 - Confucius implementation: `confucius/src/confucius/routers.py`
-- Event Publisher: `src/rufus/events.py`
-- API Models: `src/rufus_server/api_models.py`
-- UI JavaScript: `src/rufus_server/debug_ui/static/js/app.js`
+- Event Publisher: `src/ruvon/events.py`
+- API Models: `src/ruvon_server/api_models.py`
+- UI JavaScript: `src/ruvon_server/debug_ui/static/js/app.js`
 - Tests: `tests/test_server_endpoints.py`

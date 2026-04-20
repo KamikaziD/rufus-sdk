@@ -1,14 +1,14 @@
 # Performance Model and Optimizations
 
-Rufus SDK is designed for high-throughput production use. Understanding its performance characteristics helps you tune for your workload.
+Ruvon SDK is designed for high-throughput production use. Understanding its performance characteristics helps you tune for your workload.
 
 ## Performance Pillars
 
-Rufus achieves high performance through four key optimizations:
+Ruvon achieves high performance through four key optimizations:
 
 ### 1. uvloop Event Loop (2-4x faster async I/O)
 
-Python's default `asyncio` event loop has significant overhead. Rufus uses **uvloop**, a drop-in replacement built on libuv (same as Node.js).
+Python's default `asyncio` event loop has significant overhead. Ruvon uses **uvloop**, a drop-in replacement built on libuv (same as Node.js).
 
 **Benchmark Results**:
 ```python
@@ -21,12 +21,12 @@ await db.query(...)  # 12µs latency (4x faster)
 
 **How it works**:
 ```python
-# src/rufus/__init__.py
+# src/ruvon/__init__.py
 import sys
 import os
 
 # Auto-enable uvloop on import (can be disabled via env var)
-if os.getenv("RUFUS_USE_UVLOOP", "true").lower() == "true":
+if os.getenv("RUVON_USE_UVLOOP", "true").lower() == "true":
     try:
         import uvloop
         uvloop.install()  # Replace asyncio event loop
@@ -40,7 +40,7 @@ if os.getenv("RUFUS_USE_UVLOOP", "true").lower() == "true":
 
 ### 2. orjson Serialization (3-5x faster JSON)
 
-Workflow state is serialized to JSON frequently. Python's stdlib `json` module is slow. Rufus uses **orjson**, a C extension optimized for speed.
+Workflow state is serialized to JSON frequently. Python's stdlib `json` module is slow. Ruvon uses **orjson**, a C extension optimized for speed.
 
 **Benchmark Results**:
 ```python
@@ -55,10 +55,10 @@ orjson.dumps(state.dict())  # 90µs (5x faster)
 
 **How it works**:
 ```python
-# src/rufus/utils/serialization.py
+# src/ruvon/utils/serialization.py
 import os
 
-if os.getenv("RUFUS_USE_ORJSON", "true").lower() == "true":
+if os.getenv("RUVON_USE_ORJSON", "true").lower() == "true":
     import orjson
 
     def serialize(data):
@@ -78,7 +78,7 @@ else:
 
 **Usage**:
 ```python
-from rufus.utils.serialization import serialize, deserialize
+from ruvon.utils.serialization import serialize, deserialize
 
 # Automatically uses orjson if available
 json_str = serialize({"key": "value"})
@@ -89,7 +89,7 @@ data = deserialize(json_str)
 
 ### 3. Connection Pooling (10-50 connections)
 
-Creating database connections is expensive (~50-100ms). Rufus maintains a connection pool for reuse.
+Creating database connections is expensive (~50-100ms). Ruvon maintains a connection pool for reuse.
 
 **Benchmark Results**:
 ```python
@@ -132,7 +132,7 @@ export POSTGRES_POOL_MAX_INACTIVE_LIFETIME=300
 
 ### 4. Import Caching (162x faster function resolution)
 
-Step functions are imported via `importlib.import_module()`. Repeated imports are slow. Rufus caches imports.
+Step functions are imported via `importlib.import_module()`. Repeated imports are slow. Ruvon caches imports.
 
 **Benchmark Results**:
 ```python
@@ -145,7 +145,7 @@ func = import_from_string("myapp.steps.process_payment")  # 0.03ms (162x faster)
 
 **How it works**:
 ```python
-# src/rufus/builder.py
+# src/ruvon/builder.py
 class WorkflowBuilder:
     _import_cache = {}  # Class-level cache
 
@@ -261,7 +261,7 @@ execution = CeleryExecutionProvider()
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: rufus-celery-worker-hpa
+  name: ruvon-celery-worker-hpa
 spec:
   minReplicas: 3
   maxReplicas: 20
@@ -357,7 +357,7 @@ persistence = PostgresPersistenceProvider(
 from prometheus_client import Histogram
 
 workflow_duration = Histogram(
-    'rufus_workflow_duration_seconds',
+    'ruvon_workflow_duration_seconds',
     'Workflow execution duration',
     buckets=[0.1, 0.5, 1, 5, 10, 30, 60]
 )
@@ -370,7 +370,7 @@ with workflow_duration.time():
 **Step Execution**:
 ```python
 step_duration = Histogram(
-    'rufus_step_duration_seconds',
+    'ruvon_step_duration_seconds',
     'Step execution duration',
     ['step_name'],
     buckets=[0.01, 0.05, 0.1, 0.5, 1, 5]
@@ -382,7 +382,7 @@ step_duration.labels(step_name="Process_Payment").observe(duration)
 **Database Operations**:
 ```python
 db_query_duration = Histogram(
-    'rufus_db_query_duration_seconds',
+    'ruvon_db_query_duration_seconds',
     'Database query duration',
     ['operation'],
     buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
@@ -396,7 +396,7 @@ with db_query_duration.labels(operation="save_workflow").time():
 
 **Panel 1: Throughput**
 ```
-Query: rate(rufus_workflows_started_total[5m])
+Query: rate(ruvon_workflows_started_total[5m])
 Title: Workflows Started/sec
 Alert: < 10 workflows/sec (low throughput)
 ```
@@ -404,23 +404,23 @@ Alert: < 10 workflows/sec (low throughput)
 **Panel 2: Latency (p50, p95, p99)**
 ```
 Query:
-  - histogram_quantile(0.50, rufus_workflow_duration_seconds_bucket)
-  - histogram_quantile(0.95, rufus_workflow_duration_seconds_bucket)
-  - histogram_quantile(0.99, rufus_workflow_duration_seconds_bucket)
+  - histogram_quantile(0.50, ruvon_workflow_duration_seconds_bucket)
+  - histogram_quantile(0.95, ruvon_workflow_duration_seconds_bucket)
+  - histogram_quantile(0.99, ruvon_workflow_duration_seconds_bucket)
 Title: Workflow Latency
 Alert: p99 > 10s (slow workflows)
 ```
 
 **Panel 3: Database Pool Utilization**
 ```
-Query: rufus_db_pool_active_connections / rufus_db_pool_max_size
+Query: ruvon_db_pool_active_connections / ruvon_db_pool_max_size
 Title: DB Pool Utilization
 Alert: > 0.9 (pool exhausted)
 ```
 
 ## Expected Performance Gains
 
-Rufus optimizations provide measurable benefits:
+Ruvon optimizations provide measurable benefits:
 
 | Optimization | Gain | Scenario |
 |--------------|------|----------|
@@ -440,10 +440,10 @@ Sometimes you need to disable optimizations for debugging:
 
 ```bash
 # Disable uvloop (use stdlib asyncio)
-export RUFUS_USE_UVLOOP=false
+export RUVON_USE_UVLOOP=false
 
 # Disable orjson (use stdlib json)
-export RUFUS_USE_ORJSON=false
+export RUVON_USE_ORJSON=false
 
 # Reduce connection pool (easier to debug)
 export POSTGRES_POOL_MIN_SIZE=1
@@ -455,11 +455,11 @@ WorkflowBuilder._import_cache.clear()
 
 ## Performance Comparison
 
-### Rufus vs Confucius
+### Ruvon vs Confucius
 
 **Test**: Same workflow (5 steps, 5KB state, 100 concurrent executions)
 
-| Metric | Confucius | Rufus | Improvement |
+| Metric | Confucius | Ruvon | Improvement |
 |--------|-----------|-------|-------------|
 | **Throughput** | 50 workflows/sec | 120 workflows/sec | +140% |
 | **Latency (p50)** | 250ms | 180ms | -28% |
@@ -467,7 +467,7 @@ WorkflowBuilder._import_cache.clear()
 | **Memory/workflow** | ~5MB | ~3MB | -40% |
 | **DB Connections** | 10 ad-hoc | 50 pooled | +400% efficiency |
 
-**Why Rufus is faster**:
+**Why Ruvon is faster**:
 - ✅ Connection pooling (Confucius had none)
 - ✅ orjson serialization (Confucius used stdlib json)
 - ✅ uvloop event loop (Confucius used stdlib asyncio)

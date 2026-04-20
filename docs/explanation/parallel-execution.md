@@ -52,7 +52,7 @@ When tasks don't depend on each other, running them in parallel is a significant
    - validate_credit → {"credit_approved": True, "credit_limit": 10000}
    - check_inventory → {"in_stock": True, "warehouse_id": "WH-1"}
    - calculate_shipping → {"shipping_cost": 15.99, "estimated_days": 3}
-6. Rufus merges results using merge_strategy
+6. Ruvon merges results using merge_strategy
 7. Merged result saved to workflow state
 8. Workflow transitions to ACTIVE (ready for next step)
 ```
@@ -84,7 +84,7 @@ def validate_customer_credit(state: OrderState, context: StepContext) -> dict:
 
 ## Merge Strategies
 
-When parallel tasks complete, Rufus must merge their results into a single dict. There are two strategies:
+When parallel tasks complete, Ruvon must merge their results into a single dict. There are two strategies:
 
 ### SHALLOW Merge (Default)
 
@@ -149,7 +149,7 @@ What happens when two tasks return the same key?
 {"price": 89.99, "currency": "USD"}  # Conflict on "price"!
 ```
 
-Rufus offers three conflict behaviors:
+Ruvon offers three conflict behaviors:
 
 ### PREFER_NEW (Default)
 
@@ -207,7 +207,7 @@ Workflow continues with partial results:
 {
     "credit_approved": True,
     "in_stock": True,
-    "shipping_cost_failed": True  # Rufus adds failure metadata
+    "shipping_cost_failed": True  # Ruvon adds failure metadata
 }
 
 # Workflow status: ACTIVE (continues to next step)
@@ -402,7 +402,7 @@ def push_to_device(state: FleetState, context: StepContext, device_id: str = "",
     return {"pushed": device_id}
 ```
 
-**How it works**: When the PARALLEL step executes, Rufus reads `state.device_ids`, creates one task per element, and dispatches them all concurrently. If `state.device_ids` has 500 items, 500 tasks run in parallel.
+**How it works**: When the PARALLEL step executes, Ruvon reads `state.device_ids`, creates one task per element, and dispatches them all concurrently. If `state.device_ids` has 500 items, 500 tasks run in parallel.
 
 **When to use dynamic fan-out vs. static tasks:**
 
@@ -435,7 +435,7 @@ When `iterate_over` resolves to a large list (hundreds or thousands of items), d
   allow_partial_success: true
 ```
 
-**How it works**: Rufus splits the list into chunks of `batch_size`, dispatches each chunk in parallel, waits for completion, merges results into state, then moves on to the next chunk. State is updated after every batch — if a batch fails, earlier batches' results are already persisted.
+**How it works**: Ruvon splits the list into chunks of `batch_size`, dispatches each chunk in parallel, waits for completion, merges results into state, then moves on to the next chunk. State is updated after every batch — if a batch fails, earlier batches' results are already persisted.
 
 **When to use `batch_size`:**
 
@@ -484,7 +484,7 @@ def task_a(state: OrderState, context: StepContext):
     # Compute result
     item_a = fetch_item("ITEM-A", user_id)
 
-    # Return (Rufus merges after all tasks complete)
+    # Return (Ruvon merges after all tasks complete)
     return {"item_a": item_a}
 
 def task_b(state: OrderState, context: StepContext):

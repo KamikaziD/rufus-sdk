@@ -1,6 +1,6 @@
-# Rufus Celery Testing Guide
+# Ruvon Celery Testing Guide
 
-Complete guide for testing Rufus's Celery-based distributed execution.
+Complete guide for testing Ruvon's Celery-based distributed execution.
 
 ## Quick Start
 
@@ -12,23 +12,23 @@ docker-compose up -d
 
 **2. Apply database migrations:**
 ```bash
-cd ../../src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+cd ../../src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
 alembic upgrade head
 ```
 
 **3. Start Celery worker:**
 ```bash
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
 export CELERY_BROKER_URL="redis://localhost:6380/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
 
-celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+celery -A ruvon.celery_app worker --loglevel=info --concurrency=4
 ```
 
 **4. Run tests (in another terminal):**
 ```bash
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
 export CELERY_BROKER_URL="redis://localhost:6380/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
 

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, call
-from rufus.workflow import Workflow
-from rufus.models import WorkflowStep, CompensatableStep, StartSubWorkflowDirective, AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep, FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask, StepContext, WorkflowJumpDirective, WorkflowFailedException, SagaWorkflowException, MergeStrategy, MergeConflictBehavior
+from ruvon.workflow import Workflow
+from ruvon.models import WorkflowStep, CompensatableStep, StartSubWorkflowDirective, AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep, FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep, ParallelExecutionTask, StepContext, WorkflowJumpDirective, WorkflowFailedException, SagaWorkflowException, MergeStrategy, MergeConflictBehavior
 from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List, Callable, Type
 
@@ -316,8 +316,8 @@ async def test_from_dict_method(mock_providers):
     }
 
     # Mock WorkflowBuilder's static methods
-    with patch('rufus.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
-            patch('rufus.builder.WorkflowBuilder._build_steps_from_config', return_value=[WorkflowStep(name="step_c")]) as mock_build_steps_from_config:
+    with patch('ruvon.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
+            patch('ruvon.builder.WorkflowBuilder._build_steps_from_config', return_value=[WorkflowStep(name="step_c")]) as mock_build_steps_from_config:
 
         workflow = Workflow.from_dict(workflow_data, **mock_providers)
 
@@ -385,8 +385,8 @@ async def test_from_dict_state_instantiation_without_state_in_data(mock_provider
         # 'state' key is missing
     }
 
-    with patch('rufus.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
-            patch('rufus.builder.WorkflowBuilder._build_steps_from_config', return_value=[]):
+    with patch('ruvon.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
+            patch('ruvon.builder.WorkflowBuilder._build_steps_from_config', return_value=[]):
 
         workflow = Workflow.from_dict(workflow_data, **mock_providers)
         assert isinstance(workflow.state, MyStateModel)
@@ -401,8 +401,8 @@ async def test_from_dict_state_instantiation_without_state_in_data(mock_provider
         "steps_config": [],
         "state_model_path": state_model_path,
     }
-    with patch('rufus.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
-            patch('rufus.builder.WorkflowBuilder._build_steps_from_config', return_value=[]):
+    with patch('ruvon.builder.WorkflowBuilder._import_from_string', return_value=MyStateModel) as mock_import_from_string, \
+            patch('ruvon.builder.WorkflowBuilder._build_steps_from_config', return_value=[]):
 
         workflow = Workflow.from_dict(
             workflow_data_empty_state, **mock_providers)

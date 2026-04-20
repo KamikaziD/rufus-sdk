@@ -11,9 +11,9 @@ import yaml
 import asyncio
 
 from typer.testing import CliRunner
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def cli_runner():
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Creates a temporary config directory for tests."""
-    config_dir = tmp_path / ".rufus"
+    config_dir = tmp_path / ".ruvon"
     config_dir.mkdir()
     return config_dir
 
@@ -190,4 +190,4 @@ def sample_workflow_data() -> Dict[str, Any]:
 @pytest.fixture(autouse=True)
 def set_test_config_path(temp_config_dir, monkeypatch):
     """Automatically sets the config path to temporary directory for all tests."""
-    monkeypatch.setenv("RUFUS_CONFIG_DIR", str(temp_config_dir))
+    monkeypatch.setenv("RUVON_CONFIG_DIR", str(temp_config_dir))

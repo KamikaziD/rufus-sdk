@@ -2,12 +2,12 @@
 
 ## Status: ✅ COMPLETE
 
-Implementation of dynamic per-user and per-IP rate limiting for the Rufus Edge Cloud Control Plane.
+Implementation of dynamic per-user and per-IP rate limiting for the Ruvon Edge Cloud Control Plane.
 
 ## What Was Implemented
 
 ### 1. Core Service (`rate_limit_service.py`) ✅
-**File**: `/Users/kim/PycharmProjects/rufus/src/rufus_server/rate_limit_service.py`
+**File**: `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/rate_limit_service.py`
 
 **Components:**
 - `RateLimitService` class with in-memory caching and tracking
@@ -32,7 +32,7 @@ Implementation of dynamic per-user and per-IP rate limiting for the Rufus Edge C
 **Lines of Code:** ~430 lines
 
 ### 2. API Integration (`main.py`) ✅
-**File**: `/Users/kim/PycharmProjects/rufus/src/rufus_server/main.py`
+**File**: `/Users/kim/PycharmProjects/ruvon/src/ruvon_server/main.py`
 
 **Changes:**
 1. **Service Initialization** (startup_event):
@@ -64,7 +64,7 @@ Implementation of dynamic per-user and per-IP rate limiting for the Rufus Edge C
 **Lines Added:** ~250 lines
 
 ### 3. CLI Commands (`cloud_admin.py`) ✅
-**File**: `/Users/kim/PycharmProjects/rufus/examples/edge_deployment/cloud_admin.py`
+**File**: `/Users/kim/PycharmProjects/ruvon/examples/edge_deployment/cloud_admin.py`
 
 **New Commands:**
 1. `rate-limit-status [user-id-or-ip]` - Show current status
@@ -82,11 +82,11 @@ Implementation of dynamic per-user and per-IP rate limiting for the Rufus Edge C
 
 ### 4. Documentation ✅
 **Files:**
-- `/Users/kim/PycharmProjects/rufus/docs/RATE_LIMITING.md` - Comprehensive guide
-- `/Users/kim/PycharmProjects/rufus/RATE_LIMITING_IMPLEMENTATION.md` - This file
+- `/Users/kim/PycharmProjects/ruvon/docs/RATE_LIMITING.md` - Comprehensive guide
+- `/Users/kim/PycharmProjects/ruvon/RATE_LIMITING_IMPLEMENTATION.md` - This file
 
 ### 5. Tests ✅
-**File**: `/Users/kim/PycharmProjects/rufus/tests/test_rate_limiting.py`
+**File**: `/Users/kim/PycharmProjects/ruvon/tests/test_rate_limiting.py`
 
 **Test Coverage:**
 - Rate limit check (allowed/exceeded)
@@ -210,7 +210,7 @@ pytest tests/test_rate_limiting.py::test_check_rate_limit_allowed -v
 ### Manual Testing
 ```bash
 # 1. Start server
-uvicorn rufus_server.main:app --reload
+uvicorn ruvon_server.main:app --reload
 
 # 2. Test headers
 curl -i http://localhost:8000/api/v1/devices/test-device/commands
@@ -246,13 +246,13 @@ python examples/edge_deployment/cloud_admin.py rate-limit-status
 ## Files Modified/Created
 
 ### Created:
-- `src/rufus_server/rate_limit_service.py` (430 lines)
+- `src/ruvon_server/rate_limit_service.py` (430 lines)
 - `docs/RATE_LIMITING.md` (650 lines)
 - `tests/test_rate_limiting.py` (350 lines)
 - `RATE_LIMITING_IMPLEMENTATION.md` (this file)
 
 ### Modified:
-- `src/rufus_server/main.py` (+250 lines)
+- `src/ruvon_server/main.py` (+250 lines)
 - `examples/edge_deployment/cloud_admin.py` (+200 lines)
 
 **Total Lines Added:** ~1,880 lines
@@ -327,8 +327,8 @@ RATE_LIMIT_CLEANUP_INTERVAL=300   # Cleanup interval (seconds)
 
 - **Implementation Plan**: `/docs/rate_limiting_plan.md`
 - **Database Schema**: `/docker/migrations/add_webhooks_and_ratelimiting.sql`
-- **Service Code**: `/src/rufus_server/rate_limit_service.py`
-- **API Integration**: `/src/rufus_server/main.py`
+- **Service Code**: `/src/ruvon_server/rate_limit_service.py`
+- **API Integration**: `/src/ruvon_server/main.py`
 - **CLI Commands**: `/examples/edge_deployment/cloud_admin.py`
 - **Documentation**: `/docs/RATE_LIMITING.md`
 - **Tests**: `/tests/test_rate_limiting.py`

@@ -1,13 +1,13 @@
 # Production Deployment Guide
 
-This guide explains how to deploy Rufus using pre-built Docker images from Docker Hub.
+This guide explains how to deploy Ruvon using pre-built Docker images from Docker Hub.
 
 ## Overview
 
 **Pre-built Images:**
-- `yourname/rufus-server:latest` - REST API server
-- `yourname/rufus-worker:latest` - Celery workers
-- `yourname/rufus-flower:latest` - Monitoring UI
+- `yourname/ruvon-server:latest` - REST API server
+- `yourname/ruvon-worker:latest` - Celery workers
+- `yourname/ruvon-flower:latest` - Monitoring UI
 
 **Your Project:**
 - Custom workflow definitions (YAML)
@@ -16,14 +16,14 @@ This guide explains how to deploy Rufus using pre-built Docker images from Docke
 
 ---
 
-## For Rufus Maintainers: Building and Publishing Images
+## For Ruvon Maintainers: Building and Publishing Images
 
 ### Step 1: Build Production Images
 
 ```bash
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 
-# Build images (TestPyPI version for testing)
+# Build images (PyPI version for testing)
 ./build-production-images.sh 0.3.5 yourname
 
 # Or specify custom version and registry
@@ -31,9 +31,9 @@ cd /Users/kim/PycharmProjects/rufus/docker
 ```
 
 This creates:
-- `yourname/rufus-server:0.3.5` and `:latest`
-- `yourname/rufus-worker:0.3.5` and `:latest`
-- `yourname/rufus-flower:0.3.5` and `:latest`
+- `yourname/ruvon-server:0.3.5` and `:latest`
+- `yourname/ruvon-worker:0.3.5` and `:latest`
+- `yourname/ruvon-flower:0.3.5` and `:latest`
 
 ### Step 2: Test Locally
 
@@ -60,7 +60,7 @@ docker-compose up -d
 docker login
 
 # Build and push
-cd /Users/kim/PycharmProjects/rufus/docker
+cd /Users/kim/PycharmProjects/ruvon/docker
 ./build-production-images.sh 0.3.5 your-docker-hub-username true
 ```
 
@@ -69,14 +69,14 @@ cd /Users/kim/PycharmProjects/rufus/docker
 Edit the three Dockerfiles and uncomment the production PyPI lines:
 
 ```dockerfile
-# Comment out TestPyPI:
+# Comment out PyPI:
 # RUN pip install --no-cache-dir \
-#     --index-url https://test.pypi.org/simple/ \
+#     --index-url https://pypi.org/simple/ \
 #     --extra-index-url https://pypi.org/simple/ \
-#     'rufus-sdk[all]==0.3.5'
+#     'ruvon-sdk[all]==0.3.5'
 
 # Uncomment production PyPI:
-RUN pip install --no-cache-dir 'rufus-sdk[all]'
+RUN pip install --no-cache-dir 'ruvon-sdk[all]'
 ```
 
 Then rebuild and push:
@@ -100,7 +100,7 @@ cd my-payment-app
 mkdir -p my_app config
 
 # Download docker-compose template
-curl -O https://raw.githubusercontent.com/your-org/rufus-sdk/main/docker/docker-compose.user-deployment.yml
+curl -O https://raw.githubusercontent.com/your-org/ruvon-sdk/main/docker/docker-compose.user-deployment.yml
 mv docker-compose.user-deployment.yml docker-compose.yml
 
 # Update image registry in docker-compose.yml
@@ -123,7 +123,7 @@ class PaymentState(BaseModel):
 3. **Implement step functions** (`my_app/steps.py`):
 
 ```python
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from my_app.models import PaymentState
 
 def validate_payment(state: PaymentState, context: StepContext) -> dict:
@@ -173,7 +173,7 @@ docker-compose up -d
 docker-compose ps
 
 # View logs
-docker-compose logs -f rufus-worker
+docker-compose logs -f ruvon-worker
 
 # Access services
 open http://localhost:8000/docs   # API
@@ -217,10 +217,10 @@ my-payment-app/
 
 ```bash
 # Scale to 10 workers
-docker-compose up -d --scale rufus-worker=10
+docker-compose up -d --scale ruvon-worker=10
 
 # Scale down to 2
-docker-compose up -d --scale rufus-worker=2
+docker-compose up -d --scale ruvon-worker=2
 ```
 
 ---

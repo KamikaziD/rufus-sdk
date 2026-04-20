@@ -1,11 +1,11 @@
-# Rufus SDK - YAML Configuration Reference
+# Ruvon SDK - YAML Configuration Reference
 
-This document provides a complete reference for defining and configuring workflows using the Rufus SDK's YAML-based system.
+This document provides a complete reference for defining and configuring workflows using the Ruvon SDK's YAML-based system.
 It covers all configuration options, step types, and advanced features.
 
 ## 1. The Registry: `workflow_registry.yaml`
 
-All Rufus workflows must be registered in a central registry file. This file tells the `WorkflowBuilder` what workflows are available,
+All Ruvon workflows must be registered in a central registry file. This file tells the `WorkflowBuilder` what workflows are available,
 where their definitions are, and what data structure they use.
 
 Each entry in the `workflows` list requires three keys:
@@ -17,7 +17,7 @@ Each entry in the `workflows` list requires three keys:
     (e.g., `"my_app.state_models.LoanApplicationState"`).
 
 Additionally, the `workflow_registry.yaml` can declare external package dependencies using the `requires` key. These
-packages will be scanned by Rufus for additional workflow steps and definitions.
+packages will be scanned by Ruvon for additional workflow steps and definitions.
 
 **Example:**
 
@@ -34,7 +34,7 @@ workflows:
     initial_state_model: "my_app.state_models.OnboardingState"
 
 requires: # Optional: list of packages to auto-discover steps/workflows from
-  - rufus-my-custom-package # Rufus will look for entry points and modules in 'rufus_my_custom_package'
+  - ruvon-my-custom-package # Ruvon will look for entry points and modules in 'ruvon_my_custom_package'
   - another-workflow-extension # Can be any installed package
 ```
 ## 2. Anatomy of a Workflow Definition File
@@ -91,27 +91,27 @@ flowchart
 
 ### Key Technologies
 
-Rufus leverages a modern Python ecosystem for robustness, performance, and developer
+Ruvon leverages a modern Python ecosystem for robustness, performance, and developer
 experience.
 
 *   `Pydantic` : Robust data validation and serialization for workflow state and step
     inputs.
 *   `YAML` : Domain Specific Language (DSL) for declarative workflow definitions.
-*   `FastAPI` (for `rufus-server`) : High-performance, asynchronous REST APIs and
+*   `FastAPI` (for `ruvon-server`) : High-performance, asynchronous REST APIs and
     WebSocket handling.
 *   `Celery` (for `CeleryExecutor`) : Distributed task queuing and asynchronous/parallel
     execution.
 *   `PostgreSQL` (for `PostgresPersistenceProvider`) : Primary persistence layer with JSONB state
     storage and `FOR UPDATE SKIP LOCKED`.
 *   `Redis` : Message broker for Celery and Pub/Sub functionality.
-*   `Typer` (for `rufus-cli`) : Intuitive and robust CLI tools.
+*   `Typer` (for `ruvon-cli`) : Intuitive and robust CLI tools.
 
 ## 9. Advanced Features
 
 ### Saga Pattern (Distributed Transactions)
 
-Rufus implements the Saga pattern to ensure data consistency across distributed systems. If
-a workflow fails after several steps, Rufus automatically executes "compensation" functions
+Ruvon implements the Saga pattern to ensure data consistency across distributed systems. If
+a workflow fails after several steps, Ruvon automatically executes "compensation" functions
 in reverse order to undo changes.
 
 **How to use:**
@@ -148,7 +148,7 @@ In a step function, raise a `StartSubWorkflowDirective`:
 
 ```python
 # my_app/loan_steps.py
-from rufus.models import StartSubWorkflowDirective, BaseModel, StepContext
+from ruvon.models import StartSubWorkflowDirective, BaseModel, StepContext
 # from my_app.state_models import LoanApplicationState # Replace with your actual state model
 
 async def launch_kyc_workflow(state: BaseModel, context: StepContext):
@@ -181,7 +181,7 @@ the parent's state within `parent.state.sub_workflow_results`. This dictionary i
 ```python
 # Assuming LoanApplicationState and processing results
 from pydantic import BaseModel
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from typing import Dict, Any
 
 async def process_kyc_results(state: BaseModel, context: StepContext):
@@ -420,10 +420,10 @@ steps:
 
 ### Validation
 
-Use the Rufus CLI to validate your YAML files:
+Use the Ruvon CLI to validate your YAML files:
 
 ```bash
-rufus validate config/my_workflow.yaml
+ruvon validate config/my_workflow.yaml
 ```
 
 ## Changelog
@@ -437,13 +437,13 @@ rufus validate config/my_workflow.yaml
   - Template Engine
 
 ## Missing Features
-- **API Models:** The API models used in `rufus_server/api_models.py` have not been directly reviewed for their alignment with the SDK's internal data structures. While assumed correct, a dedicated review would ensure full consistency.
+- **API Models:** The API models used in `ruvon_server/api_models.py` have not been directly reviewed for their alignment with the SDK's internal data structures. While assumed correct, a dedicated review would ensure full consistency.
 
 ## Further Considerations
 - **Documentation completeness**: While the content now generally aligns, a thorough review of the newly added documentation sections (CLI, Test Harness, etc.) and cross-referencing all examples will ensure full coverage and accuracy.
 - **Provider implementations**: The example code now correctly uses `PostgresPersistenceProvider` and `RedisPersistenceProvider`, as well as `CeleryExecutor` and `ThreadPoolExecutorProvider`. It's important to ensure these are consistently reflected across all documentation that refers to providers.
 - **`sdk-plan.md`**: All tasks outlined in the `sdk-plan.md` regarding code migration have been completed. The remaining documentation task is being addressed incrementally.
-- **Auto-discovery for marketplace packages:** The `rufus-slack` package and `cookiecutter` template have been created as examples. Ensuring that the auto-discovery mechanism correctly integrates and loads these external steps is important for the marketplace ecosystem.
+- **Auto-discovery for marketplace packages:** The `ruvon-slack` package and `cookiecutter` template have been created as examples. Ensuring that the auto-discovery mechanism correctly integrates and loads these external steps is important for the marketplace ecosystem.
 - **Testing**: While `WorkflowTestHarness` has been implemented, it is recommended to ensure comprehensive test coverage for all new features and updated components to maintain stability and reliability.
 - **Error Handling and Edge Cases**: A thorough review of error handling and edge cases across the entire SDK, especially in `WorkflowEngine` and provider implementations, is crucial for production readiness.
 

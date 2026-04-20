@@ -1,6 +1,6 @@
-# Rufus Edge Load Testing Suite
+# Ruvon Edge Load Testing Suite
 
-Load testing infrastructure for validating Rufus Edge control plane performance at scale
+Load testing infrastructure for validating Ruvon Edge control plane performance at scale
 (1000+ devices), covering HTTP synchronisation, WASM execution, gossip protocols, leader
 election, and end-to-end decision pipelines.
 

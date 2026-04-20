@@ -1,5 +1,5 @@
 import pytest
-from rufus.models import (
+from ruvon.models import (
     WorkflowJumpDirective, WorkflowPauseDirective, StartSubWorkflowDirective,
     SagaWorkflowException, WorkflowFailedException
 )

@@ -23,7 +23,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from rufus.models import WorkflowJumpDirective
+from ruvon.models import WorkflowJumpDirective
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ async def check_floor_limit(state, context, **kw) -> dict:
 
 async def approve_offline(state, context, **kw) -> dict:
     """Step 5a: Approve offline and queue into SyncManager SAF."""
-    from rufus_edge.models import SAFTransaction, TransactionStatus
+    from ruvon_edge.models import SAFTransaction, TransactionStatus
 
     txn = SAFTransaction(
         transaction_id=state.transaction_id,
@@ -238,8 +238,8 @@ async def _run_monitoring_inline(agent, payment_state) -> dict:
     Both the PaymentSimulation and TransactionMonitoring workflows appear as
     separate executions in the dashboard.
     """
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
     workflow = await agent.workflow_builder.create_workflow(
         workflow_type="TransactionMonitoring",
