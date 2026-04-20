@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 LABEL maintainer="Ruvon Team <team@ruvon.dev>"
 LABEL description="Ruvon Workflow Engine — Celery Worker"
-LABEL version="0.1.2"
+LABEL version="0.1.3"
 
 WORKDIR /app
 
@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install ruvon-sdk + ruvon-server from PyPI
 RUN pip install --no-cache-dir \
-    'ruvon-sdk[postgres,performance]==0.1.2' \
-    'ruvon-server[celery]==0.1.2'
+    'ruvon-sdk[postgres,performance]==0.1.3' \
+    'ruvon-server[celery]==0.1.3'
 
 RUN pip install --no-cache-dir \
     'asyncpg>=0.27' \
