@@ -51,6 +51,33 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+class _ExecuteContextManager:
+    """
+    Bridges between awaitable and async context manager — identical pattern to
+    aiosqlite's ``_ExecuteContextManager``.
+
+    Allows ``_WaSqliteConn.execute()`` to be used both as:
+        cursor = await conn.execute(sql)
+    and:
+        async with conn.execute(sql) as cursor:
+    """
+    __slots__ = ("_coro", "_cursor")
+
+    def __init__(self, coro):
+        self._coro = coro
+        self._cursor = None
+
+    def __await__(self):
+        return self._coro.__await__()
+
+    async def __aenter__(self) -> "_WaSqliteCursor":
+        self._cursor = await self._coro
+        return self._cursor
+
+    async def __aexit__(self, *_):
+        pass
+
+
 class _WaSqliteConn:
     """
     Minimal async SQLite connection backed by wa-sqlite in the browser.
@@ -60,7 +87,7 @@ class _WaSqliteConn:
 
     Implements only the subset of the aiosqlite API used by
     ``SQLitePersistenceProvider``:
-    - ``execute(sql, params=())``  → cursor
+    - ``execute(sql, params=())``  → _ExecuteContextManager (awaitable + async CM)
     - ``executemany(sql, rows)``
     - ``commit()``
 
@@ -74,7 +101,11 @@ class _WaSqliteConn:
     def __init__(self, js_db):
         self._db = js_db  # JS wa-sqlite database handle
 
-    async def execute(self, sql: str, params: tuple = ()) -> "_WaSqliteCursor":
+    def execute(self, sql: str, params: tuple = ()) -> "_ExecuteContextManager":
+        """Return an object that is both awaitable and an async context manager."""
+        return _ExecuteContextManager(self._do_execute(sql, params))
+
+    async def _do_execute(self, sql: str, params: tuple = ()) -> "_WaSqliteCursor":
         from pyodide.ffi import to_js  # type: ignore[import]
         rows, columns = await self._db.execute(sql, to_js(list(params)))
         return _WaSqliteCursor(rows, columns)

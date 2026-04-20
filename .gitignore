@@ -55,3 +55,4 @@ docker/.env*
 
 # Screenshots
 Screenshot*.png
+examples/browser_demo_5/pyodide-cache/

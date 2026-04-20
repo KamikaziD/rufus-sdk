@@ -810,7 +810,7 @@ class Workflow:
         # Reconstruct the Pydantic model from the merged dictionary
         self.state = current_state.__class__(**state_dict)
 
-    async def next_step(self, user_input: Dict[str, Any], _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
+    async def next_step(self, user_input: Optional[Dict[str, Any]] = None, _previous_step_result: Optional[Dict[str, Any]] = None) -> (Dict[str, Any], Optional[str]):
         # Track whether we are re-executing a HumanWorkflowStep on resume
         # (vs the legacy pattern where we advance past the pause step)
         _resuming_from_human = False
@@ -839,6 +839,9 @@ class Workflow:
             await self._notify_status_change(
                 old_status, self.status, self.current_step_name, final_result=final_completion_result)
             return final_completion_result, None
+
+        if user_input is None:
+            user_input = {}
 
         step = self.workflow_steps[self.current_step]
 

@@ -92,6 +92,7 @@ class RuvonEdgeAgent:
         peer_urls: Optional[List[str]] = None,
         nats_url: Optional[str] = None,
         nats_credentials: Optional[str] = None,
+        persistence_provider=None,
     ):
         """
         Initialize the edge agent.
@@ -126,6 +127,7 @@ class RuvonEdgeAgent:
         self._peer_urls: List[str] = list(peer_urls or [])
         self._nats_url: Optional[str] = nats_url or os.getenv("RUVON_NATS_URL")
         self._nats_credentials: Optional[str] = nats_credentials or os.getenv("RUVON_NATS_CREDENTIALS")
+        self._persistence_provider = persistence_provider  # pre-supplied (e.g. Pyodide)
 
         # Components (initialized in start())
         self.persistence: Optional[SQLitePersistenceProvider] = None
@@ -174,13 +176,18 @@ class RuvonEdgeAgent:
 
         logger.info(f"Starting Ruvon Edge Agent: {self.device_id}")
 
-        # Initialize persistence
-        self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
-        await self.persistence.initialize()
-
-        # Wire WASM binary resolver so WASM steps can read from device_wasm_cache
-        from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
-        self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
+        # Initialize persistence — use pre-supplied provider (e.g. Pyodide) or
+        # fall back to the default aiosqlite-backed SQLite provider.
+        if self._persistence_provider is not None:
+            self.persistence = self._persistence_provider
+            await self.persistence.initialize()
+            self._wasm_resolver = None  # no raw conn available on custom providers
+        else:
+            self.persistence = SQLitePersistenceProvider(db_path=self.db_path)
+            await self.persistence.initialize()
+            # Wire WASM binary resolver so WASM steps can read from device_wasm_cache
+            from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+            self._wasm_resolver = SqliteWasmBinaryResolver(self.persistence.conn)
 
         # Auto-bootstrap factory-fresh devices (no pre-configured API key)
         if not self.api_key and self.cloud_url:
@@ -482,10 +489,13 @@ class RuvonEdgeAgent:
             wasm_binary_resolver=self._wasm_resolver,
         )
 
-        # Execute to completion
+        # Execute to completion — pass initial data to first step so step
+        # functions receive it via **kwargs; automate_next chains the rest.
         try:
+            first_input = dict(data)
             while workflow.status == "ACTIVE":
-                result, next_step = await workflow.next_step()
+                result, next_step = await workflow.next_step(user_input=first_input)
+                first_input = {}  # subsequent outer-loop calls get empty input
 
                 if workflow.status in ["COMPLETED", "FAILED", "WAITING_HUMAN"]:
                     break
@@ -984,7 +994,9 @@ class RuvonEdgeAgent:
         accelerators = []
         try:
             import psutil
-            ram_total_mb = psutil.virtual_memory().total / (1024 * 1024)
+            raw = psutil.virtual_memory().total
+            if isinstance(raw, (int, float)):
+                ram_total_mb = raw / (1024 * 1024)
         except Exception:
             pass
         try:
@@ -992,7 +1004,10 @@ class RuvonEdgeAgent:
             accelerators = detect_accelerators()
         except Exception:
             pass
-        tier = classify_node_tier(ram_total_mb, accelerators)
+        try:
+            tier = classify_node_tier(ram_total_mb, accelerators)
+        except Exception:
+            tier = NodeTier.TIER_1
         logger.info(
             "[Agent] Hardware tier: %s (RAM=%.0f MB accelerators=%s)",
             tier.value, ram_total_mb, [a if isinstance(a, str) else a.value for a in accelerators],

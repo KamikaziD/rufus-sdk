@@ -533,7 +533,7 @@ class WorkflowBuilderMetaConfig(BaseModel):
     human_reviewed: bool = Field(False)
     reviewed_by: Optional[str] = Field(None)
     reviewed_at: Optional[str] = Field(None)
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "protected_namespaces": ()}
 
 
 class WorkflowBuilderMetaStep(WorkflowStep):
