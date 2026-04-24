@@ -453,6 +453,120 @@ class NATSEdgeTransport:
             logger.error("[NATSTransport] Capability gossip subscription failed: %s", e)
 
     # ------------------------------------------------------------------
+    # EchoForge aliveness gossip (ruvon.echoforge.aliveness)
+    # ------------------------------------------------------------------
+
+    async def publish_echo_aliveness(self, payload: bytes) -> None:
+        """Publish a serialised ``SharedEcho`` to ``ruvon.echoforge.aliveness``.
+
+        Uses core NATS publish (NOT JetStream) for ephemeral fan-out.
+        Loss is acceptable — the next broadcast arrives within 20 s.
+
+        Args:
+            payload: JSON-encoded SharedEcho bytes (including signature_b64).
+        """
+        if not self._connected:
+            return
+        try:
+            await self._nc.publish("ruvon.echoforge.aliveness", payload)
+        except Exception as e:
+            logger.debug("[NATSTransport] echo aliveness publish failed: %s", e)
+
+    async def subscribe_echo_aliveness(
+        self,
+        handler: "Callable[[bytes], Any]",
+    ) -> None:
+        """Subscribe to ``ruvon.echoforge.aliveness`` for peer SharedEcho gossip.
+
+        Non-durable core NATS subscribe (ephemeral).  Incoming messages are
+        passed raw (bytes) to ``handler``.
+
+        Args:
+            handler: Async or sync callable accepting ``bytes``.
+        """
+        if not self._connected:
+            return
+
+        async def _handler(msg):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(msg.data)
+                else:
+                    handler(msg.data)
+            except Exception as e:
+                logger.debug("[NATSTransport] echo aliveness handler error: %s", e)
+
+        try:
+            sub = await self._nc.subscribe("ruvon.echoforge.aliveness", cb=_handler)
+            self._subscriptions.append(sub)
+            logger.info("[NATSTransport] Subscribed to echo aliveness on ruvon.echoforge.aliveness")
+        except Exception as e:
+            logger.error("[NATSTransport] Echo aliveness subscription failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # EchoForge sentinel alerts (ruvon.echoforge.sentinel)
+    # ------------------------------------------------------------------
+
+    async def publish_sentinel_alert(self, payload: bytes) -> None:
+        """Publish a serialised ``SentinelAlert`` to ``ruvon.echoforge.sentinel``.
+
+        Uses JetStream for durability — sentinel alerts must not be lost since
+        they may trigger circuit-breaker actions on all fleet nodes.
+
+        Args:
+            payload: JSON-encoded SentinelAlert bytes.
+        """
+        if not self._connected:
+            return
+        try:
+            await self._js.publish("ruvon.echoforge.sentinel", payload)
+        except Exception as e:
+            logger.warning("[NATSTransport] sentinel alert publish failed: %s", e)
+
+    async def subscribe_sentinel_alerts(
+        self,
+        handler: "Callable[[bytes], Any]",
+    ) -> None:
+        """Subscribe to ``ruvon.echoforge.sentinel`` for fleet-wide sentinel alerts.
+
+        Durable JetStream consumer — alerts persist until ACK'd so nodes
+        receive queued alerts after reconnect.
+
+        Args:
+            handler: Async or sync callable accepting raw ``bytes`` payload.
+        """
+        if not self._connected:
+            return
+
+        consumer_name = f"rufus-sentinel-{self.device_id}"
+
+        async def _handler(msg):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(msg.data)
+                else:
+                    handler(msg.data)
+                await msg.ack()
+            except Exception as e:
+                logger.error("[NATSTransport] Sentinel alert handler error: %s", e)
+                await msg.nak()
+
+        try:
+            sub = await self._js.subscribe(
+                "ruvon.echoforge.sentinel",
+                durable=consumer_name,
+                cb=_handler,
+                manual_ack=True,
+            )
+            self._subscriptions.append(sub)
+            logger.info(
+                "[NATSTransport] Subscribed to sentinel alerts (consumer=%s)",
+                consumer_name,
+            )
+        except Exception as e:
+            logger.error("[NATSTransport] Sentinel alert subscription failed: %s", e)
+
+    # ------------------------------------------------------------------
     # WASM build delegation (ruvon.mesh.build.request)
     # ------------------------------------------------------------------
 

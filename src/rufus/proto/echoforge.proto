@@ -1,0 +1,121 @@
+// echoforge.proto — EchoForge Syndicate shared message schemas.
+//
+// Three message types are gossiped across the Private Fog Network (PFN):
+//
+//   SharedEcho   — Privacy-safe pattern aliveness snapshot.
+//                  Gossiped on: ruvon.echoforge.aliveness (ephemeral core NATS)
+//                  Only aggregated, non-identifiable fields. No trade data.
+//
+//   SentinelAlert — Reflex sentinel trigger broadcast to all fleet nodes.
+//                   Gossiped on: ruvon.echoforge.sentinel (JetStream, durable)
+//                   May trigger circuit-breaker actions on receiving nodes.
+//
+//   PHICConfig   — Human governance configuration pushed from the PHIC dashboard.
+//                  Pushed on:   ruvon.echoforge.phic (JetStream, last-per-subject)
+//                  Defines autonomy bounds, veto list, regime caps, and freeze state.
+//
+// Privacy guarantee: SharedEcho carries only pattern_id + aliveness + regime.
+// No PII, balances, trade history, API keys, or order IDs are included.
+// All messages must be signed with NKey (Ed25519) before broadcast.
+//
+// Compile:
+//   protoc --python_out=gen echoforge.proto
+
+syntax = "proto3";
+
+package echoforge;
+
+option java_package = "io.rufus.echoforge";
+option java_outer_classname = "EchoForgeProto";
+
+// ---------------------------------------------------------------------------
+// SharedEcho — gossiped on ruvon.echoforge.aliveness
+// ---------------------------------------------------------------------------
+
+message SharedEcho {
+  // Deterministic hash of the pattern definition (NOT a trade ID or order ID).
+  string pattern_id = 1;
+
+  // Bayesian reinforcement score: 0.0 (dead) – 1.0 (fully alive).
+  float net_aliveness = 2;
+
+  // Current volatility/toxicity regime for this pattern.
+  // One of: "LowVol", "HighVol", "Toxic", "Unknown"
+  string regime_tag = 3;
+
+  // Bayesian α parameter: how fast this echo adapts to new outcomes (0.0–1.0).
+  // Higher α = faster adaptation; lower α = more inertia.
+  float decay_rate = 4;
+
+  // Originating node identifier (device_id of the sender).
+  string node_id = 5;
+
+  // ISO-8601 UTC timestamp of when this echo was emitted.
+  string timestamp = 6;
+
+  // Ed25519 signature over the canonical JSON of fields 1–6 (sorted keys).
+  // Empty string when signing is not configured.
+  string signature_b64 = 7;
+}
+
+// ---------------------------------------------------------------------------
+// SentinelAlert — broadcast on ruvon.echoforge.sentinel
+// ---------------------------------------------------------------------------
+
+message SentinelAlert {
+  // Which sentinel fired: "Nociceptor", "Proprioceptor", "Metabolic"
+  string sentinel_type = 1;
+
+  // Severity from 0.0 (informational) to 1.0 (critical — immediate action).
+  float severity = 2;
+
+  // Recommended action string.
+  // Examples: "CANCEL_ORDERS", "FORCE_PASSIVE", "DROP_SIGNAL", "CIRCUIT_BREAK"
+  string action = 3;
+
+  // Unix milliseconds timestamp of the trigger event.
+  uint64 timestamp_ms = 4;
+
+  // Originating node identifier.
+  string node_id = 5;
+
+  // Pattern ID associated with the alert (empty for node-wide alerts).
+  string pattern_id = 6;
+
+  // Diagnostic detail (e.g. "VPIN=0.82 exceeded threshold=0.70").
+  string detail = 7;
+
+  // Ed25519 signature over canonical JSON of fields 1–7.
+  string signature_b64 = 8;
+}
+
+// ---------------------------------------------------------------------------
+// PHICConfig — pushed on ruvon.echoforge.phic
+// ---------------------------------------------------------------------------
+
+message PHICConfig {
+  // Global autonomy level: 0.0 = max conservative, 1.0 = max aggressive.
+  // Conservative (0.5%): position limit 0.5%, consensus threshold 80%.
+  // Aggressive  (1.0%): position limit 3.0%, consensus threshold 40%.
+  float autonomy_level = 1;
+
+  // Pattern IDs that are unconditionally disabled regardless of aliveness.
+  repeated string vetoed_patterns = 2;
+
+  // Maximum position exposure per regime tag.
+  // Key: regime_tag string ("LowVol", "HighVol", "Toxic")
+  // Value: exposure cap as fraction of capital (0.0–1.0)
+  map<string, float> regime_caps = 3;
+
+  // When true: immediate halt of all execution + position flatten.
+  bool emergency_freeze = 4;
+
+  // SHA-256 hex hash of this config payload for change detection / audit.
+  string config_hash = 5;
+
+  // ISO-8601 UTC timestamp of when this config was issued.
+  string issued_at = 6;
+
+  // Identity of the human operator who issued this config.
+  string issued_by = 7;
+}

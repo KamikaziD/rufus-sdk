@@ -1,40 +1,54 @@
-# RUVON — Vector-Optimised Networking (COMPLETE)
+# EchoForge Syndicate — Active Tasks
 
-## Phase 1 — Heartbeat Stagger + Per-Peer Failure Tracking
-- [x] Startup jitter (0-50% interval) + per-cycle drift +/-10% in _heartbeat_loop()
-- [x] 3-state circuit breaker: CLOSED / OPEN / HALF-OPEN (120s cooldown)
-- [x] Per-peer stats persisted in edge_sync_state "relay_peer_stats"
+## Phase 1: Sovereign Node (Weeks 1-2)
+### Existing Package Enhancements (rufus-sdk + rufus-sdk-edge)
+- [x] planning/ruvon_echoforge_masterplan.md — written to project
+- [ ] rufus-sdk-edge: `src/rufus_edge/nkey_signer.py` — NKeyPatchSigner (closes `""` sig gap in agent.py:955)
+- [ ] rufus-sdk-edge: `src/rufus_edge/echoforge_gossip.py` — SharedEcho dataclass + EchoForgeGossipManager
+- [ ] rufus-sdk-edge: `src/rufus_edge/transport/nats_transport.py` — add 4 echoforge NATS methods
+- [ ] rufus-sdk: `src/rufus/proto/echoforge.proto` — SharedEcho, SentinelAlert, PHICConfig schemas
+- [ ] tests: `tests/edge/test_nkey_signer.py` — sign/verify roundtrip, from_env, generate_keypair
+- [ ] tests: `tests/edge/test_echoforge_gossip.py` — SharedEcho ser/deser, staleness, gossip manager
 
-## Phase 2 — Vector Scoring in MeshRouter
-- [x] S(Vc) = 0.50C + 0.15/H + 0.25U + 0.10P scored relay selection
-- [x] PeerStatus extended with connectivity_quality, relay_load, relay_success_rate
-- [x] Greedy BFS replaced: collect all candidates, score, sort desc, attempt in order
-- [x] MeshRelayMeta.vector_score=5 and relay_peer_id=6 in edge.proto + edge_pb2.py regenerated
+### ruvon-echoforge Bootstrap (new repo)
+- [ ] Repo directory structure + README
+- [ ] `core/Cargo.toml` — wasm32-wasip2 workspace
+- [ ] `core/src/ring_buffer.rs` — SharedArrayBuffer 1MB lock-free circular tick buffer
+- [ ] `core/src/nociceptor.rs` — VPIN formula + threshold guard (<10ms target)
+- [ ] `core/src/proprioceptor.rs` — EWMA latency + clock-skew detection (<5ms target)
+- [ ] `core/src/metabolic.rs` — NetAlpha = GrossDelta - (fees + slippage) (<8ms target)
+- [ ] `core/echoforge.wit` — WIT interface extending rufus.wit with sentinel interface
+- [ ] `engine/echo_store.py` — SQLite-backed MarketEcho pattern store
+- [ ] `engine/decay_engine.py` — Bayesian α-update: a_{t+1} = a_t·(1-α) + outcome·α
+- [ ] `engine/regime_detector.py` — VolatilityRegime classification (LowVol/HighVol/Toxic)
+- [ ] `api/tick_bridge.py` — Exchange WS/REST → NATS tick ingestion stub
 
-## Phase 3 — Dynamic Peer Discovery
-- [x] relay_server_url + mesh_advisory columns on edge_devices (Alembic: l7m8n9o0p1q2)
-- [x] POST /api/v1/devices/{id}/relay-server + GET /api/v1/devices/{id}/mesh-peers
-- [x] _register_relay_server(): outbound-route IP, idempotent (cache in edge_sync_state)
-- [x] DHCP self-healing: _refresh_mesh_peers() re-registers each sync cycle (no-op if IP stable)
-- [x] _get_effective_peer_urls(): cloud cache (SQLite) > static fallback
+## Phase 2: PHIC Dashboard (Weeks 3-4)
+- [ ] Duplicate rufus-dashboard → ruvon-echoforge/phic/ (strip Rufus-specific routes)
+- [ ] 4-quadrant layout: Syndicate Health | Active Echoes | Sentinel Alerts | Risk Metrics
+- [ ] `SentinelPanel` component — WebSocket-fed stream of reflex triggers
+- [ ] `EchoTable` component — live aliveness scores, regime tags, per-pattern veto toggles
+- [ ] `RiskMetrics` component — drawdown curve, position exposure, fee-efficiency gauge
+- [ ] PHIC controls: autonomy slider (0.0–1.0), veto list, regime caps, emergency freeze
+- [ ] `api/main.py` — FastAPI adapted from rufus_server: POST /phic/config, GET /ws/metrics, POST /session/record
+- [ ] Wire PHIC dashboard → EchoForge API WebSocket (100ms push)
 
-## Phase 4 — Local Master Election
-- [x] _cloud_offline_secs counter; election triggers at >300s
-- [x] S_lead = 0.50P + 0.25C + 0.25U (power, CPU, uptime)
-- [x] POST /peer/election/claim; tie-break: lower device_id wins deterministically
-- [x] _run_election(): concurrent claims, device-ID-seeded backoff (100-500ms)
-- [x] _promote_to_master() / _abdicate() + persistence in edge_sync_state
-- [x] Abdication on cloud reconnect in _sync_loop() and _reconnect_sync_loop()
+## Phase 3: Private Fog Network (Weeks 5-6)
+- [ ] `network/signaling/` — Node.js + Socket.io signaling server (STUN/TURN fallback)
+- [ ] `network/worker.js` — Adapted browser_demo_3 for EchoForge (ANNOUNCE→ECHO_ANNOUNCE, HEARTBEAT→ALIVENESS_UPDATE)
+- [ ] `network/gossip_router.py` — Quorum consensus engine (N/2+1) for regime shifts
+- [ ] Wire ruvon.echoforge.* NATS subjects in echoforge-api nats_bridge
+- [ ] Integration test: 3 nodes gossip SharedEcho, quorum vote regime, verify <50ms P2P
 
-## Phase 5 — Advisory Heartbeat + Dashboard
-- [x] VectorAdvisory proto message (relay_score, connectivity_quality, known_peers, is_local_master)
-- [x] HeartbeatMsg.vector_advisory = field 9; edge_pb2.py regenerated
-- [x] DeviceHeartbeatRequest.vector_advisory field in api_models.py
-- [x] process_heartbeat() stores advisory in edge_devices.mesh_advisory JSON column
-- [x] _send_heartbeat() computes and sends vector_advisory each cycle
-- [x] get_mesh_topology() includes relay_server_url, vector_score, is_local_master per node
-- [x] browser_demo_2 LEADERBOARD: RUVON score breakdown (C/H/U/P), sorted by vector score
-- [x] browser_demo_2 Local Master election simulated when cloudReachable=false
+## Phase 4: Live Micro-Test (Weeks 7-8)
+- [ ] `api/tick_bridge.py` — Full VALR/Binance WebSocket integration (ExchangeAdapter)
+- [ ] `gym/replay_engine.py` — L2 snapshot replay at 1x–10x speed through NATS mesh
+- [ ] `gym/latency_injector.py` — Synthetic 10–100ms latency injection
+- [ ] `gym/metrics.py` — Sharpe ratio, max drawdown, echo survival rate, fee ratio
+- [ ] `engine/session_recorder.py` — IndexedDB/SQLite session log (deterministic replay)
+- [ ] `security/key_manager.py` — Python ed25519 keypair gen, rotation, audit trail
+- [ ] `security/key_manager.ts` — Browser IndexedDB + Web Crypto AES-GCM
+- [ ] 7-day live micro-test ($50–100 capital, decay tuning via L2 Gym)
 
 ## Review
-- [x] 241 tests pass across all 5 phases, zero regressions
+_Updated after each phase completes._

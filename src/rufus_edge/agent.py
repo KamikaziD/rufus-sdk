@@ -37,6 +37,7 @@ from rufus_edge.config_manager import ConfigManager
 from rufus_edge.workflow_sync import EdgeWorkflowSyncer
 from rufus_edge.platform.base import PlatformAdapter
 from rufus_edge.nkey_verifier import NKeyPatchVerifier
+from rufus_edge.nkey_signer import NKeyPatchSigner
 from rufus_edge.capability_gossip import (
     CapabilityGossipManager,
     NodeTier,
@@ -162,6 +163,10 @@ class RufusEdgeAgent:
         # Populated from RUFUS_NKEY_PUBLIC_KEY env var in start(); None = verification skipped.
         self._nkey_verifier: Optional[NKeyPatchVerifier] = None
 
+        # EchoForge — Ed25519 patch signing for build-delegate re-broadcasts.
+        # Populated from RUFUS_NKEY_PRIVATE_KEY env var in start(); None = signing skipped.
+        self._nkey_signer: Optional[NKeyPatchSigner] = None
+
         # RUVON capability gossip
         self._gossip_manager: Optional[CapabilityGossipManager] = None
         self._local_node_tier: NodeTier = NodeTier.TIER_1  # refined in start()
@@ -240,13 +245,19 @@ class RufusEdgeAgent:
         )
         await self._transport.connect()
 
-        # Classify hardware tier and wire NKey verifier
+        # Classify hardware tier and wire NKey verifier + signer
         self._local_node_tier = self._detect_node_tier()
         self._nkey_verifier = NKeyPatchVerifier.from_env()
         if self._nkey_verifier:
             logger.info("[Agent] NKey patch signature verification ENABLED (tier=%s)", self._local_node_tier.value)
         else:
             logger.warning("[Agent] RUFUS_NKEY_PUBLIC_KEY not set — WASM patch signatures will NOT be verified")
+
+        self._nkey_signer = NKeyPatchSigner.from_env()
+        if self._nkey_signer:
+            logger.info("[Agent] NKey patch SIGNING ENABLED (tier=%s)", self._local_node_tier.value)
+        else:
+            logger.info("[Agent] RUFUS_NKEY_PRIVATE_KEY not set — build-delegate patches will be unsigned")
 
         # If NATS is active, subscribe to command, config push, and WASM patch channels
         if self._nats_url:
@@ -948,11 +959,12 @@ class RufusEdgeAgent:
 
         if self._transport and self._nats_url:
             import base64
+            sig_b64 = self._nkey_signer.sign(binary) if self._nkey_signer else ""
             payload_out = json.dumps({
                 "wasm_hash": wasm_hash,
                 "binary_b64": base64.b64encode(binary).decode(),
                 "step_name": step_name,
-                "signature_b64": "",  # Signing by build node out-of-scope here
+                "signature_b64": sig_b64,
             }).encode()
             try:
                 await self._transport._nc.publish("ruvon.node.patch", payload_out)
