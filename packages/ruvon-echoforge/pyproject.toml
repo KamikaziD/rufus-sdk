@@ -42,3 +42,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ruvon_echoforge"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "workflows/",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+]
