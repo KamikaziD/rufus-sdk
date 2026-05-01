@@ -42,3 +42,28 @@ workflows:
     initial_state_model: "ruvon_edge.sidecar.metrics:DeviceMetrics"
     requires:
       - ruvon-edge
+
+  # ── EchoForge control-plane workflows ─────────────────────────────────────
+  # These workflows govern the EchoForge trading engine daemon.
+  # The EchoForgeExtension instance must be injected via context.extra["echoforge_extension"].
+
+  - type: "EchoForgePHICUpdate"
+    description: "Validate and apply a PHIC config update to the EchoForge engine"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_phic_update.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.PHICUpdateState"
+    requires:
+      - ruvon-echoforge
+
+  - type: "EchoForgeModelRetrain"
+    description: "Retrain the ONNX signal model on Binance klines and hot-swap into inference_worker"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_model_retrain.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.ModelRetrainState"
+    requires:
+      - ruvon-echoforge
+
+  - type: "EchoForgeEmergencyFreeze"
+    description: "Evaluate a sentinel alert and freeze/resume the EchoForge trading engine"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_emergency_freeze.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.EmergencyFreezeState"
+    requires:
+      - ruvon-echoforge

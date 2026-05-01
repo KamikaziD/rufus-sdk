@@ -69,6 +69,10 @@ Practical directions for common goals:
 - **[Optimize Performance](how-to-guides/performance.md)** - Tune for high throughput
 - **[Troubleshooting](how-to-guides/troubleshooting.md)** - Debug common issues
 
+### EchoForge
+- **[Running EchoForge](how-to-guides/echoforge-running.md)** - Docker Compose, local processes, port reference, env vars
+- **[L2 Replay Gym & Decay Tuner](how-to-guides/echoforge-replay-gym.md)** - Replay sessions, tune Bayesian decay params
+
 ### Migration
 - **[Migrate from Temporal](how-to-guides/migrate-from-temporal.md)** - Switch from Temporal.io
 
@@ -86,6 +90,9 @@ Dry, accurate technical specifications:
 - **[Providers](reference/api/providers.md)** - Persistence, execution, observability
 - **[StepContext](reference/api/step-context.md)** - Context passed to step functions
 - **[Directives](reference/api/directives.md)** - Control flow exceptions
+
+### EchoForge
+- **[Bridge & Mock VALR API](reference/echoforge-api.md)** - WebSocket and REST endpoints, NATS subjects, mock control API
 
 ### Configuration Reference
 - **[YAML Schema](reference/yaml-schema.md)** - Complete workflow YAML specification
@@ -121,6 +128,10 @@ Context, background, and design decisions:
 - **[Edge Fintech Architecture](explanation/edge-architecture.md)** - POS terminals, ATMs
 - **[Store-and-Forward](explanation/store-and-forward.md)** - Offline transaction handling
 - **[Performance Model](explanation/performance.md)** - Throughput, latency, optimization
+
+### EchoForge Syndicate
+- **[EchoForge Architecture](explanation/echoforge-architecture.md)** - Sovereign browser-first quant mesh: sentinels, Bayesian echo decay, Trystero P2P, PHIC governance
+- **[EchoForge Lessons Learned](explanation/echoforge-lessons-learned.md)** - Engineering insights: stale price bugs, exposure drift, VPIN floods, CAP_TRIM as alpha source
 
 ### History & Design
 - **[Design Decisions](explanation/design-decisions.md)** - Why we chose this approach
