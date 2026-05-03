@@ -6,7 +6,7 @@ requires a running broker.
 """
 
 import pytest
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from pydantic import BaseModel
 
 

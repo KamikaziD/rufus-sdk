@@ -27,7 +27,7 @@ async def test_rotate_api_key_succeeds_with_correct_key():
     mock_pool.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.__aexit__ = AsyncMock(return_value=False)
 
-    from rufus_server.device_service import DeviceService
+    from ruvon_server.device_service import DeviceService
 
     mock_persistence = MagicMock()
     mock_persistence.pool = MagicMock()
@@ -46,7 +46,7 @@ async def test_rotate_api_key_succeeds_with_correct_key():
 @pytest.mark.asyncio
 async def test_rotate_api_key_fails_with_wrong_key():
     """rotate_api_key returns None when current key is invalid."""
-    from rufus_server.device_service import DeviceService
+    from ruvon_server.device_service import DeviceService
 
     mock_persistence = MagicMock()
     svc = DeviceService(mock_persistence)

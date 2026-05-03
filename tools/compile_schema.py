@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rufus SDK Schema Compiler
+Ruvon SDK Schema Compiler
 
 Compiles the unified YAML schema definition (migrations/schema.yaml) into
 database-specific SQL migration scripts for PostgreSQL and SQLite.
@@ -319,7 +319,7 @@ class SchemaCompiler:
         lines = []
 
         # Header
-        lines.append(f"-- Rufus SDK - {target_db.upper()} Schema")
+        lines.append(f"-- Ruvon SDK - {target_db.upper()} Schema")
         lines.append(f"-- Generated from migrations/schema.yaml v{self.schema.get('version')}")
         lines.append(f"-- DO NOT EDIT MANUALLY - Use tools/compile_schema.py")
         lines.append("")

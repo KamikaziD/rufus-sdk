@@ -10,13 +10,13 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Direct sidecar module imports (bypass rufus_edge/__init__.py which needs numpy)
+# Direct sidecar module imports (bypass ruvon_edge/__init__.py which needs numpy)
 # ---------------------------------------------------------------------------
 
 def _import_sidecar(module_leaf: str):
-    base = pathlib.Path(__file__).parents[2] / "src" / "rufus_edge" / "sidecar"
+    base = pathlib.Path(__file__).parents[2] / "src" / "ruvon_edge" / "sidecar"
     path = base / (module_leaf + ".py")
-    spec = importlib.util.spec_from_file_location(f"rufus_edge.sidecar.{module_leaf}", path)
+    spec = importlib.util.spec_from_file_location(f"ruvon_edge.sidecar.{module_leaf}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -184,7 +184,7 @@ def _make_context():
 
 def test_risk_tier_gate_level1_jumps_to_apply_change():
     """Level 1 key → WorkflowJumpDirective to ApplyChange."""
-    from rufus.models import WorkflowJumpDirective as _WJD
+    from ruvon.models import WorkflowJumpDirective as _WJD
 
     state = _make_state("fraud_threshold")
     ctx = _make_context()
@@ -245,7 +245,7 @@ def test_draft_pr_only_noop_for_level2():
 
 def test_draft_pr_only_jumps_to_report_outcome_for_level3(monkeypatch):
     """draft_pr_only raises WorkflowJumpDirective to ReportOutcome for Level 3."""
-    from rufus.models import WorkflowJumpDirective as _WJD
+    from ruvon.models import WorkflowJumpDirective as _WJD
     import urllib.request
 
     state = _make_state("encryption_key", risk_tier=3)

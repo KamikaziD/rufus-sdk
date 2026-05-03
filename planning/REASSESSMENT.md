@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-The original critique assessed Rufus at **<5% success probability** based on assumptions about edge-only deployment, no central management, and aspirational documentation.
+The original critique assessed Ruvon at **<5% success probability** based on assumptions about edge-only deployment, no central management, and aspirational documentation.
 
 After examining **8,387 LOC of SDK**, **42+ API endpoints**, and **8,821 LOC of tests**, the assessment changes materially. This is not a stub project with aspirational docs. The hard parts — saga compensation, offline persistence, device fleet management, webhook eventing — are implemented and tested.
 
@@ -27,12 +27,12 @@ The remaining 65-70% risk is execution, not architecture.
 
 | Component | File | Lines | Status |
 |-----------|------|-------|--------|
-| Config polling with ETag | `src/rufus_edge/config_manager.py` | 164-223 | Working |
-| Model distribution + hash verification | `src/rufus_edge/config_manager.py` | 360-438 | Working |
-| Policy Engine artifact updates | `src/rufus_edge/config_manager.py` | 514-613 | Working |
-| Cloud config versioning | `src/rufus_server/device_service.py` | 169-221 | Working |
-| Device registration with API keys | `src/rufus_server/device_service.py` | 34-105 | Working |
-| Command versioning + schema validation | `src/rufus_server/version_service.py` | Full file | Working |
+| Config polling with ETag | `src/ruvon_edge/config_manager.py` | 164-223 | Working |
+| Model distribution + hash verification | `src/ruvon_edge/config_manager.py` | 360-438 | Working |
+| Policy Engine artifact updates | `src/ruvon_edge/config_manager.py` | 514-613 | Working |
+| Cloud config versioning | `src/ruvon_server/device_service.py` | 169-221 | Working |
+| Device registration with API keys | `src/ruvon_server/device_service.py` | 34-105 | Working |
+| Command versioning + schema validation | `src/ruvon_server/version_service.py` | Full file | Working |
 
 The config push mechanism is ETag-based conditional polling — the same pattern used by AWS IoT Greengrass. Devices poll `GET /api/v1/devices/{id}/config` with `If-None-Match`. Cloud returns 304 when unchanged, full config when updated. This is battle-tested HTTP semantics, not novel.
 
@@ -52,13 +52,13 @@ Model distribution (`config_manager.py:360-438`) includes:
 
 | Component | File | Evidence |
 |-----------|------|----------|
-| Device heartbeat with metrics | `src/rufus_server/main.py` endpoint + `device_service.py:320-354` | Receives device status, pending sync count, config version |
-| Webhook event system | `src/rufus_server/webhook_service.py` | 22 event types including DEVICE_ERROR, COMMAND_FAILED |
-| Cloud command queue | `src/rufus_server/device_service.py:385-479` | Push commands to devices (force_sync, reload_config) |
-| Command retry with backoff | `src/rufus_server/retry_policy.py` | 5 predefined policies, jitter support |
-| WebSocket for real-time comms | `src/rufus_server/main.py` | `/api/v1/devices/{device_id}/ws` |
-| Centralized audit logging | `src/rufus/implementations/persistence/sqlite.py` | `workflow_audit_log` table with state snapshots |
-| Execution metrics | `src/rufus/implementations/persistence/sqlite.py` | `workflow_metrics` table |
+| Device heartbeat with metrics | `src/ruvon_server/main.py` endpoint + `device_service.py:320-354` | Receives device status, pending sync count, config version |
+| Webhook event system | `src/ruvon_server/webhook_service.py` | 22 event types including DEVICE_ERROR, COMMAND_FAILED |
+| Cloud command queue | `src/ruvon_server/device_service.py:385-479` | Push commands to devices (force_sync, reload_config) |
+| Command retry with backoff | `src/ruvon_server/retry_policy.py` | 5 predefined policies, jitter support |
+| WebSocket for real-time comms | `src/ruvon_server/main.py` | `/api/v1/devices/{device_id}/ws` |
+| Centralized audit logging | `src/ruvon/implementations/persistence/sqlite.py` | `workflow_audit_log` table with state snapshots |
+| Execution metrics | `src/ruvon/implementations/persistence/sqlite.py` | `workflow_metrics` table |
 
 The webhook system alone (`webhook_service.py`) fires events for device registration, connectivity changes, command lifecycle, transaction sync, config deployment, and workflow completion. An ops team can wire these to PagerDuty/Slack/Datadog with zero custom code.
 
@@ -236,14 +236,14 @@ This is expected — settlement is processor-specific (Stripe, Adyen, FIS) and w
 
 ### What You Actually Have vs. Competitors
 
-| Feature | Rufus | AWS Greengrass | Azure IoT Edge |
+| Feature | Ruvon | AWS Greengrass | Azure IoT Edge |
 |---------|-------|----------------|----------------|
 | Workflow orchestration | Native (saga, parallel, sub-wf) | Lambda-based (no saga) | Event Grid (no saga) |
 | Offline-first persistence | SQLite with WAL | Greengrass Core (limited) | IoT Edge Hub |
 | Config hot-deploy | ETag polling + callbacks | Shadow documents | Device Twins |
 | Device fleet management | 42+ API endpoints | Full IoT Core | Full IoT Hub |
 | AI inference at edge | TFLite + ONNX | SageMaker Neo | Azure ML |
-| Setup complexity | `pip install rufus` | AWS account + IAM + certs | Azure sub + IoT Hub + ACR |
+| Setup complexity | `pip install ruvon` | AWS account + IAM + certs | Azure sub + IoT Hub + ACR |
 | Financial compliance | Audit log + compensation log + P2PE | Custom implementation | Custom implementation |
 | Developer experience | Python-native, YAML workflows | SDK + Lambda + CloudFormation | SDK + Docker + ARM templates |
 
@@ -258,11 +258,11 @@ It's not any single feature. It's the **integration density**:
 Greengrass:  IoT Core → Lambda → SQS → DynamoDB → Step Functions → SageMaker
              (6 services, 6 billing dimensions, 6 failure modes)
 
-Rufus:       RufusEdgeAgent → SQLite → SyncManager → Cloud Control Plane
+Ruvon:       RuvonEdgeAgent → SQLite → SyncManager → Cloud Control Plane
              (1 SDK, 1 database, 1 sync protocol)
 ```
 
-A fintech startup can go from zero to "POS terminal with offline fraud detection and cloud sync" in days with Rufus, vs. weeks with AWS. That's the moat — until AWS builds a vertical solution.
+A fintech startup can go from zero to "POS terminal with offline fraud detection and cloud sync" in days with Ruvon, vs. weeks with AWS. That's the moat — until AWS builds a vertical solution.
 
 ---
 
@@ -270,7 +270,7 @@ A fintech startup can go from zero to "POS terminal with offline fraud detection
 
 1. **Data corruption in SAF sync** — One lost transaction in production and enterprise trust is gone forever. The idempotency mechanism exists but hasn't been chaos-tested.
 
-2. **AWS launches "IoT Payments"** — If AWS builds a vertical solution for POS/ATM workflows with Greengrass, Rufus loses its differentiation. Window: 18-24 months.
+2. **AWS launches "IoT Payments"** — If AWS builds a vertical solution for POS/ATM workflows with Greengrass, Ruvon loses its differentiation. Window: 18-24 months.
 
 3. **No production customer in 12 months** — Without a reference deployment, this is a sophisticated hobby project. The code quality demonstrates engineering capability, but markets require customer proof.
 
@@ -282,19 +282,19 @@ A fintech startup can go from zero to "POS terminal with offline fraud detection
 
 ### Files Modified
 
-1. **`src/rufus_edge/sync_manager.py`**
+1. **`src/ruvon_edge/sync_manager.py`**
    - Implemented `get_pending_count()` — queries SQLite tasks table
    - Implemented `_get_pending_transactions()` — retrieves SAF_Sync tasks with deserialization
    - Implemented `mark_synced()` — marks completed tasks in persistence
    - Added `resolve_conflicts()` — LWW + idempotency-key conflict resolution
    - Connected `mark_synced()` call in `sync_all_pending()` after successful batch
 
-2. **`src/rufus_edge/agent.py`**
+2. **`src/ruvon_edge/agent.py`**
    - Implemented `_send_heartbeat()` — reports device metrics to cloud
    - Implemented `_handle_cloud_command()` — processes force_sync, reload_config, update_model
    - Fixed `get_health()` — now async, queries real pending count from SyncManager
 
-3. **`src/rufus_edge/config_manager.py`**
+3. **`src/ruvon_edge/config_manager.py`**
    - Implemented `_load_cached_config()` — reads cached config from SQLite tasks table
    - Implemented `_cache_config()` — persists config + ETag to SQLite for offline boot
 

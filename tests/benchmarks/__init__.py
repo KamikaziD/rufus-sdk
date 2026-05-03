@@ -1,1 +1,1 @@
-"""Performance benchmark suite for Rufus SDK"""
+"""Performance benchmark suite for Ruvon SDK"""

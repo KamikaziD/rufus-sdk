@@ -34,14 +34,14 @@ Consider this scenario:
 
 ## How Zombie Detection Works
 
-Rufus uses a heartbeat-based approach inherited from Confucius:
+Ruvon uses a heartbeat-based approach inherited from Confucius:
 
 ### 1. Heartbeat During Execution
 
 While processing a step, workers send periodic heartbeats:
 
 ```python
-from rufus.heartbeat import HeartbeatManager
+from ruvon.heartbeat import HeartbeatManager
 
 async def long_running_step(state: MyState, context: StepContext):
     # Create heartbeat manager
@@ -93,7 +93,7 @@ workflow_id  | worker_id      | last_heartbeat       | current_step       | step
 A separate process periodically scans for stale heartbeats:
 
 ```python
-from rufus.zombie_scanner import ZombieScanner
+from ruvon.zombie_scanner import ZombieScanner
 
 scanner = ZombieScanner(
     persistence=persistence_provider,
@@ -155,22 +155,22 @@ Run manually or via cron:
 
 ```bash
 # Scan for zombies (dry-run)
-rufus scan-zombies --db postgresql://localhost/rufus
+ruvon scan-zombies --db postgresql://localhost/ruvon
 
 # Scan and recover
-rufus scan-zombies --db postgresql://localhost/rufus --fix
+ruvon scan-zombies --db postgresql://localhost/ruvon --fix
 
 # Custom threshold
-rufus scan-zombies --db postgresql://localhost/rufus --fix --threshold 180
+ruvon scan-zombies --db postgresql://localhost/ruvon --fix --threshold 180
 
 # JSON output for monitoring
-rufus scan-zombies --db postgresql://localhost/rufus --json
+ruvon scan-zombies --db postgresql://localhost/ruvon --json
 ```
 
 **Crontab example**:
 ```cron
 # Run every 5 minutes
-*/5 * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/rufus/zombie-scanner.log 2>&1
+*/5 * * * * ruvon scan-zombies --db $DATABASE_URL --fix >> /var/log/ruvon/zombie-scanner.log 2>&1
 ```
 
 ### 2. Daemon Mode
@@ -179,25 +179,25 @@ Run as long-lived background process:
 
 ```bash
 # Run as daemon
-rufus zombie-daemon --db postgresql://localhost/rufus
+ruvon zombie-daemon --db postgresql://localhost/ruvon
 
 # Custom intervals
-rufus zombie-daemon --db postgresql://localhost/rufus --interval 60 --threshold 120
+ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 60 --threshold 120
 ```
 
 ### 3. Systemd Service
 
 ```ini
-# /etc/systemd/system/rufus-zombie-scanner.service
+# /etc/systemd/system/ruvon-zombie-scanner.service
 [Unit]
-Description=Rufus Zombie Workflow Scanner
+Description=Ruvon Zombie Workflow Scanner
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=rufus
-Environment=DATABASE_URL=postgresql://rufus:password@localhost/rufus
-ExecStart=/usr/bin/rufus zombie-daemon --db ${DATABASE_URL} --interval 60
+User=ruvon
+Environment=DATABASE_URL=postgresql://ruvon:password@localhost/ruvon
+ExecStart=/usr/bin/ruvon zombie-daemon --db ${DATABASE_URL} --interval 60
 Restart=always
 RestartSec=10
 
@@ -207,9 +207,9 @@ WantedBy=multi-user.target
 
 Enable and start:
 ```bash
-sudo systemctl enable rufus-zombie-scanner
-sudo systemctl start rufus-zombie-scanner
-sudo systemctl status rufus-zombie-scanner
+sudo systemctl enable ruvon-zombie-scanner
+sudo systemctl start ruvon-zombie-scanner
+sudo systemctl status ruvon-zombie-scanner
 ```
 
 ### 4. Kubernetes CronJob
@@ -218,7 +218,7 @@ sudo systemctl status rufus-zombie-scanner
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: rufus-zombie-scanner
+  name: ruvon-zombie-scanner
 spec:
   schedule: "*/5 * * * *"  # Every 5 minutes
   jobTemplate:
@@ -227,18 +227,18 @@ spec:
         spec:
           containers:
           - name: scanner
-            image: myapp/rufus:latest
+            image: myapp/ruvon:latest
             command:
-            - rufus
+            - ruvon
             - scan-zombies
             - --db
-            - postgresql://postgres/rufus
+            - postgresql://postgres/ruvon
             - --fix
             env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: rufus-db-secret
+                  name: ruvon-db-secret
                   key: url
           restartPolicy: OnFailure
 ```
@@ -359,13 +359,13 @@ Ops team reviews and retries:
 
 ```bash
 # List crashed workflows
-rufus list --status FAILED_WORKER_CRASH
+ruvon list --status FAILED_WORKER_CRASH
 
 # Review specific workflow
-rufus show <workflow-id> --logs --state
+ruvon show <workflow-id> --logs --state
 
 # Retry from failed step
-rufus retry <workflow-id> --from-step Process_Payment
+ruvon retry <workflow-id> --from-step Process_Payment
 ```
 
 ### Option 2: Automatic Retry
@@ -447,9 +447,9 @@ if recovery_rate < 0.9:  # < 90%
 ```python
 from prometheus_client import Counter, Histogram
 
-zombies_detected = Counter('rufus_zombies_detected_total', 'Total zombies detected')
-zombies_recovered = Counter('rufus_zombies_recovered_total', 'Total zombies recovered')
-zombie_detection_time = Histogram('rufus_zombie_detection_seconds', 'Time from crash to detection')
+zombies_detected = Counter('ruvon_zombies_detected_total', 'Total zombies detected')
+zombies_recovered = Counter('ruvon_zombies_recovered_total', 'Total zombies recovered')
+zombie_detection_time = Histogram('ruvon_zombie_detection_seconds', 'Time from crash to detection')
 
 # In scanner
 zombies_detected.inc()
@@ -463,15 +463,15 @@ zombies_recovered.inc()
 
 ```
 Panel 1: Zombie Detection Rate
-- Query: rate(rufus_zombies_detected_total[5m])
+- Query: rate(ruvon_zombies_detected_total[5m])
 - Alert: > 0.1 zombies/second
 
 Panel 2: Average Detection Time
-- Query: rate(rufus_zombie_detection_seconds_sum[5m]) / rate(rufus_zombie_detection_seconds_count[5m])
+- Query: rate(ruvon_zombie_detection_seconds_sum[5m]) / rate(ruvon_zombie_detection_seconds_count[5m])
 - Alert: > 300 seconds
 
 Panel 3: Recovery Success Rate
-- Query: rate(rufus_zombies_recovered_total[5m]) / rate(rufus_zombies_detected_total[5m])
+- Query: rate(ruvon_zombies_recovered_total[5m]) / rate(ruvon_zombies_detected_total[5m])
 - Alert: < 0.9
 ```
 

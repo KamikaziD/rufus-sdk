@@ -1,8 +1,8 @@
-# Rufus SDK Documentation
+# Ruvon SDK Documentation
 
-**Rufus** is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device (POS terminal, ATM, drone, surgical device) also powers the cloud control plane that manages that device — three roles, one runtime, no magic paths.
+**Ruvon** is a self-hosting workflow runtime for mission-critical autonomous systems. The same SDK that runs on an edge device (POS terminal, ATM, drone, surgical device) also powers the cloud control plane that manages that device — three roles, one runtime, no magic paths.
 
-**The self-hosting insight:** Rufus orchestrates itself. Configuration rollout, audit aggregation, and policy enforcement on the control plane are themselves Rufus workflows, battle-tested by their own use.
+**The self-hosting insight:** Ruvon orchestrates itself. Configuration rollout, audit aggregation, and policy enforcement on the control plane are themselves Ruvon workflows, battle-tested by their own use.
 
 **Built for:** Robotics, drones, surgical devices, industrial IoT, fleet intelligence, POS terminals, ATMs — anywhere the network is unreliable, absent, or a safety risk.
 
@@ -32,7 +32,7 @@ oriented            │                                     │   oriented
 
 ## 🎓 [Tutorials](tutorials/) - Learning-Oriented
 
-**"I want to learn how to use Rufus"**
+**"I want to learn how to use Ruvon"**
 
 Step-by-step lessons to build skills and confidence:
 
@@ -42,7 +42,7 @@ Step-by-step lessons to build skills and confidence:
 4. **[Implementing Compensation](tutorials/saga-pattern.md)** - Handle failures gracefully
 5. **[Edge Device Deployment](tutorials/edge-deployment.md)** - Deploy to real hardware
 
-**New to Rufus?** Start with [Getting Started](tutorials/getting-started.md).
+**New to Ruvon?** Start with [Getting Started](tutorials/getting-started.md).
 
 ---
 
@@ -53,7 +53,7 @@ Step-by-step lessons to build skills and confidence:
 Practical directions for common goals:
 
 ### Setup & Configuration
-- **[Installation](how-to-guides/installation.md)** - Install Rufus in your environment
+- **[Installation](how-to-guides/installation.md)** - Install Ruvon in your environment
 - **[Configuration](how-to-guides/configuration.md)** - Configure databases, executors, observers
 
 ### Building Workflows
@@ -68,6 +68,10 @@ Practical directions for common goals:
 - **[Deploy to Production](how-to-guides/deployment.md)** - Docker, Kubernetes, scaling
 - **[Optimize Performance](how-to-guides/performance.md)** - Tune for high throughput
 - **[Troubleshooting](how-to-guides/troubleshooting.md)** - Debug common issues
+
+### EchoForge
+- **[Running EchoForge](how-to-guides/echoforge-running.md)** - Docker Compose, local processes, port reference, env vars
+- **[L2 Replay Gym & Decay Tuner](how-to-guides/echoforge-replay-gym.md)** - Replay sessions, tune Bayesian decay params
 
 ### Migration
 - **[Migrate from Temporal](how-to-guides/migrate-from-temporal.md)** - Switch from Temporal.io
@@ -87,6 +91,9 @@ Dry, accurate technical specifications:
 - **[StepContext](reference/api/step-context.md)** - Context passed to step functions
 - **[Directives](reference/api/directives.md)** - Control flow exceptions
 
+### EchoForge
+- **[Bridge & Mock VALR API](reference/echoforge-api.md)** - WebSocket and REST endpoints, NATS subjects, mock control API
+
 ### Configuration Reference
 - **[YAML Schema](reference/yaml-schema.md)** - Complete workflow YAML specification
 - **[Step Types](reference/step-types.md)** - All 9 step types (STANDARD, ASYNC, LOOP, etc.)
@@ -99,7 +106,7 @@ Dry, accurate technical specifications:
 
 ## 💡 [Explanation](explanation/) - Understanding-Oriented
 
-**"I want to understand how Rufus works"**
+**"I want to understand how Ruvon works"**
 
 Context, background, and design decisions:
 
@@ -117,10 +124,14 @@ Context, background, and design decisions:
 - **[Workflow Versioning](explanation/workflow-versioning.md)** - Definition snapshots
 
 ### Fintech, Edge & Self-Hosting
-- **[Self-Hosting](explanation/self-hosting.md)** - Rufus orchestrates itself
+- **[Self-Hosting](explanation/self-hosting.md)** - Ruvon orchestrates itself
 - **[Edge Fintech Architecture](explanation/edge-architecture.md)** - POS terminals, ATMs
 - **[Store-and-Forward](explanation/store-and-forward.md)** - Offline transaction handling
 - **[Performance Model](explanation/performance.md)** - Throughput, latency, optimization
+
+### EchoForge Syndicate
+- **[EchoForge Architecture](explanation/echoforge-architecture.md)** - Sovereign browser-first quant mesh: sentinels, Bayesian echo decay, Trystero P2P, PHIC governance
+- **[EchoForge Lessons Learned](explanation/echoforge-lessons-learned.md)** - Engineering insights: stale price bugs, exposure drift, VPIN floods, CAP_TRIM as alpha source
 
 ### History & Design
 - **[Design Decisions](explanation/design-decisions.md)** - Why we chose this approach
@@ -130,14 +141,14 @@ Context, background, and design decisions:
 
 ## ⚡ [Advanced Topics](advanced/)
 
-**For experienced users pushing Rufus to its limits**
+**For experienced users pushing Ruvon to its limits**
 
 - **[Custom Providers](advanced/custom-providers.md)** - Implement your own persistence/execution
 - **[Executor Portability](advanced/executor-portability.md)** - ⚠️ Critical warnings about state management
 - **[Dynamic Injection](advanced/dynamic-injection.md)** - ⚠️ Runtime step insertion (use cautiously)
 - **[Security Considerations](advanced/security.md)** - PCI-DSS, encryption, input sanitization
 - **[Resource Management](advanced/resource-management.md)** - Memory, connections, cleanup
-- **[Extending Rufus](advanced/extending-rufus.md)** - Add new step types, observers
+- **[Extending Ruvon](advanced/extending-ruvon.md)** - Add new step types, observers
 
 ---
 
@@ -147,15 +158,15 @@ Context, background, and design decisions:
 - **[Changelog](appendices/changelog.md)** - Version history
 - **[Roadmap](appendices/roadmap.md)** - Planned features
 - **[Migration Notes](appendices/migration-notes.md)** - Breaking changes between versions
-- **[Contributing](appendices/contributing.md)** - How to contribute to Rufus
+- **[Contributing](appendices/contributing.md)** - How to contribute to Ruvon
 
 ---
 
 ## 🔗 Quick Links
 
-- **[GitHub Repository](https://github.com/KamikaziD/rufus-sdk)**
+- **[GitHub Repository](https://github.com/KamikaziD/ruvon-sdk)**
 - **[Examples](/examples/)** - Complete working examples
-- **[Debug UI](/src/rufus_server/debug_ui/)** - Visual workflow inspection
+- **[Debug UI](/src/ruvon_server/debug_ui/)** - Visual workflow inspection
 - **[CLI Quick Reference](CLI_QUICK_REFERENCE.md)** - Common commands cheat sheet
 
 ---
@@ -180,4 +191,4 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/) for s
 - **Explanation** builds understanding
 
 **Last Updated:** 2026-04-07
-**Rufus Version:** 1.0.0rc6
+**Ruvon Version:** 1.0.0rc6

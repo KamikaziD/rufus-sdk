@@ -1,4 +1,4 @@
-# Rufus Production Readiness Guide
+# Ruvon Production Readiness Guide
 
 **Last Updated**: 2026-02-09
 **Assessment**: Code-grounded analysis of 8,387 LOC SDK + 8,821 LOC tests
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-Rufus has transitioned from "architecturally designed" to **production-ready** for fintech edge deployments.
+Ruvon has transitioned from "architecturally designed" to **production-ready** for fintech edge deployments.
 
 **Production Ready Components**:
 - ✅ Core Workflow Engine (95% complete)
@@ -57,7 +57,7 @@ Previous stub implementations are now fully functional:
 
 ---
 
-### 2. Edge Agent (RufusEdgeAgent)
+### 2. Edge Agent (RuvonEdgeAgent)
 
 **Status**: ✅ **Production Ready** (after Feb 2026 updates)
 
@@ -141,7 +141,7 @@ async def resolve_conflicts(self, batch_response: dict) -> List[dict]:
 
 **Status**: ✅ **Production Ready**
 
-**Components** (`src/rufus_server/`):
+**Components** (`src/ruvon_server/`):
 
 | Component | File | Status | Endpoints |
 |-----------|------|--------|-----------|
@@ -161,7 +161,7 @@ async def resolve_conflicts(self, batch_response: dict) -> List[dict]:
 docker compose up -d
 
 # Kubernetes
-kubectl apply -f k8s/rufus-control-plane.yaml
+kubectl apply -f k8s/ruvon-control-plane.yaml
 ```
 
 **Observability**:
@@ -291,7 +291,7 @@ SQLite Workflows:    ~9,000 ops/sec (in-memory)
 ### Scenario 1: POS Terminal Fleet (100-1000 devices)
 
 **Architecture**:
-- Edge: SQLite + RufusEdgeAgent on each terminal
+- Edge: SQLite + RuvonEdgeAgent on each terminal
 - Cloud: PostgreSQL + FastAPI control plane
 
 **Production Readiness**: ✅ **Ready Now**
@@ -299,8 +299,8 @@ SQLite Workflows:    ~9,000 ops/sec (in-memory)
 **Setup**:
 ```bash
 # Edge device
-pip install rufus-edge
-rufus-edge --cloud-url https://control.company.com --device-id pos-001
+pip install ruvon-edge
+ruvon-edge --cloud-url https://control.company.com --device-id pos-001
 
 # Cloud
 docker compose up -d
@@ -323,7 +323,7 @@ docker compose up -d
 ### Scenario 2: ATM Network (10-100 devices)
 
 **Architecture**:
-- Edge: SQLite + RufusEdgeAgent + AI inference
+- Edge: SQLite + RuvonEdgeAgent + AI inference
 - Cloud: PostgreSQL + FastAPI control plane
 
 **Production Readiness**: ✅ **Ready Now**
@@ -344,7 +344,7 @@ docker compose up -d
 ### Scenario 3: Healthcare Wearables (1000+ devices)
 
 **Architecture**:
-- Edge: SQLite + RufusEdgeAgent + TFLite inference
+- Edge: SQLite + RuvonEdgeAgent + TFLite inference
 - Cloud: PostgreSQL + FastAPI control plane
 
 **Production Readiness**: ⚠️ **Mostly Ready** (load testing needed)
@@ -490,7 +490,7 @@ docker compose up -d
 
 ## Conclusion
 
-**Rufus is production-ready for fintech edge deployments** with the following caveats:
+**Ruvon is production-ready for fintech edge deployments** with the following caveats:
 
 ✅ **Use Now For**:
 - POS terminal fleets (100-1000 devices)

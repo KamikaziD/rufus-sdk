@@ -40,9 +40,9 @@ User Flow (new experience)
     5    Big button: “Share Join Link” → copies https://demo-url/?group=team-alpha-42
     6    Anyone opening that link on any device joins the same private mesh instantly
 Technical Implementation (Hybrid Transport)
-    •    Local (same device): Keep BroadcastChannel("rufus-mesh") for zero-latency
-    •    Cross-device: WebRTC DataChannels (primary) + WebSocket fallback to your existing Rufus control plane
-    •    Signaling: Simple extension of your Rufus server (or PeerJS for rapid prototyping)
+    •    Local (same device): Keep BroadcastChannel("ruvon-mesh") for zero-latency
+    •    Cross-device: WebRTC DataChannels (primary) + WebSocket fallback to your existing Ruvon control plane
+    •    Signaling: Simple extension of your Ruvon server (or PeerJS for rapid prototyping)
     ◦    New endpoint /signal/{group_key} (WebSocket room)
     ◦    Pods join the room named after the group key
     ◦    Exchange only ICE candidates, offers, answers — nothing heavy
@@ -69,7 +69,7 @@ Phase 0 (Done Today)
     •    Keep current demo exactly as-is for local testing.
 Phase 1 (1–2 days) – Quick WebSocket Signaling
     •    Add group-key modal + shareable link
-    •    Connect all pods to Rufus server via WebSocket (room = group_key)
+    •    Connect all pods to Ruvon server via WebSocket (room = group_key)
     •    Relay RUVON messages through server (simple pub/sub)
     •    Keep BroadcastChannel for local speed
 Phase 2 (2–4 days) – Full WebRTC

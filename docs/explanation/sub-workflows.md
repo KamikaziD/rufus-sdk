@@ -80,7 +80,7 @@ steps:
 A step function raises `StartSubWorkflowDirective`:
 
 ```python
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def allocate_inventory(state: OrderState, context: StepContext) -> dict:
     """Step that spawns inventory allocation sub-workflow."""
@@ -228,7 +228,7 @@ Grandparent: OrderProcessing
         └── Great-grandchild: ShippingCostCalculation
 ```
 
-**Depth Limit**: Rufus supports arbitrary nesting depth, but practical limit is 3-4 levels (beyond that, consider refactoring).
+**Depth Limit**: Ruvon supports arbitrary nesting depth, but practical limit is 3-4 levels (beyond that, consider refactoring).
 
 **Status Propagation**: Bubbles up through all levels:
 
@@ -320,7 +320,7 @@ def allocate_inventory(state, context):
 
 ### Manual Error Handling (Future Enhancement)
 
-Currently, Rufus does not support catching child failures. Planned for future:
+Currently, Ruvon does not support catching child failures. Planned for future:
 
 ```yaml
 # Planned (not yet implemented)

@@ -11,7 +11,7 @@ import pytest
 from io import StringIO
 from pydantic import BaseModel
 
-from rufus.implementations.observability.logging import (
+from ruvon.implementations.observability.logging import (
     LoggingObserver,
     StructuredLogFormatter,
 )
@@ -33,7 +33,7 @@ def _capture_logs() -> tuple:
 async def test_step_executed_includes_duration_ms():
     observer = LoggingObserver()
     handler, stream = _capture_logs()
-    observer_logger = logging.getLogger("rufus.implementations.observability.logging")
+    observer_logger = logging.getLogger("ruvon.implementations.observability.logging")
     observer_logger.addHandler(handler)
     observer_logger.setLevel(logging.DEBUG)
 
@@ -53,7 +53,7 @@ async def test_step_executed_includes_duration_ms():
 async def test_step_executed_without_duration_no_duration_key():
     observer = LoggingObserver()
     handler, stream = _capture_logs()
-    observer_logger = logging.getLogger("rufus.implementations.observability.logging")
+    observer_logger = logging.getLogger("ruvon.implementations.observability.logging")
     observer_logger.addHandler(handler)
     observer_logger.setLevel(logging.DEBUG)
 

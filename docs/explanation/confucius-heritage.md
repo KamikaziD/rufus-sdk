@@ -1,10 +1,10 @@
 # Confucius Heritage: Evolution and Improvements
 
-Rufus SDK is the production evolution of Confucius, a workflow engine prototype developed in 2025. Understanding this heritage explains Rufus's design choices and features.
+Ruvon SDK is the production evolution of Confucius, a workflow engine prototype developed in 2025. Understanding this heritage explains Ruvon's design choices and features.
 
-## What Rufus Inherited from Confucius
+## What Ruvon Inherited from Confucius
 
-Rufus preserves all core workflow capabilities that made Confucius successful:
+Ruvon preserves all core workflow capabilities that made Confucius successful:
 
 ### 1. Core Workflow Model
 
@@ -35,12 +35,12 @@ steps:
 - `PARALLEL`: Concurrent task execution
 - `HTTP`: Polyglot API integration
 
-**Enhanced in Rufus**:
+**Enhanced in Ruvon**:
 - `LOOP`: Iterate over collections (Phase 8 addition)
 - `FIRE_AND_FORGET`: Fire-and-forget async (Phase 8 addition)
 - `CRON_SCHEDULE`: Scheduled execution (Phase 8 addition)
 
-**Result**: Rufus has **100% step type parity** with Confucius Phase 8.
+**Result**: Ruvon has **100% step type parity** with Confucius Phase 8.
 
 ### 3. Saga Pattern
 
@@ -66,7 +66,7 @@ steps:
 - Status propagation (PENDING_SUB_WORKFLOW, WAITING_CHILD_HUMAN_INPUT)
 - Result merging via `sub_workflow_results`
 
-**Enhanced in Rufus**:
+**Enhanced in Ruvon**:
 - Nested saga support (child sagas trigger before parent sagas)
 - Better error handling and logging
 
@@ -97,7 +97,7 @@ class _PostgresExecutor:
 - Input sanitization for XSS/SQLi protection
 - Validates user input before workflow execution
 
-**Rufus Implementation**: `src/rufus/implementations/security/semantic_firewall.py`
+**Ruvon Implementation**: `src/ruvon/implementations/security/semantic_firewall.py`
 
 **Why Preserved**: Security is non-negotiable in fintech.
 
@@ -108,13 +108,13 @@ class _PostgresExecutor:
 - Real-time state inspection
 - Step-by-step execution controls
 
-**Rufus Port** (2026-02-13): Ported from Confucius to `src/rufus_server/debug_ui/`
+**Ruvon Port** (2026-02-13): Ported from Confucius to `src/ruvon_server/debug_ui/`
 
 **Why Preserved**: Critical for developer experience.
 
-## What Rufus Improved
+## What Ruvon Improved
 
-While preserving Confucius's features, Rufus made significant architectural improvements:
+While preserving Confucius's features, Ruvon made significant architectural improvements:
 
 ### 1. Provider Pattern Architecture
 
@@ -129,7 +129,7 @@ class Workflow:
         self.async_executor = execute_async_task
 ```
 
-**Rufus (Pluggable)**:
+**Ruvon (Pluggable)**:
 ```python
 class Workflow:
     def __init__(
@@ -153,25 +153,25 @@ class Workflow:
 
 **Confucius**: Basic Docker Compose for development.
 
-**Rufus Additions**:
+**Ruvon Additions**:
 - Kubernetes manifests with HPA (auto-scaling)
 - Production Dockerfiles with health checks
 - Celery worker scaling (3-20 replicas)
 - Monitoring (Prometheus, Grafana)
 
-**Impact**: Rufus deployable to production day 1.
+**Impact**: Ruvon deployable to production day 1.
 
 ### 3. CLI Tool
 
 **Confucius**: No CLI, all operations via API.
 
-**Rufus CLI**:
+**Ruvon CLI**:
 ```bash
-rufus list --status ACTIVE
-rufus show <workflow-id> --state --logs
-rufus retry <workflow-id> --from-step Process_Payment
-rufus scan-zombies --fix
-rufus db migrate
+ruvon list --status ACTIVE
+ruvon show <workflow-id> --state --logs
+ruvon retry <workflow-id> --from-step Process_Payment
+ruvon scan-zombies --fix
+ruvon db migrate
 ```
 
 **Impact**: Operations workflows simplified (cron jobs, kubectl exec, automation).
@@ -180,7 +180,7 @@ rufus db migrate
 
 **Confucius**: No detection. Workers crash, workflows stuck forever.
 
-**Rufus**:
+**Ruvon**:
 - HeartbeatManager sends periodic updates
 - ZombieScanner detects stale heartbeats
 - Automatic recovery: `FAILED_WORKER_CRASH`
@@ -191,7 +191,7 @@ rufus db migrate
 
 **Confucius**: All workflows use latest YAML (breaking changes break running workflows).
 
-**Rufus**:
+**Ruvon**:
 - Each workflow snapshots definition at creation
 - Running workflows immune to YAML changes
 - Natural migration (old workflows drain, new workflows start)
@@ -202,7 +202,7 @@ rufus db migrate
 
 **Confucius**: PostgreSQL or Redis only (requires server).
 
-**Rufus**:
+**Ruvon**:
 - First-class SQLite support
 - In-memory mode for testing
 - WAL mode for concurrency
@@ -221,7 +221,7 @@ rufus db migrate
 - No connection pooling
 - No import caching
 
-**Rufus Optimizations**:
+**Ruvon Optimizations**:
 - **uvloop**: 2-4x faster async I/O
 - **orjson**: 3-5x faster JSON serialization
 - **Connection pooling**: 10-50 persistent connections
@@ -233,7 +233,7 @@ rufus db migrate
 
 **Confucius Tests**: 16 files, 1,964 lines, ~60% coverage.
 
-**Rufus Tests**: 35 files, 5,800+ lines, ~75% coverage.
+**Ruvon Tests**: 35 files, 5,800+ lines, ~75% coverage.
 
 **Additions**:
 - Integration tests with Docker Compose
@@ -247,7 +247,7 @@ rufus db migrate
 
 **Confucius**: CLAUDE.md (300 lines), basic README.
 
-**Rufus**:
+**Ruvon**:
 - CLAUDE.md (800 lines, comprehensive)
 - USAGE_GUIDE.md (2,000 lines)
 - docker/SCALING.md (900 lines)
@@ -261,7 +261,7 @@ rufus db migrate
 
 ## Migration Comparison
 
-| Aspect | Confucius | Rufus |
+| Aspect | Confucius | Ruvon |
 |--------|-----------|-------|
 | **Total Lines** | 4,637 | 31,112 (+571%) |
 | **Core Library** | 4,637 lines | 10,373 lines (+223%) |
@@ -285,9 +285,9 @@ rufus db migrate
 
 ## Feature Parity Verification
 
-After deep analysis (CONFUCIUS_VS_RUFUS_ANALYSIS_ADDENDUM.md), Rufus has:
+After deep analysis (CONFUCIUS_VS_RUVON_ANALYSIS_ADDENDUM.md), Ruvon has:
 
-| Feature Category | Confucius | Rufus | Status |
+| Feature Category | Confucius | Ruvon | Status |
 |------------------|-----------|-------|--------|
 | **Step Types** | 8 types | 8 types | ✅ 100% parity |
 | **Saga Pattern** | Yes | Yes | ✅ Preserved |
@@ -298,9 +298,9 @@ After deep analysis (CONFUCIUS_VS_RUFUS_ANALYSIS_ADDENDUM.md), Rufus has:
 | **Declarative Routing** | Yes | Yes | ✅ Preserved |
 | **PostgresExecutor** | Yes | Enhanced | ✅ Improved |
 
-**Verdict**: Rufus has **100% feature parity** with Confucius + significant additions.
+**Verdict**: Ruvon has **100% feature parity** with Confucius + significant additions.
 
-## What Rufus Changed (Breaking)
+## What Ruvon Changed (Breaking)
 
 ### Import Paths
 
@@ -309,9 +309,9 @@ After deep analysis (CONFUCIUS_VS_RUFUS_ANALYSIS_ADDENDUM.md), Rufus has:
 from confucius.workflow import Workflow
 from confucius.workflow_loader import WorkflowBuilder
 
-# Rufus
-from rufus.workflow import Workflow
-from rufus.builder import WorkflowBuilder
+# Ruvon
+from ruvon.workflow import Workflow
+from ruvon.builder import WorkflowBuilder
 ```
 
 **Migration**: Find/replace imports.
@@ -322,9 +322,9 @@ from rufus.builder import WorkflowBuilder
 # Confucius (hardcoded dependencies)
 builder = WorkflowBuilder(config_dir="config/")
 
-# Rufus (inject providers)
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.celery import CeleryExecutionProvider
+# Ruvon (inject providers)
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
 
 persistence = PostgresPersistenceProvider(db_url=DB_URL)
 execution = CeleryExecutionProvider()
@@ -378,26 +378,26 @@ Confucius had 300 lines of documentation. Early users struggled with:
 
 ### 4. Testing Enables Refactoring
 
-Confucius had 60% test coverage. Refactoring to Rufus risked regressions.
+Confucius had 60% test coverage. Refactoring to Ruvon risked regressions.
 
 **Lesson**: High test coverage (75%+) enables confident refactoring.
 
 ## Migration Timeline
 
-For teams migrating from Confucius to Rufus:
+For teams migrating from Confucius to Ruvon:
 
 **Week 1**: Install and configure
-- Install Rufus: `pip install rufus`
-- Update imports: `s/confucius/rufus/g`
+- Install Ruvon: `pip install ruvon`
+- Update imports: `s/confucius/ruvon/g`
 - Initialize providers (PostgreSQL, Celery)
 
 **Week 2**: Test in staging
-- Run existing workflows on Rufus
+- Run existing workflows on Ruvon
 - Verify results match Confucius
 - Load test for performance
 
 **Week 3**: Gradual production rollout
-- Route 10% of workflows to Rufus
+- Route 10% of workflows to Ruvon
 - Monitor for errors
 - Increase to 50%, then 100%
 
@@ -415,18 +415,18 @@ For teams migrating from Confucius to Rufus:
 - **Prototype-first**: Prove concept, refine later
 - **Monolithic**: Tightly integrated components
 
-**Rufus Philosophy**:
+**Ruvon Philosophy**:
 - **Production-first**: Reliability > features
 - **Architecture-first**: Modular, testable, maintainable
 - **SDK-first**: Embeddable library, not framework
 
-**Result**: Confucius proved workflow engine viability. Rufus makes it production-ready.
+**Result**: Confucius proved workflow engine viability. Ruvon makes it production-ready.
 
 ## Community Response
 
 After porting Debug UI and verifying feature parity:
 
-> "Rufus is not just Confucius extracted—it's Confucius reimagined with production-grade architecture." —Analysis conclusion
+> "Ruvon is not just Confucius extracted—it's Confucius reimagined with production-grade architecture." —Analysis conclusion
 
 **Key Achievements**:
 - ✅ 100% feature preservation
@@ -435,11 +435,11 @@ After porting Debug UI and verifying feature parity:
 - ✅ Performance optimizations (+120% throughput)
 - ✅ Comprehensive documentation (+1,167%)
 
-**Verdict**: Rufus successfully evolved Confucius from prototype to production SDK.
+**Verdict**: Ruvon successfully evolved Confucius from prototype to production SDK.
 
 ## What's Next
 
-Now that you understand Rufus's heritage:
-- [Design Decisions](design-decisions.md) - Why Rufus is designed this way
+Now that you understand Ruvon's heritage:
+- [Design Decisions](design-decisions.md) - Why Ruvon is designed this way
 - [Architecture](architecture.md) - How Confucius lessons shaped architecture
-- [Performance](performance.md) - Optimizations added in Rufus
+- [Performance](performance.md) - Optimizations added in Ruvon

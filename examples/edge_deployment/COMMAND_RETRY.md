@@ -133,8 +133,8 @@ POST /api/v1/devices/macbook-m4-001/commands
 ### Python SDK
 
 ```python
-from rufus_server.device_service import DeviceService
-from rufus_server.retry_policy import RetryPolicy
+from ruvon_server.device_service import DeviceService
+from ruvon_server.retry_policy import RetryPolicy
 
 # Create retry policy
 retry_policy = RetryPolicy(
@@ -225,38 +225,38 @@ retry_count = max_retries
 
 **As Daemon** (runs continuously):
 ```bash
-python -m rufus_server.retry_worker \
-  --db-url postgresql://rufus:rufus@localhost:5433/rufus \
+python -m ruvon_server.retry_worker \
+  --db-url postgresql://ruvon:ruvon@localhost:5433/ruvon \
   --interval 60
 ```
 
 **One-Shot** (process once and exit):
 ```bash
-python -m rufus_server.retry_worker --once
+python -m ruvon_server.retry_worker --once
 ```
 
 **Custom Interval**:
 ```bash
 # Check every 30 seconds
-python -m rufus_server.retry_worker --interval 30
+python -m ruvon_server.retry_worker --interval 30
 
 # Check every 5 minutes
-python -m rufus_server.retry_worker --interval 300
+python -m ruvon_server.retry_worker --interval 300
 ```
 
 ### Systemd Service
 
 ```ini
 [Unit]
-Description=Rufus Command Retry Worker
+Description=Ruvon Command Retry Worker
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=rufus
-WorkingDirectory=/opt/rufus
-Environment="DATABASE_URL=postgresql://rufus:rufus@localhost/rufus"
-ExecStart=/usr/bin/python3 -m rufus_server.retry_worker --interval 60
+User=ruvon
+WorkingDirectory=/opt/ruvon
+Environment="DATABASE_URL=postgresql://ruvon:ruvon@localhost/ruvon"
+ExecStart=/usr/bin/python3 -m ruvon_server.retry_worker --interval 60
 Restart=always
 RestartSec=10
 
@@ -266,9 +266,9 @@ WantedBy=multi-user.target
 
 Enable and start:
 ```bash
-sudo systemctl enable rufus-retry-worker
-sudo systemctl start rufus-retry-worker
-sudo systemctl status rufus-retry-worker
+sudo systemctl enable ruvon-retry-worker
+sudo systemctl start ruvon-retry-worker
+sudo systemctl status ruvon-retry-worker
 ```
 
 ### Docker Compose
@@ -277,9 +277,9 @@ sudo systemctl status rufus-retry-worker
 services:
   retry-worker:
     build: .
-    command: python -m rufus_server.retry_worker --interval 60
+    command: python -m ruvon_server.retry_worker --interval 60
     environment:
-      DATABASE_URL: postgresql://rufus:rufus@postgres:5432/rufus
+      DATABASE_URL: postgresql://ruvon:ruvon@postgres:5432/ruvon
     depends_on:
       - postgres
     restart: unless-stopped
@@ -416,7 +416,7 @@ ps aux | grep retry_worker
 
 **Check retry worker logs**:
 ```bash
-journalctl -u rufus-retry-worker -f
+journalctl -u ruvon-retry-worker -f
 ```
 
 ### Retry Storm (Too Many Retries)
@@ -476,10 +476,10 @@ For existing deployments:
 
 ```bash
 # Apply migration
-psql -U rufus -d rufus < docker/migrations/add_command_retry_support.sql
+psql -U ruvon -d ruvon < docker/migrations/add_command_retry_support.sql
 
 # Verify
-psql -U rufus -d rufus -c "\d device_commands"
+psql -U ruvon -d ruvon -c "\d device_commands"
 ```
 
 ## Performance Considerations

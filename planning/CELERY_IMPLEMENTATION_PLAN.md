@@ -1,4 +1,4 @@
-# Celery Worker Implementation Plan for Rufus
+# Celery Worker Implementation Plan for Ruvon
 
 ## Current Status
 
@@ -10,9 +10,9 @@
 
 ❌ **What's Missing:**
 - Celery execution provider
-- Rufus tasks module (for Celery tasks)
+- Ruvon tasks module (for Celery tasks)
 - Worker registry for distributed workers
-- Updated celery_app.py for Rufus
+- Updated celery_app.py for Ruvon
 
 ---
 
@@ -22,11 +22,11 @@ Your `celery_app.py` references old Confucius modules that need updating:
 
 | Old Module | New Module | Status |
 |------------|------------|--------|
-| `confucius.workflow_loader` | `rufus.builder` | ✅ Exists |
-| `confucius.tasks` | `rufus.tasks` | ❌ Need to create |
-| `confucius.persistence_postgres` | `rufus.implementations.persistence.postgres` | ✅ Exists |
-| `confucius.events` | `rufus.events` (or remove if not needed) | ❓ Check if needed |
-| `confucius.worker_registry` | `rufus.worker_registry` | ❌ Need to create |
+| `confucius.workflow_loader` | `ruvon.builder` | ✅ Exists |
+| `confucius.tasks` | `ruvon.tasks` | ❌ Need to create |
+| `confucius.persistence_postgres` | `ruvon.implementations.persistence.postgres` | ✅ Exists |
+| `confucius.events` | `ruvon.events` (or remove if not needed) | ❓ Check if needed |
+| `confucius.worker_registry` | `ruvon.worker_registry` | ❌ Need to create |
 
 ---
 
@@ -34,7 +34,7 @@ Your `celery_app.py` references old Confucius modules that need updating:
 
 ### Step 1: Create Celery Execution Provider
 
-**File:** `src/rufus/implementations/execution/celery_executor.py`
+**File:** `src/ruvon/implementations/execution/celery_executor.py`
 
 ```python
 """
@@ -43,7 +43,7 @@ Celery-based execution provider for distributed workflow execution.
 
 from typing import Dict, Any, Optional, List
 from celery import Celery, current_app
-from rufus.providers.execution import ExecutionProvider
+from ruvon.providers.execution import ExecutionProvider
 import logging
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         Returns:
             task_id: Celery task ID for tracking
         """
-        from rufus.tasks import execute_async_step
+        from ruvon.tasks import execute_async_step
 
         result = execute_async_step.apply_async(
             kwargs={
@@ -108,7 +108,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         Returns:
             List of task IDs
         """
-        from rufus.tasks import execute_parallel_task
+        from ruvon.tasks import execute_parallel_task
 
         task_ids = []
         for task_config in tasks:
@@ -141,7 +141,7 @@ class CeleryExecutionProvider(ExecutionProvider):
         Returns:
             sub_workflow_id
         """
-        from rufus.tasks import create_sub_workflow
+        from ruvon.tasks import create_sub_workflow
 
         result = create_sub_workflow.apply_async(
             kwargs={
@@ -168,9 +168,9 @@ class CeleryExecutionProvider(ExecutionProvider):
 
 ---
 
-### Step 2: Create Rufus Tasks Module
+### Step 2: Create Ruvon Tasks Module
 
-**File:** `src/rufus/tasks.py`
+**File:** `src/ruvon/tasks.py`
 
 ```python
 """
@@ -195,8 +195,8 @@ class WorkflowTask(Task):
     def workflow_builder(self):
         """Lazy-load workflow builder."""
         if self._workflow_builder is None:
-            from rufus.builder import WorkflowBuilder
-            from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+            from ruvon.builder import WorkflowBuilder
+            from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
             import os
 
             db_url = os.environ.get("DATABASE_URL")
@@ -235,11 +235,11 @@ def execute_async_step(
 
     try:
         # Import step function
-        from rufus.builder import WorkflowBuilder
+        from ruvon.builder import WorkflowBuilder
         func = WorkflowBuilder._import_from_string(function_path)
 
         # Reconstruct state and context
-        from rufus.models import StepContext
+        from ruvon.models import StepContext
         from pydantic import BaseModel
 
         # Load workflow to get state model
@@ -280,10 +280,10 @@ def execute_parallel_task(
     logger.info(f"Executing parallel task {task_name} for workflow {workflow_id}")
 
     # Similar to execute_async_step
-    from rufus.builder import WorkflowBuilder
+    from ruvon.builder import WorkflowBuilder
     func = WorkflowBuilder._import_from_string(function_path)
 
-    from rufus.models import StepContext
+    from ruvon.models import StepContext
     workflow_dict = asyncio.run(self._persistence.load_workflow(workflow_id))
     state_model_class = WorkflowBuilder._import_from_string(workflow_dict['state_model_path'])
 
@@ -348,13 +348,13 @@ def trigger_scheduled_workflow(self, workflow_type: str, initial_data: Dict[str,
 
 ---
 
-### Step 3: Update celery_app.py for Rufus
+### Step 3: Update celery_app.py for Ruvon
 
 **File:** `celery_app.py` (root directory)
 
 ```python
 """
-Rufus Celery Application
+Ruvon Celery Application
 """
 
 from celery import Celery
@@ -362,7 +362,7 @@ import os
 from celery.signals import worker_process_init, worker_ready, worker_shutdown
 
 # Create Celery app
-celery_app = Celery('rufus')
+celery_app = Celery('ruvon')
 
 # Configure Celery
 celery_app.conf.update(
@@ -371,7 +371,7 @@ celery_app.conf.update(
 
     # Task modules
     include=[
-        'rufus.tasks',  # Core Rufus tasks
+        'ruvon.tasks',  # Core Ruvon tasks
     ],
 
     # Task settings
@@ -392,14 +392,14 @@ celery_app.conf.update(
     # Task routing (optional - for regional queues)
     task_create_missing_queues=True,
     task_default_queue='default',
-    task_default_exchange='rufus',
+    task_default_exchange='ruvon',
     task_default_routing_key='default',
 )
 
 # Beat schedule (for cron workflows)
 celery_app.conf.beat_schedule = {
     'poll-scheduled-workflows': {
-        'task': 'rufus.tasks.poll_scheduled_workflows',
+        'task': 'ruvon.tasks.poll_scheduled_workflows',
         'schedule': 60.0,  # Every minute
     },
 }
@@ -423,7 +423,7 @@ def on_worker_ready(**kwargs):
     Called when worker is ready to accept tasks.
     """
     hostname = kwargs.get('sender').hostname
-    print(f"✅ Rufus Celery worker ready: {hostname}")
+    print(f"✅ Ruvon Celery worker ready: {hostname}")
 
 
 @worker_shutdown.connect
@@ -432,7 +432,7 @@ def on_worker_shutdown(**kwargs):
     Called when worker is shutting down.
     """
     hostname = kwargs.get('sender').hostname
-    print(f"👋 Rufus Celery worker shutting down: {hostname}")
+    print(f"👋 Ruvon Celery worker shutting down: {hostname}")
 ```
 
 ---
@@ -464,7 +464,7 @@ all = [
 
 ### Step 5: Create CLI Integration
 
-**Update:** `src/rufus_cli/commands/worker_cmd.py` (new file)
+**Update:** `src/ruvon_cli/commands/worker_cmd.py` (new file)
 
 ```python
 """
@@ -530,10 +530,10 @@ def start_beat(
 
 ```bash
 # Install with Celery support
-pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git@main"
+pip install "ruvon[celery] @ git+https://github.com/KamikaziD/ruvon-sdk.git@main"
 
 # Or with all features
-pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@main"
+pip install "ruvon[all] @ git+https://github.com/KamikaziD/ruvon-sdk.git@main"
 ```
 
 ### Configuration
@@ -542,7 +542,7 @@ pip install "rufus[all] @ git+https://github.com/KamikaziD/rufus-sdk.git@main"
 # Set environment variables
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
-export DATABASE_URL="postgresql://user:pass@localhost/rufus"
+export DATABASE_URL="postgresql://user:pass@localhost/ruvon"
 export WORKFLOW_CONFIG_DIR="/path/to/workflow/configs"
 ```
 
@@ -558,17 +558,17 @@ celery -A celery_app worker --concurrency=4 --loglevel=info
 # Start Celery beat (for scheduled workflows)
 celery -A celery_app beat --loglevel=info
 
-# Or use Rufus CLI (after implementing worker commands)
-rufus worker start --concurrency=4
-rufus worker beat
+# Or use Ruvon CLI (after implementing worker commands)
+ruvon worker start --concurrency=4
+ruvon worker beat
 ```
 
 ### Use in Code
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.celery_executor import CeleryExecutionProvider
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.celery_executor import CeleryExecutionProvider
 from celery_app import celery_app
 
 # Initialize
@@ -605,7 +605,7 @@ celery -A celery_app worker --loglevel=debug
 # In another terminal, run workflow
 python << 'EOF'
 import asyncio
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 # ... create workflow with Celery executor ...
 EOF
 ```
@@ -616,7 +616,7 @@ EOF
 
 1. ✅ Review this plan
 2. Implement CeleryExecutionProvider
-3. Implement rufus.tasks module
+3. Implement ruvon.tasks module
 4. Update celery_app.py
 5. Add Celery to pyproject.toml
 6. Test with a simple workflow
@@ -628,8 +628,8 @@ EOF
 **Estimated Effort:** 4-6 hours for complete implementation and testing
 
 **Priority Files:**
-1. `src/rufus/implementations/execution/celery_executor.py` (High)
-2. `src/rufus/tasks.py` (High)
+1. `src/ruvon/implementations/execution/celery_executor.py` (High)
+2. `src/ruvon/tasks.py` (High)
 3. `celery_app.py` update (Medium)
 4. `pyproject.toml` dependencies (Medium)
 5. CLI worker commands (Low - nice to have)

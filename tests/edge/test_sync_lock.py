@@ -10,9 +10,9 @@ import pytest_asyncio
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus_edge.sync_manager import SyncManager
-from rufus_edge.models import SyncStatus
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon_edge.sync_manager import SyncManager
+from ruvon_edge.models import SyncStatus
 
 
 @pytest_asyncio.fixture

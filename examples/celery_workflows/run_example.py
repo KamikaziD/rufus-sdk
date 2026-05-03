@@ -16,12 +16,12 @@ from pathlib import Path
 # Add example directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def run_order_processing_example():
@@ -36,7 +36,7 @@ async def run_order_processing_example():
     print("="*70 + "\n")
 
     # Initialize providers
-    db_url = os.environ.get("DATABASE_URL", "postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example")
     execution = CeleryExecutionProvider()
     persistence = PostgresPersistenceProvider(db_url=db_url)
     await persistence.initialize()
@@ -111,7 +111,7 @@ async def run_order_processing_example():
 
     print(f"\n✅ Example complete - workflow ID: {workflow.id}")
     print(f"📋 To check workflow status:")
-    print(f"   rufus show {workflow.id}")
+    print(f"   ruvon show {workflow.id}")
 
 
 async def run_payment_example():
@@ -126,7 +126,7 @@ async def run_payment_example():
     print("="*70 + "\n")
 
     # Initialize providers
-    db_url = os.environ.get("DATABASE_URL", "postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example")
     execution = CeleryExecutionProvider()
     persistence = PostgresPersistenceProvider(db_url=db_url)
     await persistence.initialize()

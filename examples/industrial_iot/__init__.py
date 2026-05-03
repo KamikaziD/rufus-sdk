@@ -1,5 +1,5 @@
 """
-Industrial IoT Predictive Maintenance Demo - Rufus Edge AI Inference
+Industrial IoT Predictive Maintenance Demo - Ruvon Edge AI Inference
 
 Demonstrates on-device AI for manufacturing equipment monitoring:
 - Vibration analysis for bearing failure prediction

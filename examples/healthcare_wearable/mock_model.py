@@ -177,7 +177,7 @@ class MockInferenceProvider:
 
     @property
     def runtime(self):
-        from rufus.providers.inference import InferenceRuntime
+        from ruvon.providers.inference import InferenceRuntime
         return InferenceRuntime.TFLITE  # Pretend to be TFLite
 
 

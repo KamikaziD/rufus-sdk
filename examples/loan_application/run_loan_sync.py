@@ -13,13 +13,13 @@ Demonstrates complex workflow features:
 """
 from state_models import LoanApplicationState, UserProfileState
 import yaml
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.engine import WorkflowEngine
-from rufus.models import WorkflowPauseDirective
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.engine import WorkflowEngine
+from ruvon.models import WorkflowPauseDirective
 import asyncio
 import os
 import sys

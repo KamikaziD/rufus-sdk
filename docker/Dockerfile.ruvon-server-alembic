@@ -1,0 +1,75 @@
+# Production Ruvon Server Dockerfile with Alembic Migrations
+# Installs ruvon-sdk from PyPI and runs Alembic migrations on startup
+
+FROM python:3.11-slim
+
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine - REST API Server with Alembic Migrations"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ruvon-sdk from PyPI (TEMPORARY - for testing)
+# TODO: Switch to production PyPI once published
+
+# First install ruvon-sdk core from PyPI
+RUN pip install --no-cache-dir \
+    --index-url https://pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'ruvon-sdk==0.3.6'
+
+# Then install extras from PyPI to avoid broken packages on PyPI
+RUN pip install --no-cache-dir \
+    fastapi>=0.100 \
+    uvicorn[standard]>=0.20 \
+    starlette>=0.27 \
+    slowapi>=0.1 \
+    asyncpg>=0.27 \
+    rich>=13.0 \
+    uvloop>=0.19 \
+    websockets>=12.0 \
+    psutil>=5.9 \
+    numpy>=1.24 \
+    celery[redis]>=5.3 \
+    redis>=5.0 \
+    psycopg2-binary>=2.9 \
+    prometheus-client>=0.19 \
+    alembic>=1.13
+
+# PRODUCTION VERSION (uncomment when published to PyPI):
+# RUN pip install --no-cache-dir 'ruvon-sdk[all]'
+
+# Create directories for user code (will be mounted as volumes)
+RUN mkdir -p /app/config /app/user_code /app/src/ruvon
+
+# Copy Alembic configuration and migrations
+COPY src/ruvon/alembic /app/src/ruvon/alembic
+COPY src/ruvon/alembic.ini /app/src/ruvon/alembic.ini
+
+# Copy entrypoint script
+COPY docker/entrypoint-server.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Set Python path to include user code directory
+ENV PYTHONPATH=/app:/app/user_code
+
+# Default environment variables (override in docker-compose)
+ENV DATABASE_URL=postgresql://ruvon:ruvon_secret@postgres:5432/ruvon_production
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# Expose API port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5)" || exit 1
+
+# Use entrypoint script to run migrations then start server
+ENTRYPOINT ["/app/entrypoint.sh"]

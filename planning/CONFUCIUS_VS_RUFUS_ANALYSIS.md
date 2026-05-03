@@ -1,4 +1,4 @@
-# Deep Dive Comparison: Confucius vs Rufus
+# Deep Dive Comparison: Confucius vs Ruvon
 
 **Analysis Date:** 2026-02-13
 **Analyzer:** Claude Sonnet 4.5
@@ -9,19 +9,19 @@
 
 **Confucius** was a monolithic workflow engine prototype tightly coupled to a specific application (loan processing).
 
-**Rufus** is a production-grade SDK extracted and refactored from Confucius with:
+**Ruvon** is a production-grade SDK extracted and refactored from Confucius with:
 - **5.7x code growth** (4,637 → 31,112 lines) due to proper architecture
 - **Clean separation of concerns** via provider interfaces
 - **Production features** (Docker, Kubernetes, CLI, auto-scaling)
 - **SDK-first design** for reusability
 
-**Key Verdict:** Rufus is not just an extraction—it's a complete architectural redesign for production use.
+**Key Verdict:** Ruvon is not just an extraction—it's a complete architectural redesign for production use.
 
 ---
 
 ## 1. Code Metrics
 
-| Metric | Confucius | Rufus | Change |
+| Metric | Confucius | Ruvon | Change |
 |--------|-----------|-------|--------|
 | **Total Files** | 22 | 125 | +468% |
 | **Total Lines** | 4,637 | 31,112 | +571% |
@@ -35,7 +35,7 @@
 | **Documentation** | CLAUDE.md (300 lines) | 5 docs, ~3,500 lines | +1,167% |
 
 **Analysis:**
-- Rufus growth is **architectural**, not bloat
+- Ruvon growth is **architectural**, not bloat
 - Provider pattern adds ~500 lines but enables pluggability
 - CLI adds ~4,000 lines but provides production usability
 - Documentation is 11x more comprehensive
@@ -68,14 +68,14 @@
 └─────────────────────────────────────────┘
 ```
 
-**Rufus: SDK-First Design**
+**Ruvon: SDK-First Design**
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Client Application                    │
 └─────────────────────┬───────────────────────────────────┘
                       │
           ┌───────────▼──────────┐
-          │   Rufus SDK (Core)   │
+          │   Ruvon SDK (Core)   │
           │  ┌──────────────┐    │
           │  │  Workflow    │    │
           │  │   Engine     │    │
@@ -97,14 +97,14 @@
                                       └── PrometheusObserver
 
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│   Rufus CLI      │  │  Rufus Server    │  │  Docker/K8s      │
+│   Ruvon CLI      │  │  Ruvon Server    │  │  Docker/K8s      │
 │  (Management)    │  │   (FastAPI)      │  │  (Deployment)    │
 └──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
 **Key Differences:**
 - Confucius: Tight coupling, hard to test, hard to extend
-- Rufus: Dependency injection, pluggable backends, testable
+- Ruvon: Dependency injection, pluggable backends, testable
 
 ---
 
@@ -125,9 +125,9 @@ class Workflow:
         self.async_executor = execute_async_task
 ```
 
-**Rufus: Provider Injection**
+**Ruvon: Provider Injection**
 ```python
-# src/rufus/workflow.py (LINE ~50)
+# src/ruvon/workflow.py (LINE ~50)
 class Workflow:
     def __init__(
         self,
@@ -142,33 +142,33 @@ class Workflow:
 ```
 
 **Impact:**
-- ✅ Rufus can swap SQLite ↔ PostgreSQL without code changes
-- ✅ Rufus can run sync (dev) or Celery (prod) via config
-- ✅ Rufus testable with in-memory providers
+- ✅ Ruvon can swap SQLite ↔ PostgreSQL without code changes
+- ✅ Ruvon can run sync (dev) or Celery (prod) via config
+- ✅ Ruvon testable with in-memory providers
 - ❌ Confucius requires Redis + Celery even for simple tests
 
 ---
 
 ### 2.3 Provider Pattern Deep Dive
 
-**Rufus Provider Interfaces:**
+**Ruvon Provider Interfaces:**
 
 ```python
-# src/rufus/providers/persistence.py
+# src/ruvon/providers/persistence.py
 class PersistenceProvider(Protocol):
     async def save_workflow(self, workflow_id: str, workflow_dict: Dict) -> None: ...
     async def load_workflow(self, workflow_id: str) -> Optional[Dict]: ...
     async def list_workflows(self, ...) -> List[Dict]: ...
     # + 15 more methods
 
-# src/rufus/providers/execution.py
+# src/ruvon/providers/execution.py
 class ExecutionProvider(Protocol):
     def dispatch_async_task(self, func_path: str, ...) -> str: ...
     def dispatch_parallel_tasks(self, tasks: List[ParallelTask], ...) -> str: ...
     def execute_sync_step_function(self, func: Callable, ...) -> Dict: ...
     # + 8 more methods
 
-# src/rufus/providers/observer.py
+# src/ruvon/providers/observer.py
 class WorkflowObserver(Protocol):
     def on_workflow_started(self, workflow_id: str, ...) -> None: ...
     def on_step_executed(self, workflow_id: str, ...) -> None: ...
@@ -183,40 +183,40 @@ class WorkflowObserver(Protocol):
 
 ### 3.1 Core Features Matrix
 
-| Feature | Confucius | Rufus | Notes |
+| Feature | Confucius | Ruvon | Notes |
 |---------|-----------|-------|-------|
 | **Workflow Definition (YAML)** | ✅ | ✅ | Similar |
 | **Step Types: STANDARD** | ✅ | ✅ | Identical |
 | **Step Types: ASYNC** | ✅ | ✅ | Identical |
 | **Step Types: DECISION** | ✅ | ✅ | Identical |
 | **Step Types: PARALLEL** | ✅ | ✅ | Identical |
-| **Step Types: HTTP** | ❌ | ✅ | **Rufus adds polyglot support** |
-| **Step Types: FIRE_AND_FORGET** | ❌ | ✅ | **Rufus addition** |
-| **Step Types: LOOP** | ❌ | ✅ | **Rufus addition** |
-| **Step Types: CRON_SCHEDULE** | ❌ | ✅ | **Rufus addition** |
-| **Sub-Workflows** | ✅ | ✅ | Rufus has better status bubbling |
+| **Step Types: HTTP** | ❌ | ✅ | **Ruvon adds polyglot support** |
+| **Step Types: FIRE_AND_FORGET** | ❌ | ✅ | **Ruvon addition** |
+| **Step Types: LOOP** | ❌ | ✅ | **Ruvon addition** |
+| **Step Types: CRON_SCHEDULE** | ❌ | ✅ | **Ruvon addition** |
+| **Sub-Workflows** | ✅ | ✅ | Ruvon has better status bubbling |
 | **Saga Pattern** | ✅ | ✅ | Identical |
 | **Dynamic Injection** | ✅ | ✅ | Similar (both risky) |
 | **Automate Next** | ✅ | ✅ | Identical |
 | **State Management** | ✅ (Pydantic) | ✅ (Pydantic) | Identical |
-| **Conditional Branching** | ✅ (Jump) | ✅ (Jump + Routes) | Rufus adds declarative routes |
+| **Conditional Branching** | ✅ (Jump) | ✅ (Jump + Routes) | Ruvon adds declarative routes |
 | **Human-in-the-Loop** | ✅ | ✅ | Identical |
 
 ---
 
 ### 3.2 Persistence Features
 
-| Feature | Confucius | Rufus | Winner |
+| Feature | Confucius | Ruvon | Winner |
 |---------|-----------|-------|--------|
-| **Redis Support** | ✅ (only option) | ✅ (optional) | Rufus |
-| **PostgreSQL Support** | ⚠️ (added late) | ✅ (first-class) | **Rufus** |
-| **SQLite Support** | ❌ | ✅ | **Rufus** |
-| **In-Memory (Testing)** | ❌ | ✅ | **Rufus** |
-| **Schema Migrations** | Manual SQL | ✅ Alembic | **Rufus** |
-| **Audit Logging** | ✅ (PostgreSQL only) | ✅ (all backends) | Rufus |
+| **Redis Support** | ✅ (only option) | ✅ (optional) | Ruvon |
+| **PostgreSQL Support** | ⚠️ (added late) | ✅ (first-class) | **Ruvon** |
+| **SQLite Support** | ❌ | ✅ | **Ruvon** |
+| **In-Memory (Testing)** | ❌ | ✅ | **Ruvon** |
+| **Schema Migrations** | Manual SQL | ✅ Alembic | **Ruvon** |
+| **Audit Logging** | ✅ (PostgreSQL only) | ✅ (all backends) | Ruvon |
 | **Metrics Table** | ✅ | ✅ | Tie |
-| **Transaction Safety** | ⚠️ (Redis = eventual) | ✅ (ACID with PG) | **Rufus** |
-| **Connection Pooling** | ❌ | ✅ | **Rufus** |
+| **Transaction Safety** | ⚠️ (Redis = eventual) | ✅ (ACID with PG) | **Ruvon** |
+| **Connection Pooling** | ❌ | ✅ | **Ruvon** |
 
 **Code Example - Confucius (Hardcoded):**
 ```python
@@ -232,11 +232,11 @@ def get_persistence():
         return RedisPersistence(os.getenv("REDIS_URL"))
 ```
 
-**Code Example - Rufus (Pluggable):**
+**Code Example - Ruvon (Pluggable):**
 ```python
 # User application code
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 # Choose backend at runtime via config
 if config.persistence == "sqlite":
@@ -252,7 +252,7 @@ workflow = builder.create_workflow("MyWorkflow", persistence_provider=persistenc
 
 ### 3.3 Execution Providers
 
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Sync Execution** | ⚠️ (Celery always required) | ✅ SyncExecutionProvider |
 | **Celery Execution** | ✅ | ✅ CeleryExecutionProvider |
@@ -275,9 +275,9 @@ def _execute_async_step(self, step, state, context):
     )
 ```
 
-**Rufus Code (Pluggable Execution):**
+**Ruvon Code (Pluggable Execution):**
 ```python
-# src/rufus/workflow.py (LINE ~450)
+# src/ruvon/workflow.py (LINE ~450)
 def _execute_async_step(self, step, state, context):
     # Dispatches to injected ExecutionProvider
     task_id = self.execution.dispatch_async_task(
@@ -295,7 +295,7 @@ def _execute_async_step(self, step, state, context):
 
 ### 3.4 Observability
 
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Logging** | ✅ (print statements) | ✅ (structured logging) |
 | **Metrics** | ✅ (PostgreSQL table) | ✅ (PostgreSQL table) |
@@ -315,9 +315,9 @@ def execute_step(self, step, user_input):
     print(f"Step completed: {step.name}")  # Hardcoded print
 ```
 
-**Rufus Code (Observer Pattern):**
+**Ruvon Code (Observer Pattern):**
 ```python
-# src/rufus/workflow.py (LINE ~220)
+# src/ruvon/workflow.py (LINE ~220)
 def execute_step(self, step, user_input):
     # Notify observer (pluggable)
     self.observer.on_step_started(self.id, step.name)
@@ -363,9 +363,9 @@ CREATE TABLE workflow_audit_log (
 -- No versioning, no migration system
 ```
 
-**Rufus Schema (Alembic Migrations):**
+**Ruvon Schema (Alembic Migrations):**
 ```python
-# src/rufus/alembic/versions/001_initial_schema.py
+# src/ruvon/alembic/versions/001_initial_schema.py
 def upgrade():
     op.create_table(
         'workflow_executions',
@@ -386,7 +386,7 @@ def downgrade():
 ```
 
 **Migration System:**
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Version Tracking** | ❌ | ✅ `alembic_version` table |
 | **Incremental Migrations** | ❌ | ✅ Alembic history |
@@ -396,7 +396,7 @@ def downgrade():
 
 ---
 
-### 4.2 Schema Additions in Rufus
+### 4.2 Schema Additions in Ruvon
 
 **New Tables:**
 ```sql
@@ -420,7 +420,7 @@ CREATE TABLE worker_nodes (
     last_heartbeat TIMESTAMPTZ
 );
 
--- Edge device registry (NEW in Rufus)
+-- Edge device registry (NEW in Ruvon)
 CREATE TABLE edge_devices (
     device_id VARCHAR(100) PRIMARY KEY,
     device_type VARCHAR(50),
@@ -459,9 +459,9 @@ def get_workflow_router():
     return router
 ```
 
-**Rufus API (Dedicated Server):**
+**Ruvon API (Dedicated Server):**
 ```python
-# src/rufus_server/routers/workflows.py (LINE ~1-500)
+# src/ruvon_server/routers/workflows.py (LINE ~1-500)
 from fastapi import APIRouter, Depends
 
 router = APIRouter(prefix="/api/v1/workflows")
@@ -488,7 +488,7 @@ async def cancel_workflow(...): ...
 ```
 
 **API Coverage:**
-| Endpoint Category | Confucius | Rufus |
+| Endpoint Category | Confucius | Ruvon |
 |-------------------|-----------|-------|
 | **Workflow CRUD** | 6 endpoints | 12 endpoints |
 | **Metrics/Monitoring** | 0 | 4 endpoints |
@@ -504,27 +504,27 @@ async def cancel_workflow(...): ...
 
 **Confucius:** No CLI tool
 
-**Rufus:** Full-featured CLI (`src/rufus_cli/`)
+**Ruvon:** Full-featured CLI (`src/ruvon_cli/`)
 
 ```bash
 # Workflow Management
-rufus list --status ACTIVE --type OrderProcessing
-rufus start OrderProcessing --data '{"user_id": "123"}'
-rufus show <workflow-id> --state --logs
-rufus resume <workflow-id> --input '{"approval": true}'
-rufus cancel <workflow-id>
+ruvon list --status ACTIVE --type OrderProcessing
+ruvon start OrderProcessing --data '{"user_id": "123"}'
+ruvon show <workflow-id> --state --logs
+ruvon resume <workflow-id> --input '{"approval": true}'
+ruvon cancel <workflow-id>
 
 # Database Management
-rufus db init
-rufus db migrate
-rufus db stats
+ruvon db init
+ruvon db migrate
+ruvon db stats
 
 # Configuration
-rufus config set-persistence --provider postgres
-rufus config show
+ruvon config set-persistence --provider postgres
+ruvon config show
 
 # Zombie Recovery
-rufus scan-zombies --fix
+ruvon scan-zombies --fix
 ```
 
 **CLI Features:**
@@ -535,7 +535,7 @@ rufus scan-zombies --fix
 - ✅ Workflow lifecycle management
 - ✅ Non-interactive mode (CI/CD)
 
-**Impact:** Rufus usable in production without writing application code
+**Impact:** Ruvon usable in production without writing application code
 
 ---
 
@@ -552,7 +552,7 @@ RUN pip install -r requirements.txt
 CMD ["uvicorn", "main:app"]
 ```
 
-**Rufus:**
+**Ruvon:**
 ```dockerfile
 # docker/Dockerfile.celery-worker (LINE ~1-40)
 FROM python:3.11-slim
@@ -563,7 +563,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Health checks
 HEALTHCHECK --interval=30s --timeout=10s \
-    CMD celery -A rufus.celery_app inspect ping || exit 1
+    CMD celery -A ruvon.celery_app inspect ping || exit 1
 
 # Proper signal handling
 STOPSIGNAL SIGTERM
@@ -572,13 +572,13 @@ STOPSIGNAL SIGTERM
 ENV WORKER_CONCURRENCY=4
 ENV WORKER_POOL=prefork
 
-CMD celery -A rufus.celery_app worker \
+CMD celery -A ruvon.celery_app worker \
     --loglevel=${WORKER_LOG_LEVEL} \
     --concurrency=${WORKER_CONCURRENCY}
 ```
 
 **Docker Maturity:**
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Multi-stage Builds** | ❌ | ✅ |
 | **Health Checks** | ❌ | ✅ |
@@ -594,14 +594,14 @@ CMD celery -A rufus.celery_app worker \
 
 **Confucius:** No Kubernetes manifests
 
-**Rufus:** Production-grade Kubernetes deployment
+**Ruvon:** Production-grade Kubernetes deployment
 
 ```yaml
 # docker/kubernetes/celery-worker-deployment.yaml (LINE ~1-80)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-celery-worker
+  name: ruvon-celery-worker
 spec:
   replicas: 3
   template:
@@ -630,7 +630,7 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: rufus-celery-worker-hpa
+  name: ruvon-celery-worker-hpa
 spec:
   minReplicas: 3
   maxReplicas: 20
@@ -644,7 +644,7 @@ spec:
 ```
 
 **Kubernetes Features:**
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Deployment Manifests** | ❌ | ✅ |
 | **HorizontalPodAutoscaler** | ❌ | ✅ (3-20 replicas) |
@@ -667,7 +667,7 @@ Single Process (FastAPI + Celery Worker)
 └── No auto-scaling support
 ```
 
-**Rufus Scaling:**
+**Ruvon Scaling:**
 ```
 ┌────────────────────────────────────────────┐
 │  Kubernetes Cluster                        │
@@ -715,7 +715,7 @@ Total: 16 files, 1,964 lines
 Coverage: ~60% (estimated)
 ```
 
-**Rufus Tests:**
+**Ruvon Tests:**
 ```
 tests/
 ├── sdk/
@@ -739,7 +739,7 @@ Coverage: ~75% (measured)
 ```
 
 **Test Quality Matrix:**
-| Feature | Confucius | Rufus |
+| Feature | Confucius | Ruvon |
 |---------|-----------|-------|
 | **Unit Tests** | ✅ | ✅ |
 | **Integration Tests** | ⚠️ (require infra) | ✅ (Docker Compose) |
@@ -761,7 +761,7 @@ def execute_step(self, step, user_input):  # No type hints
     result = step.func(state=self.state, ...)  # Any type
     return result
 
-# Rufus (LINE ~220 in workflow.py)
+# Ruvon (LINE ~220 in workflow.py)
 def execute_step(
     self,
     step: WorkflowStep,
@@ -780,7 +780,7 @@ except Exception as e:
     self.status = "FAILED"
     raise
 
-# Rufus (comprehensive error handling)
+# Ruvon (comprehensive error handling)
 try:
     result = step.func(state=self.state)
 except WorkflowJumpDirective as directive:
@@ -804,7 +804,7 @@ except Exception as e:
 ```
 
 **Code Quality:**
-| Metric | Confucius | Rufus |
+| Metric | Confucius | Ruvon |
 |--------|-----------|-------|
 | **Type Hints Coverage** | ~30% | ~85% |
 | **Docstring Coverage** | ~40% | ~90% |
@@ -823,7 +823,7 @@ except Exception as e:
 - Inline comments (sparse)
 - **Total: ~400 lines**
 
-**Rufus Documentation:**
+**Ruvon Documentation:**
 - CLAUDE.md (800 lines - comprehensive)
 - README.md (detailed)
 - USAGE_GUIDE.md (2,000 lines)
@@ -833,7 +833,7 @@ except Exception as e:
 - **Total: ~5,000 lines**
 
 **Documentation Coverage:**
-| Topic | Confucius | Rufus |
+| Topic | Confucius | Ruvon |
 |-------|-----------|-------|
 | **Getting Started** | ✅ | ✅ |
 | **API Reference** | ⚠️ Basic | ✅ OpenAPI |
@@ -851,7 +851,7 @@ except Exception as e:
 
 ### 9.1 Production Features Checklist
 
-| Feature | Confucius | Rufus | Priority |
+| Feature | Confucius | Ruvon | Priority |
 |---------|-----------|-------|----------|
 | **Horizontal Scaling** | ❌ | ✅ | HIGH |
 | **Auto-Scaling** | ❌ | ✅ | HIGH |
@@ -871,7 +871,7 @@ except Exception as e:
 
 **Production Readiness Score:**
 - Confucius: 3/15 (20%)
-- Rufus: 10/15 (67%)
+- Ruvon: 10/15 (67%)
 
 ---
 
@@ -883,7 +883,7 @@ except Exception as e:
 - No workflow versioning
 - No migration system
 
-**Rufus:**
+**Ruvon:**
 - **Tier 1:** Basic reliability (inherited from Confucius)
   - Audit logging
   - Metrics
@@ -921,7 +921,7 @@ Memory per workflow: ~5MB
 Database connections: ~10 (no pooling)
 ```
 
-**Rufus Performance:**
+**Ruvon Performance:**
 ```
 Throughput: ~120 workflows/sec (+140%)
 Latency (p50): 180ms (-28%)
@@ -948,7 +948,7 @@ Max workers: ~10 (Celery, manual scaling)
 Database: Redis (in-memory limit)
 ```
 
-**Rufus Scalability:**
+**Ruvon Scalability:**
 ```
 Max concurrent workflows: 10,000+ (Kubernetes HPA)
 Max workers: 100+ (auto-scaling)
@@ -956,7 +956,7 @@ Database: PostgreSQL (disk-backed, no memory limit)
 ```
 
 **Bottleneck Analysis:**
-| Bottleneck | Confucius | Rufus | Mitigation |
+| Bottleneck | Confucius | Ruvon | Mitigation |
 |------------|-----------|-------|------------|
 | **Database Connections** | ✅ Issue | ✅ Solved (pooling) | Connection pool |
 | **Worker Scaling** | ✅ Manual | ✅ Auto (HPA) | Kubernetes |
@@ -968,7 +968,7 @@ Database: PostgreSQL (disk-backed, no memory limit)
 
 ## 11. Security Comparison
 
-| Security Feature | Confucius | Rufus | Notes |
+| Security Feature | Confucius | Ruvon | Notes |
 |------------------|-----------|-------|-------|
 | **Authentication** | ❌ | ⚠️ JWT (planned) | API security |
 | **Authorization** | ❌ | ⚠️ RBAC (planned) | Role-based access |
@@ -983,15 +983,15 @@ Database: PostgreSQL (disk-backed, no memory limit)
 
 **Security Posture:**
 - Confucius: Development-grade (OWASP Top 10 gaps)
-- Rufus: Production-aware (better defaults, planned enterprise features)
+- Ruvon: Production-aware (better defaults, planned enterprise features)
 
 ---
 
-## 12. Edge Computing Features (Rufus Only)
+## 12. Edge Computing Features (Ruvon Only)
 
 **Confucius:** Not designed for edge deployment
 
-**Rufus:** First-class edge support
+**Ruvon:** First-class edge support
 
 **Edge Features:**
 | Feature | Description |
@@ -1026,7 +1026,7 @@ steps:
 ┌─────────────────────────────────────────┐
 │          Cloud Control Plane            │
 │  ┌────────────────────────────────┐    │
-│  │  Rufus Server (PostgreSQL)     │    │
+│  │  Ruvon Server (PostgreSQL)     │    │
 │  │  - Device registry             │    │
 │  │  - Config server (ETag)        │    │
 │  │  - Transaction sync            │    │
@@ -1037,7 +1037,7 @@ steps:
 ┌───────────────▼────────────────────────┐
 │          Edge Device (POS)             │
 │  ┌────────────────────────────────┐   │
-│  │  RufusEdgeAgent (SQLite)       │   │
+│  │  RuvonEdgeAgent (SQLite)       │   │
 │  │  - Offline workflows           │   │
 │  │  - Store-and-forward queue     │   │
 │  │  - Config sync                 │   │
@@ -1063,7 +1063,7 @@ steps:
 Total: $45/month + labor
 ```
 
-**Rufus Deployment (Typical):**
+**Ruvon Deployment (Typical):**
 ```
 - Kubernetes cluster (managed): $70/month
 - RDS PostgreSQL (db.t3.small): $25/month
@@ -1080,10 +1080,10 @@ Total: $144/month
 
 **Cost per Workflow Execution:**
 - Confucius: ~$0.0001 (50 workflows/sec * 2.6M workflows/month)
-- Rufus: ~$0.00005 (120 workflows/sec * 6.2M workflows/month, 50% cheaper)
+- Ruvon: ~$0.00005 (120 workflows/sec * 6.2M workflows/month, 50% cheaper)
 
 **Cost Efficiency:**
-- Rufus processes 2.4x more workflows for 3.2x cost = **25% better cost/workflow**
+- Ruvon processes 2.4x more workflows for 3.2x cost = **25% better cost/workflow**
 - With spot instances: **66% better cost/workflow**
 
 ---
@@ -1092,7 +1092,7 @@ Total: $144/month
 
 **Time to Production:**
 
-| Phase | Confucius | Rufus |
+| Phase | Confucius | Ruvon |
 |-------|-----------|-------|
 | **Initial Setup** | 2 hours | 30 minutes (via quick-start.sh) |
 | **Add Workflow** | 1 hour | 30 minutes (better tooling) |
@@ -1103,20 +1103,20 @@ Total: $144/month
 
 **Total Time to Production:**
 - Confucius: ~39 hours
-- Rufus: ~6 hours
+- Ruvon: ~6 hours
 
-**Developer Productivity:** Rufus is **6.5x faster** to production
+**Developer Productivity:** Ruvon is **6.5x faster** to production
 
 ---
 
-## 14. Migration Path (Confucius → Rufus)
+## 14. Migration Path (Confucius → Ruvon)
 
 ### 14.1 Compatibility Assessment
 
 **Breaking Changes:**
 | Area | Breaking Change | Migration Effort |
 |------|-----------------|------------------|
-| **Import Paths** | `from confucius.workflow` → `from rufus.workflow` | LOW (find/replace) |
+| **Import Paths** | `from confucius.workflow` → `from ruvon.workflow` | LOW (find/replace) |
 | **Provider Injection** | Hardcoded → Constructor injection | MEDIUM (refactor initialization) |
 | **Persistence API** | Direct Redis → Provider interface | MEDIUM (update calls) |
 | **Celery Tasks** | Different signatures | LOW (mostly compatible) |
@@ -1129,10 +1129,10 @@ Total: $144/month
 
 ### 14.2 Migration Steps
 
-**Step 1: Install Rufus**
+**Step 1: Install Ruvon**
 ```bash
 pip uninstall confucius
-pip install rufus
+pip install ruvon
 ```
 
 **Step 2: Update Imports**
@@ -1141,9 +1141,9 @@ pip install rufus
 from confucius.workflow import Workflow
 from confucius.workflow_loader import WorkflowBuilder
 
-# After (Rufus)
-from rufus.workflow import Workflow
-from rufus.builder import WorkflowBuilder
+# After (Ruvon)
+from ruvon.workflow import Workflow
+from ruvon.builder import WorkflowBuilder
 ```
 
 **Step 3: Update Workflow Initialization**
@@ -1152,10 +1152,10 @@ from rufus.builder import WorkflowBuilder
 builder = WorkflowBuilder(config_dir="config/")
 workflow = builder.create_workflow("MyWorkflow", initial_data)
 
-# After (Rufus) - inject providers
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.observability.logging import LoggingObserver
+# After (Ruvon) - inject providers
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 persistence = PostgresPersistenceProvider(db_url=DB_URL)
 execution = CeleryExecutionProvider()
@@ -1173,7 +1173,7 @@ workflow = builder.create_workflow("MyWorkflow", initial_data)
 **Step 4: Run Database Migration**
 ```bash
 # Apply Alembic migrations (adds new columns/tables)
-cd src/rufus
+cd src/ruvon
 alembic upgrade head
 ```
 
@@ -1183,8 +1183,8 @@ alembic upgrade head
 from confucius.celery_app import configure_celery_app
 celery_app = configure_celery_app()
 
-# After (Rufus)
-from rufus.celery_app import celery_app
+# After (Ruvon)
+from ruvon.celery_app import celery_app
 # No configuration needed - uses environment variables
 ```
 
@@ -1194,10 +1194,10 @@ from rufus.celery_app import celery_app
 from confucius.routers import get_workflow_router
 app.include_router(get_workflow_router())
 
-# After (Rufus) - use dedicated server or custom integration
-# Option A: Use Rufus Server (recommended)
-# Option B: Import routers from rufus_server
-from rufus_server.routers import workflows
+# After (Ruvon) - use dedicated server or custom integration
+# Option A: Use Ruvon Server (recommended)
+# Option B: Import routers from ruvon_server
+from ruvon_server.routers import workflows
 app.include_router(workflows.router, prefix="/api/v1")
 ```
 
@@ -1216,17 +1216,17 @@ python examples/load_test.py
 
 **Run Both in Parallel:**
 ```python
-# During migration, run both Confucius and Rufus
+# During migration, run both Confucius and Ruvon
 if os.getenv("USE_RUFUS", "false") == "true":
-    from rufus.builder import WorkflowBuilder
-    # Rufus code
+    from ruvon.builder import WorkflowBuilder
+    # Ruvon code
 else:
     from confucius.workflow_loader import WorkflowBuilder
     # Confucius code
 ```
 
 **Gradual Rollout:**
-1. Week 1: Deploy Rufus infrastructure (PostgreSQL, workers)
+1. Week 1: Deploy Ruvon infrastructure (PostgreSQL, workers)
 2. Week 2: Migrate 10% of workflows
 3. Week 3: Migrate 50% of workflows
 4. Week 4: Migrate 100% of workflows
@@ -1238,11 +1238,11 @@ else:
 
 ### 15.1 Confucius Roadmap (Abandoned)
 
-Confucius development has stopped. All future work moved to Rufus.
+Confucius development has stopped. All future work moved to Ruvon.
 
 ---
 
-### 15.2 Rufus Roadmap
+### 15.2 Ruvon Roadmap
 
 **Q2 2026:**
 - ✅ Docker/Kubernetes deployment (DONE)
@@ -1270,22 +1270,22 @@ Confucius development has stopped. All future work moved to Rufus.
 
 ### 16.1 Overall Assessment
 
-| Category | Confucius | Rufus | Winner |
+| Category | Confucius | Ruvon | Winner |
 |----------|-----------|-------|--------|
-| **Architecture** | 3/10 (monolithic) | 9/10 (modular) | **Rufus** |
-| **Code Quality** | 6/10 | 9/10 | **Rufus** |
-| **Production Readiness** | 3/10 | 8/10 | **Rufus** |
-| **Performance** | 6/10 | 9/10 | **Rufus** |
-| **Scalability** | 4/10 | 9/10 | **Rufus** |
-| **Testing** | 6/10 | 8/10 | **Rufus** |
-| **Documentation** | 4/10 | 9/10 | **Rufus** |
-| **Deployment** | 2/10 | 9/10 | **Rufus** |
-| **Developer Experience** | 5/10 | 9/10 | **Rufus** |
-| **Cost Efficiency** | 6/10 | 8/10 | **Rufus** |
+| **Architecture** | 3/10 (monolithic) | 9/10 (modular) | **Ruvon** |
+| **Code Quality** | 6/10 | 9/10 | **Ruvon** |
+| **Production Readiness** | 3/10 | 8/10 | **Ruvon** |
+| **Performance** | 6/10 | 9/10 | **Ruvon** |
+| **Scalability** | 4/10 | 9/10 | **Ruvon** |
+| **Testing** | 6/10 | 8/10 | **Ruvon** |
+| **Documentation** | 4/10 | 9/10 | **Ruvon** |
+| **Deployment** | 2/10 | 9/10 | **Ruvon** |
+| **Developer Experience** | 5/10 | 9/10 | **Ruvon** |
+| **Cost Efficiency** | 6/10 | 8/10 | **Ruvon** |
 
 **Overall Score:**
 - Confucius: **4.5/10** (prototype/proof-of-concept)
-- Rufus: **8.7/10** (production-grade SDK)
+- Ruvon: **8.7/10** (production-grade SDK)
 
 ---
 
@@ -1294,7 +1294,7 @@ Confucius development has stopped. All future work moved to Rufus.
 **Use Confucius When:**
 - ❌ You shouldn't - it's deprecated
 
-**Use Rufus When:**
+**Use Ruvon When:**
 - ✅ Building production workflows
 - ✅ Need horizontal scaling
 - ✅ Require multiple persistence backends
@@ -1309,19 +1309,19 @@ Confucius development has stopped. All future work moved to Rufus.
 ### 16.3 Migration Recommendation
 
 **For Existing Confucius Users:**
-- **Recommendation:** Migrate to Rufus within 3 months
+- **Recommendation:** Migrate to Ruvon within 3 months
 - **Effort:** 2-4 days
 - **ROI:** 6.5x faster development, 25% cost reduction, production reliability
 
 **For New Projects:**
-- **Recommendation:** Start with Rufus immediately
+- **Recommendation:** Start with Ruvon immediately
 - **Reason:** Production-ready, better architecture, active development
 
 ---
 
 ## 17. Conclusion
 
-**Rufus is not just Confucius extracted—it's Confucius reimagined.**
+**Ruvon is not just Confucius extracted—it's Confucius reimagined.**
 
 The transformation includes:
 - ✅ **5.7x code growth** (architectural, not bloat)
@@ -1331,7 +1331,7 @@ The transformation includes:
 - ✅ **Better DX** (CLI, comprehensive docs, examples)
 - ✅ **Better testing** (in-memory providers, fixtures, CI/CD)
 
-**Key Takeaway:** Confucius was a successful prototype that validated the workflow engine concept. Rufus is the production-grade SDK built on those learnings, suitable for enterprise deployment.
+**Key Takeaway:** Confucius was a successful prototype that validated the workflow engine concept. Ruvon is the production-grade SDK built on those learnings, suitable for enterprise deployment.
 
 ---
 

@@ -1,12 +1,12 @@
-# Rufus Orchestrates Itself
+# Ruvon Orchestrates Itself
 
 ## The Self-Hosting Insight
 
-Most workflow orchestration systems require a separate orchestration tier — a control plane that is architecturally distinct from the workloads it manages. Rufus takes a different approach.
+Most workflow orchestration systems require a separate orchestration tier — a control plane that is architecturally distinct from the workloads it manages. Ruvon takes a different approach.
 
-**The Rufus control plane runs on Rufus.**
+**The Ruvon control plane runs on Ruvon.**
 
-The same SDK that runs on a POS terminal processing offline payments also powers the cloud server managing that terminal's configuration, commands, and audit log. Configuration rollout, audit aggregation, and policy enforcement are themselves Rufus workflows — they use the same step types, the same saga pattern, the same provider abstractions.
+The same SDK that runs on a POS terminal processing offline payments also powers the cloud server managing that terminal's configuration, commands, and audit log. Configuration rollout, audit aggregation, and policy enforcement are themselves Ruvon workflows — they use the same step types, the same saga pattern, the same provider abstractions.
 
 This is not a coincidence. It is a deliberate architectural choice.
 
@@ -16,7 +16,7 @@ This is not a coincidence. It is a deliberate architectural choice.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                         Rufus SDK (Core)                       │
+│                         Ruvon SDK (Core)                       │
 │         WorkflowBuilder · Workflow · Providers · Steps         │
 └─────────────┬──────────────────┬──────────────────┬───────────┘
               │                  │                  │
@@ -55,8 +55,8 @@ builder = WorkflowBuilder(
 
 In other orchestration platforms, the control plane is a separate system with its own APIs, its own state management, its own failure modes. Debugging a workflow failure in the control plane requires understanding a completely different codebase.
 
-In Rufus, there are no magic paths. Everything is either:
-- A Rufus workflow (uses `WorkflowBuilder`, `Workflow`, step functions, providers)
+In Ruvon, there are no magic paths. Everything is either:
+- A Ruvon workflow (uses `WorkflowBuilder`, `Workflow`, step functions, providers)
 - A provider implementation (implements a Python Protocol interface)
 
 If you understand how a payment workflow runs on a device, you understand how the configuration rollout workflow runs on the control plane.
@@ -89,7 +89,7 @@ Here is an example of the self-hosting pattern at work:
 3. If `Finalize_Rollout` raises (too many device failures), saga compensation runs in reverse: broadcast is cancelled, config version is deactivated, and the previous version is restored
 4. The entire rollout is auditable via `workflow_audit_log` — same table used by device-side workflows
 
-**That `ConfigRollout` workflow is a Rufus workflow.** It runs on the control plane with PostgreSQL + Celery, but it is defined in YAML exactly like the payment workflow running on the device.
+**That `ConfigRollout` workflow is a Ruvon workflow.** It runs on the control plane with PostgreSQL + Celery, but it is defined in YAML exactly like the payment workflow running on the device.
 
 Similarly, `PolicyRollout` wraps the fraud-rule write path in the same pattern: `Validate_Policy` → `Persist_Policy` (compensatable: deletes from DB + in-memory cache on rollback) → `Finalize_Policy_Rollout`. High-stakes policy writes get durable persistence and automatic compensation; read and evaluate operations remain direct calls on the hot path.
 
@@ -105,7 +105,7 @@ Other systems that self-host include:
 
 The pattern is called **bootstrapping** or **dogfooding**. It is a strong signal of architectural integrity: the authors trust their system enough to run their most critical infrastructure on it.
 
-Rufus applies this pattern to workflow orchestration: "A recursive, offline-first orchestration system that proves its own correctness by running itself."
+Ruvon applies this pattern to workflow orchestration: "A recursive, offline-first orchestration system that proves its own correctness by running itself."
 
 ---
 

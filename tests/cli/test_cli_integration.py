@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from rufus_cli.main import app
+from ruvon_cli.main import app
 from tests.cli.utils import assert_output_contains
 
 
@@ -132,7 +132,7 @@ class TestErrorHandling:
     def test_invalid_config_file(self, cli_runner, tmp_path):
         """Test handling of invalid config file."""
         # Create malformed config
-        config_file = tmp_path / ".rufus" / "config.yaml"
+        config_file = tmp_path / ".ruvon" / "config.yaml"
         config_file.parent.mkdir(exist_ok=True)
         with open(config_file, 'w') as f:
             f.write("{ invalid yaml")
@@ -168,8 +168,8 @@ class TestCLIConsistency:
     """Test consistency between different command syntaxes."""
 
     def test_list_command_aliases(self, cli_runner, temp_config_dir, mock_persistence):
-        """Test that 'rufus list' and 'rufus workflow list' are equivalent."""
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        """Test that 'ruvon list' and 'ruvon workflow list' are equivalent."""
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result1 = cli_runner.invoke(app, ["list"])
             result2 = cli_runner.invoke(app, ["workflow", "list"])
 
@@ -177,11 +177,11 @@ class TestCLIConsistency:
             assert result1.exit_code == result2.exit_code
 
     def test_show_command_aliases(self, cli_runner, temp_config_dir, mock_persistence, sample_workflow_data):
-        """Test that 'rufus show' and 'rufus workflow show' are equivalent."""
+        """Test that 'ruvon show' and 'ruvon workflow show' are equivalent."""
         workflow_id = sample_workflow_data["id"]
         mock_persistence.load_workflow.return_value = sample_workflow_data
 
-        with patch('rufus_cli.providers.create_persistence_provider', return_value=mock_persistence):
+        with patch('ruvon_cli.providers.create_persistence_provider', return_value=mock_persistence):
             result1 = cli_runner.invoke(app, ["show", workflow_id])
             result2 = cli_runner.invoke(app, ["workflow", "show", workflow_id])
 

@@ -37,7 +37,7 @@ steps:
 ### Implement the step function
 
 ```python
-from rufus.models import StepContext, WorkflowJumpDirective
+from ruvon.models import StepContext, WorkflowJumpDirective
 from my_app.state_models import OrderState
 
 # Works for decisions (approval/rejection routing):
@@ -76,16 +76,16 @@ await workflow.next_step(user_input={
 
 ```bash
 # List paused workflows
-rufus list --status WAITING_HUMAN
+ruvon list --status WAITING_HUMAN
 
 # Show workflow details
-rufus show <workflow-id>
+ruvon show <workflow-id>
 
 # Resume with approval
-rufus resume <workflow-id> --input '{"approved": true, "reviewer": "manager@company.com"}'
+ruvon resume <workflow-id> --input '{"approved": true, "reviewer": "manager@company.com"}'
 
 # View updated status
-rufus show <workflow-id>
+ruvon show <workflow-id>
 ```
 
 ## Input validation with input_model
@@ -200,7 +200,7 @@ Check for expired approvals:
 
 ```python
 # Scheduled job (run every hour)
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 async def check_expired_approvals():
     persistence = PostgresPersistenceProvider(db_url)
@@ -325,7 +325,7 @@ assert workflow.state.amount == 1500.00
 
 ```python
 import pytest
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 
 @pytest.mark.asyncio
 async def test_approval_workflow():
@@ -417,7 +417,7 @@ Old pattern (still supported):
 
 ## Edge Device HITL Round-Trip (v1.0.0rc5)
 
-For air-gapped or offline-capable edge devices, Rufus supports a full cloud HITL round-trip: the device escalates a decision to the cloud, an analyst reviews it in the dashboard, and the decision is delivered back to the device as a command.
+For air-gapped or offline-capable edge devices, Ruvon supports a full cloud HITL round-trip: the device escalates a decision to the cloud, an analyst reviews it in the dashboard, and the decision is delivered back to the device as a command.
 
 ### Pattern Overview
 
@@ -438,13 +438,13 @@ Edge Device                         Cloud Control Plane
 
 ### `register_command_handler()` API
 
-`RufusEdgeAgent` supports registering async handlers for custom cloud command types:
+`RuvonEdgeAgent` supports registering async handlers for custom cloud command types:
 
 ```python
-agent = RufusEdgeAgent(
+agent = RuvonEdgeAgent(
     device_id="atm-001",
     cloud_url="https://control.example.com",
-    db_path="/var/lib/rufus/edge.db",
+    db_path="/var/lib/ruvon/edge.db",
 )
 
 async def handle_fraud_review_decision(command_data: dict):

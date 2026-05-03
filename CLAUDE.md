@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Rufus Edge** is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides:
+**Ruvon Edge** is a Python-native workflow engine designed for **fintech edge devices** - POS terminals, ATMs, mobile readers, and kiosks. It provides:
 
 - **Offline-first architecture** with SQLite for edge deployment
 - **Store-and-Forward (SAF)** for offline payment transactions
@@ -17,16 +17,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The project consists of:
 
-1. **Core SDK** (`src/rufus/`) - The reusable workflow engine library
-2. **Edge Agent** (`src/rufus_edge/`) - Runtime for edge devices with offline support
-3. **Cloud Control Plane** (`src/rufus_server/`) - FastAPI server for device management
-4. **CLI Tool** (`src/rufus_cli/`) - Command-line interface for workflow management
+1. **Core SDK** (`src/ruvon/`) - The reusable workflow engine library
+2. **Edge Agent** (`src/ruvon_edge/`) - Runtime for edge devices with offline support
+3. **Cloud Control Plane** (`src/ruvon_server/`) - FastAPI server for device management
+4. **CLI Tool** (`src/ruvon_cli/`) - Command-line interface for workflow management
 
 ### Fintech Edge Architecture
 
 ```
 CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
-├── Device Registry API                    ├── RufusEdgeAgent
+├── Device Registry API                    ├── RuvonEdgeAgent
 ├── Config Server (ETag)         <─────>   ├── SyncManager (SAF)
 ├── Transaction Sync API                   ├── ConfigManager
 └── Settlement Gateway                     └── Local Workflows
@@ -43,15 +43,15 @@ CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
 
 ### Heritage and Evolution
 
-**Rufus is extracted from "Confucius"**, a monolithic workflow engine prototype.
+**Ruvon is extracted from "Confucius"**, a monolithic workflow engine prototype.
 
 **Inherited from Confucius:** HTTP Steps, Phase 8 Step Types (Loop, Fire-and-Forget, Cron), Semantic Firewall, PostgresExecutor Pattern, Saga Pattern, Sub-Workflows, Dynamic Injection.
 
-**Rufus Additions:** Provider Pattern, Multi-Executor Support, Production Tooling (Docker/K8s/Helm), CLI Tool, SQLite Support, Performance Optimizations (uvloop, orjson, connection pooling, import caching), Zombie Workflow Recovery, Workflow Versioning.
+**Ruvon Additions:** Provider Pattern, Multi-Executor Support, Production Tooling (Docker/K8s/Helm), CLI Tool, SQLite Support, Performance Optimizations (uvloop, orjson, connection pooling, import caching), Zombie Workflow Recovery, Workflow Versioning.
 
 **Not Yet Ported:** Debug UI (planned).
 
-**Key Difference:** Confucius was monolithic (4,637 lines, 22 files). Rufus is modular SDK + CLI + Server (31,112 lines, 125 files).
+**Key Difference:** Confucius was monolithic (4,637 lines, 22 files). Ruvon is modular SDK + CLI + Server (31,112 lines, 125 files).
 
 ---
 
@@ -62,8 +62,8 @@ CLOUD CONTROL PLANE (PostgreSQL)          EDGE DEVICE (SQLite)
 ```bash
 # Full dev install (all three packages from source)
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 
 # For Redis/Celery: docker run -d --name redis-server -p 6379:6379 redis
 ```
@@ -71,10 +71,10 @@ pip install -e "packages/rufus-sdk-server[server,celery,auth]"
 **PyPI install by role:**
 ```bash
 # Edge device only (~15 MB installed)
-pip install 'rufus-sdk-edge[edge]'
+pip install 'ruvon-edge[edge]'
 
 # Cloud server (API + workers)
-pip install 'rufus-sdk[postgres,performance]' 'rufus-sdk-server[server,celery,auth]'
+pip install 'ruvon-sdk[postgres,performance]' 'ruvon-server[server,celery,auth]'
 ```
 
 ### Testing
@@ -92,55 +92,55 @@ Tests automatically exclude `confucius/` and `original_implementation_files/` di
 
 **Configuration:**
 ```bash
-rufus config show               # Show current configuration
-rufus config set-persistence    # Set persistence provider (interactive)
-rufus config set-execution      # Set execution provider (interactive)
-rufus config set-default        # Set default behaviors (interactive)
-rufus config reset              # Reset to defaults
-rufus config path               # Show config file location
+ruvon config show               # Show current configuration
+ruvon config set-persistence    # Set persistence provider (interactive)
+ruvon config set-execution      # Set execution provider (interactive)
+ruvon config set-default        # Set default behaviors (interactive)
+ruvon config reset              # Reset to defaults
+ruvon config path               # Show config file location
 ```
 
 **Workflow Management:**
 ```bash
-rufus list [--status ACTIVE] [--type OrderProcessing] [--limit 10]
-rufus show <workflow-id> [--state] [--logs]
-rufus start <workflow-type> [--data '{"field": "value"}'] [--data-file data.json] [--config wf.yaml] [--auto] [--interactive/-i] [--dry-run]
-rufus resume <workflow-id> [--input '{"approval": true}'] [--input-file input.json] [--auto]
-rufus retry <workflow-id> [--from-step StepName]
-rufus cancel <workflow-id> [--force] [--reason "User cancelled"]
-rufus logs <workflow-id> [--step StepName] [--level ERROR] [--limit 50]
-rufus metrics [--workflow-id <id>] [--type execution_time]
-rufus interactive run <workflow-type> [--data '{}'] [--config wf.yaml]
+ruvon list [--status ACTIVE] [--type OrderProcessing] [--limit 10]
+ruvon show <workflow-id> [--state] [--logs]
+ruvon start <workflow-type> [--data '{"field": "value"}'] [--data-file data.json] [--config wf.yaml] [--auto] [--interactive/-i] [--dry-run]
+ruvon resume <workflow-id> [--input '{"approval": true}'] [--input-file input.json] [--auto]
+ruvon retry <workflow-id> [--from-step StepName]
+ruvon cancel <workflow-id> [--force] [--reason "User cancelled"]
+ruvon logs <workflow-id> [--step StepName] [--level ERROR] [--limit 50]
+ruvon metrics [--workflow-id <id>] [--type execution_time]
+ruvon interactive run <workflow-type> [--data '{}'] [--config wf.yaml]
 ```
 
 **Database Management:**
 ```bash
-rufus db init [--db-url postgresql://...]  # Initialize database schema
-rufus db migrate [--dry-run]               # Apply pending migrations
-rufus db status                            # Show migration status
-rufus db stats                             # Show database statistics
-rufus db validate                          # Validate schema definition
+ruvon db init [--db-url postgresql://...]  # Initialize database schema
+ruvon db migrate [--dry-run]               # Apply pending migrations
+ruvon db status                            # Show migration status
+ruvon db stats                             # Show database statistics
+ruvon db validate                          # Validate schema definition
 ```
 
 **Validate & Run (local):**
 ```bash
-rufus validate <workflow.yaml> [--strict] [--json] [--graph] [--graph-format mermaid|dot|text]
-rufus run <workflow.yaml> [--data '{}']
+ruvon validate <workflow.yaml> [--strict] [--json] [--graph] [--graph-format mermaid|dot|text]
+ruvon run <workflow.yaml> [--data '{}']
 ```
 
 **Zombie Workflow Recovery:**
 ```bash
-rufus scan-zombies --db <URL> [--fix] [--threshold 120]   # Scan for zombie workflows (--db required)
-rufus zombie-daemon --db <URL> [--interval 60]            # Run scanner as daemon (--db required)
+ruvon scan-zombies --db <URL> [--fix] [--threshold 120]   # Scan for zombie workflows (--db required)
+ruvon zombie-daemon --db <URL> [--interval 60]            # Run scanner as daemon (--db required)
 ```
 
-**Alternative subcommand syntax:** `rufus workflow list`, `rufus workflow start <type>`, etc.
+**Alternative subcommand syntax:** `ruvon workflow list`, `ruvon workflow start <type>`, etc.
 
 ### Running the Server
 
 ```bash
-uvicorn rufus_server.main:app --reload
-celery -A rufus.implementations.execution.celery worker --loglevel=info
+uvicorn ruvon_server.main:app --reload
+celery -A ruvon.implementations.execution.celery worker --loglevel=info
 ```
 
 ---
@@ -149,15 +149,15 @@ celery -A rufus.implementations.execution.celery worker --loglevel=info
 
 ### Core Components
 
-**Workflow Class (`src/rufus/workflow.py`)** — Main class managing workflow lifecycle, state, and execution. Delegates to providers for persistence, execution, and observability. Handles all step types, directives, and control flow.
+**Workflow Class (`src/ruvon/workflow.py`)** — Main class managing workflow lifecycle, state, and execution. Delegates to providers for persistence, execution, and observability. Handles all step types, directives, and control flow.
 
-**WorkflowEngine (Legacy, `src/rufus/engine.py`)** — Being migrated to unified `Workflow` class. Contains orchestration logic including Saga pattern and dynamic injection.
+**WorkflowEngine (Legacy, `src/ruvon/engine.py`)** — Being migrated to unified `Workflow` class. Contains orchestration logic including Saga pattern and dynamic injection.
 
-**WorkflowBuilder (`src/rufus/builder.py`)** — Loads workflow definitions from YAML, resolves function/model paths via `importlib`, manages workflow registry and auto-discovers `rufus-*` packages, creates `Workflow` instances with dependency injection.
+**WorkflowBuilder (`src/ruvon/builder.py`)** — Loads workflow definitions from YAML, resolves function/model paths via `importlib`, manages workflow registry and auto-discovers `ruvon-*` packages, creates `Workflow` instances with dependency injection.
 
-**Models (`src/rufus/models.py`)** — Pydantic-based data structures. `StepContext` provides context to step functions. `WorkflowStep` subclasses: `CompensatableStep`, `AsyncWorkflowStep`, `HttpWorkflowStep`, `ParallelWorkflowStep`, `FireAndForgetWorkflowStep`, `LoopStep`, `CronScheduleWorkflowStep`. Directives (as exceptions): `WorkflowJumpDirective`, `WorkflowPauseDirective`, `StartSubWorkflowDirective`, `SagaWorkflowException`.
+**Models (`src/ruvon/models.py`)** — Pydantic-based data structures. `StepContext` provides context to step functions. `WorkflowStep` subclasses: `CompensatableStep`, `AsyncWorkflowStep`, `HttpWorkflowStep`, `ParallelWorkflowStep`, `FireAndForgetWorkflowStep`, `LoopStep`, `CronScheduleWorkflowStep`. Directives (as exceptions): `WorkflowJumpDirective`, `WorkflowPauseDirective`, `StartSubWorkflowDirective`, `SagaWorkflowException`.
 
-### Provider Interfaces (`src/rufus/providers/`)
+### Provider Interfaces (`src/ruvon/providers/`)
 
 All external integrations are abstracted via Python ABC interfaces (changed from Protocol in v1.0 — partial implementations now fail at instantiation instead of silently at runtime):
 
@@ -169,7 +169,7 @@ All external integrations are abstracted via Python ABC interfaces (changed from
 
 > **`Workflow()` requires all 6 providers.** Direct instantiation needs `persistence_provider`, `execution_provider`, `workflow_observer`, `workflow_builder`, `expression_evaluator_cls`, and `template_engine_cls` — all raise `ValueError` if `None`. In tests, use `WorkflowBuilder.create_workflow()` (handles wiring) or pass `MagicMock()` for providers you don't need to exercise.
 
-### Default Implementations (`src/rufus/implementations/`)
+### Default Implementations (`src/ruvon/implementations/`)
 
 **Persistence:** `postgres.py` (production), `sqlite.py` (development/testing), `memory.py` (testing), `redis.py`.
 
@@ -179,7 +179,7 @@ All external integrations are abstracted via Python ABC interfaces (changed from
 
 ### Workflow Configuration
 
-**Registry** (`config/workflow_registry.yaml`) — Master list of available workflows. Each entry: `type`, `config_file`, `initial_state_model`. Optional `requires` key lists external `rufus-*` packages.
+**Registry** (`config/workflow_registry.yaml`) — Master list of available workflows. Each entry: `type`, `config_file`, `initial_state_model`. Optional `requires` key lists external `ruvon-*` packages.
 
 **Available Step Types:**
 
@@ -247,7 +247,7 @@ Child workflows report status changes to parents:
 
 HTTP Steps enable Python-orchestrated workflows to call services in any language (Go, Rust, Node.js, etc.). Supports Jinja2 templating for dynamic URLs/headers/body, all HTTP methods, automatic JSON parsing, configurable timeouts.
 
-**Architecture:** `Rufus Engine (Python) → HTTP/REST → External Services`
+**Architecture:** `Ruvon Engine (Python) → HTTP/REST → External Services`
 
 → See [TECHNICAL_INFORMATION.md §5](/.claude/TECHNICAL_INFORMATION.md) for full YAML configs and multi-language pipeline example.
 
@@ -271,7 +271,7 @@ HTTP Steps enable Python-orchestrated workflows to call services in any language
 
 ```
 ┌─────────────────┐
-│ Rufus API/CLI   │
+│ Ruvon API/CLI   │
 └────────┬────────┘
          │
     ┌────▼─────┐
@@ -317,8 +317,8 @@ Enabled by default via environment variables (can be disabled for debugging):
 
 | Optimization | Gain | Control |
 |-------------|------|---------|
-| **uvloop** event loop | 2–4× faster async I/O | `RUFUS_USE_UVLOOP=false` |
-| **orjson** serialization | 3–5× faster JSON | `RUFUS_USE_ORJSON=false` |
+| **uvloop** event loop | 2–4× faster async I/O | `RUVON_USE_UVLOOP=false` |
+| **orjson** serialization | 3–5× faster JSON | `RUVON_USE_ORJSON=false` |
 | **PostgreSQL connection pool** | High concurrency | `POSTGRES_POOL_MIN_SIZE`, `POSTGRES_POOL_MAX_SIZE` |
 | **Import caching** (`WorkflowBuilder._import_cache`) | 162× speedup | Automatic |
 
@@ -330,12 +330,12 @@ Pool defaults: min=10, max=50. Tune per workload (low: 5/20, medium: 10/50, high
 
 ## Database Schema Management
 
-Rufus uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach:
+Ruvon uses **Alembic + SQLAlchemy** for schema migrations with a hybrid approach:
 - **SQLAlchemy** for schema definition and migration generation (single source of truth)
 - **Raw SQL** for all runtime queries (45% faster than SQLAlchemy Core)
 
 **Migration workflow:**
-1. Edit `src/rufus/db_schema/database.py` (SQLAlchemy table definitions)
+1. Edit `src/ruvon/db_schema/database.py` (SQLAlchemy table definitions)
 2. `alembic revision --autogenerate -m "description"` — auto-detects changes (~15% false positive rate, always review)
 3. Test migration: upgrade, downgrade, upgrade
 4. Update raw SQL in persistence providers if needed
@@ -375,7 +375,7 @@ SQLite is included for development, testing, and edge deployments. No server req
 
 `HeartbeatManager` is used automatically via the execution provider, or manually for custom logic via `async with heartbeat:` context manager.
 
-`ZombieScanner` runs as one-shot CLI (`rufus scan-zombies --fix`) or continuous daemon (`rufus zombie-daemon`).
+`ZombieScanner` runs as one-shot CLI (`ruvon scan-zombies --fix`) or continuous daemon (`ruvon zombie-daemon`).
 
 **Config rule:** `Stale Threshold > 2 × Heartbeat Interval` to avoid false positives.
 
@@ -440,7 +440,7 @@ Code that uses `global`, module-level variables, or relies on in-memory state fr
 
 ### Recent Migration (SDK Extraction)
 
-This codebase was recently refactored from "Confucius" to "Rufus":
+This codebase was recently refactored from "Confucius" to "Ruvon":
 - Extracting core SDK from monolithic application
 - Unified `Workflow` class (consolidating `WorkflowEngine`)
 - Improved provider interfaces and dependency injection

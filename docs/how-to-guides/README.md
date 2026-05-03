@@ -1,10 +1,10 @@
 # How-to guides
 
-Task-oriented guides for common Rufus workflows.
+Task-oriented guides for common Ruvon workflows.
 
 ## Getting started
 
-- [**Installation**](installation.md) - Install Rufus for different scenarios (SQLite, PostgreSQL, Docker)
+- [**Installation**](installation.md) - Install Ruvon for different scenarios (SQLite, PostgreSQL, Docker)
 - [**Configuration**](configuration.md) - Configure persistence, execution, and observability providers
 - [**Create a workflow**](create-workflow.md) - Build your first workflow from scratch
 

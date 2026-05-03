@@ -64,8 +64,8 @@ Let's build an e-commerce payment workflow with compensation.
 Create a new directory:
 
 ```bash
-mkdir rufus-saga-demo
-cd rufus-saga-demo
+mkdir ruvon-saga-demo
+cd ruvon-saga-demo
 mkdir -p payment_processor config
 touch payment_processor/__init__.py
 ```
@@ -122,7 +122,7 @@ Payment workflow steps with compensation functions
 
 import uuid
 from payment_processor.models import PaymentState
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 # ============================================================================
@@ -364,12 +364,12 @@ Demonstrates:
 import asyncio
 from pathlib import Path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.memory import InMemoryPersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def main():

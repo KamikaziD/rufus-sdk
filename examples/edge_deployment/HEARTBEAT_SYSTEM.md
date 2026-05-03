@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rufus Edge platform uses a heartbeat system to monitor device health and connectivity. Devices send periodic heartbeats to report their status, and the server automatically marks devices as offline if heartbeats stop.
+The Ruvon Edge platform uses a heartbeat system to monitor device health and connectivity. Devices send periodic heartbeats to report their status, and the server automatically marks devices as offline if heartbeats stop.
 
 ## Heartbeat Configuration
 

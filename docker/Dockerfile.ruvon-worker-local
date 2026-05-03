@@ -1,0 +1,54 @@
+# Development Ruvon Worker Dockerfile - Uses LOCAL source code
+# This builds from the current repo state, not PyPI
+# Use this for testing changes before publishing
+
+FROM python:3.11-slim
+
+LABEL maintainer="Ruvon Team <team@ruvon.dev>"
+LABEL description="Ruvon Workflow Engine - Celery Worker (Local Dev Build)"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy entire source code
+COPY src /app/src
+COPY pyproject.toml /app/
+COPY README.md /app/
+
+# Install dependencies first (for better caching)
+RUN pip install --no-cache-dir \
+    pydantic PyYAML jinja2 typer click aiosqlite anyio orjson httpx \
+    cryptography sqlalchemy alembic python-dotenv typing-extensions \
+    annotated-types jsonschema croniter \
+    fastapi uvicorn[standard] starlette slowapi asyncpg \
+    rich uvloop websockets psutil numpy \
+    celery[redis] redis psycopg2-binary prometheus-client
+
+# Install ruvon-sdk from local source
+RUN pip install -e .
+
+# Create directories for user code (will be mounted as volumes)
+RUN mkdir -p /app/config /app/user_code
+
+# Set Python path
+ENV PYTHONPATH=/app:/app/user_code
+
+# Default environment variables
+ENV DATABASE_URL=postgresql://ruvon:ruvon_secret@postgres:5432/ruvon_production
+ENV CELERY_BROKER_URL=redis://redis:6379/0
+ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
+ENV WORKER_CONCURRENCY=4
+ENV WORKER_POOL=prefork
+ENV WORKER_LOG_LEVEL=info
+
+# Default command: Start Celery worker
+CMD celery -A ruvon.celery_app worker \
+    --loglevel=${WORKER_LOG_LEVEL} \
+    --concurrency=${WORKER_CONCURRENCY} \
+    --pool=${WORKER_POOL}

@@ -1,6 +1,6 @@
-# Design Decisions: Why Rufus is Built This Way
+# Design Decisions: Why Ruvon is Built This Way
 
-Rufus makes specific architectural choices that shape how you use it. Understanding the "why" behind these decisions helps you work with the framework, not against it.
+Ruvon makes specific architectural choices that shape how you use it. Understanding the "why" behind these decisions helps you work with the framework, not against it.
 
 ## 1. Provider Pattern vs Monolithic Architecture
 
@@ -30,7 +30,7 @@ def test_workflow():
     # Test logic
     # Stop Redis, Celery...
 
-# With providers (Rufus)
+# With providers (Ruvon)
 # In-memory providers, no infrastructure
 def test_workflow():
     persistence = MemoryPersistenceProvider()
@@ -41,24 +41,24 @@ def test_workflow():
 
 ## 2. SDK-First vs Framework-First
 
-**Decision**: Rufus is a library (SDK), not a framework.
+**Decision**: Ruvon is a library (SDK), not a framework.
 
 **Alternatives Considered**:
-- **Framework**: Applications extend Rufus (like Django)
-- **Service**: Rufus as a separate service (like Temporal)
+- **Framework**: Applications extend Ruvon (like Django)
+- **Service**: Ruvon as a separate service (like Temporal)
 
 **Why SDK-First**:
 - ✅ **Embeddable**: Import into any Python application
 - ✅ **Lightweight**: Core SDK is 10,373 lines, not 100k+
 - ✅ **Flexible**: Use only what you need (no forced conventions)
-- ✅ **Ownership**: Application owns the workflow lifecycle, not Rufus
+- ✅ **Ownership**: Application owns the workflow lifecycle, not Ruvon
 
 **Trade-off**: Less "magic" (no auto-discovery, no CLI for free), but more control.
 
 **Example Impact**:
 ```python
-# SDK approach (Rufus)
-from rufus.builder import WorkflowBuilder
+# SDK approach (Ruvon)
+from ruvon.builder import WorkflowBuilder
 
 builder = WorkflowBuilder(config_dir="config/")
 workflow = builder.create_workflow("MyWorkflow", data)
@@ -68,13 +68,13 @@ if condition:
     await workflow.next_step(user_input={})
 
 # Framework approach (alternative)
-# Rufus would control execution, application extends
-class MyWorkflowHandler(RufusWorkflowHandler):
+# Ruvon would control execution, application extends
+class MyWorkflowHandler(RuvonWorkflowHandler):
     def on_step_executed(self, step, result):
         # Application logic
         pass
 
-# Rufus runs application code, not vice versa
+# Ruvon runs application code, not vice versa
 ```
 
 ## 3. YAML Configuration vs Code-First
@@ -96,7 +96,7 @@ class MyWorkflowHandler(RufusWorkflowHandler):
 
 **Example Impact**:
 ```yaml
-# YAML approach (Rufus)
+# YAML approach (Ruvon)
 # config/order_processing.yaml
 steps:
   - name: "Validate_Order"
@@ -135,7 +135,7 @@ workflow.add_step("Charge_Payment", charge_payment)
 
 **Example Impact**:
 ```python
-# Async approach (Rufus)
+# Async approach (Ruvon)
 async def save_workflow(self, workflow_id, workflow_dict):
     await self.conn.execute(
         "INSERT INTO workflow_executions ...",
@@ -168,7 +168,7 @@ def save_workflow(self, workflow_id, workflow_dict):
 
 **Example Impact**:
 ```python
-# Pydantic approach (Rufus)
+# Pydantic approach (Ruvon)
 class OrderState(BaseModel):
     order_id: str
     total_amount: float  # Validated as float
@@ -228,7 +228,7 @@ state = {"order_id": "123", "total_amount": -10}  # No validation!
 
 **Example Impact**:
 ```python
-# Heartbeat approach (Rufus)
+# Heartbeat approach (Ruvon)
 # Long-running step (5 minutes)
 async with HeartbeatManager(..., interval_seconds=30):
     result = await process_large_file()
@@ -250,13 +250,13 @@ async with HeartbeatManager(..., interval_seconds=30):
 **Why Protocols**:
 - ✅ **Flexibility**: Don't need to inherit from base class
 - ✅ **Type Safety**: Still get type checking (mypy, pyright)
-- ✅ **Third-Party**: External providers don't need to import Rufus
+- ✅ **Third-Party**: External providers don't need to import Ruvon
 
 **Trade-off**: Less enforcement (no runtime check), but more flexibility.
 
 **Example Impact**:
 ```python
-# Protocol approach (Rufus)
+# Protocol approach (Ruvon)
 class PersistenceProvider(Protocol):
     async def save_workflow(self, ...) -> None: ...
 
@@ -325,7 +325,7 @@ persistence = PostgresPersistenceProvider(db_url=os.environ["DATABASE_URL"])
 
 **Example Impact**:
 ```python
-# Saga approach (Rufus)
+# Saga approach (Ruvon)
 # Reserve flight, hotel, charge payment
 # If payment fails, compensate (cancel flight + hotel)
 
@@ -336,7 +336,7 @@ persistence = PostgresPersistenceProvider(db_url=os.environ["DATABASE_URL"])
 
 ## 11. CLI + Server vs Server-Only
 
-**Decision**: Separate CLI tool (`rufus`) and API server (`rufus_server`).
+**Decision**: Separate CLI tool (`ruvon`) and API server (`ruvon_server`).
 
 **Alternatives Considered**:
 - **Server-Only**: All operations via REST API
@@ -351,9 +351,9 @@ persistence = PostgresPersistenceProvider(db_url=os.environ["DATABASE_URL"])
 
 **Example Impact**:
 ```bash
-# CLI approach (Rufus)
-rufus list --status ACTIVE
-rufus retry <workflow-id> --from-step Process_Payment
+# CLI approach (Ruvon)
+ruvon list --status ACTIVE
+ruvon retry <workflow-id> --from-step Process_Payment
 
 # API approach (alternative)
 curl -X GET http://localhost:8000/api/v1/workflows?status=ACTIVE
@@ -412,16 +412,16 @@ steps:
 
 ## Lessons from Confucius
 
-Rufus learned from Confucius's shortcomings:
+Ruvon learned from Confucius's shortcomings:
 
 1. **Hardcoded Dependencies** → Provider pattern
 2. **No Testability** → In-memory providers
 3. **Breaking Changes** → Workflow snapshots
 4. **No Zombie Detection** → Heartbeat system
 5. **Manual Scaling** → Kubernetes + auto-scaling
-6. **No CLI** → Rufus CLI tool
+6. **No CLI** → Ruvon CLI tool
 
-These lessons shaped Rufus's production-first philosophy.
+These lessons shaped Ruvon's production-first philosophy.
 
 ## What's Next
 

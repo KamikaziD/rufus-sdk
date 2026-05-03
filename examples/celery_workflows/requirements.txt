@@ -1,6 +1,6 @@
 # Install Rufus with Celery support
 # In production, install from GitHub:
-# rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git
+# rufus[celery] @ git+https://github.com/KamikaziD/ruvon-sdk.git
 
 # For local development:
 -e ../../.[celery]

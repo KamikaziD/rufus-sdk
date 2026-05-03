@@ -1,4 +1,4 @@
-# Scaling Rufus Celery Workers with Docker
+# Scaling Ruvon Celery Workers with Docker
 
 Complete guide for distributed deployment and horizontal scaling of Celery workers.
 
@@ -38,7 +38,7 @@ open http://localhost:5555
 
 # Or command line
 docker-compose -f docker-compose.production.yml exec celery-worker \
-    celery -A rufus.celery_app inspect active
+    celery -A ruvon.celery_app inspect active
 ```
 
 ---
@@ -66,7 +66,7 @@ docker-compose -f docker-compose.production.yml exec celery-worker \
 │  └─────────────────────────────────────────────────┘        │
 │         │                                                    │
 │  ┌──────┴──────────┐                                        │
-│  │  Rufus Server   │                                        │
+│  │  Ruvon Server   │                                        │
 │  │  (API/UI)       │                                        │
 │  └─────────────────┘                                        │
 └─────────────────────────────────────────────────────────────┘
@@ -104,8 +104,8 @@ docker-compose -f docker-compose.production.yml up -d postgres redis
 **4. Apply database migrations:**
 
 ```bash
-docker-compose -f docker-compose.production.yml run --rm rufus-server \
-    sh -c "cd src/rufus && alembic upgrade head"
+docker-compose -f docker-compose.production.yml run --rm ruvon-server \
+    sh -c "cd src/ruvon && alembic upgrade head"
 ```
 
 **5. Start workers:**
@@ -118,7 +118,7 @@ docker-compose -f docker-compose.production.yml up -d --scale celery-worker=5
 **6. Start monitoring and API:**
 
 ```bash
-docker-compose -f docker-compose.production.yml up -d flower rufus-server
+docker-compose -f docker-compose.production.yml up -d flower ruvon-server
 ```
 
 **7. Verify deployment:**
@@ -129,7 +129,7 @@ docker-compose -f docker-compose.production.yml ps
 
 # Check worker registration in database
 docker-compose -f docker-compose.production.yml exec postgres \
-    psql -U rufus -d rufus_production -c "SELECT worker_id, region, zone, status, last_heartbeat FROM worker_nodes;"
+    psql -U ruvon -d ruvon_production -c "SELECT worker_id, region, zone, status, last_heartbeat FROM worker_nodes;"
 
 # Check Flower dashboard
 open http://localhost:5555
@@ -182,40 +182,40 @@ WORKER_REGION=eu-west-1 WORKER_ZONE=zone-b \
 
 ```bash
 # Build worker image
-docker build -f docker/Dockerfile.celery-worker -t your-registry/rufus-celery-worker:latest .
+docker build -f docker/Dockerfile.celery-worker -t ruvondev/ruvon-celery-worker:latest .
 
 # Build server image
-docker build -f docker/Dockerfile.rufus-server -t your-registry/rufus-server:latest .
+docker build -f docker/Dockerfile.ruvon-server -t your-registry/ruvon-server:latest .
 
 # Push to registry
-docker push your-registry/rufus-celery-worker:latest
-docker push your-registry/rufus-server:latest
+docker push ruvondev/ruvon-celery-worker:latest
+docker push your-registry/ruvon-server:latest
 ```
 
 **2. Create namespace:**
 
 ```bash
-kubectl create namespace rufus-production
+kubectl create namespace ruvon-production
 ```
 
 **3. Create secrets:**
 
 ```bash
 # Database credentials
-kubectl create secret generic rufus-secrets \
-    --from-literal=database-url='postgresql://user:password@postgres-host:5432/rufus' \
-    -n rufus-production
+kubectl create secret generic ruvon-secrets \
+    --from-literal=database-url='postgresql://user:password@postgres-host:5432/ruvon' \
+    -n ruvon-production
 
 # Or use a secret file
 cat > secret.yaml <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
-  name: rufus-secrets
-  namespace: rufus-production
+  name: ruvon-secrets
+  namespace: ruvon-production
 type: Opaque
 stringData:
-  database-url: "postgresql://user:password@postgres-host:5432/rufus"
+  database-url: "postgresql://user:password@postgres-host:5432/ruvon"
 EOF
 
 kubectl apply -f secret.yaml
@@ -224,33 +224,33 @@ kubectl apply -f secret.yaml
 **4. Deploy Redis:**
 
 ```bash
-kubectl apply -f docker/kubernetes/redis-deployment.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/redis-deployment.yaml -n ruvon-production
 ```
 
 **5. Deploy ConfigMap:**
 
 ```bash
-kubectl apply -f docker/kubernetes/configmap.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/configmap.yaml -n ruvon-production
 ```
 
 **6. Deploy Celery workers:**
 
 ```bash
 # Update image in celery-worker-deployment.yaml first
-kubectl apply -f docker/kubernetes/celery-worker-deployment.yaml -n rufus-production
+kubectl apply -f docker/kubernetes/celery-worker-deployment.yaml -n ruvon-production
 ```
 
 **7. Verify deployment:**
 
 ```bash
 # Check pods
-kubectl get pods -n rufus-production
+kubectl get pods -n ruvon-production
 
 # Check worker logs
-kubectl logs -f -l component=celery-worker -n rufus-production
+kubectl logs -f -l component=celery-worker -n ruvon-production
 
 # Check autoscaling
-kubectl get hpa -n rufus-production
+kubectl get hpa -n ruvon-production
 ```
 
 ### Kubernetes Scaling
@@ -259,7 +259,7 @@ kubectl get hpa -n rufus-production
 
 ```bash
 # Scale to 10 replicas
-kubectl scale deployment rufus-celery-worker --replicas=10 -n rufus-production
+kubectl scale deployment ruvon-celery-worker --replicas=10 -n ruvon-production
 ```
 
 **Auto-scaling:**
@@ -273,16 +273,16 @@ The HorizontalPodAutoscaler is configured to:
 **Monitor autoscaling:**
 
 ```bash
-kubectl get hpa rufus-celery-worker-hpa -n rufus-production --watch
+kubectl get hpa ruvon-celery-worker-hpa -n ruvon-production --watch
 ```
 
 **Update HPA:**
 
 ```bash
 # Change max replicas to 50
-kubectl patch hpa rufus-celery-worker-hpa \
+kubectl patch hpa ruvon-celery-worker-hpa \
     --patch '{"spec":{"maxReplicas":50}}' \
-    -n rufus-production
+    -n ruvon-production
 ```
 
 ---
@@ -294,7 +294,7 @@ kubectl patch hpa rufus-celery-worker-hpa \
 **Route tasks to specific queues:**
 
 ```python
-from rufus.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
 
 execution = CeleryExecutionProvider()
 
@@ -313,12 +313,12 @@ execution.dispatch_async_task(
 # High priority workers (low concurrency, fast)
 docker run -e CELERY_QUEUES=high_priority \
     -e WORKER_CONCURRENCY=2 \
-    your-registry/rufus-celery-worker
+    ruvondev/ruvon-celery-worker
 
 # Low priority workers (high concurrency, batch)
 docker run -e CELERY_QUEUES=low_priority \
     -e WORKER_CONCURRENCY=8 \
-    your-registry/rufus-celery-worker
+    ruvondev/ruvon-celery-worker
 ```
 
 ### 2. Region-Based Scaling
@@ -406,10 +406,10 @@ services:
 
 ```bash
 # Scale up during business hours (9 AM)
-0 9 * * * kubectl scale deployment rufus-celery-worker --replicas=20
+0 9 * * * kubectl scale deployment ruvon-celery-worker --replicas=20
 
 # Scale down at night (6 PM)
-0 18 * * * kubectl scale deployment rufus-celery-worker --replicas=5
+0 18 * * * kubectl scale deployment ruvon-celery-worker --replicas=5
 ```
 
 ---
@@ -425,7 +425,7 @@ services:
 open http://localhost:5555
 
 # Kubernetes port-forward
-kubectl port-forward svc/rufus-flower 5555:5555 -n rufus-production
+kubectl port-forward svc/ruvon-flower 5555:5555 -n ruvon-production
 open http://localhost:5555
 ```
 
@@ -565,12 +565,12 @@ def rate_limited_task():
 
 **Liveness probe:**
 ```bash
-celery -A rufus.celery_app inspect ping -d celery@worker1
+celery -A ruvon.celery_app inspect ping -d celery@worker1
 ```
 
 **Readiness probe:**
 ```bash
-celery -A rufus.celery_app inspect active -d celery@worker1
+celery -A ruvon.celery_app inspect active -d celery@worker1
 ```
 
 ### 5. Graceful Shutdown
@@ -585,7 +585,7 @@ STOPSIGNAL SIGTERM
 lifecycle:
   preStop:
     exec:
-      command: ["celery", "-A", "rufus.celery_app", "control", "shutdown"]
+      command: ["celery", "-A", "ruvon.celery_app", "control", "shutdown"]
 terminationGracePeriodSeconds: 60
 ```
 
@@ -617,7 +617,7 @@ celery-worker:
 ```yaml
 # docker-compose.production.yml
 networks:
-  rufus-network:
+  ruvon-network:
     driver: bridge
     internal: true  # No external access
 ```
@@ -646,7 +646,7 @@ CELERY_BROKER_URL=rediss://redis:6380/0  # SSL/TLS
 docker-compose exec celery-worker redis-cli -h redis ping
 
 # Check PostgreSQL connectivity
-docker-compose exec celery-worker pg_isready -h postgres -U rufus
+docker-compose exec celery-worker pg_isready -h postgres -U ruvon
 ```
 
 ### High memory usage
@@ -656,23 +656,23 @@ docker-compose exec celery-worker pg_isready -h postgres -U rufus
 docker stats
 
 # Restart workers periodically
-celery -A rufus.celery_app control shutdown
+celery -A ruvon.celery_app control shutdown
 
 # Or use max-tasks-per-child
-celery -A rufus.celery_app worker --max-tasks-per-child=1000
+celery -A ruvon.celery_app worker --max-tasks-per-child=1000
 ```
 
 ### Tasks stuck in queue
 
 ```bash
 # Check queue length
-celery -A rufus.celery_app inspect active_queues
+celery -A ruvon.celery_app inspect active_queues
 
 # Purge queue (DANGEROUS - only in dev)
-celery -A rufus.celery_app purge
+celery -A ruvon.celery_app purge
 
 # Check worker availability
-celery -A rufus.celery_app inspect stats
+celery -A ruvon.celery_app inspect stats
 ```
 
 ---
@@ -693,12 +693,12 @@ nodeSelector:
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: rufus-celery-worker-vpa
+  name: ruvon-celery-worker-vpa
 spec:
   targetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: rufus-celery-worker
+    name: ruvon-celery-worker
   updatePolicy:
     updateMode: "Auto"
 ```

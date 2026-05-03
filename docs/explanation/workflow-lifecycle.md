@@ -1,6 +1,6 @@
 # Workflow Lifecycle
 
-A workflow in Rufus goes through a series of states from creation to completion. Understanding this lifecycle helps you predict behavior, debug issues, and design robust workflows.
+A workflow in Ruvon goes through a series of states from creation to completion. Understanding this lifecycle helps you predict behavior, debug issues, and design robust workflows.
 
 ## Lifecycle States
 

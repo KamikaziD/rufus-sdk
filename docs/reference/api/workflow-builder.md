@@ -4,7 +4,7 @@
 
 `WorkflowBuilder` loads workflow definitions from YAML files and creates workflow instances with proper dependency injection.
 
-**Module:** `rufus.builder`
+**Module:** `ruvon.builder`
 
 ## Constructor
 
@@ -46,9 +46,9 @@ def __init__(
 **Example:**
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 workflow_registry = {
     "OrderProcessing": {
@@ -121,9 +121,9 @@ async def create_workflow(
 **Example:**
 
 ```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
 
 persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()

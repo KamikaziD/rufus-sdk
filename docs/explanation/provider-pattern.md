@@ -1,10 +1,10 @@
 # The Provider Pattern
 
-Rufus SDK is built on the provider pattern—a dependency injection approach that makes the engine pluggable, testable, and adaptable to different environments.
+Ruvon SDK is built on the provider pattern—a dependency injection approach that makes the engine pluggable, testable, and adaptable to different environments.
 
 ## Why Providers?
 
-Before Rufus, Confucius hardcoded dependencies:
+Before Ruvon, Confucius hardcoded dependencies:
 
 ```python
 # Confucius: Hardcoded Redis and Celery
@@ -54,13 +54,13 @@ Any class that implements these methods can be used as a persistence provider, e
 
 ## The Three Core Providers
 
-Rufus has three main provider interfaces:
+Ruvon has three main provider interfaces:
 
 ### 1. PersistenceProvider
 
 **Responsibility**: Storage and retrieval of workflow state, audit logs, and metrics.
 
-**Interface** (`src/rufus/providers/persistence.py`):
+**Interface** (`src/ruvon/providers/persistence.py`):
 ```python
 class PersistenceProvider(Protocol):
     async def save_workflow(...)
@@ -88,7 +88,7 @@ class PersistenceProvider(Protocol):
 
 **Responsibility**: Dispatching and executing workflow steps.
 
-**Interface** (`src/rufus/providers/execution.py`):
+**Interface** (`src/ruvon/providers/execution.py`):
 ```python
 class ExecutionProvider(Protocol):
     def dispatch_async_task(...)
@@ -114,7 +114,7 @@ class ExecutionProvider(Protocol):
 
 **Responsibility**: Observability hooks for workflow events.
 
-**Interface** (`src/rufus/providers/observer.py`):
+**Interface** (`src/ruvon/providers/observer.py`):
 ```python
 class WorkflowObserver(Protocol):
     def on_workflow_started(...)
@@ -142,7 +142,7 @@ class WorkflowObserver(Protocol):
 The Workflow class receives providers via constructor injection:
 
 ```python
-# src/rufus/workflow.py
+# src/ruvon/workflow.py
 class Workflow:
     def __init__(
         self,
@@ -161,10 +161,10 @@ The engine doesn't create these objects—they're passed in by the caller. This 
 ### Usage Example
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 # Create providers
 persistence = SQLitePersistenceProvider(db_path="workflows.db")
@@ -232,7 +232,7 @@ Different deployments use different providers without code changes:
 
 ```python
 # Edge device
-persistence = SQLitePersistenceProvider(db_path="/var/lib/rufus/workflows.db")
+persistence = SQLitePersistenceProvider(db_path="/var/lib/ruvon/workflows.db")
 execution = ThreadPoolExecutionProvider(max_workers=4)
 
 # Cloud deployment
@@ -245,7 +245,7 @@ execution = CeleryExecutionProvider()
 The workflow engine knows nothing about PostgreSQL, Celery, or Prometheus. It only knows about provider interfaces. This means:
 - Engine can evolve independently of implementations
 - New storage backends can be added without changing the engine
-- Third-party providers can be created without modifying Rufus
+- Third-party providers can be created without modifying Ruvon
 
 ### 4. Performance Optimization
 
@@ -266,7 +266,7 @@ observer = NoOpObserver()
 
 ### Protocol vs ABC
 
-Rufus uses Python Protocols (PEP 544) instead of Abstract Base Classes:
+Ruvon uses Python Protocols (PEP 544) instead of Abstract Base Classes:
 
 ```python
 # Protocol (structural subtyping)
@@ -397,7 +397,7 @@ Let's create a custom persistence provider that stores workflows in a cloud obje
 import boto3
 import json
 from typing import Dict, Optional
-from rufus.providers.persistence import PersistenceProvider
+from ruvon.providers.persistence import PersistenceProvider
 
 class S3PersistenceProvider:
     """Store workflow state in AWS S3."""
@@ -441,12 +441,12 @@ Production deployments often configure providers via environment variables:
 
 ```python
 import os
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 def get_persistence_provider():
     """Factory function to select provider based on environment."""
-    backend = os.getenv("RUFUS_PERSISTENCE", "sqlite")
+    backend = os.getenv("RUVON_PERSISTENCE", "sqlite")
 
     if backend == "postgres":
         return PostgresPersistenceProvider(

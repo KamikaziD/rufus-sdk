@@ -5,7 +5,7 @@ These tasks can run in parallel as a sub-workflow.
 """
 import time
 import random
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 
 @celery_app.task

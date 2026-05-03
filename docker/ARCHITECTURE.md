@@ -1,4 +1,4 @@
-# Rufus Distributed Architecture
+# Ruvon Distributed Architecture
 
 ## High-Level Overview
 
@@ -14,7 +14,7 @@
                             │
                             ▼
           ┌──────────────────────────────────────────┐
-          │       Rufus API Server (FastAPI)         │
+          │       Ruvon API Server (FastAPI)         │
           │  - Workflow Management REST API          │
           │  - Workflow creation & resumption        │
           │  - Status monitoring                     │
@@ -74,7 +74,7 @@
 - Stream workflow events
 - Manage workflow lifecycle
 
-**Container:** `rufus-server`
+**Container:** `ruvon-server`
 **Port:** 8000
 **Dependencies:** PostgreSQL, Redis
 
@@ -89,7 +89,7 @@
 - `workflow_heartbeats` - Zombie detection
 - `worker_nodes` - Worker fleet registry
 
-**Container:** `rufus-postgres`
+**Container:** `ruvon-postgres`
 **Port:** 5432
 **Persistence:** Docker volume `postgres_data`
 
@@ -103,7 +103,7 @@
 - Pub/Sub (real-time events)
 - Streams (workflow events)
 
-**Container:** `rufus-redis`
+**Container:** `ruvon-redis`
 **Port:** 6379
 **Persistence:** Docker volume `redis_data`
 **Configuration:**
@@ -364,7 +364,7 @@ services:
 ### Docker Compose
 
 ```
-rufus-network (bridge)
+ruvon-network (bridge)
 │
 ├── postgres (postgres:5432)
 ├── redis (redis:6379)
@@ -372,7 +372,7 @@ rufus-network (bridge)
 ├── celery-worker-2 (ephemeral)
 ├── celery-worker-3 (ephemeral)
 ├── flower (flower:5555)
-└── rufus-server (rufus-server:8000)
+└── ruvon-server (ruvon-server:8000)
 ```
 
 **Exposed Ports:**
@@ -392,8 +392,8 @@ Service Mesh
 ├── Service: redis-svc (ClusterIP)
 │   └── Endpoints: redis pod(s)
 │
-├── Service: rufus-api (LoadBalancer)
-│   └── Endpoints: rufus-server pod(s)
+├── Service: ruvon-api (LoadBalancer)
+│   └── Endpoints: ruvon-server pod(s)
 │
 └── Service: flower (LoadBalancer)
     └── Endpoints: flower pod(s)

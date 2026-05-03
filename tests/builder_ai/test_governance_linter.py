@@ -4,7 +4,7 @@ No LLM calls required — the linter is fully deterministic.
 """
 
 import pytest
-from rufus.builder_ai.stages.governance_linter import GovernanceLinter
+from ruvon.builder_ai.stages.governance_linter import GovernanceLinter
 
 
 def _linter():

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rufus.builder_ai.knowledge.indexer import Chunk, KnowledgeBase
-from rufus.builder_ai.knowledge.raft_router import (
+from ruvon.builder_ai.knowledge.indexer import Chunk, KnowledgeBase
+from ruvon.builder_ai.knowledge.raft_router import (
     PrivacyLevel,
     RAFTRouter,
     RetrievalDecision,
@@ -94,7 +94,7 @@ async def test_decide_rag_for_domain_query():
     assert decision.strategy in (RetrievalStrategy.RAG, RetrievalStrategy.NONE)
     if decision.strategy == RetrievalStrategy.RAG:
         assert len(decision.chunks) > 0
-        assert decision.model_override is None  # Anthropic can't use rufus-expert
+        assert decision.model_override is None  # Anthropic can't use ruvon-expert
 
 
 @pytest.mark.asyncio
@@ -105,13 +105,13 @@ async def test_decide_raft_downgrade_when_model_absent():
     kb.retrieve = AsyncMock(return_value=[chunk])
 
     router = RAFTRouter(kb, privacy_level=PrivacyLevel.BALANCED)
-    router._raft_available = False  # rufus-expert not installed
+    router._raft_available = False  # ruvon-expert not installed
 
     decision = await router.decide(
         "configure llm_config.data_sovereignty for EDGE_MODEL_CALL with GOV-004 compliance",
         backend="ollama",
     )
-    # With high similarity + domain terms but no rufus-expert → should downgrade to RAG
+    # With high similarity + domain terms but no ruvon-expert → should downgrade to RAG
     assert decision.strategy != RetrievalStrategy.RAFT
     assert decision.model_override is None
 
@@ -133,7 +133,7 @@ async def test_decide_raft_when_model_available():
     )
     # Confidence depends on similarity + specificity; test the model_override is set if RAFT
     if decision.strategy == RetrievalStrategy.RAFT:
-        assert decision.model_override == "rufus-expert"
+        assert decision.model_override == "ruvon-expert"
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ async def test_balanced_privacy_replaces_chunk_text_for_cloud():
 
 @pytest.mark.asyncio
 async def test_pii_scrubbing_applied_to_chunks():
-    from rufus.builder_ai.knowledge.scrubber import PIIScrubber
+    from ruvon.builder_ai.knowledge.scrubber import PIIScrubber
 
     scrubber = PIIScrubber()
     text = "Contact us at john@example.com or call +971-50-123-4567"
@@ -192,7 +192,7 @@ async def test_pii_scrubbing_applied_to_chunks():
 
 
 def test_pii_scrubber_card_number():
-    from rufus.builder_ai.knowledge.scrubber import PIIScrubber
+    from ruvon.builder_ai.knowledge.scrubber import PIIScrubber
 
     scrubber = PIIScrubber()
     text = "Card: 4111 1111 1111 1111 is invalid"
@@ -207,7 +207,7 @@ def test_pii_scrubber_card_number():
 # ---------------------------------------------------------------------------
 
 def test_inject_knowledge_returns_unchanged_for_none_decision():
-    from rufus.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.stages.base import LLMStageMixin
 
     mixin = LLMStageMixin()
     original = "My system prompt."
@@ -216,7 +216,7 @@ def test_inject_knowledge_returns_unchanged_for_none_decision():
 
 
 def test_inject_knowledge_returns_unchanged_for_none_strategy():
-    from rufus.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.stages.base import LLMStageMixin
 
     mixin = LLMStageMixin()
     decision = RetrievalDecision(
@@ -229,7 +229,7 @@ def test_inject_knowledge_returns_unchanged_for_none_strategy():
 
 
 def test_inject_knowledge_augments_for_rag_strategy():
-    from rufus.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.stages.base import LLMStageMixin
 
     mixin = LLMStageMixin()
     chunk = _make_chunk()
@@ -239,12 +239,12 @@ def test_inject_knowledge_augments_for_rag_strategy():
         confidence=0.6,
     )
     result = mixin._inject_knowledge("System prompt.", decision=decision)
-    assert "<RUFUS_KNOWLEDGE>" in result
+    assert "<RUVON_KNOWLEDGE>" in result
     assert "HUMAN_APPROVAL" in result
 
 
 def test_inject_knowledge_focus_types_filter():
-    from rufus.builder_ai.stages.base import LLMStageMixin
+    from ruvon.builder_ai.stages.base import LLMStageMixin
 
     mixin = LLMStageMixin()
     yaml_chunk = _make_chunk(chunk_type="yaml_example")

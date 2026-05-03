@@ -1,44 +1,69 @@
-# Rufus Edge Workflow Registry
+# Ruvon Edge Workflow Registry
 # Register all available workflows for the fintech edge platform
 
 workflows:
   - type: "ConfigRollout"
     description: "Fleet-wide config push with progressive rollout and saga compensation"
     config_file: "config_rollout_workflow.yaml"
-    initial_state_model: "rufus_server.steps.config_rollout_steps.ConfigRolloutState"
+    initial_state_model: "ruvon_server.steps.config_rollout_steps.ConfigRolloutState"
 
   - type: "PolicyRollout"
     description: "Durable policy creation with saga compensation"
     config_file: "policy_rollout_workflow.yaml"
-    initial_state_model: "rufus_server.steps.policy_rollout_steps.PolicyRolloutState"
+    initial_state_model: "ruvon_server.steps.policy_rollout_steps.PolicyRolloutState"
 
   - type: "PaymentAuthorization"
     description: "Payment authorization with offline fallback"
     config_file: "payment_workflow.yaml"
-    initial_state_model: "rufus_edge.models.PaymentState"
+    initial_state_model: "ruvon_edge.models.PaymentState"
 
   - type: "RefundTransaction"
     description: "Process refunds for completed transactions"
     config_file: "refund_workflow.yaml"
-    initial_state_model: "rufus_edge.models.PaymentState"
+    initial_state_model: "ruvon_edge.models.PaymentState"
     # Not yet implemented
 
   - type: "VoidTransaction"
     description: "Void a pending authorization"
     config_file: "void_workflow.yaml"
-    initial_state_model: "rufus_edge.models.PaymentState"
+    initial_state_model: "ruvon_edge.models.PaymentState"
     # Not yet implemented
 
   - type: "DeploymentMonitor"
     description: "Autonomous deployment sidecar — monitors device health, surfaces HITL improvement proposals, applies approved changes via WASM sandbox"
     config_file: "deployment_monitor.yaml"
-    initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
+    initial_state_model: "ruvon_edge.sidecar.metrics:DeviceMetrics"
     requires:
-      - rufus-sdk-edge
+      - ruvon-edge
 
   - type: "DeploymentMonitorWasm"
     description: "WASM-sandboxed deployment sidecar — same as DeploymentMonitor but ApplyChange runs in WASI isolation (requires compiled apply_config.wasm)"
     config_file: "deployment_monitor_wasm.yaml"
-    initial_state_model: "rufus_edge.sidecar.metrics:DeviceMetrics"
+    initial_state_model: "ruvon_edge.sidecar.metrics:DeviceMetrics"
     requires:
-      - rufus-sdk-edge
+      - ruvon-edge
+
+  # ── EchoForge control-plane workflows ─────────────────────────────────────
+  # These workflows govern the EchoForge trading engine daemon.
+  # The EchoForgeExtension instance must be injected via context.extra["echoforge_extension"].
+
+  - type: "EchoForgePHICUpdate"
+    description: "Validate and apply a PHIC config update to the EchoForge engine"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_phic_update.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.PHICUpdateState"
+    requires:
+      - ruvon-echoforge
+
+  - type: "EchoForgeModelRetrain"
+    description: "Retrain the ONNX signal model on Binance klines and hot-swap into inference_worker"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_model_retrain.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.ModelRetrainState"
+    requires:
+      - ruvon-echoforge
+
+  - type: "EchoForgeEmergencyFreeze"
+    description: "Evaluate a sentinel alert and freeze/resume the EchoForge trading engine"
+    config_file: "packages/ruvon-echoforge/workflows/echoforge_emergency_freeze.yaml"
+    initial_state_model: "ruvon_echoforge.workflows.steps.EmergencyFreezeState"
+    requires:
+      - ruvon-echoforge

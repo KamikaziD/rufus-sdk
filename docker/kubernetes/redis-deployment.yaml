@@ -1,29 +1,29 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: rufus-redis
+  name: ruvon-redis
 spec:
   ports:
   - port: 6379
     targetPort: 6379
   selector:
-    app: rufus
+    app: ruvon
     component: redis
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-redis
+  name: ruvon-redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: rufus
+      app: ruvon
       component: redis
   template:
     metadata:
       labels:
-        app: rufus
+        app: ruvon
         component: redis
     spec:
       containers:
@@ -66,12 +66,12 @@ spec:
       volumes:
       - name: redis-data
         persistentVolumeClaim:
-          claimName: rufus-redis-pvc
+          claimName: ruvon-redis-pvc
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rufus-redis-pvc
+  name: ruvon-redis-pvc
 spec:
   accessModes:
   - ReadWriteOnce

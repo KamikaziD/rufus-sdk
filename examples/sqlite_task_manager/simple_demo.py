@@ -8,7 +8,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 
 async def main():

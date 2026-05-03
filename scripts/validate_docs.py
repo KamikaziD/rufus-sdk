@@ -35,7 +35,7 @@ class LinkValidator:
 
     def validate_all_docs(self):
         """Validate all markdown files in docs/ and root."""
-        print("🔍 Validating Rufus documentation...")
+        print("🔍 Validating Ruvon documentation...")
         print(f"📂 Root: {DOCS_ROOT}")
         print()
 

@@ -33,17 +33,17 @@ ENV PYTHONPATH=/app/src:/app/examples
 # Default environment variables (override in docker-compose or k8s)
 ENV CELERY_BROKER_URL=redis://redis:6379/0
 ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
-ENV DATABASE_URL=postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_production
+ENV DATABASE_URL=postgresql://ruvon:ruvon_secret_2024@postgres:5432/ruvon_production
 ENV WORKER_CONCURRENCY=4
 ENV WORKER_POOL=prefork
 ENV WORKER_LOG_LEVEL=info
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD celery -A rufus.celery_app inspect ping -d celery@${HOSTNAME} || exit 1
+    CMD celery -A ruvon.celery_app inspect ping -d celery@${HOSTNAME} || exit 1
 
 # Run Celery worker
-CMD celery -A rufus.celery_app worker \
+CMD celery -A ruvon.celery_app worker \
     --loglevel=${WORKER_LOG_LEVEL} \
     --concurrency=${WORKER_CONCURRENCY} \
     --pool=${WORKER_POOL} \

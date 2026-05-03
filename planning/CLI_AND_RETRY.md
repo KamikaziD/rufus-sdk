@@ -302,7 +302,7 @@ python cloud_admin.py test-webhook \
 
 Automatic background worker that retries failed webhook deliveries based on configurable retry policies.
 
-**File:** `src/rufus_server/webhook_retry_worker.py`
+**File:** `src/ruvon_server/webhook_retry_worker.py`
 
 ### Features
 
@@ -368,7 +368,7 @@ Constant delay between retries.
 
 ```bash
 # Start retry worker
-DATABASE_URL=postgresql://localhost/rufus_edge \
+DATABASE_URL=postgresql://localhost/ruvon_edge \
 python examples/edge_deployment/webhook_retry_daemon.py
 
 # Custom scan interval (30 seconds)
@@ -387,7 +387,7 @@ python webhook_retry_daemon.py --scan-interval 30 --max-concurrent 20
   Webhook Retry Daemon
 ======================================================================
 
-  Database:        postgresql://localhost/rufus_edge
+  Database:        postgresql://localhost/ruvon_edge
   Scan interval:   60s
   Max concurrent:  10
 
@@ -409,7 +409,7 @@ python webhook_retry_daemon.py --scan-interval 30 --max-concurrent 20
 #### Environment Variables
 
 ```bash
-export DATABASE_URL=postgresql://localhost/rufus_edge
+export DATABASE_URL=postgresql://localhost/ruvon_edge
 export WEBHOOK_RETRY_SCAN_INTERVAL=60        # Scan every 60 seconds
 export WEBHOOK_RETRY_MAX_CONCURRENT=10       # Max 10 concurrent retries
 
@@ -422,16 +422,16 @@ python webhook_retry_daemon.py
 
 ```ini
 [Unit]
-Description=Rufus Webhook Retry Daemon
+Description=Ruvon Webhook Retry Daemon
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=rufus
-Environment="DATABASE_URL=postgresql://localhost/rufus_edge"
+User=ruvon
+Environment="DATABASE_URL=postgresql://localhost/ruvon_edge"
 Environment="WEBHOOK_RETRY_SCAN_INTERVAL=60"
 Environment="WEBHOOK_RETRY_MAX_CONCURRENT=10"
-ExecStart=/usr/bin/python3 /opt/rufus/webhook_retry_daemon.py
+ExecStart=/usr/bin/python3 /opt/ruvon/webhook_retry_daemon.py
 Restart=always
 RestartSec=10
 
@@ -478,7 +478,7 @@ docker build -t webhook-retry-daemon .
 
 docker run -d \
   --name webhook-retry-daemon \
-  -e DATABASE_URL=postgresql://postgres:password@db:5432/rufus_edge \
+  -e DATABASE_URL=postgresql://postgres:password@db:5432/ruvon_edge \
   -e WEBHOOK_RETRY_SCAN_INTERVAL=60 \
   -e WEBHOOK_RETRY_MAX_CONCURRENT=10 \
   --restart unless-stopped \
@@ -493,7 +493,7 @@ services:
     build: .
     image: webhook-retry-daemon
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/rufus_edge
+      - DATABASE_URL=postgresql://postgres:password@db:5432/ruvon_edge
       - WEBHOOK_RETRY_SCAN_INTERVAL=60
       - WEBHOOK_RETRY_MAX_CONCURRENT=10
     depends_on:
@@ -503,7 +503,7 @@ services:
   db:
     image: postgres:15
     environment:
-      - POSTGRES_DB=rufus_edge
+      - POSTGRES_DB=ruvon_edge
       - POSTGRES_PASSWORD=password
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -571,10 +571,10 @@ export LOG_LEVEL=DEBUG  # DEBUG, INFO, WARNING, ERROR
 ps aux | grep webhook_retry_daemon
 
 # Check last log entry
-tail -n 1 /var/log/rufus/webhook-retry-daemon.log
+tail -n 1 /var/log/ruvon/webhook-retry-daemon.log
 
 # Check failed deliveries count
-psql -d rufus_edge -c "SELECT COUNT(*) FROM webhook_deliveries WHERE status = 'failed'"
+psql -d ruvon_edge -c "SELECT COUNT(*) FROM webhook_deliveries WHERE status = 'failed'"
 ```
 
 ---
@@ -585,7 +585,7 @@ psql -d rufus_edge -c "SELECT COUNT(*) FROM webhook_deliveries WHERE status = 'f
 
 ```bash
 # Start server
-uvicorn rufus_server.main:app --reload
+uvicorn ruvon_server.main:app --reload
 
 # Test command versioning
 python cloud_admin.py list-command-versions
@@ -609,7 +609,7 @@ python cloud_admin.py delete-webhook test-webhook
 
 ```bash
 # Terminal 1: Start server
-uvicorn rufus_server.main:app --reload
+uvicorn ruvon_server.main:app --reload
 
 # Terminal 2: Create webhook with unreachable URL (will fail)
 curl -X POST http://localhost:8000/api/v1/webhooks \
@@ -628,7 +628,7 @@ curl -X POST http://localhost:8000/api/v1/devices \
   -d '{"device_id": "test-123", ...}'
 
 # Terminal 3: Start retry worker
-DATABASE_URL=postgresql://localhost/rufus_edge \
+DATABASE_URL=postgresql://localhost/ruvon_edge \
 python webhook_retry_daemon.py --scan-interval 15
 
 # Watch retry attempts in logs
@@ -756,7 +756,7 @@ WHERE is_active = true;
 ## Files Created/Modified
 
 ### Created
-1. `src/rufus_server/webhook_retry_worker.py` (~300 lines)
+1. `src/ruvon_server/webhook_retry_worker.py` (~300 lines)
 2. `examples/edge_deployment/webhook_retry_daemon.py` (~120 lines)
 3. `CLI_AND_RETRY.md` (this file)
 

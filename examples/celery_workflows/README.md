@@ -1,6 +1,6 @@
 # Celery Workflows Example Application
 
-Complete example demonstrating Rufus's Celery-based distributed execution with:
+Complete example demonstrating Ruvon's Celery-based distributed execution with:
 - ✅ Async task execution
 - ✅ Parallel task execution
 - ✅ Sub-workflow orchestration
@@ -22,8 +22,8 @@ pip install -e "../../.[celery]"
 
 **3. Apply database migrations:**
 ```bash
-cd ../../src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example"
+cd ../../src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example"
 alembic upgrade head
 cd -
 ```
@@ -219,7 +219,7 @@ examples/celery_workflows/
 ### Environment Variables
 ```bash
 # Database
-DATABASE_URL=postgresql://rufus:rufus_secret_2024@localhost:5432/rufus_example
+DATABASE_URL=postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon_example
 
 # Celery
 CELERY_BROKER_URL=redis://localhost:6379/0
@@ -243,7 +243,7 @@ WORKER_ZONE=us-east-1a
 ### Defining an Async Task
 ```python
 # tasks/payment_tasks.py
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 @celery_app.task
 def process_payment_task(state: dict, workflow_id: str):
@@ -284,7 +284,7 @@ steps:
 ### Sub-Workflow
 ```python
 # In step function
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def trigger_notifications(state: OrderState, context: StepContext):
     raise StartSubWorkflowDirective(
@@ -302,8 +302,8 @@ def trigger_notifications(state: OrderState, context: StepContext):
 
 ### View Worker Status
 ```bash
-celery -A rufus.celery_app inspect active
-celery -A rufus.celery_app inspect stats
+celery -A ruvon.celery_app inspect active
+celery -A ruvon.celery_app inspect stats
 ```
 
 ### Monitor Redis Events
@@ -327,7 +327,7 @@ psql $DATABASE_URL -c "
 
 ### View Workflow History
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(db_url)
 await persistence.initialize()
@@ -357,16 +357,16 @@ docker-compose down
 ### Worker not starting
 ```bash
 # Check logs
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 
 # Verify imports
-python -c "from rufus.celery_app import celery_app; print(celery_app)"
+python -c "from ruvon.celery_app import celery_app; print(celery_app)"
 ```
 
 ### Workflows stuck
 ```bash
 # Check active tasks
-celery -A rufus.celery_app inspect active
+celery -A ruvon.celery_app inspect active
 
 # Check Redis
 redis-cli PING
@@ -383,7 +383,7 @@ psql $DATABASE_URL -c "SELECT 1"
 # Reset database
 docker-compose down -v
 docker-compose up -d
-cd ../../src/rufus && alembic upgrade head
+cd ../../src/ruvon && alembic upgrade head
 ```
 
 ---
@@ -405,11 +405,11 @@ def custom_merge(results: list) -> dict:
 ```bash
 # Start US worker
 export WORKER_REGION=us-east-1
-celery -A rufus.celery_app worker -Q us-east-1,default
+celery -A ruvon.celery_app worker -Q us-east-1,default
 
 # Start EU worker
 export WORKER_REGION=eu-central-1
-celery -A rufus.celery_app worker -Q eu-central-1,default
+celery -A ruvon.celery_app worker -Q eu-central-1,default
 ```
 
 ### Task Retry Configuration

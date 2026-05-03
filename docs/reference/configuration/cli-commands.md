@@ -2,27 +2,27 @@
 
 ## Overview
 
-Complete reference for all Rufus CLI commands.
+Complete reference for all Ruvon CLI commands.
 
 **Installation:**
 
 ```bash
 pip install -e .
-rufus --help
+ruvon --help
 ```
 
 ---
 
 ## Configuration Commands
 
-### `rufus config show`
+### `ruvon config show`
 
 Display current configuration.
 
 **Syntax:**
 
 ```bash
-rufus config show [--json]
+ruvon config show [--json]
 ```
 
 **Options:**
@@ -34,34 +34,34 @@ rufus config show [--json]
 **Example:**
 
 ```bash
-rufus config show
-rufus config show --json
+ruvon config show
+ruvon config show --json
 ```
 
 ---
 
-### `rufus config path`
+### `ruvon config path`
 
 Show configuration file location.
 
 **Syntax:**
 
 ```bash
-rufus config path
+ruvon config path
 ```
 
-**Output:** Path to config file (typically `~/.rufus/config.yaml`)
+**Output:** Path to config file (typically `~/.ruvon/config.yaml`)
 
 ---
 
-### `rufus config set-persistence`
+### `ruvon config set-persistence`
 
 Configure persistence provider (interactive).
 
 **Syntax:**
 
 ```bash
-rufus config set-persistence
+ruvon config set-persistence
 ```
 
 **Interactive Prompts:**
@@ -80,14 +80,14 @@ rufus config set-persistence
 
 ---
 
-### `rufus config set-execution`
+### `ruvon config set-execution`
 
 Configure execution provider (interactive).
 
 **Syntax:**
 
 ```bash
-rufus config set-execution
+ruvon config set-execution
 ```
 
 **Interactive Prompts:**
@@ -100,18 +100,18 @@ rufus config set-execution
 | `sync` | Synchronous execution (single-threaded) |
 | `thread_pool` | Thread-based parallel execution |
 
-> **Note:** `celery` is not supported in the CLI (requires rufus-server and a running broker). Use `sync` or `thread_pool` for local execution.
+> **Note:** `celery` is not supported in the CLI (requires ruvon-server and a running broker). Use `sync` or `thread_pool` for local execution.
 
 ---
 
-### `rufus config set-default`
+### `ruvon config set-default`
 
 Configure default behaviors (interactive).
 
 **Syntax:**
 
 ```bash
-rufus config set-default
+ruvon config set-default
 ```
 
 **Available Defaults:**
@@ -121,14 +121,14 @@ rufus config set-default
 
 ---
 
-### `rufus config reset`
+### `ruvon config reset`
 
 Reset configuration to defaults.
 
 **Syntax:**
 
 ```bash
-rufus config reset [--yes]
+ruvon config reset [--yes]
 ```
 
 **Options:**
@@ -141,14 +141,14 @@ rufus config reset [--yes]
 
 ## Workflow Commands
 
-### `rufus list`
+### `ruvon list`
 
 List workflows with optional filtering.
 
 **Syntax:**
 
 ```bash
-rufus list [OPTIONS]
+ruvon list [OPTIONS]
 ```
 
 **Options:**
@@ -168,22 +168,22 @@ rufus list [OPTIONS]
 **Examples:**
 
 ```bash
-rufus list
-rufus list --status ACTIVE
-rufus list --type OrderProcessing --limit 50
-rufus list --json
+ruvon list
+ruvon list --status ACTIVE
+ruvon list --type OrderProcessing --limit 50
+ruvon list --json
 ```
 
 ---
 
-### `rufus start`
+### `ruvon start`
 
 Start a new workflow.
 
 **Syntax:**
 
 ```bash
-rufus start <workflow-type> [OPTIONS]
+ruvon start <workflow-type> [OPTIONS]
 ```
 
 **Arguments:**
@@ -206,21 +206,21 @@ rufus start <workflow-type> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus start OrderProcessing --data '{"customer_id": "123"}'
-rufus start OrderProcessing --data-file order.json
-rufus start OrderProcessing --data '{}' --auto
+ruvon start OrderProcessing --data '{"customer_id": "123"}'
+ruvon start OrderProcessing --data-file order.json
+ruvon start OrderProcessing --data '{}' --auto
 ```
 
 ---
 
-### `rufus show`
+### `ruvon show`
 
 Show detailed workflow information.
 
 **Syntax:**
 
 ```bash
-rufus show <workflow-id> [OPTIONS]
+ruvon show <workflow-id> [OPTIONS]
 ```
 
 **Arguments:**
@@ -242,21 +242,21 @@ rufus show <workflow-id> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus show wf_abc123
-rufus show wf_abc123 --state --logs
-rufus show wf_abc123 --verbose --json
+ruvon show wf_abc123
+ruvon show wf_abc123 --state --logs
+ruvon show wf_abc123 --verbose --json
 ```
 
 ---
 
-### `rufus resume`
+### `ruvon resume`
 
 Resume a paused workflow.
 
 **Syntax:**
 
 ```bash
-rufus resume <workflow-id> [OPTIONS]
+ruvon resume <workflow-id> [OPTIONS]
 ```
 
 **Arguments:**
@@ -276,20 +276,20 @@ rufus resume <workflow-id> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus resume wf_abc123 --input '{"approved": true}'
-rufus resume wf_abc123 --input-file approval.json --auto
+ruvon resume wf_abc123 --input '{"approved": true}'
+ruvon resume wf_abc123 --input-file approval.json --auto
 ```
 
 ---
 
-### `rufus retry`
+### `ruvon retry`
 
 Retry a failed workflow.
 
 **Syntax:**
 
 ```bash
-rufus retry <workflow-id> [OPTIONS]
+ruvon retry <workflow-id> [OPTIONS]
 ```
 
 **Arguments:**
@@ -308,20 +308,20 @@ rufus retry <workflow-id> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus retry wf_abc123
-rufus retry wf_abc123 --from-step Process_Payment --auto
+ruvon retry wf_abc123
+ruvon retry wf_abc123 --from-step Process_Payment --auto
 ```
 
 ---
 
-### `rufus logs`
+### `ruvon logs`
 
 View workflow execution logs.
 
 **Syntax:**
 
 ```bash
-rufus logs <workflow-id> [OPTIONS]
+ruvon logs <workflow-id> [OPTIONS]
 ```
 
 **Arguments:**
@@ -347,22 +347,22 @@ rufus logs <workflow-id> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus logs wf_abc123
-rufus logs wf_abc123 --step Process_Payment
-rufus logs wf_abc123 --level ERROR --limit 50
-rufus logs wf_abc123 --json
+ruvon logs wf_abc123
+ruvon logs wf_abc123 --step Process_Payment
+ruvon logs wf_abc123 --level ERROR --limit 50
+ruvon logs wf_abc123 --json
 ```
 
 ---
 
-### `rufus metrics`
+### `ruvon metrics`
 
 View workflow performance metrics.
 
 **Syntax:**
 
 ```bash
-rufus metrics [OPTIONS]
+ruvon metrics [OPTIONS]
 ```
 
 **Options:**
@@ -378,21 +378,21 @@ rufus metrics [OPTIONS]
 **Examples:**
 
 ```bash
-rufus metrics --workflow-id wf_abc123
-rufus metrics --type OrderProcessing --summary
-rufus metrics --json
+ruvon metrics --workflow-id wf_abc123
+ruvon metrics --type OrderProcessing --summary
+ruvon metrics --json
 ```
 
 ---
 
-### `rufus cancel`
+### `ruvon cancel`
 
 Cancel a running workflow.
 
 **Syntax:**
 
 ```bash
-rufus cancel <workflow-id> [OPTIONS]
+ruvon cancel <workflow-id> [OPTIONS]
 ```
 
 **Arguments:**
@@ -411,20 +411,20 @@ rufus cancel <workflow-id> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus cancel wf_abc123
-rufus cancel wf_abc123 --reason "Duplicate order" --force
+ruvon cancel wf_abc123
+ruvon cancel wf_abc123 --reason "Duplicate order" --force
 ```
 
 ---
 
-### `rufus interactive run`
+### `ruvon interactive run`
 
 Run a workflow interactively, pausing at each Human-in-the-Loop step to collect user input via terminal prompts.
 
 **Syntax:**
 
 ```bash
-rufus interactive run <workflow-type> [OPTIONS]
+ruvon interactive run <workflow-type> [OPTIONS]
 ```
 
 **Arguments:**
@@ -444,8 +444,8 @@ rufus interactive run <workflow-type> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus interactive run OrderProcessing --config workflows/order.yaml
-rufus interactive run Approval --data '{"request_id": "123"}'
+ruvon interactive run OrderProcessing --config workflows/order.yaml
+ruvon interactive run Approval --data '{"request_id": "123"}'
 ```
 
 **Behavior:**
@@ -457,14 +457,14 @@ rufus interactive run Approval --data '{"request_id": "123"}'
 
 ## Database Commands
 
-### `rufus db init`
+### `ruvon db init`
 
 Initialize database schema.
 
 **Syntax:**
 
 ```bash
-rufus db init [--db-url <url>]
+ruvon db init [--db-url <url>]
 ```
 
 **Options:**
@@ -476,9 +476,9 @@ rufus db init [--db-url <url>]
 **Examples:**
 
 ```bash
-rufus db init
-rufus db init --db-url sqlite:///workflows.db
-rufus db init --db-url postgresql://user:pass@localhost/rufus
+ruvon db init
+ruvon db init --db-url sqlite:///workflows.db
+ruvon db init --db-url postgresql://user:pass@localhost/ruvon
 ```
 
 **Behavior:**
@@ -488,14 +488,14 @@ rufus db init --db-url postgresql://user:pass@localhost/rufus
 
 ---
 
-### `rufus db migrate`
+### `ruvon db migrate`
 
 Apply pending database migrations.
 
 **Syntax:**
 
 ```bash
-rufus db migrate [OPTIONS]
+ruvon db migrate [OPTIONS]
 ```
 
 **Options:**
@@ -508,21 +508,21 @@ rufus db migrate [OPTIONS]
 **Examples:**
 
 ```bash
-rufus db migrate
-rufus db migrate --dry-run
-rufus db migrate --db-url postgresql://user:pass@localhost/rufus
+ruvon db migrate
+ruvon db migrate --dry-run
+ruvon db migrate --db-url postgresql://user:pass@localhost/ruvon
 ```
 
 ---
 
-### `rufus db status`
+### `ruvon db status`
 
 Show database migration status.
 
 **Syntax:**
 
 ```bash
-rufus db status [--db-url <url>]
+ruvon db status [--db-url <url>]
 ```
 
 **Options:**
@@ -534,19 +534,19 @@ rufus db status [--db-url <url>]
 **Example:**
 
 ```bash
-rufus db status
+ruvon db status
 ```
 
 ---
 
-### `rufus db stats`
+### `ruvon db stats`
 
 Show database statistics.
 
 **Syntax:**
 
 ```bash
-rufus db stats [--db-url <url>]
+ruvon db stats [--db-url <url>]
 ```
 
 **Options:**
@@ -558,7 +558,7 @@ rufus db stats [--db-url <url>]
 **Example:**
 
 ```bash
-rufus db stats
+ruvon db stats
 ```
 
 **Output:**
@@ -568,14 +568,14 @@ rufus db stats
 
 ---
 
-### `rufus db validate`
+### `ruvon db validate`
 
 Validate database schema.
 
 **Syntax:**
 
 ```bash
-rufus db validate
+ruvon db validate
 ```
 
 **Validates:**
@@ -588,14 +588,14 @@ rufus db validate
 
 ## Zombie Workflow Commands
 
-### `rufus scan-zombies`
+### `ruvon scan-zombies`
 
 Scan for zombie workflows (stale heartbeats).
 
 **Syntax:**
 
 ```bash
-rufus scan-zombies [OPTIONS]
+ruvon scan-zombies [OPTIONS]
 ```
 
 **Options:**
@@ -610,21 +610,21 @@ rufus scan-zombies [OPTIONS]
 **Examples:**
 
 ```bash
-rufus scan-zombies --db postgresql://localhost/rufus
-rufus scan-zombies --db sqlite:///workflows.db --fix
-rufus scan-zombies --db postgresql://localhost/rufus --threshold 180 --json
+ruvon scan-zombies --db postgresql://localhost/ruvon
+ruvon scan-zombies --db sqlite:///workflows.db --fix
+ruvon scan-zombies --db postgresql://localhost/ruvon --threshold 180 --json
 ```
 
 ---
 
-### `rufus zombie-daemon`
+### `ruvon zombie-daemon`
 
 Run zombie scanner as continuous daemon.
 
 **Syntax:**
 
 ```bash
-rufus zombie-daemon [OPTIONS]
+ruvon zombie-daemon [OPTIONS]
 ```
 
 **Options:**
@@ -638,21 +638,21 @@ rufus zombie-daemon [OPTIONS]
 **Example:**
 
 ```bash
-rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 60
 ```
 
 ---
 
 ## Legacy Commands
 
-### `rufus validate`
+### `ruvon validate`
 
 Validate workflow YAML syntax and structure.
 
 **Syntax:**
 
 ```bash
-rufus validate <yaml-file> [OPTIONS]
+ruvon validate <yaml-file> [OPTIONS]
 ```
 
 **Arguments:**
@@ -673,23 +673,23 @@ rufus validate <yaml-file> [OPTIONS]
 **Examples:**
 
 ```bash
-rufus validate config/my_workflow.yaml
-rufus validate config/my_workflow.yaml --strict
-rufus validate config/my_workflow.yaml --graph
-rufus validate config/my_workflow.yaml --graph --graph-format dot
-rufus validate config/my_workflow.yaml --json
+ruvon validate config/my_workflow.yaml
+ruvon validate config/my_workflow.yaml --strict
+ruvon validate config/my_workflow.yaml --graph
+ruvon validate config/my_workflow.yaml --graph --graph-format dot
+ruvon validate config/my_workflow.yaml --json
 ```
 
 ---
 
-### `rufus run`
+### `ruvon run`
 
 Run workflow locally (in-memory, synchronous).
 
 **Syntax:**
 
 ```bash
-rufus run <yaml-file> [OPTIONS]
+ruvon run <yaml-file> [OPTIONS]
 ```
 
 **Arguments:**
@@ -707,7 +707,7 @@ rufus run <yaml-file> [OPTIONS]
 **Example:**
 
 ```bash
-rufus run config/my_workflow.yaml --data '{"user_id": "123"}'
+ruvon run config/my_workflow.yaml --data '{"user_id": "123"}'
 ```
 
 **Behavior:**
@@ -725,15 +725,15 @@ Available for all commands:
 | Option | Description |
 |--------|-------------|
 | `--help` | Show command help |
-| `--version` | Show Rufus version |
+| `--version` | Show Ruvon version |
 
 **Example:**
 
 ```bash
-rufus --help
-rufus --version
-rufus config --help
-rufus logs --help
+ruvon --help
+ruvon --version
+ruvon config --help
+ruvon logs --help
 ```
 
 ---
@@ -744,18 +744,18 @@ Override CLI behavior with environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `RUFUS_CONFIG_PATH` | Config file location | `~/.rufus/config.yaml` |
-| `RUFUS_DB_URL` | Database URL override | From config |
+| `RUVON_CONFIG_PATH` | Config file location | `~/.ruvon/config.yaml` |
+| `RUVON_DB_URL` | Database URL override | From config |
 | `NO_COLOR` | Disable colored output | - |
 
 **Example:**
 
 ```bash
-export RUFUS_CONFIG_PATH=/custom/config.yaml
-export RUFUS_DB_URL=postgresql://localhost/rufus
+export RUVON_CONFIG_PATH=/custom/config.yaml
+export RUVON_DB_URL=postgresql://localhost/ruvon
 export NO_COLOR=1
 
-rufus list
+ruvon list
 ```
 
 ---

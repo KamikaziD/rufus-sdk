@@ -1,5 +1,5 @@
 """
-Rufus Edge Load Testing Suite.
+Ruvon Edge Load Testing Suite.
 
 Simulates edge devices for load testing the cloud control plane.
 """

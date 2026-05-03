@@ -1,4 +1,4 @@
--- Rufus SDK - SQLITE Schema
+-- Ruvon SDK - SQLITE Schema
 -- Generated from migrations/schema.yaml v1.1.0
 -- DO NOT EDIT MANUALLY - Use tools/compile_schema.py
 

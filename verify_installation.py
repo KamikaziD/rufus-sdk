@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rufus SDK Installation Verification Script
+Ruvon SDK Installation Verification Script
 
 Run this after installing the package to verify everything works correctly.
 
@@ -17,11 +17,11 @@ def check_imports() -> List[Tuple[str, bool, str]]:
     results = []
 
     checks = [
-        ("rufus.builder", "WorkflowBuilder"),
-        ("rufus.models", "StepContext"),
-        ("rufus.workflow", "Workflow"),
-        ("rufus.implementations.persistence.sqlite", "SQLitePersistenceProvider"),
-        ("rufus.implementations.execution.sync", "SyncExecutionProvider"),
+        ("ruvon.builder", "WorkflowBuilder"),
+        ("ruvon.models", "StepContext"),
+        ("ruvon.workflow", "Workflow"),
+        ("ruvon.implementations.persistence.sqlite", "SQLitePersistenceProvider"),
+        ("ruvon.implementations.execution.sync", "SyncExecutionProvider"),
         ("rufus_cli.main", "app"),
     ]
 
@@ -46,7 +46,7 @@ def check_cli() -> Tuple[bool, str]:
 
     try:
         result = subprocess.run(
-            ["rufus", "--version"],
+            ["ruvon", "--version"],
             capture_output=True,
             text=True,
             timeout=5
@@ -56,7 +56,7 @@ def check_cli() -> Tuple[bool, str]:
         else:
             return False, f"CLI error (code {result.returncode}): {result.stderr}"
     except FileNotFoundError:
-        return False, "rufus command not found in PATH"
+        return False, "ruvon command not found in PATH"
     except Exception as e:
         return False, f"Error checking CLI: {e}"
 
@@ -138,7 +138,7 @@ def print_results():
     print("-" * 70)
     cli_ok, cli_message = check_cli()
     cli_status = "✓" if cli_ok else "✗"
-    print(f"  {cli_status} rufus command: {cli_message}")
+    print(f"  {cli_status} ruvon command: {cli_message}")
     print()
 
     # Dependencies
@@ -166,11 +166,11 @@ def print_results():
     print("=" * 70)
 
     if all_imports_ok and cli_ok and all_deps_ok:
-        print("  ✓ ALL CHECKS PASSED - Rufus SDK is ready to use!")
+        print("  ✓ ALL CHECKS PASSED - Ruvon SDK is ready to use!")
         print("=" * 70)
         print()
         print("Next steps:")
-        print("  1. Try: rufus --help")
+        print("  1. Try: ruvon --help")
         print("  2. Run examples: cd examples/sqlite_task_manager && python simple_demo.py")
         print("  3. Read documentation: QUICKSTART.md")
         return 0
@@ -181,7 +181,7 @@ def print_results():
         print("Troubleshooting:")
 
         if not all_imports_ok:
-            print("  • Import errors: Reinstall with: pip install --force-reinstall git+https://github.com/KamikaziD/rufus-sdk.git")
+            print("  • Import errors: Reinstall with: pip install --force-reinstall git+https://github.com/KamikaziD/ruvon-sdk.git")
 
         if not cli_ok:
             print("  • CLI not found: Check that pip install location is in your PATH")

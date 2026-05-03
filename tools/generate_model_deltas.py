@@ -32,7 +32,7 @@ from typing import Dict
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from rufus_edge.delta_updates import generate_delta_patch
+from ruvon_edge.delta_updates import generate_delta_patch
 
 logging.basicConfig(
     level=logging.INFO,

@@ -2,7 +2,7 @@
 
 ## Overview
 
-All Rufus components (server, tests, edge agent) now read configuration from environment variables. This provides a unified way to configure the system across different environments.
+All Ruvon components (server, tests, edge agent) now read configuration from environment variables. This provides a unified way to configure the system across different environments.
 
 ## Files
 
@@ -47,10 +47,10 @@ python tests/load/run_load_test.py --all --devices 500
 ### Database Connection
 ```bash
 # Local development
-DATABASE_URL=postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud
+DATABASE_URL=postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud
 
 # Docker (uses internal hostname)
-DATABASE_URL=postgresql://rufus:rufus_secret_2024@postgres:5432/rufus_cloud
+DATABASE_URL=postgresql://ruvon:ruvon_secret_2024@postgres:5432/ruvon_cloud
 ```
 
 ### Connection Pool Sizing
@@ -115,7 +115,7 @@ python tests/load/run_load_test.py --all --devices 1000
 
 ### Development (`.env`)
 ```bash
-DATABASE_URL=postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud
+DATABASE_URL=postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud
 LOG_LEVEL=DEBUG
 RATE_LIMIT_ENABLED=false
 ```
@@ -133,7 +133,7 @@ env:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rufus-config
+  name: ruvon-config
 data:
   DATABASE_URL: postgresql://user:pass@prod-db:5432/prod_db
   LOG_LEVEL: ERROR
@@ -155,7 +155,7 @@ max_retries = int(os.getenv("MAX_RETRIES", "3"))
 db_url = os.environ["DATABASE_URL"]
 
 # Optional variable
-api_key = os.getenv("RUFUS_API_KEY", "")
+api_key = os.getenv("RUVON_API_KEY", "")
 ```
 
 ### Device Simulator Example
@@ -211,13 +211,13 @@ python tests/load/run_load_test.py --all --devices 500
 - `LOG_LEVEL` - Logging verbosity
 
 ### Performance
-- `RUFUS_USE_UVLOOP` - Enable uvloop for faster async
-- `RUFUS_USE_ORJSON` - Enable orjson for faster JSON
+- `RUVON_USE_UVLOOP` - Enable uvloop for faster async
+- `RUVON_USE_ORJSON` - Enable orjson for faster JSON
 - `POSTGRES_POOL_*` - Connection pool settings
 
 ### Security
-- `RUFUS_REGISTRATION_KEY` - Device enrollment key
-- `RUFUS_ENCRYPTION_KEY` - Data encryption key
+- `RUVON_REGISTRATION_KEY` - Device enrollment key
+- `RUVON_ENCRYPTION_KEY` - Data encryption key
 - `RATE_LIMIT_*` - Rate limiting configuration
 
 ### Testing
@@ -304,7 +304,7 @@ python -c "import os; print(os.getenv('YOUR_VAR'))"
 ```bash
 # 1. Check docker-compose.yml has env_file directive
 # services:
-#   rufus-server:
+#   ruvon-server:
 #     env_file: ../.env
 
 # 2. Explicitly pass variables
@@ -324,7 +324,7 @@ docker compose version  # Should be v2.0+
 pip install python-dotenv
 
 # 2. Check .env is in project root
-pwd  # Should be /path/to/rufus
+pwd  # Should be /path/to/ruvon
 ls .env
 
 # 3. Manually load in test
@@ -339,7 +339,7 @@ If you have hardcoded configuration:
 ### Before
 ```python
 # config.py
-DB_URL = "postgresql://rufus:secret@localhost:5433/rufus_cloud"
+DB_URL = "postgresql://ruvon:secret@localhost:5433/ruvon_cloud"
 MAX_RETRIES = 3
 ```
 
@@ -347,13 +347,13 @@ MAX_RETRIES = 3
 ```python
 # config.py
 import os
-DB_URL = os.getenv("DATABASE_URL", "postgresql://rufus:secret@localhost:5433/rufus_cloud")
+DB_URL = os.getenv("DATABASE_URL", "postgresql://ruvon:secret@localhost:5433/ruvon_cloud")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 ```
 
 ```bash
 # .env
-DATABASE_URL=postgresql://rufus:secret@localhost:5433/rufus_cloud
+DATABASE_URL=postgresql://ruvon:secret@localhost:5433/ruvon_cloud
 MAX_RETRIES=3
 ```
 

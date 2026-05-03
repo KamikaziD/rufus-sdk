@@ -4,13 +4,13 @@
 
 Provider interfaces abstract external dependencies for persistence, execution, and observability. `WorkflowObserver` uses ABC (abstract base class, v1.0+). All other providers use Python ABC with `@abstractmethod` declarations.
 
-**Module:** `rufus.providers`
+**Module:** `ruvon.providers`
 
 ## PersistenceProvider
 
 Persistence abstraction for workflow state, audit logs, and task records.
 
-**Module:** `rufus.providers.persistence`
+**Module:** `ruvon.providers.persistence`
 
 ### Methods
 
@@ -238,10 +238,10 @@ class TaskNotFoundError(PersistenceError): ...
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `PostgresPersistenceProvider` | `rufus.implementations.persistence.postgres` | PostgreSQL with JSONB |
-| `SQLitePersistenceProvider` | `rufus.implementations.persistence.sqlite` | SQLite with WAL mode; includes all edge-only methods |
-| `MemoryPersistenceProvider` | `rufus.implementations.persistence.memory` | In-memory (testing) |
-| `RedisPersistenceProvider` | `rufus.implementations.persistence.redis` | Redis-based |
+| `PostgresPersistenceProvider` | `ruvon.implementations.persistence.postgres` | PostgreSQL with JSONB |
+| `SQLitePersistenceProvider` | `ruvon.implementations.persistence.sqlite` | SQLite with WAL mode; includes all edge-only methods |
+| `MemoryPersistenceProvider` | `ruvon.implementations.persistence.memory` | In-memory (testing) |
+| `RedisPersistenceProvider` | `ruvon.implementations.persistence.redis` | Redis-based |
 
 ---
 
@@ -249,7 +249,7 @@ class TaskNotFoundError(PersistenceError): ...
 
 Execution abstraction for sync, async, and parallel step execution.
 
-**Module:** `rufus.providers.execution`
+**Module:** `ruvon.providers.execution`
 
 ### `ExecutionContext` dataclass *(v1.0)*
 
@@ -412,10 +412,10 @@ Request cancellation of a dispatched task. Returns `True` if cancellation was ac
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `SyncExecutionProvider` | `rufus.implementations.execution.sync` | Synchronous execution |
-| `ThreadPoolExecutionProvider` | `rufus.implementations.execution.thread_pool` | Thread-based parallel |
-| `CeleryExecutor` | `rufus.implementations.execution.celery` | Distributed Celery |
-| `PostgresExecutor` | `rufus.implementations.execution.postgres_executor` | PostgreSQL task queue |
+| `SyncExecutionProvider` | `ruvon.implementations.execution.sync` | Synchronous execution |
+| `ThreadPoolExecutionProvider` | `ruvon.implementations.execution.thread_pool` | Thread-based parallel |
+| `CeleryExecutor` | `ruvon.implementations.execution.celery` | Distributed Celery |
+| `PostgresExecutor` | `ruvon.implementations.execution.postgres_executor` | PostgreSQL task queue |
 
 ---
 
@@ -423,7 +423,7 @@ Request cancellation of a dispatched task. Returns `True` if cancellation was ac
 
 Observability hooks for workflow lifecycle events.
 
-**Module:** `rufus.providers.observer`
+**Module:** `ruvon.providers.observer`
 
 **Type:** ABC (abstract base class, v1.0+). All methods have default async no-op implementations — subclasses only need to override the methods they care about. Existing subclasses continue to work without modification.
 
@@ -566,17 +566,17 @@ OpenTelemetry observer that creates parent spans per workflow and child spans pe
 **Installation:**
 
 ```bash
-pip install 'rufus-sdk[otel]'
+pip install 'ruvon-sdk[otel]'
 ```
 
 **Usage:**
 
 ```python
-from rufus.implementations.observability.otel import OtelObserver
+from ruvon.implementations.observability.otel import OtelObserver
 
 observer = OtelObserver(
     tracer_provider=None,   # Optional: pass your TracerProvider; uses global if None
-    service_name="rufus",   # Span service.name attribute
+    service_name="ruvon",   # Span service.name attribute
 )
 ```
 
@@ -586,10 +586,10 @@ Auto no-ops when `opentelemetry-sdk` is not installed (safe to instantiate uncon
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `LoggingObserver` | `rufus.implementations.observability.logging` | Structured console logging |
-| `OtelObserver` | `rufus.implementations.observability.otel` | OpenTelemetry spans (requires `[otel]` extra) |
-| `EventPublisherObserver` | `rufus.implementations.observability.events` | Redis Streams event publishing |
-| `NoopObserver` | `rufus.providers.observer` | No-op (default) |
+| `LoggingObserver` | `ruvon.implementations.observability.logging` | Structured console logging |
+| `OtelObserver` | `ruvon.implementations.observability.otel` | OpenTelemetry spans (requires `[otel]` extra) |
+| `EventPublisherObserver` | `ruvon.implementations.observability.events` | Redis Streams event publishing |
+| `NoopObserver` | `ruvon.providers.observer` | No-op (default) |
 
 ---
 
@@ -597,7 +597,7 @@ Auto no-ops when `opentelemetry-sdk` is not installed (safe to instantiate uncon
 
 Expression evaluation for DECISION steps and dynamic injection.
 
-**Module:** `rufus.providers.expression_evaluator`
+**Module:** `ruvon.providers.expression_evaluator`
 
 ### Methods
 
@@ -635,7 +635,7 @@ result = evaluator.evaluate(
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `SimpleExpressionEvaluator` | `rufus.implementations.expression_evaluator.simple` | Basic Python eval |
+| `SimpleExpressionEvaluator` | `ruvon.implementations.expression_evaluator.simple` | Basic Python eval |
 
 ---
 
@@ -643,7 +643,7 @@ result = evaluator.evaluate(
 
 Template rendering for HTTP steps and dynamic content.
 
-**Module:** `rufus.providers.template_engine`
+**Module:** `ruvon.providers.template_engine`
 
 ### Methods
 
@@ -682,7 +682,7 @@ output = engine.render(
 
 | Provider | Module | Description |
 |----------|--------|-------------|
-| `Jinja2TemplateEngine` | `rufus.implementations.templating.jinja2` | Jinja2 renderer |
+| `Jinja2TemplateEngine` | `ruvon.implementations.templating.jinja2` | Jinja2 renderer |
 
 ---
 

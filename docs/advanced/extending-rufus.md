@@ -1,18 +1,18 @@
-# Advanced: Extending Rufus
+# Advanced: Extending Ruvon
 
-Guide to adding new capabilities to Rufus: custom step types, observers, custom database tables, custom API routes, plugins, and contributing back to the project.
+Guide to adding new capabilities to Ruvon: custom step types, observers, custom database tables, custom API routes, plugins, and contributing back to the project.
 
 ---
 
 ## Extending the Database Schema
 
-Rufus's PostgreSQL schema is defined in `src/rufus/db_schema/database.py` using SQLAlchemy. All 33 cloud tables share a single `metadata` object, which means you can add your own tables and have them managed by Alembic alongside the core tables.
+Ruvon's PostgreSQL schema is defined in `src/ruvon/db_schema/database.py` using SQLAlchemy. All 33 cloud tables share a single `metadata` object, which means you can add your own tables and have them managed by Alembic alongside the core tables.
 
 ### Adding Custom Tables
 
 ```python
 # myapp/schema.py
-from rufus.db_schema.database import metadata
+from ruvon.db_schema.database import metadata
 from sqlalchemy import Table, Column, String, Integer, DateTime, Text, func
 
 # Define your table using the shared metadata
@@ -32,7 +32,7 @@ payment_events = Table(
 Then generate and apply the migration:
 
 ```bash
-cd src/rufus
+cd src/ruvon
 alembic revision --autogenerate -m "add_payment_events"
 # Always review the generated file before applying
 alembic upgrade head
@@ -42,13 +42,13 @@ alembic upgrade head
 
 ### Edge SQLite Schema
 
-For edge-device tables, add them to `SQLITE_SCHEMA` in `src/rufus/implementations/persistence/sqlite.py`. These tables are auto-created by `CREATE TABLE IF NOT EXISTS` on first startup — no Alembic needed.
+For edge-device tables, add them to `SQLITE_SCHEMA` in `src/ruvon/implementations/persistence/sqlite.py`. These tables are auto-created by `CREATE TABLE IF NOT EXISTS` on first startup — no Alembic needed.
 
 ---
 
-## Custom API Routes (RUFUS_CUSTOM_ROUTERS)
+## Custom API Routes (RUVON_CUSTOM_ROUTERS)
 
-Mount additional FastAPI routers on the Rufus server without modifying core server code:
+Mount additional FastAPI routers on the Ruvon server without modifying core server code:
 
 ### Step 1: Define your router
 
@@ -72,10 +72,10 @@ async def void_transaction(txn_id: str):
 ### Step 2: Set the environment variable
 
 ```bash
-export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router"
+export RUVON_CUSTOM_ROUTERS="myapp.routers.payments.router"
 
 # Multiple routers (comma-separated)
-export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
+export RUVON_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
 ```
 
 The routers are imported at server startup and mounted on the FastAPI app. They appear automatically in the Swagger UI at `/docs`.
@@ -86,12 +86,12 @@ The routers are imported at server startup and mounted on the FastAPI app. They 
 
 ### Creating a New Step Type
 
-Rufus supports custom step types beyond the built-in `STANDARD`, `ASYNC`, `DECISION`, etc.
+Ruvon supports custom step types beyond the built-in `STANDARD`, `ASYNC`, `DECISION`, etc.
 
 **Step 1: Define the Step Model**
 
 ```python
-from rufus.models import WorkflowStep
+from ruvon.models import WorkflowStep
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
@@ -116,7 +116,7 @@ class RetryableWorkflowStep(WorkflowStep):
 **Step 2: Implement Execution Logic**
 
 ```python
-# In rufus/workflow.py or custom executor
+# In ruvon/workflow.py or custom executor
 
 async def execute_retryable_step(
     self,
@@ -212,7 +212,7 @@ class OpenTelemetryObserver:
     Workflow observer that creates distributed traces
     """
 
-    def __init__(self, service_name: str = "rufus-workflows"):
+    def __init__(self, service_name: str = "ruvon-workflows"):
         # Configure tracer
         resource = Resource(attributes={SERVICE_NAME: service_name})
 
@@ -334,18 +334,18 @@ builder = WorkflowBuilder(
 
 ## Plugin Architecture
 
-### Creating a Rufus Plugin Package
+### Creating a Ruvon Plugin Package
 
-Rufus supports `rufus-*` plugin packages for extending functionality.
+Ruvon supports `ruvon-*` plugin packages for extending functionality.
 
 **Project Structure:**
 
 ```
-rufus-stripe/
+ruvon-stripe/
 ├── pyproject.toml
 ├── README.md
 ├── src/
-│   └── rufus_stripe/
+│   └── ruvon_stripe/
 │       ├── __init__.py
 │       ├── steps.py          # Stripe payment steps
 │       ├── models.py         # Stripe state models
@@ -359,26 +359,26 @@ rufus-stripe/
 
 ```toml
 [project]
-name = "rufus-stripe"
+name = "ruvon-stripe"
 version = "1.0.0"
-description = "Stripe payment integration for Rufus workflows"
+description = "Stripe payment integration for Ruvon workflows"
 requires-python = ">=3.10"
 dependencies = [
-    "rufus>=1.0.0",
+    "ruvon>=1.0.0",
     "stripe>=5.0.0",
 ]
 
-[project.entry-points."rufus.plugins"]
-stripe = "rufus_stripe:plugin"
+[project.entry-points."ruvon.plugins"]
+stripe = "ruvon_stripe:plugin"
 ```
 
-**src/rufus_stripe/__init__.py:**
+**src/ruvon_stripe/__init__.py:**
 
 ```python
 """
-Rufus Stripe Plugin
+Ruvon Stripe Plugin
 
-Provides Stripe payment processing steps for Rufus workflows.
+Provides Stripe payment processing steps for Ruvon workflows.
 """
 
 from pathlib import Path
@@ -388,19 +388,19 @@ def plugin():
     """
     Plugin entry point
 
-    Returns plugin metadata for Rufus.
+    Returns plugin metadata for Ruvon.
     """
     return {
         "name": "stripe",
         "version": "1.0.0",
         "description": "Stripe payment integration",
         "workflows_dir": Path(__file__).parent / "workflows",
-        "steps_module": "rufus_stripe.steps",
-        "models_module": "rufus_stripe.models",
+        "steps_module": "ruvon_stripe.steps",
+        "models_module": "ruvon_stripe.models",
     }
 ```
 
-**src/rufus_stripe/steps.py:**
+**src/ruvon_stripe/steps.py:**
 
 ```python
 """
@@ -409,8 +409,8 @@ Stripe payment steps
 
 import stripe
 import os
-from rufus.models import StepContext
-from rufus_stripe.models import StripePaymentState
+from ruvon.models import StepContext
+from ruvon_stripe.models import StripePaymentState
 
 
 stripe.api_key = os.getenv("STRIPE_API_KEY")
@@ -461,37 +461,37 @@ def refund_payment(state: StripePaymentState, context: StepContext, **kwargs) ->
     }
 ```
 
-**src/rufus_stripe/workflows/payment.yaml:**
+**src/ruvon_stripe/workflows/payment.yaml:**
 
 ```yaml
 workflow_type: "StripePayment"
 workflow_version: "1.0.0"
-initial_state_model: "rufus_stripe.models.StripePaymentState"
+initial_state_model: "ruvon_stripe.models.StripePaymentState"
 description: "Stripe payment processing workflow"
 
 steps:
   - name: "Create_Payment_Intent"
     type: "STANDARD"
-    function: "rufus_stripe.steps.create_payment_intent"
+    function: "ruvon_stripe.steps.create_payment_intent"
     automate_next: true
 
   - name: "Confirm_Payment"
     type: "STANDARD"
-    function: "rufus_stripe.steps.confirm_payment"
-    compensate_function: "rufus_stripe.steps.refund_payment"
+    function: "ruvon_stripe.steps.confirm_payment"
+    compensate_function: "ruvon_stripe.steps.refund_payment"
 ```
 
 **Using the Plugin:**
 
 ```bash
 # Install plugin
-pip install rufus-stripe
+pip install ruvon-stripe
 
-# Plugin auto-discovered by Rufus
+# Plugin auto-discovered by Ruvon
 ```
 
 ```python
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 
 builder = WorkflowBuilder(config_dir="config/")
 
@@ -508,14 +508,14 @@ workflow = builder.create_workflow(
 
 ---
 
-## Contributing Back to Rufus
+## Contributing Back to Ruvon
 
 ### Contribution Workflow
 
 1. **Fork the repository**
    ```bash
-   git clone https://github.com/yourusername/rufus.git
-   cd rufus
+   git clone https://github.com/yourusername/ruvon.git
+   cd ruvon
    ```
 
 2. **Create a feature branch**
@@ -600,22 +600,22 @@ Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`
 
 ### Useful Plugins to Build
 
-1. **rufus-aws** - AWS integrations (S3, SQS, SNS, Lambda)
-2. **rufus-gcp** - Google Cloud integrations
-3. **rufus-slack** - Slack notifications
-4. **rufus-email** - Email notifications (SendGrid, SES)
-5. **rufus-twilio** - SMS notifications
-6. **rufus-stripe** - Payment processing
-7. **rufus-paypal** - Alternative payments
-8. **rufus-shopify** - E-commerce integrations
-9. **rufus-salesforce** - CRM integrations
-10. **rufus-analytics** - Advanced analytics and dashboards
+1. **ruvon-aws** - AWS integrations (S3, SQS, SNS, Lambda)
+2. **ruvon-gcp** - Google Cloud integrations
+3. **ruvon-slack** - Slack notifications
+4. **ruvon-email** - Email notifications (SendGrid, SES)
+5. **ruvon-twilio** - SMS notifications
+6. **ruvon-stripe** - Payment processing
+7. **ruvon-paypal** - Alternative payments
+8. **ruvon-shopify** - E-commerce integrations
+9. **ruvon-salesforce** - CRM integrations
+10. **ruvon-analytics** - Advanced analytics and dashboards
 
 ---
 
 ## Summary
 
-**Extending Rufus:**
+**Extending Ruvon:**
 
 1. **Custom Step Types**: Define new execution patterns
 2. **Custom Observers**: Add monitoring, tracing, analytics
@@ -634,4 +634,4 @@ Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`
 - Contributing Guide: `/CONTRIBUTING.md`
 - Development Setup: `/docs/development.md`
 - Architecture: `/docs/architecture.md`
-- Community Forum: `https://github.com/yourorg/rufus/discussions`
+- Community Forum: `https://github.com/yourorg/ruvon/discussions`

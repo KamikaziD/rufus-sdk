@@ -1,13 +1,13 @@
 # Lessons Learned
 
 ## Pattern: WASM Binary Build — py2wasm IS pip-installable but requires Python 3.11+
-**Context:** `src/rufus_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
+**Context:** `src/ruvon_edge/sidecar/wasm/apply_config.wasm` — compiled WASM binary for the sandboxed deployment sidecar `ApplyChange` step
 **Anti-Pattern (corrected):** Earlier lesson said "Neither py2wasm nor wasi-sdk are pip-installable". This was WRONG. `pip install py2wasm>=2.6.2` works and auto-downloads wasi-sdk during first run. However, py2wasm 2.6.x requires **Python 3.11+** — it fails on 3.10 with "Python version '3.10' is not supported". Always invoke via `python3.11 -m py2wasm` or `/path/to/python3.11/bin/py2wasm`.
 **Additional Anti-Pattern:** `config_applier.py` had `if __name__ == "__wasm__": wasm_main()` — this guard NEVER fires because WASI sets `__name__` to `"__main__"`, not `"__wasm__"`. Binary ran clean (exit 0) but produced no output. Fix: `if __name__ == "__main__": wasm_main()`.
 **Additional Anti-Pattern:** `build_wasm._build_with_py2wasm()` passed `--entry wasm_main` flag which does not exist in py2wasm — causes exit code 2. py2wasm takes only `filename` and `-o OUTPUT`.
 **Additional Anti-Pattern:** wasmtime Python bindings use `WasiConfig.stdin_file = "/path"` (property, string path) NOT `stdin_bytes` or `WasiFile.from_fileobj()` which don't exist.
 **Correction:** `pip install py2wasm>=2.6.2` then `python3.11 -m py2wasm config_applier.py -o apply_config.wasm`. Binary is ~25MB (CPython embedded). Commit the binary so it travels with the source. The `.sha256` hash file is used for staleness detection. Tests use subprocess mock for the no-toolchain path; the binary test uses file-based stdin/stdout with temp files.
-**Verification:** `tests/edge/test_sidecar_wasm.py` — 9/9 passing. Binary at `src/rufus_edge/sidecar/wasm/apply_config.wasm` (25MB). Test verifies hot-swap proposal produces `{"outcome": ..., "method": "hot_swap"}` on stdout.
+**Verification:** `tests/edge/test_sidecar_wasm.py` — 9/9 passing. Binary at `src/ruvon_edge/sidecar/wasm/apply_config.wasm` (25MB). Test verifies hot-swap proposal produces `{"outcome": ..., "method": "hot_swap"}` on stdout.
 
 ## Pattern: Celery Task Signature Mismatch for Parallel Tasks
 **Context:** Celery parallel tasks (chord header) in `dispatch_parallel_tasks`
@@ -21,23 +21,23 @@
 **Correction:** Remove `tags=` from all `@app.websocket()` decorators; only HTTP method decorators (get/post/put/delete/patch) support tags
 **Verification:** Server starts without `TypeError: FastAPI.websocket() got an unexpected keyword argument 'tags'`
 
-## Pattern: TestPyPI CDN Propagation Takes 1-3 Minutes Per Package, Not 15 Seconds
-**Context:** Docker build after twine upload to TestPyPI in multi-arch (amd64+arm64) build
-**Anti-Pattern:** Starting Docker build immediately after twine reports success — TestPyPI CDN nodes can still show the old version list for 1-3+ minutes; different packages propagate at different rates
-**Correction:** (1) Check each package individually via `curl -s "https://test.pypi.org/pypi/<pkg>/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sorted(d['releases'].keys())[-3:])"` before building. (2) If Docker build fails with "could not find version", prune the buildx cache (`docker buildx prune --builder rufus-builder --force`) then retry once all 3 packages are confirmed indexed.
+## Pattern: PyPI CDN Propagation Takes 1-3 Minutes Per Package, Not 15 Seconds
+**Context:** Docker build after twine upload to PyPI in multi-arch (amd64+arm64) build
+**Anti-Pattern:** Starting Docker build immediately after twine reports success — PyPI CDN nodes can still show the old version list for 1-3+ minutes; different packages propagate at different rates
+**Correction:** (1) Check each package individually via `curl -s "https://pypi.org/pypi/<pkg>/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sorted(d['releases'].keys())[-3:])"` before building. (2) If Docker build fails with "could not find version", prune the buildx cache (`docker buildx prune --builder ruvon-builder --force`) then retry once all 3 packages are confirmed indexed.
 **Verification:** All 3 `curl` commands return 0.7.x as the last version before starting Docker build
 
 ## Pattern: Docker Layer Cache Silently Ships Wrong Version
 **Context:** Version bump — bumping `pyproject.toml` + `__init__.py` then running the Docker build script
-**Anti-Pattern:** Running `build-production-images.sh` without `--no-cache` after a version bump — Docker reuses the cached `pip install rufus-sdk==<old>` layer, producing images tagged `0.5.2` that silently run `0.5.1` inside
+**Anti-Pattern:** Running `build-production-images.sh` without `--no-cache` after a version bump — Docker reuses the cached `pip install ruvon-sdk==<old>` layer, producing images tagged `0.5.2` that silently run `0.5.1` inside
 **Correction:** (1) Update the version pin in all three Dockerfiles as part of the version bump step, *before* building. (2) Always pass `--no-cache` to the Docker build after a version bump so the pip install layer is forced to re-run
-**Verification:** `docker run --rm ruhfuskdev/rufus-server:0.5.2 python -c "import rufus; print(rufus.__version__)"` must print the new version
+**Verification:** `docker run --rm ruhfuskdev/ruvon-server:0.5.2 python -c "import ruvon; print(ruvon.__version__)"` must print the new version
 
 ## Pattern: All Version Locations Must Be Updated Together
 **Context:** Version bump flow for this project (v0.6.0+)
-**Anti-Pattern:** Missing any of the canonical version locations — now there are more: root `pyproject.toml`, both sub-package `pyproject.toml` files (`packages/rufus-sdk-edge/`, `packages/rufus-sdk-server/`), all four `__init__.py` files (`rufus`, `rufus_edge`, `rufus_server`, `rufus_cli`), and all three Dockerfiles.
-**Correction:** Full version bump checklist: (1) root `pyproject.toml`, (2) `packages/rufus-sdk-edge/pyproject.toml`, (3) `packages/rufus-sdk-server/pyproject.toml`, (4) all four `__init__.py` files, (5) all three Dockerfiles — then commit, build with `--no-cache`, push. Run `pytest tests/test_package_versions.py` to catch drift.
-**Verification:** `pytest tests/test_package_versions.py -v` passes; `grep version packages/*/pyproject.toml pyproject.toml` shows consistent version in all three pyproject files; `grep rufus-sdk docker/Dockerfile.rufus-*-prod` shows new version in all Dockerfiles
+**Anti-Pattern:** Missing any of the canonical version locations — now there are more: root `pyproject.toml`, both sub-package `pyproject.toml` files (`packages/ruvon-edge/`, `packages/ruvon-server/`), all four `__init__.py` files (`ruvon`, `ruvon_edge`, `ruvon_server`, `ruvon_cli`), and all three Dockerfiles.
+**Correction:** Full version bump checklist: (1) root `pyproject.toml`, (2) `packages/ruvon-edge/pyproject.toml`, (3) `packages/ruvon-server/pyproject.toml`, (4) all four `__init__.py` files, (5) all three Dockerfiles — then commit, build with `--no-cache`, push. Run `pytest tests/test_package_versions.py` to catch drift.
+**Verification:** `pytest tests/test_package_versions.py -v` passes; `grep version packages/*/pyproject.toml pyproject.toml` shows consistent version in all three pyproject files; `grep ruvon-sdk docker/Dockerfile.ruvon-*-prod` shows new version in all Dockerfiles
 
 ## Pattern: Step Functions Used as Dotted-Path Tasks Must Be Module-Level
 **Context:** Writing tests for `ThreadPoolExecutor` and `PARALLEL` steps using `WorkflowBuilder` dotted-path function references
@@ -53,8 +53,8 @@
 
 ## Pattern: Mock Patch Path Must Match the Module That Owns the Binding
 **Context:** Patching `pg_executor` in `celery.py` tests
-**Anti-Pattern:** `patch("rufus.utils.postgres_executor.pg_executor")` alone — this patches the source module but `celery.py` already has its own binding via `from rufus.utils.postgres_executor import pg_executor`; the celery module sees the old object
-**Correction:** Patch where it is used: `patch("rufus.implementations.execution.celery.pg_executor")` — this replaces the binding in the module under test
+**Anti-Pattern:** `patch("ruvon.utils.postgres_executor.pg_executor")` alone — this patches the source module but `celery.py` already has its own binding via `from ruvon.utils.postgres_executor import pg_executor`; the celery module sees the old object
+**Correction:** Patch where it is used: `patch("ruvon.implementations.execution.celery.pg_executor")` — this replaces the binding in the module under test
 **Verification:** Mock's `assert_called_once` passes; no `AttributeError: module ... does not have the attribute`
 
 ## Pattern: workflow.next_step() Always Requires user_input Argument
@@ -64,15 +64,15 @@
 **Verification:** Test runs without TypeError
 
 ## Pattern: Poetry 2.x and Hatchling Both Reject ../../ Paths in packages= — Use force-include
-**Context:** Mono-repo sub-packages (`packages/rufus-sdk-edge/`) whose source lives in `../../src/rufus_edge`
-**Anti-Pattern:** `packages = [{ include = "rufus_edge", from = "../../src" }]` (Poetry) or `packages = ["../../src/rufus_edge"]` (Hatchling) — both raise `ValueError: path must be relative` because build backends refuse to traverse outside the project root for security
+**Context:** Mono-repo sub-packages (`packages/ruvon-edge/`) whose source lives in `../../src/ruvon_edge`
+**Anti-Pattern:** `packages = [{ include = "ruvon_edge", from = "../../src" }]` (Poetry) or `packages = ["../../src/ruvon_edge"]` (Hatchling) — both raise `ValueError: path must be relative` because build backends refuse to traverse outside the project root for security
 **Correction:** Use Hatchling as build backend with `[tool.hatch.build.targets.wheel.force-include]` — `force-include` resolves paths via `os.path.normpath(root / source)`, which correctly handles `../../` without the relative-path validation:
 ```toml
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel.force-include]
-"../../src/rufus_edge" = "rufus_edge"
+"../../src/ruvon_edge" = "ruvon_edge"
 ```
 Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchling reads the latter.
 **Verification:** `python -m build --wheel` from the sub-package dir succeeds; `unzip -l dist/*.whl | grep "\.py"` shows only the intended package files
@@ -80,8 +80,8 @@ Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchli
 ## Pattern: Use git (not gh) for GitHub Releases
 **Context:** Creating a GitHub release as part of the version bump / release chore
 **Anti-Pattern:** `gh release create v0.6.1 ...` — the `gh` CLI returns `401 Unauthorized / Bad credentials` in this environment; it does not have a valid GitHub token configured
-**Correction:** Create GitHub releases via the GitHub web UI at https://github.com/KamikaziD/rufus-sdk/releases/new, or use the raw GitHub API with `curl` if a token is available. Never use `gh release create`.
-**Verification:** Release appears at https://github.com/KamikaziD/rufus-sdk/releases without a 401 error
+**Correction:** Create GitHub releases via the GitHub web UI at https://github.com/KamikaziD/ruvon-sdk/releases/new, or use the raw GitHub API with `curl` if a token is available. Never use `gh release create`.
+**Verification:** Release appears at https://github.com/KamikaziD/ruvon-sdk/releases without a 401 error
 
 ## Pattern: Docker Bind-Mounts Bypass Python .pyc Cache Via touch, Not Deletion
 **Context:** Patching installed Python packages in a pre-built Docker image via bind-mounted `.py` files (test docker-compose)
@@ -89,9 +89,9 @@ Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchli
 **Correction:** `touch` the mounted source files before starting uvicorn: `touch /usr/local/lib/python3.11/site-packages/pkg/patched.py`. Python validates pyc by mtime+size stored in the pyc header; a newer mtime on the source triggers recompile from source, and if the container can't write the new pyc it just uses the in-memory compiled version
 **Verification:** No `ModuleNotFoundError` from old cached code; log shows expected behavior from the patched module
 
-## Pattern: rufus-server Image Missing celery+redis — Must Install at Startup for Celery Backend
-**Context:** Running `ruhfuskdev/rufus-server:latest` with `WORKFLOW_EXECUTION_BACKEND: celery`
-**Anti-Pattern:** Image only has fastapi/uvicorn/asyncpg; `CeleryExecutionProvider.__init__` imports `from rufus.celery_app import celery_app` which imports `from celery import Celery` — crash at startup
+## Pattern: ruvon-server Image Missing celery+redis — Must Install at Startup for Celery Backend
+**Context:** Running `ruhfuskdev/ruvon-server:latest` with `WORKFLOW_EXECUTION_BACKEND: celery`
+**Anti-Pattern:** Image only has fastapi/uvicorn/asyncpg; `CeleryExecutionProvider.__init__` imports `from ruvon.celery_app import celery_app` which imports `from celery import Celery` — crash at startup
 **Correction 1:** Make the `CeleryExecutionProvider` import lazy in `main.py` (inside the `if execution_backend == 'celery':` block, not at module top level)
 **Correction 2:** Add `pip install celery redis --quiet --no-cache-dir` to the container startup command in the test compose
 **Verification:** Server logs show `INFO: Application startup complete.` and `GET /health` returns 200
@@ -104,7 +104,7 @@ Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchli
 
 ## Pattern: Keycloak 24 Image Has No curl or wget — Use bash /dev/tcp for Healthcheck
 **Context:** Docker Compose healthcheck for Keycloak container
-**Anti-Pattern:** `test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/rufus || exit 1"]` — Keycloak 24.0 base image has no `curl` or `wget`; healthcheck always fails
+**Anti-Pattern:** `test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/ruvon || exit 1"]` — Keycloak 24.0 base image has no `curl` or `wget`; healthcheck always fails
 **Correction:** Use bash's built-in `/dev/tcp` pseudo-device: `test: ["CMD", "bash", "-c", "(echo > /dev/tcp/localhost/8080) 2>/dev/null"]`. Note: must use `CMD` (not `CMD-SHELL`) to invoke bash explicitly, since `/bin/sh` in the image is not bash and doesn't support `/dev/tcp`
 **Verification:** `docker inspect <container> --format "{{.State.Health.Status}}"` returns `healthy`
 
@@ -112,13 +112,13 @@ Also switch from `[tool.poetry]` metadata to `[project]` (PEP 621) since Hatchli
 **Context:** Next-auth OIDC discovery from inside Docker to `host.docker.internal:8080` returning `{"error":"HTTPS required"}`
 **Anti-Pattern:** Only setting server-level flags (`KC_HTTP_ENABLED=true`, `KC_HOSTNAME_STRICT=false`, `KC_HOSTNAME_STRICT_HTTPS=false`, `KC_PROXY=edge`) — these don't fix it because the "HTTPS required" is enforced at the REALM level (default: `sslRequired=external`, meaning non-loopback IPs must use HTTPS)
 **Correction:** Set `"sslRequired": "none"` in the realm JSON before first import, OR use `kcadm.sh update realms/<name> -s sslRequired=NONE` on a running instance. Also add `KC_PROXY: edge` to the Keycloak service as defense-in-depth.
-**Verification:** `docker exec <dashboard> node -e "fetch('http://host.docker.internal:8080/realms/rufus/.well-known/openid-configuration').then(r=>r.json()).then(d=>console.log(d.issuer))"` returns the issuer URL instead of `{"error":"HTTPS required"}`
+**Verification:** `docker exec <dashboard> node -e "fetch('http://host.docker.internal:8080/realms/ruvon/.well-known/openid-configuration').then(r=>r.json()).then(d=>console.log(d.issuer))"` returns the issuer URL instead of `{"error":"HTTPS required"}`
 
 ## Pattern: Keycloak Realm JSON Rejects Bash Variable Expansion in redirectUris
 **Context:** Keycloak 24.0 realm JSON import
-**Anti-Pattern:** `"${RUFUS_DASHBOARD_URL:+${RUFUS_DASHBOARD_URL}/*}"` in `redirectUris` — Keycloak validates each URI and rejects bash-style parameter expansion as an invalid URI format; throws `ERROR: Invalid client rufus-dashboard: A redirect URI is not a valid URI` and crashes
+**Anti-Pattern:** `"${RUVON_DASHBOARD_URL:+${RUVON_DASHBOARD_URL}/*}"` in `redirectUris` — Keycloak validates each URI and rejects bash-style parameter expansion as an invalid URI format; throws `ERROR: Invalid client ruvon-dashboard: A redirect URI is not a valid URI` and crashes
 **Correction:** Only put literal URIs in redirectUris (e.g., `"http://localhost:3000/*"`); add production URIs via Keycloak Admin Console or a separate realm import step
-**Verification:** Keycloak logs show `Realm 'rufus' imported` and `KC-SERVICES0032: Import finished successfully`
+**Verification:** Keycloak logs show `Realm 'ruvon' imported` and `KC-SERVICES0032: Import finished successfully`
 
 ## Pattern: next-auth v5 beta.25 oauth4webapi HTTPS Enforcement on userInfoRequest
 **Context:** next-auth v5 beta.25 OAuth provider (`type: "oauth"`) with HTTP Keycloak token/userinfo endpoints in Docker dev
@@ -156,7 +156,7 @@ userinfo: {
 **Verification:** `GET /workflows/[id]` renders without React error boundary crash
 
 ## Pattern: Server API Response Shapes Must Be Verified Before Using in Dashboard
-**Context:** Rufus dashboard API client (`packages/rufus-dashboard/src/lib/api.ts`) against `rufus_server/main.py`
+**Context:** Ruvon dashboard API client (`packages/ruvon-dashboard/src/lib/api.ts`) against `ruvon_server/main.py`
 **Key mismatches found:**
 - `GET /api/v1/workflows/executions` returns bare array, not `{workflows, total, page, page_size}`; uses `offset` not `page`
 - `GET /api/v1/workflow/{id}/status` returns `current_step_name` (not `current_step`); lacks `steps_config`, `current_step_info`, `audit_log`
@@ -194,7 +194,7 @@ userinfo: {
 ## Pattern: Server API Response Shapes Change — Always Verify Against DB Schema, Not Migration Script
 **Context:** `GET /api/v1/workflow/{id}/audit` returning 500 after adding audit fetch to dashboard
 **Anti-Pattern:** Writing SQL column names by reading a migration file (`old_state`, `new_state`, `metadata`, `logged_at`) without checking the actual table definition — the SQLAlchemy `database.py` is the source of truth; the migration may reference renamed columns
-**Correction:** Always verify column names against `src/rufus/db_schema/database.py` (or `docker exec … psql … \d <table>`). Actual `workflow_audit_log` columns: `old_status`, `new_status`, `details`, `timestamp`
+**Correction:** Always verify column names against `src/ruvon/db_schema/database.py` (or `docker exec … psql … \d <table>`). Actual `workflow_audit_log` columns: `old_status`, `new_status`, `details`, `timestamp`
 **Verification:** `curl .../audit` returns `[]` (not 500); postgres logs show no "column does not exist" errors
 
 ## Pattern: Bind-Mounted site-packages Require Container Restart, Not touch
@@ -210,13 +210,13 @@ userinfo: {
 **Verification:** Migration runs without `DuplicateTable` error; `SELECT indexname FROM pg_indexes WHERE indexname LIKE 'ix_%audit%'` shows distinct names
 
 ## Pattern: Next.js Dockerfile COPY public/ Fails When Directory Doesn't Exist
-**Context:** Multi-stage Next.js Dockerfile (`Dockerfile.rufus-dashboard-prod`) — COPY public/ in runner stage
+**Context:** Multi-stage Next.js Dockerfile (`Dockerfile.ruvon-dashboard-prod`) — COPY public/ in runner stage
 **Anti-Pattern:** `COPY --from=builder /app/public ./public` — if the project has no `public/` directory, Docker buildx throws `failed to calculate checksum of ref ...: "/app/public": not found` and aborts the build
 **Correction:** Check whether the project actually has a `public/` directory before adding the COPY line. If absent, omit it entirely — Next.js doesn't require `public/` and will serve `/_next/static/` directly from `.next/`.
 **Verification:** `docker buildx build` completes without checksum error; `npm run start` serves the app
 
 ## Pattern: Sub-package `python -m build` Fails sdist for `../../` Relative Paths — Use `--wheel`
-**Context:** Building `packages/rufus-sdk-edge/` and `packages/rufus-sdk-server/` sub-packages
+**Context:** Building `packages/ruvon-edge/` and `packages/ruvon-server/` sub-packages
 **Anti-Pattern:** `python -m build` (builds both sdist and wheel) — sdist extraction validates that files don't escape the temp dir; `readme = "../../README.md"` resolves to a path outside the temp dir, raising `tarfile.OutsideDestinationError`
 **Correction:** `python -m build --wheel` — skips sdist entirely; wheel build via Hatchling uses `force-include` which resolves paths correctly
 **Verification:** `dist/*.whl` created successfully; no tarfile error
@@ -226,7 +226,7 @@ userinfo: {
 **Anti-Pattern:** Immediately diving into Python source code, checking service files, or adding workarounds — the missing object almost always means a migration was never applied, not that the code is wrong.
 **Correction:** Before touching any code, run this diagnostic sequence:
   1. `SELECT version_num FROM alembic_version;` — what is the DB currently stamped at?
-  2. Compare against the HEAD revision in `src/rufus/alembic/versions/` (latest file by down_revision chain)
+  2. Compare against the HEAD revision in `src/ruvon/alembic/versions/` (latest file by down_revision chain)
   3. If they differ, a migration file exists in source but was never applied to this DB
   4. Root cause is usually: older Docker image (missing migration files in site-packages), or DB created before the migration was written
   5. Fix: ensure the migration file is visible to Alembic (bind-mount the versions/ directory in test compose) then re-run `alembic upgrade head`
@@ -247,9 +247,9 @@ userinfo: {
 
 ## Pattern: buf generate Fails on betterproto-Specific Proto Options — Remove Them
 **Context:** Running `buf generate` after adding `option python_betterproto_package = "..."` to `.proto` files
-**Anti-Pattern:** Embedding `option python_betterproto_package = "rufus.proto.gen"` in the `.proto` file itself — buf's linter rejects it with `field python_betterproto_package of google.protobuf.FileOptions does not exist`; protoc also rejects it with `Option unknown`
-**Correction:** Remove the option from `.proto` files entirely — it's redundant since `buf.gen.yaml` already carries `opt: python_package=rufus.proto.gen`. betterproto reads the opt from buf, not from the proto file.
-**Verification:** `buf generate --path src/rufus/proto` exits 0; generated `*.py` and `*_pb2.py` appear in `gen/`
+**Anti-Pattern:** Embedding `option python_betterproto_package = "ruvon.proto.gen"` in the `.proto` file itself — buf's linter rejects it with `field python_betterproto_package of google.protobuf.FileOptions does not exist`; protoc also rejects it with `Option unknown`
+**Correction:** Remove the option from `.proto` files entirely — it's redundant since `buf.gen.yaml` already carries `opt: python_package=ruvon.proto.gen`. betterproto reads the opt from buf, not from the proto file.
+**Verification:** `buf generate --path src/ruvon/proto` exits 0; generated `*.py` and `*_pb2.py` appear in `gen/`
 
 ## Pattern: buf generate Requires Remote Plugin Access — Use protoc as Fallback
 **Context:** Running `buf generate` when buf is installed but plugins aren't cached/available
@@ -386,7 +386,7 @@ This guarantees z-order — stars are always on top regardless of node rendering
 **Context:** `device_approvals.py` had a stub `POST /{device_id}/heartbeat` route; real handler in `main.py` registered later
 **Anti-Pattern:** Assuming FastAPI evaluates all routes and picks the "best match" — it returns the **first** match. A stub in a sub-router included early silently intercepts all requests, returning a partial response without touching the DB. In this case `last_heartbeat_at` stayed NULL, every device showed OFFLINE.
 **Correction:** Search all routers for duplicate path patterns before diagnosing server-side logic. Remove any stub routes that were added for scaffolding.
-**Verification:** `grep -r "heartbeat" src/rufus_server/api/` — only one route definition should match the heartbeat path. After removal, DB shows non-NULL `last_heartbeat_at` for active devices.
+**Verification:** `grep -r "heartbeat" src/ruvon_server/api/` — only one route definition should match the heartbeat path. After removal, DB shows non-NULL `last_heartbeat_at` for active devices.
 
 ## Pattern: asyncpg Requires Naive Datetime for TIMESTAMP WITHOUT TIME ZONE Columns
 **Context:** Changing `datetime.utcnow()` to `datetime.now(timezone.utc)` in `device_service.py`

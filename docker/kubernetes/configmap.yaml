@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rufus-config
+  name: ruvon-config
 data:
-  celery-broker-url: "redis://rufus-redis:6379/0"
-  celery-result-backend: "redis://rufus-redis:6379/0"
+  celery-broker-url: "redis://ruvon-redis:6379/0"
+  celery-result-backend: "redis://ruvon-redis:6379/0"
   worker-concurrency: "4"
   worker-pool: "prefork"
   worker-log-level: "info"

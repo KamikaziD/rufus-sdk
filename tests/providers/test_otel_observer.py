@@ -2,7 +2,7 @@
 OtelObserver tests — Sprint 3.
 
 Tests span creation and attribute setting using the OTel in-process SDK.
-Requires: pip install 'rufus-sdk[otel]'
+Requires: pip install 'ruvon-sdk[otel]'
 
 Skipped gracefully when opentelemetry-sdk is not installed.
 """
@@ -20,7 +20,7 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not _OTEL_AVAILABLE,
-    reason="opentelemetry-sdk not installed (pip install 'rufus-sdk[otel]')"
+    reason="opentelemetry-sdk not installed (pip install 'ruvon-sdk[otel]')"
 )
 
 
@@ -33,7 +33,7 @@ def otel_setup():
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    from rufus.implementations.observability.otel import OtelObserver
+    from ruvon.implementations.observability.otel import OtelObserver
     observer = OtelObserver(tracer_provider=provider)
     return observer, exporter
 

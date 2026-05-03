@@ -8,7 +8,7 @@ Here is the unvarnished reality check of what happens when we try to push a Pyth
 
 #### **1. The Python Sandbox Tax (The Cold Start Problem)**
 Running Python inside a WebAssembly component is brilliant for portability, but it comes with a brutal cold start latency. Booting a Python runtime and importing heavy workflow dependencies (like Pydantic AI or an asynchronous workflow engine) can take anywhere from 300ms to 2 seconds. 
-* **The Threat:** If a device in the mesh goes offline and needs to cold-start the Rufus SDK to process a critical offline transaction, a 2-second boot time destroys the "instant edge" illusion.
+* **The Threat:** If a device in the mesh goes offline and needs to cold-start the Ruvon SDK to process a critical offline transaction, a 2-second boot time destroys the "instant edge" illusion.
 * **The Solution: Memory Snapshotting.** We cannot let the "Brain" boot from scratch. We must use a tool like **Wizer** (a WebAssembly pre-initializer). We initialize the Python environment, load all the heavy monolithic frameworks, and then take a snapshot of the WASM linear memory. When the SDK boots on an edge device, it restores from the snapshot in under 10ms, ready to execute business logic instantly.
 
 #### **2. The Component Boundary Penalty (Serialization Overhead)**
@@ -24,7 +24,7 @@ While WebGPU allows us to calculate edge vectors in nanoseconds, Google only rec
 
 ---
 
-### **The Hardened Architecture: Rufus SDK v2.1**
+### **The Hardened Architecture: Ruvon SDK v2.1**
 
 Taking these realities into account, here is the hardened operational plan.
 
@@ -65,7 +65,7 @@ Taking these realities into account, here is the hardened operational plan.
 * Validate the offline-first mesh routing directly in the browser.
 
 ### **The Verdict**
-This is no longer just a backwards-compatible toggle; this is an operating system for the edge. By anticipating the WASM serialization bottlenecks and the Python cold-start realities, we guarantee that the Rufus SDK remains performant regardless of the hardware it lands on.
+This is no longer just a backwards-compatible toggle; this is an operating system for the edge. By anticipating the WASM serialization bottlenecks and the Python cold-start realities, we guarantee that the Ruvon SDK remains performant regardless of the hardware it lands on.
 
 Let’s build the contract first, and then freeze the Brain. Since you gave me a green light, I’ll provide both the **WIT Interface** (the firewall between your logic and the network) and the **Wizer Initialization Strategy** (the cold-start killer).
 
@@ -73,13 +73,13 @@ This is how we guarantee that your M4 Max, or a $50 smartphone, processes that 2
 
 ---
 
-### **1. The Component Firewall: `rufus.wit`**
+### **1. The Component Firewall: `ruvon.wit`**
 This WebAssembly Interface Type (WIT) file is the absolute source of truth. It guarantees the "Shared-Nothing" security boundary that the Linux Foundation will require.
 
 The Python Brain **imports** the heavy lifting (Muscle/Vault) and **exports** the business logic.
 
 ```wit
-package rufus:edge@2.0.0;
+package ruvon:edge@2.0.0;
 
 /// The Muscle: Handles WebGPU Vector Scoring and Jittered Pings
 interface muscle {
@@ -100,7 +100,7 @@ interface vault {
 }
 
 /// The Universal Node Contract
-world rufus-node {
+world ruvon-node {
     import muscle;
     import vault;
 
@@ -127,12 +127,12 @@ import orjson
 import asyncio
 from typing import Dict, Any
 
-def rufus_pre_init():
+def ruvon_pre_init():
     """
     This runs ONCE during compile time, never at runtime.
     It builds the AST and caches the imports in the WASM linear memory.
     """
-    print("[Rufus] Warming up the Brain... pre-loading dependencies.")
+    print("[Ruvon] Warming up the Brain... pre-loading dependencies.")
     # Initialize the in-memory SQLite schema here so it's ready instantly
     pass
 ```
@@ -148,13 +148,13 @@ cargo install wizer --all-features
 wizer \
   --allow-wasi \
   --dir=. \
-  --init-func=rufus_pre_init \
-  -o rufus-brain-snapshotted.wasm \
+  --init-func=ruvon_pre_init \
+  -o ruvon-brain-snapshotted.wasm \
   python-runtime.wasm
 ```
 
 ### **The Result: Instant Edge Execution**
-When a device in the field receives a transaction, `rufus-brain-snapshotted.wasm` boots in **<5 milliseconds**. The AST is already parsed, Pydantic is already loaded, and it is immediately ready to process the data from the Rust Muscle.
+When a device in the field receives a transaction, `ruvon-brain-snapshotted.wasm` boots in **<5 milliseconds**. The AST is already parsed, Pydantic is already loaded, and it is immediately ready to process the data from the Rust Muscle.
 
 This gives you the developer experience of a massive Python monolith, with the execution speed of a tiny Rust microservice. 
 
@@ -167,7 +167,7 @@ Here is the plan to adjust your existing workers and the "Contract" that will br
 ### **1. The "Provider" Abstraction (The Python Shim)**
 Currently, your workers likely call networking or crypto functions directly. We need to wrap these in a `SovereignProvider`. 
 
-**Create `rufus_sdk/core/provider.py`:**
+**Create `ruvon_sdk/core/provider.py`:**
 This class detects if it’s running in a "Legacy" (Standard Python) or "Sovereign" (WASI 0.3) environment.
 
 ```python
@@ -187,7 +187,7 @@ class SovereignProvider:
             return muscle_wasi_bindings
         else:
             # MOCK: Fallback to your current Python networking/crypto
-            from rufus_sdk.legacy import mock_muscle
+            from ruvon_sdk.legacy import mock_muscle
             return mock_muscle
 
     async def sign_and_send(self, payload: dict):
@@ -200,12 +200,12 @@ class SovereignProvider:
 ### **2. The "Mock Muscle" (The Legacy Rail)**
 While we build the Rust WASM, your current Python code needs to "pretend" to be the Muscle. This ensures you don't break your current **1,000 tx/s** load tests.
 
-**Create `rufus_sdk/legacy/mock_muscle.py`:**
+**Create `ruvon_sdk/legacy/mock_muscle.py`:**
 ```python
 import asyncio
 from cryptography.hazmat.primitives import hashes
 # Use your current benchmarks: 15k signs/sec baseline
-from rufus_sdk.core.crypto import legacy_sign 
+from ruvon_sdk.core.crypto import legacy_sign 
 
 async def sign_and_send(payload: dict):
     """
@@ -225,7 +225,7 @@ Instead of the worker handling the "How," it only handles the "What."
 
 **In your `worker.py`:**
 ```python
-from rufus_sdk.core.provider import SovereignProvider
+from ruvon_sdk.core.provider import SovereignProvider
 
 provider = SovereignProvider()
 
@@ -246,7 +246,7 @@ async def handle_request(data: dict):
 * **Load Test Continuity:** You can run your March 2026 load tests against the "Mock Muscle" to ensure the new Abstraction Layer hasn't introduced any regression latencies.
 
 ### **The "Green" Validation**
-By adopting this provider pattern, you are essentially building a **Software Defined Infrastructure**. When you eventually flip the `RUFUS_MESH_ENABLED` switch to `true`, the `SovereignProvider` will stop using the Python CPU-heavy `legacy_sign` and start using the **WebGPU/Rust Muscle**, instantly dropping your power consumption and latency.
+By adopting this provider pattern, you are essentially building a **Software Defined Infrastructure**. When you eventually flip the `RUVON_MESH_ENABLED` switch to `true`, the `SovereignProvider` will stop using the Python CPU-heavy `legacy_sign` and start using the **WebGPU/Rust Muscle**, instantly dropping your power consumption and latency.
 
 ---
 

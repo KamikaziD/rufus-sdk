@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run all integration and load tests for Rufus Edge Cloud Control Plane
+# Run all integration and load tests for Ruvon Edge Cloud Control Plane
 
 set -e
 
@@ -11,7 +11,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================================================${NC}"
-echo -e "${BLUE}  Rufus Edge Cloud Control Plane - Test Suite${NC}"
+echo -e "${BLUE}  Ruvon Edge Cloud Control Plane - Test Suite${NC}"
 echo -e "${BLUE}========================================================================${NC}"
 echo ""
 
@@ -23,7 +23,7 @@ else
     echo -e "${RED}✗ Server is not running!${NC}"
     echo ""
     echo "Please start the server first:"
-    echo "  uvicorn rufus_server.main:app --reload"
+    echo "  uvicorn ruvon_server.main:app --reload"
     echo ""
     exit 1
 fi

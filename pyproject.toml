@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "rufus-sdk"
-version = "1.0.0rc6"
+name = "ruvon-sdk"
+version = "0.1.3"
 description = "Offline-first workflow engine for edge devices - saga compensation, store-and-forward, fleet config rollout"
-authors = ["Rufus Team <team@rufus.dev>"]
+authors = ["Ruvon Team <team@ruvon.dev>"]
 license = "Apache-2.0"
 readme = "README.md"
-homepage = "https://github.com/KamikaziD/rufus-sdk"
-repository = "https://github.com/KamikaziD/rufus-sdk"
+homepage = "https://github.com/KamikaziD/ruvon-core"
+repository = "https://github.com/KamikaziD/ruvon-core"
 keywords = ["workflow", "fintech", "pos", "edge", "offline", "store-and-forward", "saga", "payment"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -21,13 +21,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 packages = [
-    { include = "rufus", from = "src" },
-    { include = "rufus_cli", from = "src" },
+    { include = "ruvon", from = "src" },
+    { include = "ruvon_cli", from = "src" },
 ]
 
 exclude = [
-    "src/rufus/examples",
-    "src/rufus/examples/**/*",
+    "src/ruvon/examples",
+    "src/ruvon/examples/**/*",
 ]
 
 [tool.poetry.dependencies]
@@ -49,7 +49,7 @@ sqlalchemy = "^2.0"
 alembic = "^1.13"
 python-dotenv = "^1.0"
 typing-extensions = "^4.0"
-annotated-types = ">=0.7.0"
+annotated-types = ">=0.6.0"
 jsonschema = "^4.17,<5.0"
 
 # Workflow scheduling
@@ -102,7 +102,7 @@ black = "^23.0"
 mypy = "^1.0"
 
 [tool.poetry.scripts]
-rufus = "rufus_cli.main:app"
+ruvon = "ruvon_cli.main:app"
 
 [build-system]
 requires = ["poetry-core>=1.0.0,<2.0.0"]
@@ -114,7 +114,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=src/rufus --cov-report=term-missing"
+addopts = "--cov=src/ruvon --cov-report=term-missing"
 
 [tool.black]
 line-length = 100

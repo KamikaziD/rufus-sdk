@@ -4,7 +4,7 @@
 
 Directives are exceptions raised by step functions to control workflow execution flow.
 
-**Module:** `rufus.models`
+**Module:** `ruvon.models`
 
 ## WorkflowJumpDirective
 
@@ -33,7 +33,7 @@ class WorkflowJumpDirective(Exception):
 ### Usage
 
 ```python
-from rufus.models import WorkflowJumpDirective, StepContext
+from ruvon.models import WorkflowJumpDirective, StepContext
 from pydantic import BaseModel
 
 def decision_step(state: BaseModel, context: StepContext) -> dict:
@@ -92,7 +92,7 @@ class WorkflowPauseDirective(Exception):
 ### Usage
 
 ```python
-from rufus.models import WorkflowPauseDirective, StepContext
+from ruvon.models import WorkflowPauseDirective, StepContext
 from pydantic import BaseModel
 
 def approval_step(state: BaseModel, context: StepContext) -> dict:
@@ -165,7 +165,7 @@ class StartSubWorkflowDirective(Exception):
 ### Usage
 
 ```python
-from rufus.models import StartSubWorkflowDirective, StepContext
+from ruvon.models import StartSubWorkflowDirective, StepContext
 from pydantic import BaseModel
 
 def launch_kyc(state: BaseModel, context: StepContext) -> dict:
@@ -249,7 +249,7 @@ class SagaWorkflowException(Exception):
 ### Usage
 
 ```python
-from rufus.models import SagaWorkflowException, StepContext
+from ruvon.models import SagaWorkflowException, StepContext
 from pydantic import BaseModel
 
 def charge_payment(state: BaseModel, context: StepContext) -> dict:

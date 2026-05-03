@@ -24,7 +24,7 @@ class MyWorkflowState(BaseModel):
 
 ```python
 # my_app/workflow_steps.py
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from my_app.state_models import MyWorkflowState
 
 def process_data(state: MyWorkflowState, context: StepContext) -> dict:
@@ -109,7 +109,7 @@ Set `automate_next: true` in step config — return value becomes input for next
 ### Conditional Branching (WorkflowJumpDirective)
 
 ```python
-from rufus.models import WorkflowJumpDirective
+from ruvon.models import WorkflowJumpDirective
 
 def decision_step(state: MyState, context: StepContext):
     if state.amount > 10000:
@@ -121,7 +121,7 @@ def decision_step(state: MyState, context: StepContext):
 ### Human-in-the-Loop (WorkflowPauseDirective)
 
 ```python
-from rufus.models import WorkflowPauseDirective
+from ruvon.models import WorkflowPauseDirective
 
 def approval_step(state: MyState, context: StepContext):
     raise WorkflowPauseDirective(result={"awaiting_approval": True})
@@ -130,7 +130,7 @@ def approval_step(state: MyState, context: StepContext):
 ### Sub-Workflows (StartSubWorkflowDirective)
 
 ```python
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def trigger_child(state: MyState, context: StepContext):
     raise StartSubWorkflowDirective(
@@ -422,7 +422,7 @@ steps:
 
 ```bash
 # Install with Celery support
-pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[celery] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # Or install directly
 pip install celery redis psycopg2-binary prometheus-client
@@ -436,7 +436,7 @@ docker run -d --name redis -p 6379:6379 redis:latest
 ```bash
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
-export DATABASE_URL="postgresql://user:pass@localhost:5432/rufus"
+export DATABASE_URL="postgresql://user:pass@localhost:5432/ruvon"
 
 # Optional worker config
 export WORKER_ID="worker-01"
@@ -449,7 +449,7 @@ export WORKER_CAPABILITIES='{"gpu": true, "memory_gb": 16}'
 
 ```python
 # my_app/celery_app.py
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 celery_app.conf.update(
     task_serializer='json',
@@ -466,30 +466,30 @@ app = celery_app
 
 ```bash
 # Basic worker (development)
-celery -A rufus.celery_app worker --loglevel=info --autoreload
+celery -A ruvon.celery_app worker --loglevel=info --autoreload
 
 # Production worker
-celery -A rufus.celery_app worker --loglevel=warning --concurrency=4
+celery -A ruvon.celery_app worker --loglevel=warning --concurrency=4
 
 # Regional workers
 export WORKER_REGION="us-east-1"
-celery -A rufus.celery_app worker -Q us-east-1,default --loglevel=info
+celery -A ruvon.celery_app worker -Q us-east-1,default --loglevel=info
 
 # GPU-enabled worker
 export WORKER_CAPABILITIES='{"gpu": true, "cuda_version": "12.1"}'
-celery -A rufus.celery_app worker -Q gpu-tasks --loglevel=info
+celery -A ruvon.celery_app worker -Q gpu-tasks --loglevel=info
 ```
 
 ### CeleryExecutionProvider Usage
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 execution_provider = CeleryExecutionProvider()
-persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/rufus")
+persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/ruvon")
 await persistence.initialize()
 
 builder = WorkflowBuilder(
@@ -511,7 +511,7 @@ await workflow.next_step()
 
 ```python
 # my_app/tasks.py
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 @celery_app.task
 def process_payment(state: dict, workflow_id: str):
@@ -571,7 +571,7 @@ def check_fraud(state: dict, workflow_id: str):
 ### Sub-Workflow Example
 
 ```python
-from rufus.models import StartSubWorkflowDirective
+from ruvon.models import StartSubWorkflowDirective
 
 def trigger_kyc(state: OrderState, context: StepContext):
     raise StartSubWorkflowDirective(
@@ -595,7 +595,7 @@ CREATE TABLE worker_nodes (
     status VARCHAR(20),  -- 'online', 'offline'
     last_heartbeat TIMESTAMPTZ,
     -- Added in migration b2c3d4e5f6a7 (v0.7.3) ──────────────────────────────
-    sdk_version VARCHAR(50),             -- rufus-sdk version string from __version__
+    sdk_version VARCHAR(50),             -- ruvon-sdk version string from __version__
     pending_command_count INTEGER DEFAULT 0,  -- bumped on insert, decremented on execute
     last_command_at TIMESTAMPTZ,         -- when last command was queued for this worker
     -- ─────────────────────────────────────────────────────────────────────────
@@ -692,16 +692,16 @@ curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
 curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
   -d '{"command_type": "restart", "command_data": {"delay_seconds": 10}}'
 
-# Update rufus-sdk from TestPyPI to 0.7.3
+# Update ruvon-sdk from PyPI to 0.7.3
 curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
   -d '{"command_type": "update_code", "command_data": {
-        "package": "rufus-sdk", "version": "0.7.3",
-        "index_url": "https://test.pypi.org/simple/"}}'
+        "package": "ruvon-sdk", "version": "0.7.3",
+        "index_url": "https://pypi.org/simple/"}}'
 
 # Update code from a wheel URL (air-gapped / edge)
 curl -X POST http://localhost:8000/api/v1/workers/worker-hostname-001/commands \
   -d '{"command_type": "update_code", "command_data": {
-        "wheel_url": "https://cdn.example.com/rufus_sdk-0.7.3-py3-none-any.whl"}}'
+        "wheel_url": "https://cdn.example.com/ruvon_sdk-0.7.3-py3-none-any.whl"}}'
 
 # Broadcast restart to all workers in region "us-east"
 curl -X POST http://localhost:8000/api/v1/workers/broadcast \
@@ -749,7 +749,7 @@ async def monitor_workflow(workflow_id: str):
 
 ```bash
 pip install flower
-celery -A rufus.celery_app flower --port=5555
+celery -A ruvon.celery_app flower --port=5555
 # Open http://localhost:5555
 ```
 
@@ -761,7 +761,7 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: rufus
+      POSTGRES_DB: ruvon
       POSTGRES_PASSWORD: secret
     ports:
       - "5432:5432"
@@ -773,9 +773,9 @@ services:
 
   worker:
     build: .
-    command: celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A ruvon.celery_app worker --loglevel=info --concurrency=4
     environment:
-      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+      DATABASE_URL: postgresql://postgres:secret@postgres/ruvon
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       WORKER_REGION: us-east-1
@@ -787,11 +787,11 @@ services:
 
   api:
     build: .
-    command: uvicorn rufus_server.main:app --host 0.0.0.0
+    command: uvicorn ruvon_server.main:app --host 0.0.0.0
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:secret@postgres/rufus
+      DATABASE_URL: postgresql://postgres:secret@postgres/ruvon
     depends_on:
       - postgres
       - redis
@@ -804,26 +804,26 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-worker
+  name: ruvon-worker
 spec:
   replicas: 5
   selector:
     matchLabels:
-      app: rufus-worker
+      app: ruvon-worker
   template:
     metadata:
       labels:
-        app: rufus-worker
+        app: ruvon-worker
     spec:
       containers:
       - name: worker
-        image: myregistry/rufus-worker:latest
-        command: ["celery", "-A", "rufus.celery_app", "worker", "--concurrency=4"]
+        image: myregistry/ruvon-worker:latest
+        command: ["celery", "-A", "ruvon.celery_app", "worker", "--concurrency=4"]
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: rufus-secrets
+              name: ruvon-secrets
               key: database-url
         - name: CELERY_BROKER_URL
           value: "redis://redis-service:6379/0"
@@ -843,13 +843,13 @@ spec:
 ```bash
 # Workers not picking up tasks
 redis-cli ping
-celery -A rufus.celery_app inspect active
-celery -A rufus.celery_app inspect registered
+celery -A ruvon.celery_app inspect active
+celery -A ruvon.celery_app inspect registered
 
 # Workflows stuck in PENDING_ASYNC
-celery -A rufus.celery_app events
+celery -A ruvon.celery_app events
 redis-cli GET celery-task-meta-<task_id>
-celery -A rufus.celery_app worker --loglevel=debug
+celery -A ruvon.celery_app worker --loglevel=debug
 ```
 
 ```sql
@@ -862,13 +862,13 @@ UPDATE worker_nodes SET status = 'offline' WHERE last_heartbeat < NOW() - INTERV
 
 ```bash
 # CPU-bound tasks
-celery -A rufus.celery_app worker --concurrency=2
+celery -A ruvon.celery_app worker --concurrency=2
 
 # I/O-bound tasks
-celery -A rufus.celery_app worker --concurrency=20
+celery -A ruvon.celery_app worker --concurrency=20
 
 # Auto-scale
-celery -A rufus.celery_app worker --autoscale=10,2
+celery -A ruvon.celery_app worker --autoscale=10,2
 ```
 
 ```python
@@ -886,7 +886,7 @@ celery_app.conf.update(result_expires=3600)
 ### TestHarness Usage
 
 ```python
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 
 harness = TestHarness()
 workflow = harness.start_workflow(
@@ -901,7 +901,7 @@ assert workflow.state.status == "completed"
 
 ```python
 import pytest
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 @pytest.fixture
 async def persistence():
@@ -915,8 +915,8 @@ async def persistence():
 
 ```python
 import pytest
-from rufus.implementations.execution.sync import SyncExecutionProvider
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
 
 @pytest.mark.parametrize("executor", [
     SyncExecutionProvider(),
@@ -937,22 +937,22 @@ def test_workflow_executor_portable(executor):
 
 ```python
 # Automatically enabled on import
-import rufus  # uvloop configured here
+import ruvon  # uvloop configured here
 
 # Disable for debugging
-# export RUFUS_USE_UVLOOP=false
+# export RUVON_USE_UVLOOP=false
 ```
 
 ### orjson Serialization
 
 ```python
-from rufus.utils.serialization import serialize, deserialize
+from ruvon.utils.serialization import serialize, deserialize
 
 json_str = serialize({"key": "value"})
 data = deserialize(json_str)
 
 # Disable for debugging
-# export RUFUS_USE_ORJSON=false
+# export RUVON_USE_ORJSON=false
 ```
 
 ### PostgreSQL Connection Pool Config
@@ -995,14 +995,14 @@ Run: `python tests/benchmarks/workflow_performance.py`
 
 ## §9 Database Schema Management
 
-> **Schema governance update (v0.4.2+):** `src/rufus/db_schema/database.py` now covers
+> **Schema governance update (v0.4.2+):** `src/ruvon/db_schema/database.py` now covers
 > all 33 cloud PostgreSQL tables. `migrations/schema.yaml` is deprecated — do not add
 > new tables there. See §16 for the complete table inventory and edge vs cloud separation.
 
 ### Alembic Migration Commands
 
 ```bash
-cd src/rufus
+cd src/ruvon
 
 # Auto-generate migration from SQLAlchemy model changes
 alembic revision --autogenerate -m "add user preferences table"
@@ -1011,7 +1011,7 @@ alembic revision --autogenerate -m "add user preferences table"
 alembic revision -m "add custom index"
 
 # Apply migrations
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 alembic upgrade head
 
 # Inspect
@@ -1027,7 +1027,7 @@ alembic upgrade head
 ### SQLAlchemy Table Definition Example
 
 ```python
-# src/rufus/db_schema/database.py
+# src/ruvon/db_schema/database.py
 from sqlalchemy import Table, Column, String, Text, DateTime, func
 
 user_preferences = Table(
@@ -1053,7 +1053,7 @@ user_preferences = Table(
 
 ### Schema Modification Process
 
-1. Edit `src/rufus/db_schema/database.py`
+1. Edit `src/ruvon/db_schema/database.py`
 2. `alembic revision --autogenerate -m "description"`
 3. Review generated migration (Alembic ~15% false positive rate)
 4. Test: `alembic upgrade head` then `alembic downgrade -1` then `alembic upgrade head`
@@ -1065,26 +1065,26 @@ user_preferences = Table(
 ```bash
 # Development (SQLite)
 export DATABASE_URL="sqlite:///dev.db"
-cd src/rufus && alembic upgrade head
+cd src/ruvon && alembic upgrade head
 
 # Development (PostgreSQL Docker)
 docker compose up postgres -d
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
-cd src/rufus && alembic upgrade head
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
+cd src/ruvon && alembic upgrade head
 
 # Production fresh install
 export DATABASE_URL="postgresql://user:pass@host:5432/dbname"
-cd src/rufus && alembic upgrade head
+cd src/ruvon && alembic upgrade head
 ```
 
 Docker entrypoint:
 ```yaml
 command: >
   sh -c "
-    cd /app/src/rufus &&
+    cd /app/src/ruvon &&
     alembic upgrade head &&
     cd /app &&
-    uvicorn rufus_server.main:app --host 0.0.0.0
+    uvicorn ruvon_server.main:app --host 0.0.0.0
   "
 ```
 
@@ -1096,7 +1096,7 @@ command: >
 
 ```python
 # In-memory (testing)
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
@@ -1109,10 +1109,10 @@ await persistence.initialize()
 ### Full Workflow Integration
 
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 persistence = SQLitePersistenceProvider(db_path="workflows.db")
 await persistence.initialize()
@@ -1180,7 +1180,7 @@ async with persistence.conn.execute("PRAGMA journal_mode") as cursor:
 ### HeartbeatManager Usage
 
 ```python
-from rufus.heartbeat import HeartbeatManager
+from ruvon.heartbeat import HeartbeatManager
 
 async def custom_step(state: MyState, context: StepContext):
     heartbeat = HeartbeatManager(
@@ -1210,27 +1210,27 @@ await heartbeat.stop()
 
 ```bash
 # One-shot scan (dry-run)
-rufus scan-zombies --db postgresql://localhost/rufus
+ruvon scan-zombies --db postgresql://localhost/ruvon
 
 # Scan and fix
-rufus scan-zombies --db postgresql://localhost/rufus --fix
+ruvon scan-zombies --db postgresql://localhost/ruvon --fix
 
 # Custom threshold
-rufus scan-zombies --db postgresql://localhost/rufus --fix --threshold 180
+ruvon scan-zombies --db postgresql://localhost/ruvon --fix --threshold 180
 
 # JSON output
-rufus scan-zombies --db postgresql://localhost/rufus --json
+ruvon scan-zombies --db postgresql://localhost/ruvon --json
 
 # Continuous daemon
-rufus zombie-daemon --db postgresql://localhost/rufus
-rufus zombie-daemon --db postgresql://localhost/rufus --interval 60 --threshold 120
+ruvon zombie-daemon --db postgresql://localhost/ruvon
+ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 60 --threshold 120
 ```
 
 ### ZombieScanner (Programmatic)
 
 ```python
-from rufus.zombie_scanner import ZombieScanner
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.zombie_scanner import ZombieScanner
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(db_url)
 await persistence.initialize()
@@ -1267,18 +1267,18 @@ CREATE INDEX idx_heartbeat_time ON workflow_heartbeats(last_heartbeat ASC);
 
 **Cron job:**
 ```bash
-* * * * * rufus scan-zombies --db $DATABASE_URL --fix >> /var/log/rufus/zombie-scanner.log 2>&1
+* * * * * ruvon scan-zombies --db $DATABASE_URL --fix >> /var/log/ruvon/zombie-scanner.log 2>&1
 ```
 
 **Systemd service:**
 ```ini
 [Unit]
-Description=Rufus Zombie Workflow Scanner
+Description=Ruvon Zombie Workflow Scanner
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/rufus zombie-daemon --db postgresql://localhost/rufus --interval 60
+ExecStart=/usr/bin/ruvon zombie-daemon --db postgresql://localhost/ruvon --interval 60
 Restart=always
 RestartSec=10
 
@@ -1291,7 +1291,7 @@ WantedBy=multi-user.target
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: rufus-zombie-scanner
+  name: ruvon-zombie-scanner
 spec:
   schedule: "*/5 * * * *"
   jobTemplate:
@@ -1300,8 +1300,8 @@ spec:
         spec:
           containers:
           - name: scanner
-            image: myapp/rufus:latest
-            command: ["rufus", "scan-zombies", "--db", "postgresql://postgres/rufus", "--fix"]
+            image: myapp/ruvon:latest
+            command: ["ruvon", "scan-zombies", "--db", "postgresql://postgres/ruvon", "--fix"]
           restartPolicy: OnFailure
 ```
 
@@ -1676,7 +1676,7 @@ alembic revision --autogenerate -m "description_of_change"
 
 From Docker Compose:
 ```bash
-docker-compose run --rm rufus-server alembic upgrade head
+docker-compose run --rm ruvon-server alembic upgrade head
 ```
 
 ---
@@ -1791,7 +1791,7 @@ CREATE INDEX IF NOT EXISTS ix_server_commands_status
 |---------|-----------|
 | `reload_workflows` | Triggers immediate `_reload_workflow_definitions()` call (skips 60 s wait) |
 | `gc_caches` | Calls `builder.clear_all_caches()` — evicts `_workflow_config_cache` + `_import_cache` |
-| `update_code` | Runs `pip install --upgrade rufus-sdk` in a subprocess, then triggers reload |
+| `update_code` | Runs `pip install --upgrade ruvon-sdk` in a subprocess, then triggers reload |
 | `restart` | Calls `os.kill(os.getpid(), signal.SIGUSR1)` — graceful uvicorn reload |
 
 ### API Endpoints
@@ -1882,22 +1882,22 @@ Full reference: [`docs/reference/configuration/edge-footprint.md`](../docs/refer
 
 | Component | Size | Files | Edge-relevant |
 |-----------|------|-------|---------------|
-| `rufus/` core SDK | 1.9 MB | 57 | Partially (see below) |
-| `rufus_edge/` agent | 232 KB | 8 | Yes |
-| `rufus_cli/` CLI | 520 KB | 12 | No |
-| `rufus_server/` cloud API | 10 MB | 42 | No |
+| `ruvon/` core SDK | 1.9 MB | 57 | Partially (see below) |
+| `ruvon_edge/` agent | 232 KB | 8 | Yes |
+| `ruvon_cli/` CLI | 520 KB | 12 | No |
+| `ruvon_server/` cloud API | 10 MB | 42 | No |
 
 ### What is included vs excluded from the wheel
 
 **Included:**
 
-- All of `rufus/implementations/` — sqlite, postgres, sync, celery, thread_pool, onnx, tflite, etc. (716 KB)
-- `rufus_edge/payment_steps.py` — reference implementation, ships with the package
-- `rufus_cli/` and `rufus_server/` — shipped but never imported by edge agents
+- All of `ruvon/implementations/` — sqlite, postgres, sync, celery, thread_pool, onnx, tflite, etc. (716 KB)
+- `ruvon_edge/payment_steps.py` — reference implementation, ships with the package
+- `ruvon_cli/` and `ruvon_server/` — shipped but never imported by edge agents
 
 **Excluded** (via `pyproject.toml exclude`):
 
-- `src/rufus/examples/`
+- `src/ruvon/examples/`
 - `config/*.yaml` (project root — user-supplied, not in any package)
 - `tests/` (dev-only)
 - **User-written step functions** — always external to the package; add to footprint based on user imports
@@ -1905,21 +1905,21 @@ Full reference: [`docs/reference/configuration/edge-footprint.md`](../docs/refer
 ### Installed footprint by scenario
 
 ```text
-Scenario A: pip install rufus-sdk
+Scenario A: pip install ruvon-sdk
   Disk: ~25–30 MB  |  RSS: ~50 MB
   Use: offline payment, SAF, SQLite, config polling
 
-Scenario B: pip install 'rufus-sdk[edge]'
+Scenario B: pip install 'ruvon-sdk[edge]'
   Disk: ~40–45 MB  |  RSS: ~65 MB
   Adds: websockets, psutil, numpy (+14 MB)
   Use: everything above + WebSocket commands, health metrics
 
-Scenario C: pip install 'rufus-sdk[edge]' && pip install onnxruntime
+Scenario C: pip install 'ruvon-sdk[edge]' && pip install onnxruntime
   Disk: ~100–600 MB  |  RSS: ~115–165 MB
   Adds: onnxruntime (+60 MB) + model files (10–500 MB)
   Use: on-device ML fraud scoring, anomaly detection
 
-Scenario D: pip install 'rufus-sdk[edge]' && pip install tflite-runtime
+Scenario D: pip install 'ruvon-sdk[edge]' && pip install tflite-runtime
   Disk: ~60–250 MB  |  RSS: ~85–115 MB
   Adds: tflite-runtime (+10 MB) + model files
   Use: TFLite inference (lighter than ONNX on some hardware)
@@ -1928,18 +1928,18 @@ Scenario D: pip install 'rufus-sdk[edge]' && pip install tflite-runtime
 ### Core modules loaded by edge agents at runtime
 
 ```python
-rufus.workflow, rufus.builder, rufus.models
-rufus.providers.*  (7 interface files)
-rufus.implementations.persistence.sqlite
-rufus.implementations.execution.sync
-rufus.implementations.observability.logging
-rufus.implementations.templating.jinja2
-rufus.implementations.expression_evaluator.simple
-rufus.implementations.security.crypto_utils
-rufus.implementations.inference.*  (only if AI enabled)
+ruvon.workflow, ruvon.builder, ruvon.models
+ruvon.providers.*  (7 interface files)
+ruvon.implementations.persistence.sqlite
+ruvon.implementations.execution.sync
+ruvon.implementations.observability.logging
+ruvon.implementations.templating.jinja2
+ruvon.implementations.expression_evaluator.simple
+ruvon.implementations.security.crypto_utils
+ruvon.implementations.inference.*  (only if AI enabled)
 ```
 
-Modules on disk but never imported on edge: `celery_app`, `tasks`, `worker_registry`, `zombie_scanner`, `heartbeat`, `engine` (legacy), celery/postgres/redis implementations, `rufus_cli.*`, `rufus_server.*`
+Modules on disk but never imported on edge: `celery_app`, `tasks`, `worker_registry`, `zombie_scanner`, `heartbeat`, `engine` (legacy), celery/postgres/redis implementations, `ruvon_cli.*`, `ruvon_server.*`
 
 ### Hardware minimums
 
@@ -1954,21 +1954,21 @@ Modules on disk but never imported on edge: `celery_app`, `tasks`, `worker_regis
 
 ## §19 — Package Split (v0.6.0)
 
-Three separate wheels replace the monolithic `rufus-sdk`:
+Three separate wheels replace the monolithic `ruvon-sdk`:
 
 | Package | Contents | PyPI install |
 |---------|----------|--------------|
-| `rufus-sdk` | `rufus/` core + `rufus_cli/` | `pip install rufus-sdk` |
-| `rufus-sdk-edge` | `rufus_edge/` | `pip install rufus-sdk-edge` |
-| `rufus-sdk-server` | `rufus_server/` | `pip install rufus-sdk-server` |
+| `ruvon-sdk` | `ruvon/` core + `ruvon_cli/` | `pip install ruvon-sdk` |
+| `ruvon-edge` | `ruvon_edge/` | `pip install ruvon-edge` |
+| `ruvon-server` | `ruvon_server/` | `pip install ruvon-server` |
 
-Sub-packages declare `rufus-sdk >= 0.6.0` as a required dependency.
+Sub-packages declare `ruvon-sdk >= 0.6.0` as a required dependency.
 
 ### pyproject.toml locations
 
-- Root: `/pyproject.toml` — `rufus-sdk` (core + CLI)
-- Edge: `/packages/rufus-sdk-edge/pyproject.toml` — `rufus-sdk-edge`
-- Server: `/packages/rufus-sdk-server/pyproject.toml` — `rufus-sdk-server`
+- Root: `/pyproject.toml` — `ruvon-sdk` (core + CLI)
+- Edge: `/packages/ruvon-edge/pyproject.toml` — `ruvon-edge`
+- Server: `/packages/ruvon-server/pyproject.toml` — `ruvon-server`
 
 Sub-packages reference source via `from = "../../src"` — no file moves required.
 
@@ -1976,20 +1976,20 @@ Sub-packages reference source via `from = "../../src"` — no file moves require
 
 | Extra | Package | Packages added |
 |-------|---------|---------------|
-| `[postgres]` | `rufus-sdk` | asyncpg |
-| `[performance]` | `rufus-sdk` | uvloop |
-| `[cli]` | `rufus-sdk` | rich |
-| `[edge]` | `rufus-sdk-edge` | websockets, psutil, numpy |
-| `[server]` | `rufus-sdk-server` | fastapi, uvicorn, starlette, slowapi |
-| `[celery]` | `rufus-sdk-server` | celery, redis, psycopg2-binary, prometheus-client |
-| `[auth]` | `rufus-sdk-server` | python-jose |
+| `[postgres]` | `ruvon-sdk` | asyncpg |
+| `[performance]` | `ruvon-sdk` | uvloop |
+| `[cli]` | `ruvon-sdk` | rich |
+| `[edge]` | `ruvon-edge` | websockets, psutil, numpy |
+| `[server]` | `ruvon-server` | fastapi, uvicorn, starlette, slowapi |
+| `[celery]` | `ruvon-server` | celery, redis, psycopg2-binary, prometheus-client |
+| `[auth]` | `ruvon-server` | python-jose |
 
 ### Dev install (all from source)
 
 ```bash
 pip install -e ".[postgres,performance,cli]"
-pip install -e "packages/rufus-sdk-edge[edge]"
-pip install -e "packages/rufus-sdk-server[server,celery,auth]"
+pip install -e "packages/ruvon-edge[edge]"
+pip install -e "packages/ruvon-server[server,celery,auth]"
 ```
 
 ### Build
@@ -1998,20 +1998,20 @@ pip install -e "packages/rufus-sdk-server[server,celery,auth]"
 # Core
 poetry build
 # Edge
-cd packages/rufus-sdk-edge && poetry build
+cd packages/ruvon-edge && poetry build
 # Server
-cd packages/rufus-sdk-server && poetry build
+cd packages/ruvon-server && poetry build
 ```
 
 ### Wheel size after split
 
 | Wheel | Size |
 |-------|------|
-| `rufus_sdk-0.6.0-py3-none-any.whl` | ~2.5 MB |
-| `rufus_sdk_edge-0.6.0-py3-none-any.whl` | ~250 KB |
-| `rufus_sdk_server-0.6.0-py3-none-any.whl` | ~10 MB |
+| `ruvon_sdk-0.6.0-py3-none-any.whl` | ~2.5 MB |
+| `ruvon_sdk_edge-0.6.0-py3-none-any.whl` | ~250 KB |
+| `ruvon_sdk_server-0.6.0-py3-none-any.whl` | ~10 MB |
 
-Edge devices installing `rufus-sdk-edge` save ~10.5 MB vs the old monolithic wheel.
+Edge devices installing `ruvon-edge` save ~10.5 MB vs the old monolithic wheel.
 
 ---
 
@@ -2023,7 +2023,7 @@ Edge devices installing `rufus-sdk-edge` save ~10.5 MB vs the old monolithic whe
 
 **Dependency:** `pip install wasmtime` (imported lazily — only required if a workflow uses WASM steps).
 
-**Optional extra:** `pip install 'rufus-sdk[wasm]'`
+**Optional extra:** `pip install 'ruvon-sdk[wasm]'`
 
 ---
 
@@ -2172,13 +2172,13 @@ steps:
 ### Python — Wiring Up WasmRuntime
 
 ```python
-from rufus.implementations.execution.wasm_runtime import WasmRuntime, DiskWasmBinaryResolver
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.builder import WorkflowBuilder
+from ruvon.implementations.execution.wasm_runtime import WasmRuntime, DiskWasmBinaryResolver
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
 
 # Cloud setup: DiskWasmBinaryResolver queries wasm_components table and reads disk
 persistence = PostgresPersistenceProvider(db_url=DATABASE_URL)
@@ -2215,8 +2215,8 @@ await workflow.next_step()
 ### Edge Device Setup
 
 ```python
-from rufus.implementations.execution.wasm_runtime import WasmRuntime, SqliteWasmBinaryResolver
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.wasm_runtime import WasmRuntime, SqliteWasmBinaryResolver
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 # Edge persistence wraps an aiosqlite connection
 persistence = SQLitePersistenceProvider(db_path="/data/edge_device.db")
@@ -2289,8 +2289,8 @@ On device startup, `load_local_workflow_definitions()` also scans cached YAML fo
 # tests/sdk/test_wasm_step.py
 import pytest
 import hashlib
-from rufus.implementations.execution.wasm_runtime import WasmRuntime
-from rufus.models import WasmConfig
+from ruvon.implementations.execution.wasm_runtime import WasmRuntime
+from ruvon.models import WasmConfig
 
 class MockBinaryResolver:
     def __init__(self, binary: bytes):
@@ -2368,7 +2368,7 @@ async def test_wasm_real_execution():
 
 ## §20 — Browser + WASI 0.3 Deployment (v0.8.0)
 
-`rufus-sdk-edge` can now run in three environments without code changes:
+`ruvon-edge` can now run in three environments without code changes:
 
 | Environment | HTTP transport | SQLite | Metrics | Install extra |
 |-------------|---------------|--------|---------|---------------|
@@ -2378,17 +2378,17 @@ async def test_wasm_real_execution():
 
 ### Platform Adapter
 
-All HTTP and metrics access is routed through `PlatformAdapter` (Protocol in `rufus_edge.platform.base`):
+All HTTP and metrics access is routed through `PlatformAdapter` (Protocol in `ruvon_edge.platform.base`):
 
 ```python
-from rufus_edge.platform import detect_platform  # auto-selects correct adapter
+from ruvon_edge.platform import detect_platform  # auto-selects correct adapter
 
 adapter = detect_platform()   # NativePlatformAdapter on CPython
                                # PyodidePlatformAdapter inside Pyodide
                                # WasiPlatformAdapter on wasm32
 
 # Pass to agent for full portability
-agent = RufusEdgeAgent(
+agent = RuvonEdgeAgent(
     device_id="pos-001",
     cloud_url="https://control.example.com",
     platform_adapter=adapter,
@@ -2406,20 +2406,20 @@ WASM steps now use `ComponentStepRuntime` by default. It auto-detects the binary
 | Component Model (WASI 0.3) | magic bytes `\x00asm\x0e\x00` | `wasmtime.component` — typed `execute(state, step_name) → result` |
 | Legacy core module | magic bytes `\x00asm\x01\x00` | stdin/stdout JSON (unchanged) |
 
-**WIT interface** (`src/rufus/wasm_component/step.wit`):
+**WIT interface** (`src/ruvon/wasm_component/step.wit`):
 ```wit
-package rufus:step@0.1.0;
+package ruvon:step@0.1.0;
 
 interface runner {
     execute: func(state-json: string, step-name: string) -> result<string, step-error>;
 }
 
-world rufus-step { export runner; }
+world ruvon-step { export runner; }
 ```
 
 **Wiring via WorkflowBuilder** (cloud or edge):
 ```python
-from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
 
 resolver = SqliteWasmBinaryResolver(conn)   # or DiskWasmBinaryResolver(pool)
 
@@ -2436,7 +2436,7 @@ Legacy `WasmRuntime` is **not removed** — it now delegates CM binaries to `Com
 
 **Requirements:** Chrome 126+ (JSPI on by default) or Chrome 117+ with `--enable-features=WebAssemblyJSPI`.
 
-**Bootstrap** (`src/rufus_edge/browser_loader.js`):
+**Bootstrap** (`src/ruvon_edge/browser_loader.js`):
 ```js
 const worker = new Worker("/browser_loader.js", { type: "module" });
 worker.postMessage({
@@ -2444,7 +2444,7 @@ worker.postMessage({
     deviceId: "browser-pos-001",
     cloudUrl: "https://control.example.com",
     apiKey: "your-key",
-    wheelUrl: "https://your-cdn/rufus_sdk_edge-latest-py3-none-any.whl",
+    wheelUrl: "https://your-cdn/ruvon_sdk_edge-latest-py3-none-any.whl",
 });
 
 worker.onmessage = ({ data }) => {
@@ -2459,7 +2459,7 @@ worker.onmessage = ({ data }) => {
 
 **Install:**
 ```bash
-pip install 'rufus-sdk-edge[browser]'   # no psutil, no websockets, no httpx
+pip install 'ruvon-edge[browser]'   # no psutil, no websockets, no httpx
 ```
 
 **Constraints:**
@@ -2473,47 +2473,47 @@ pip install 'rufus-sdk-edge[browser]'   # no psutil, no websockets, no httpx
 **Build:**
 ```bash
 pip install py2wasm
-bash scripts/build_wasi.sh          # → dist/rufus_edge.wasm
+bash scripts/build_wasi.sh          # → dist/ruvon_edge.wasm
 
 # Optional: wrap as Component Model binary (requires wasm-tools)
-wasm-tools component new dist/rufus_edge.wasm \
+wasm-tools component new dist/ruvon_edge.wasm \
     --adapt wasi_snapshot_preview1.reactor.wasm \
-    -o dist/rufus_edge_component.wasm
+    -o dist/ruvon_edge_component.wasm
 ```
 
 **Run:**
 ```bash
 wasmtime \
-  --env RUFUS_DEVICE_ID=wasi-001 \
-  --env RUFUS_CLOUD_URL=https://control.example.com \
-  --env RUFUS_API_KEY=your-key \
-  dist/rufus_edge.wasm
+  --env RUVON_DEVICE_ID=wasi-001 \
+  --env RUVON_CLOUD_URL=https://control.example.com \
+  --env RUVON_API_KEY=your-key \
+  dist/ruvon_edge.wasm
 ```
 
 **Environment variables:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RUFUS_DEVICE_ID` | `wasi-device` | Unique device identifier |
-| `RUFUS_CLOUD_URL` | `""` | Cloud control plane URL |
-| `RUFUS_API_KEY` | `""` | API key for authentication |
-| `RUFUS_DB_PATH` | `rufus_edge.db` | SQLite database path (via `wasi:filesystem`) |
-| `RUFUS_SYNC_INTERVAL` | `30` | Seconds between SAF sync attempts |
-| `RUFUS_LOG_LEVEL` | `INFO` | Python logging level |
+| `RUVON_DEVICE_ID` | `wasi-device` | Unique device identifier |
+| `RUVON_CLOUD_URL` | `""` | Cloud control plane URL |
+| `RUVON_API_KEY` | `""` | API key for authentication |
+| `RUVON_DB_PATH` | `ruvon_edge.db` | SQLite database path (via `wasi:filesystem`) |
+| `RUVON_SYNC_INTERVAL` | `30` | Seconds between SAF sync attempts |
+| `RUVON_LOG_LEVEL` | `INFO` | Python logging level |
 
 **HTTP:** routed through `wasi:http/outgoing-handler` — the host (wasmtime) must be started with `--wasi http` capability grant.
 
 **Install:**
 ```bash
-pip install 'rufus-sdk-edge[wasi]'    # zero extra deps
-pip install 'rufus-sdk-edge[native-wasm]'  # adds wasmtime for CM on native Python
+pip install 'ruvon-edge[wasi]'    # zero extra deps
+pip install 'ruvon-edge[native-wasm]'  # adds wasmtime for CM on native Python
 ```
 
 ---
 
 ## §21 Paged Inference Runtime
 
-Running a 2B-parameter generative LLM on a memory-constrained browser or edge device requires keeping only a **rolling window of model shards** resident in memory. This section documents the shard-paged architecture in Rufus SDK.
+Running a 2B-parameter generative LLM on a memory-constrained browser or edge device requires keeping only a **rolling window of model shards** resident in memory. This section documents the shard-paged architecture in Ruvon SDK.
 
 ### Why Shard Paging?
 
@@ -2595,7 +2595,7 @@ Set `shard_urls` in `AIInferenceConfig` to point to the shard files:
 wf = await builder.create_workflow("PagedReasoning", ...)
 
 # Explicit override
-from rufus.implementations.inference.paged_browser import PagedBrowserInferenceProvider
+from ruvon.implementations.inference.paged_browser import PagedBrowserInferenceProvider
 wf = await builder.create_workflow("PagedReasoning", ...,
                                    paged_inference_provider=PagedBrowserInferenceProvider())
 ```
@@ -2648,11 +2648,11 @@ def register_command_handler(self, command_type: str, handler: Callable[[dict], 
 **Usage:**
 
 ```python
-agent = RufusEdgeAgent(
+agent = RuvonEdgeAgent(
     device_id="atm-001",
     cloud_url="https://control.example.com",
-    db_path="/var/lib/rufus/edge.db",
-    encryption_key=os.getenv("RUFUS_ENCRYPTION_KEY"),
+    db_path="/var/lib/ruvon/edge.db",
+    encryption_key=os.getenv("RUVON_ENCRYPTION_KEY"),
 )
 
 async def handle_fraud_review_decision(command_data: dict):
@@ -2735,13 +2735,13 @@ Both `betterproto` and `google.protobuf` are supported and switchable at runtime
 | Backend | Env var | Speed | Notes |
 |---------|---------|-------|-------|
 | `betterproto` | default | ~2.3M ops/sec | Pure Python dataclasses; works in Pyodide/WASI; no C extension |
-| `google.protobuf` | `RUFUS_PROTO_BACKEND=google` | ~3–4× faster | C extension (`protobuf>=4.21`); `SerializeToString`/`FromString` API |
+| `google.protobuf` | `RUVON_PROTO_BACKEND=google` | ~3–4× faster | C extension (`protobuf>=4.21`); `SerializeToString`/`FromString` API |
 
-The `src/rufus/proto/gen/__init__.py` selects the right generated classes on import. The serialization helpers in `rufus.utils.serialization` dispatch based on `hasattr(msg, "SerializeToString")` — application code never changes between backends.
+The `src/ruvon/proto/gen/__init__.py` selects the right generated classes on import. The serialization helpers in `ruvon.utils.serialization` dispatch based on `hasattr(msg, "SerializeToString")` — application code never changes between backends.
 
 Generated files:
-- `src/rufus/proto/gen/*_pb2.py` — google.protobuf C-extension classes (from `buf generate`)
-- `src/rufus/proto/gen/*.py` (betterproto dataclasses) — default path
+- `src/ruvon/proto/gen/*_pb2.py` — google.protobuf C-extension classes (from `buf generate`)
+- `src/ruvon/proto/gen/*.py` (betterproto dataclasses) — default path
 
 Wire format envelope (used on NATS):
 - `0x01` prefix → JSON payload (orjson bytes)
@@ -2772,7 +2772,7 @@ Sections:
 - Cloud KPI: `GET /api/v1/metrics/edge-impact` returns `saf_recovered_cents` + `fraud_prevented_cents`
 
 ### RUVON Key Facts (quick reference)
-- `RUFUS_PROTO_BACKEND=google` for max throughput on server; leave default (betterproto) for browser/WASI
+- `RUVON_PROTO_BACKEND=google` for max throughput on server; leave default (betterproto) for browser/WASI
 - Alembic HEAD: `l7m8n9o0p1q2` — adds `relay_server_url` + `mesh_advisory` to `edge_devices`
 - Production DB size at 664k executions: ~1.69 GB total (workflow_executions 1.44 GB dominates)
 - Cleanup lever: purge `workflow_executions WHERE status IN ('COMPLETED','FAILED') AND created_at < now() - interval '30 days'`
@@ -2784,11 +2784,11 @@ Sections:
 ### Purpose
 
 Browser Demo 3 (`examples/browser_demo_3/`) runs a live peer-to-peer pod mesh entirely inside
-browser tabs — no backend server required. Each tab is a Rufus pod running a stripped-down edge
+browser tabs — no backend server required. Each tab is a Ruvon pod running a stripped-down edge
 agent in a Web Worker. Pods gossip capacity scores, elect a Sovereign, and relay offline
 transactions via Store-and-Forward.
 
-Live URL: `https://kamikazid.github.io/rufus-sdk/browser_demo_3/`
+Live URL: `https://kamikazid.github.io/ruvon-sdk/browser_demo_3/`
 Local: `cd examples/browser_demo_3 && python serve.py` → `http://localhost:8083`
 
 Full inline documentation: `examples/browser_demo_3/about.html`
@@ -2801,7 +2801,7 @@ Two complementary transports carry RUVON gossip:
 
 | Transport | Scope | Label |
 |-----------|-------|-------|
-| `BroadcastChannel("rufus-mesh")` | Same device (all tabs, same origin) | Green **BC** |
+| `BroadcastChannel("ruvon-mesh")` | Same device (all tabs, same origin) | Green **BC** |
 | PeerJS WebRTC DataChannels | Cross-device (any network) | Blue **P2P** |
 
 The worker cannot use WebRTC directly (`window` is unavailable in workers). The relay pattern:
@@ -2868,8 +2868,8 @@ to top-3 peers; they reply with `HELP_OFFER`.
 
 Discovery without a server uses the anchor pod pattern:
 
-1. Every pod registers as `rufus-{groupKey}-{podId}` on `peerjs.com`.
-2. Every pod attempts to connect to `rufus-{groupKey}-anchor`.
+1. Every pod registers as `ruvon-{groupKey}-{podId}` on `peerjs.com`.
+2. Every pod attempts to connect to `ruvon-{groupKey}-anchor`.
 3. If anchor responds → anchor sends `_MEMBER_LIST` → pod connects to all listed peers.
 4. If no anchor within 2.5 s → this pod registers a second peer as the anchor and relays
    member lists to newcomers.
@@ -2888,11 +2888,11 @@ at runtime — works offline once loaded and passes GitHub Pages CSP.
 WS /api/v1/signal/{group_key}
 ```
 
-Defined in `src/rufus_server/main.py`. Fan-out relay keyed by group key — all pods in a group
+Defined in `src/ruvon_server/main.py`. Fan-out relay keyed by group key — all pods in a group
 receive every message broadcast by any member. No auth required (group key provides isolation).
 
 The demo no longer uses this endpoint (replaced by PeerJS), but it remains in `main.py` for
-local full-stack development where a Rufus server is already running.
+local full-stack development where a Ruvon server is already running.
 
 ---
 
@@ -2908,6 +2908,6 @@ cd examples/browser_demo_3 && python serve.py
 # Share link: click "Share Link" in the header after joining a mesh group
 ```
 
-GitHub Pages: `https://kamikazid.github.io/rufus-sdk/browser_demo_3/`
+GitHub Pages: `https://kamikazid.github.io/ruvon-sdk/browser_demo_3/`
 Deployed via `.github/workflows/pages.yml` — copies `examples/browser_demo_3/` into
 `_site/browser_demo_3/` on every push to `main`.

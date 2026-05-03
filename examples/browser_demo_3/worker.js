@@ -3,7 +3,7 @@
  *             v2 — Regenerative Top-Down Mesh
  *
  * Each browser tab runs this Worker. Pods discover each other via
- * BroadcastChannel("rufus-mesh") — zero server involvement for local tabs.
+ * BroadcastChannel("ruvon-mesh") — zero server involvement for local tabs.
  * When a group_key is provided on INIT, the worker also connects to the
  * Rufus WebSocket signaling endpoint (/api/v1/signal/{group_key}) so that
  * pods on different devices can join the same private mesh.
@@ -18,7 +18,7 @@
  *   - Sovereign Pulse Mode: sovereign locks to base interval
  *
  * Transport:
- *   - Local (same device / same origin): BroadcastChannel("rufus-mesh")
+ *   - Local (same device / same origin): BroadcastChannel("ruvon-mesh")
  *   - Remote (cross-device): WebSocket to /api/v1/signal/{group_key}
  *   - Dedup cache prevents echo loops across both channels
  *
@@ -216,7 +216,7 @@ function buildTransaction() {
 // Remote path: worker posts REMOTE_SEND → main thread → PeerJS DataChannel fans out
 // Incoming remote messages: main thread posts REMOTE_MSG → worker
 // ---------------------------------------------------------------------------
-const mesh = new BroadcastChannel("rufus-mesh");
+const mesh = new BroadcastChannel("ruvon-mesh");
 
 function broadcastLocal(msg) { mesh.postMessage(msg); }
 
@@ -402,7 +402,7 @@ function _fib(n) {
 function _hashBatch(count) {
   let h = 5381;
   for (let i = 0; i < count; i++) {
-    const s = "rufus-task-" + i;
+    const s = "ruvon-task-" + i;
     for (let j = 0; j < s.length; j++) { h = ((h << 5) + h) + s.charCodeAt(j); h |= 0; }
   }
   return h >>> 0;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Industrial IoT Predictive Maintenance Demo - Rufus Edge AI Inference
+Industrial IoT Predictive Maintenance Demo - Ruvon Edge AI Inference
 
 Demonstrates on-device AI for manufacturing equipment monitoring:
 1. Normal operation - routine monitoring
@@ -11,7 +11,7 @@ Demonstrates on-device AI for manufacturing equipment monitoring:
 Usage:
     python examples/industrial_iot/demo.py
 
-This demo shows how Rufus Edge handles:
+This demo shows how Ruvon Edge handles:
 - On-device ML inference for failure prediction
 - Threshold-based immediate alarms
 - AI pattern recognition for subtle degradation

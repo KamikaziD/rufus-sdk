@@ -15,8 +15,8 @@ import tempfile
 import subprocess
 from pathlib import Path
 
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 
 async def test_postgres_fresh_setup():
@@ -25,7 +25,7 @@ async def test_postgres_fresh_setup():
     print("  Testing Fresh PostgreSQL Setup with Alembic")
     print("="*70 + "\n")
 
-    db_url = "postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_cloud"
+    db_url = "postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_cloud"
 
     # Step 1: Verify Alembic can run
     print("1. Verifying Alembic installation...")
@@ -45,7 +45,7 @@ async def test_postgres_fresh_setup():
     print("\n2. Checking migration status...")
     try:
         os.environ["DATABASE_URL"] = db_url
-        os.chdir("src/rufus")
+        os.chdir("src/ruvon")
 
         result = subprocess.run(
             ["alembic", "current"],
@@ -104,7 +104,7 @@ async def test_sqlite_fresh_setup():
         print("1. Applying Alembic migrations to SQLite...")
         try:
             os.environ["DATABASE_URL"] = db_url
-            os.chdir("src/rufus")
+            os.chdir("src/ruvon")
 
             result = subprocess.run(
                 ["alembic", "upgrade", "head"],

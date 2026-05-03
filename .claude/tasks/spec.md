@@ -1,7 +1,7 @@
-# Spec: WASM/Browser/WASI Deployment for rufus-sdk-edge
+# Spec: WASM/Browser/WASI Deployment for ruvon-edge
 
 **Date:** 2026-03-12
-**Scope:** `rufus-sdk-edge` (edge agent only; cloud control plane unchanged)
+**Scope:** `ruvon-edge` (edge agent only; cloud control plane unchanged)
 **Targets:** Browser (Pyodide + JSPI) + Native WASI 0.3 (parallel)
 **WASM Steps:** Migrate to Component Model (replace stdin/stdout + wasmtime)
 
@@ -25,7 +25,7 @@
 
 ```
                     ┌──────────────────────────────────────────┐
-                    │          RufusEdgeAgent                  │
+                    │          RuvonEdgeAgent                  │
                     │  (unchanged public API)                  │
                     └──────────────┬───────────────────────────┘
                                    │ uses
@@ -60,7 +60,7 @@ WASM Step Execution (Component Model):
 ## 3. New File Map
 
 ```
-src/rufus_edge/
+src/ruvon_edge/
   platform/
     __init__.py            # exports detect_platform(), get_adapter()
     base.py                # PlatformAdapter Protocol + NullSystemMetrics
@@ -68,10 +68,10 @@ src/rufus_edge/
     wasi.py                # WasiPlatformAdapter (wasi:http, stubs)
     pyodide.py             # PyodidePlatformAdapter (js.fetch, wa-sqlite)
 
-src/rufus/implementations/execution/
+src/ruvon/implementations/execution/
   component_runtime.py     # ComponentStepRuntime (replaces WasmRuntime for CM)
 
-src/rufus/wasm_component/
+src/ruvon/wasm_component/
   step.wit                 # WIT interface definition for workflow steps
   __init__.py
 
@@ -79,7 +79,7 @@ scripts/
   build_wasi.sh            # py2wasm build for WASI target
   browser_loader.js        # Pyodide bootstrap + wa-sqlite init
 
-packages/rufus-sdk-edge/pyproject.toml  # new extras: browser, wasi
+packages/ruvon-edge/pyproject.toml  # new extras: browser, wasi
 ```
 
 ---
@@ -87,8 +87,8 @@ packages/rufus-sdk-edge/pyproject.toml  # new extras: browser, wasi
 ## 4. WIT Interface (Component Model Contract)
 
 ```wit
-// src/rufus/wasm_component/step.wit
-package rufus:step@0.1.0;
+// src/ruvon/wasm_component/step.wit
+package ruvon:step@0.1.0;
 
 interface step-types {
   type state-json = string;   // JSON-encoded state dict
@@ -123,7 +123,7 @@ The old `WasmRuntime` (stdin/stdout) stays for **backward compatibility** but is
 ## 5. PlatformAdapter Protocol
 
 ```python
-# src/rufus_edge/platform/base.py
+# src/ruvon_edge/platform/base.py
 
 class HttpResponse(Protocol):
     status_code: int
@@ -147,8 +147,8 @@ class PlatformAdapter(Protocol):
 **How it works:**
 1. `browser_loader.js` loads Pyodide into a Web Worker
 2. Installs `wa-sqlite` (SQLite compiled to WASM, exposed via JS API)
-3. Imports `rufus_edge` Python package via `pyodide.loadPackage`
-4. Calls `await pyodide.runPythonAsync(...)` to start `RufusEdgeAgent`
+3. Imports `ruvon_edge` Python package via `pyodide.loadPackage`
+4. Calls `await pyodide.runPythonAsync(...)` to start `RuvonEdgeAgent`
 5. Asyncio runs on browser event loop via JSPI
 
 **Key constraints:**
@@ -163,7 +163,7 @@ class PlatformAdapter(Protocol):
 ## 7. WASI 0.3 Plan
 
 **How it works:**
-1. CPython + rufus_edge compiled to `wasm32-wasi` using `py2wasm` or `wasi-python`
+1. CPython + ruvon_edge compiled to `wasm32-wasi` using `py2wasm` or `wasi-python`
 2. `wasi:http/outgoing-handler` for HTTP (via `wasi-http` Python binding)
 3. `wasi:filesystem` for SQLite file I/O (`aiosqlite` works unchanged)
 4. `wasi:clocks` for datetime (Python stdlib uses this automatically)
@@ -175,7 +175,7 @@ class PlatformAdapter(Protocol):
 
 **Build script** (`scripts/build_wasi.sh`):
 ```bash
-py2wasm src/rufus_edge/wasi_main.py -o dist/rufus_edge.wasm
+py2wasm src/ruvon_edge/wasi_main.py -o dist/ruvon_edge.wasm
 ```
 
 ---

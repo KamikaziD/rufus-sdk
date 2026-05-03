@@ -7,13 +7,13 @@ This directory contains test workflows for debugging and development.
 ### Option 1: Using setup script (Easiest)
 
 ```bash
-cd /Users/kim/PycharmProjects/rufus/debugging
+cd /Users/kim/PycharmProjects/ruvon/debugging
 
 # Source the setup script to add this directory to PYTHONPATH
 source setup_workflow.sh
 
 # Now run your workflow
-rufus workflow start TestApplication \
+ruvon workflow start TestApplication \
   -d '{"name":"Detmar", "age": 45}' \
   --config ./test_workflow.yaml
 ```
@@ -21,8 +21,8 @@ rufus workflow start TestApplication \
 ### Option 2: One-liner
 
 ```bash
-cd /Users/kim/PycharmProjects/rufus/debugging
-PYTHONPATH=$PWD rufus workflow start TestApplication -d '{"name":"Detmar", "age": 45}' --config ./test_workflow.yaml
+cd /Users/kim/PycharmProjects/ruvon/debugging
+PYTHONPATH=$PWD ruvon workflow start TestApplication -d '{"name":"Detmar", "age": 45}' --config ./test_workflow.yaml
 ```
 
 ### Option 3: Python directly
@@ -34,9 +34,9 @@ import sys
 import asyncio
 sys.path.insert(0, '.')  # Add current directory to path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
 
 async def main():
     # Initialize providers
@@ -86,8 +86,8 @@ EOF
 **Solution**:
 ```bash
 # Always run with PYTHONPATH set
-cd /Users/kim/PycharmProjects/rufus/debugging
-PYTHONPATH=$PWD rufus workflow start ...
+cd /Users/kim/PycharmProjects/ruvon/debugging
+PYTHONPATH=$PWD ruvon workflow start ...
 ```
 
 ### "Table workflow_executions not found"
@@ -97,7 +97,7 @@ PYTHONPATH=$PWD rufus workflow start ...
 **Solution**:
 ```bash
 # Initialize the database
-rufus db init --db test.db
+ruvon db init --db test.db
 ```
 
 ## Development Workflow
@@ -110,19 +110,19 @@ rufus db init --db test.db
 2. **Run and test**:
    ```bash
    source setup_workflow.sh
-   rufus workflow start TestApplication -d '{"name":"Test", "age": 30}' --config ./test_workflow.yaml
+   ruvon workflow start TestApplication -d '{"name":"Test", "age": 30}' --config ./test_workflow.yaml
    ```
 
 3. **Check logs**:
    ```bash
-   rufus logs <workflow-id>
+   ruvon logs <workflow-id>
    ```
 
 4. **Iterate** and repeat!
 
 ## Tips
 
-- Use `--help` to see all options: `rufus workflow start --help`
-- List workflows: `rufus list`
-- Show workflow details: `rufus show <workflow-id>`
-- Cancel workflow: `rufus cancel <workflow-id>`
+- Use `--help` to see all options: `ruvon workflow start --help`
+- List workflows: `ruvon list`
+- Show workflow details: `ruvon show <workflow-id>`
+- Cancel workflow: `ruvon cancel <workflow-id>`

@@ -4,10 +4,10 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from rufus.builder_ai import AIWorkflowBuilder
-from rufus.builder_ai.models import BuildResult
-from rufus.builder_ai.stages.schema_validator import SchemaValidator
-from rufus.builder_ai.stages.stub_generator import StubGenerator
+from ruvon.builder_ai import AIWorkflowBuilder
+from ruvon.builder_ai.models import BuildResult
+from ruvon.builder_ai.stages.schema_validator import SchemaValidator
+from ruvon.builder_ai.stages.stub_generator import StubGenerator
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ class TestSchemaValidatorGate:
     def test_auto_repairs_missing_standard_function(self):
         wf = {"steps": [{"name": "X", "type": "STANDARD"}]}
         validated, _ = self._v().validate(wf)
-        assert validated["steps"][0]["function"] == "rufus_workflows.steps.identity"
+        assert validated["steps"][0]["function"] == "ruvon_workflows.steps.identity"
 
     def test_normalises_type_to_uppercase(self):
         wf = {"steps": [{"name": "X", "type": "standard", "function": "m.f"}]}

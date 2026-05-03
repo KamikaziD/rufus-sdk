@@ -1,6 +1,6 @@
 # Roadmap
 
-Rufus SDK development roadmap with planned features, priorities, and timelines.
+Ruvon SDK development roadmap with planned features, priorities, and timelines.
 
 **Last Updated:** 2026-03-18
 **Current Version:** 1.0.0rc5
@@ -26,7 +26,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 ```
 2026-02 ━━ v0.3.0 (Documentation release)
    │
-2026-02 ━━ v0.4.0 (RUFUS_CUSTOM_ROUTERS)
+2026-02 ━━ v0.4.0 (RUVON_CUSTOM_ROUTERS)
    │
 2026-02 ━━ v0.4.1 (OpenAPI tags, grouped Swagger UI)
    │
@@ -34,7 +34,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
    │
 2026-02 ━━ v0.5.0 (33-table schema consolidation)
    │
-2026-02 ━━ v0.6.0 (package split: rufus-sdk-edge + rufus-sdk-server)
+2026-02 ━━ v0.6.0 (package split: ruvon-edge + ruvon-server)
    │
 2026-03 ━━ v0.7.x (Edge E2E, device fleet, workflow sync, SAF)
    │
@@ -91,7 +91,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 
 ### Planned Features
 
-- [ ] **rufus-stripe Package**
+- [ ] **ruvon-stripe Package**
   - Stripe payment workflows
   - Webhook handling
   - Subscription management workflows
@@ -167,14 +167,14 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 
 #### Ecosystem Packages
 
-- [ ] **rufus-aws**
+- [ ] **ruvon-aws**
   - S3 operations
   - Lambda invocations
   - SQS/SNS integrations
   - DynamoDB operations
   - CloudWatch integration
 
-- [ ] **rufus-sendgrid**
+- [ ] **ruvon-sendgrid**
   - Email workflows
   - Template management
   - Delivery tracking
@@ -295,19 +295,19 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 
 #### Ecosystem Packages
 
-- [ ] **rufus-gcp**
+- [ ] **ruvon-gcp**
   - Cloud Functions
   - Cloud Storage
   - Pub/Sub
   - BigQuery
 
-- [ ] **rufus-azure**
+- [ ] **ruvon-azure**
   - Azure Functions
   - Blob Storage
   - Service Bus
   - Cosmos DB
 
-- [ ] **rufus-openai**
+- [ ] **ruvon-openai**
   - ChatGPT workflows
   - Embeddings
   - Fine-tuning pipelines
@@ -381,7 +381,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 #### Ecosystem
 
 - [ ] **Marketplace/Registry Website**
-  - Discover rufus-* packages
+  - Discover ruvon-* packages
   - Usage statistics
   - Community ratings
   - Documentation hosting
@@ -426,7 +426,7 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 - ✅ Zombie detection & recovery
 - ✅ Debug UI (web interface)
 - ✅ OpenAPI tags / grouped Swagger UI (14 tag groups, 86 endpoints) — v0.4.1
-- ✅ RUFUS_CUSTOM_ROUTERS for user-defined API extensions — v0.4.0
+- ✅ RUVON_CUSTOM_ROUTERS for user-defined API extensions — v0.4.0
 
 #### CLI
 - ✅ 21 commands across 5 categories
@@ -457,14 +457,14 @@ Rufus SDK development roadmap with planned features, priorities, and timelines.
 - ✅ JavaScript/polyglot example
 
 #### Ecosystem
-- ✅ Package auto-discovery (`rufus-*`)
-- ✅ rufus-slack (reference implementation)
+- ✅ Package auto-discovery (`ruvon-*`)
+- ✅ ruvon-slack (reference implementation)
 - ✅ Cookiecutter template
 
 ### In Progress
 
 - 🚧 **OpenTelemetry Integration** (Target: v1.0)
-- 🚧 **rufus-stripe** (Target: v0.9.2)
+- 🚧 **ruvon-stripe** (Target: v0.9.2)
 
 ### Planned
 
@@ -479,8 +479,8 @@ Want to influence the roadmap? Here's how:
 ### 1. Check Existing Plans
 
 - Review this roadmap
-- Search [GitHub Issues](https://github.com/your-org/rufus-sdk/issues)
-- Check [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- Search [GitHub Issues](https://github.com/your-org/ruvon-sdk/issues)
+- Check [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 
 ### 2. Open a Feature Request
 
@@ -528,7 +528,7 @@ Features are prioritized based on:
 
 ## Release Philosophy
 
-Rufus follows **strict semantic versioning**:
+Ruvon follows **strict semantic versioning**:
 
 - **Major (X.0.0):** Breaking API changes
 - **Minor (0.X.0):** New features, backwards compatible
@@ -553,10 +553,10 @@ Areas needing help:
 - Migration guides
 
 **Ecosystem Packages:**
-- rufus-stripe
-- rufus-aws
-- rufus-sendgrid
-- rufus-gcp
+- ruvon-stripe
+- ruvon-aws
+- ruvon-sendgrid
+- ruvon-gcp
 
 See `contributing.md` for details on how to help.
 
@@ -564,9 +564,9 @@ See `contributing.md` for details on how to help.
 
 ## Questions?
 
-- 💬 [GitHub Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 💬 [GitHub Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 - 📖 [Full Documentation](/docs/README.md)
-- 🐛 [Report Issues](https://github.com/your-org/rufus-sdk/issues)
+- 🐛 [Report Issues](https://github.com/your-org/ruvon-sdk/issues)
 
 ---
 

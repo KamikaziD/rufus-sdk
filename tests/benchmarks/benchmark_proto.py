@@ -96,8 +96,8 @@ def main():
     try:
         # Try generated code first (import directly from module, not via backend switch)
         try:
-            from rufus.proto.gen.edge import HeartbeatMsg  # type: ignore
-            from rufus.proto.gen.workflow import WorkflowRecord  # type: ignore
+            from ruvon.proto.gen.edge import HeartbeatMsg  # type: ignore
+            from ruvon.proto.gen.workflow import WorkflowRecord  # type: ignore
 
             hb = HeartbeatMsg(**{k: v for k, v in HEARTBEAT_DICT.items() if k != "pending_sync_count"},
                                pending_sync_count=HEARTBEAT_DICT["pending_sync_count"])
@@ -172,11 +172,11 @@ def main():
 
     # --- google.protobuf (_pb2) ---
     try:
-        _prev_backend = os.environ.get("RUFUS_PROTO_BACKEND")
-        os.environ["RUFUS_PROTO_BACKEND"] = "google"
+        _prev_backend = os.environ.get("RUVON_PROTO_BACKEND")
+        os.environ["RUVON_PROTO_BACKEND"] = "google"
         try:
-            from rufus.proto.gen.edge_pb2 import HeartbeatMsg as HB_pb  # type: ignore
-            from rufus.proto.gen.workflow_pb2 import WorkflowRecord as WR_pb  # type: ignore
+            from ruvon.proto.gen.edge_pb2 import HeartbeatMsg as HB_pb  # type: ignore
+            from ruvon.proto.gen.workflow_pb2 import WorkflowRecord as WR_pb  # type: ignore
 
             hb_pb = HB_pb(
                 device_id=HEARTBEAT_DICT["device_id"],
@@ -211,9 +211,9 @@ def main():
             print("google.protobuf _pb2 code not found — run: buf generate (or make proto)")
     finally:
         if _prev_backend is None:
-            os.environ.pop("RUFUS_PROTO_BACKEND", None)
+            os.environ.pop("RUVON_PROTO_BACKEND", None)
         else:
-            os.environ["RUFUS_PROTO_BACKEND"] = _prev_backend
+            os.environ["RUVON_PROTO_BACKEND"] = _prev_backend
 
     # --- Print results table ---
     print()

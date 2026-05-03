@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Rufus — Browser Runtime Demo</title>
+<title>Ruvon — Browser Runtime Demo</title>
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#1f6feb">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -689,7 +689,7 @@
 
 <!-- ── Header ──────────────────────────────────────────────────────────────── -->
 <header class="header">
-  <div class="header-title">Rufus <span>·</span> Browser Runtime</div>
+  <div class="header-title">Ruvon <span>·</span> Browser Runtime</div>
   <div style="font-size:12px;color:var(--muted)">Python workflows, zero backend</div>
   <div class="badges">
     <span class="badge" id="badge-pyodide">
@@ -1924,7 +1924,7 @@ function renderPreflight(data) {
     ["Active model", runtime.active_model
         ? `✓ ${runtime.active_model === "extractor" ? "MiniLM" : "FLAN-T5"}`
         : "✗ none loaded"],
-    ["rufus-sdk wheel",   runtime.wheel_url || "—"],
+    ["ruvon-sdk wheel",   runtime.wheel_url || "—"],
     ["Storage usage",     storageStr],
   ];
   if (runtime.storage_usage != null) {
@@ -2011,7 +2011,7 @@ function renderPreflight(data) {
     </div>` : "";
   const idbHtml = `
     <div class="pf-section">
-      <h3>IndexedDB — rufus-demo</h3>
+      <h3>IndexedDB — ruvon-demo</h3>
       <div class="pf-stats">
         <div class="pf-stat">
           <div class="pf-stat-label">Workflows stored</div>

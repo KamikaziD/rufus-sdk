@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rufus configuration via environment variables, config files, and CLI options.
+Ruvon configuration via environment variables, config files, and CLI options.
 
 ---
 
@@ -25,11 +25,11 @@ Rufus configuration via environment variables, config files, and CLI options.
 **Example:**
 
 ```bash
-export DATABASE_URL="postgresql://rufus:secret@localhost:5432/rufus_cloud"
+export DATABASE_URL="postgresql://ruvon:secret@localhost:5432/ruvon_cloud"
 export DATABASE_URL="sqlite:///workflows.db"
 ```
 
-#### `RUFUS_DB_URL`
+#### `RUVON_DB_URL`
 
 **Type:** `string`
 
@@ -38,8 +38,8 @@ export DATABASE_URL="sqlite:///workflows.db"
 **Example:**
 
 ```bash
-export RUFUS_DB_URL="postgresql://localhost/rufus_test"
-rufus db stats  # Uses RUFUS_DB_URL
+export RUVON_DB_URL="postgresql://localhost/ruvon_test"
+ruvon db stats  # Uses RUVON_DB_URL
 ```
 
 ---
@@ -155,7 +155,7 @@ export CELERY_RESULT_BACKEND="redis://localhost:6379/1"
 
 ### Performance Optimizations
 
-#### `RUFUS_USE_UVLOOP`
+#### `RUVON_USE_UVLOOP`
 
 **Type:** `boolean`
 
@@ -166,10 +166,10 @@ export CELERY_RESULT_BACKEND="redis://localhost:6379/1"
 **Example:**
 
 ```bash
-export RUFUS_USE_UVLOOP=false  # Disable for debugging
+export RUVON_USE_UVLOOP=false  # Disable for debugging
 ```
 
-#### `RUFUS_USE_ORJSON`
+#### `RUVON_USE_ORJSON`
 
 **Type:** `boolean`
 
@@ -180,25 +180,25 @@ export RUFUS_USE_UVLOOP=false  # Disable for debugging
 **Example:**
 
 ```bash
-export RUFUS_USE_ORJSON=false  # Use stdlib json
+export RUVON_USE_ORJSON=false  # Use stdlib json
 ```
 
 ---
 
 ### CLI Configuration
 
-#### `RUFUS_CONFIG_PATH`
+#### `RUVON_CONFIG_PATH`
 
 **Type:** `string`
 
-**Default:** `~/.rufus/config.yaml`
+**Default:** `~/.ruvon/config.yaml`
 
 **Description:** CLI configuration file location.
 
 **Example:**
 
 ```bash
-export RUFUS_CONFIG_PATH="/etc/rufus/config.yaml"
+export RUVON_CONFIG_PATH="/etc/ruvon/config.yaml"
 ```
 
 #### `NO_COLOR`
@@ -238,7 +238,7 @@ pytest tests/
 
 ### Security
 
-#### `RUFUS_ENCRYPTION_KEY`
+#### `RUVON_ENCRYPTION_KEY`
 
 **Type:** `string`
 
@@ -255,7 +255,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 **Example:**
 
 ```bash
-export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
+export RUVON_ENCRYPTION_KEY="your-base64-fernet-key-here"
 ```
 
 **Key rotation:** Deploy the new key, then gradually re-encrypt existing workflows. See [Security](../advanced/security.md) for the rotation procedure.
@@ -264,7 +264,7 @@ export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
 
 ### Server Extensions
 
-#### `RUFUS_CUSTOM_ROUTERS`
+#### `RUVON_CUSTOM_ROUTERS`
 
 **Type:** `string`
 
@@ -275,7 +275,7 @@ export RUFUS_ENCRYPTION_KEY="your-base64-fernet-key-here"
 **Example:**
 
 ```bash
-export RUFUS_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
+export RUVON_CUSTOM_ROUTERS="myapp.routers.payments.router,myapp.routers.reports.router"
 ```
 
 **Router definition:**
@@ -295,7 +295,7 @@ async def payment_summary():
 
 ## CLI Configuration File
 
-**Location:** `~/.rufus/config.yaml` (or `$RUFUS_CONFIG_PATH`)
+**Location:** `~/.ruvon/config.yaml` (or `$RUVON_CONFIG_PATH`)
 
 ### Format
 
@@ -335,7 +335,7 @@ version: "1.0"
 persistence:
   provider: postgres
   postgres:
-    db_url: postgresql://rufus:secret@localhost:5432/rufus_cloud
+    db_url: postgresql://ruvon:secret@localhost:5432/ruvon_cloud
     pool_min_size: 10
     pool_max_size: 50
 
@@ -379,7 +379,7 @@ workflows:
     config_file: "order_processing.yaml"
     initial_state_model: "my_app.models.OrderState"
     requires:
-      - rufus-payment-gateway
+      - ruvon-payment-gateway
 
   - type: "UserOnboarding"
     description: "User onboarding workflow"
@@ -387,7 +387,7 @@ workflows:
     initial_state_model: "my_app.models.UserState"
 
 requires:
-  - rufus-notifications
+  - ruvon-notifications
 ```
 
 ---
@@ -397,7 +397,7 @@ requires:
 ### SQLite
 
 ```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(
     db_path="workflows.db",      # Path to database file
@@ -417,7 +417,7 @@ persistence = SQLitePersistenceProvider(
 ### PostgreSQL
 
 ```python
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(
     db_url="postgresql://user:pass@host/db",
@@ -437,7 +437,7 @@ persistence = PostgresPersistenceProvider(
 ### Redis
 
 ```python
-from rufus.implementations.persistence.redis import RedisPersistenceProvider
+from ruvon.implementations.persistence.redis import RedisPersistenceProvider
 
 persistence = RedisPersistenceProvider(
     redis_url="redis://localhost:6379/0"
@@ -453,7 +453,7 @@ persistence = RedisPersistenceProvider(
 ### In-Memory
 
 ```python
-from rufus.implementations.persistence.memory import MemoryPersistenceProvider
+from ruvon.implementations.persistence.memory import MemoryPersistenceProvider
 
 persistence = MemoryPersistenceProvider()
 ```
@@ -467,7 +467,7 @@ persistence = MemoryPersistenceProvider()
 ### Sync
 
 ```python
-from rufus.implementations.execution.sync import SyncExecutionProvider
+from ruvon.implementations.execution.sync import SyncExecutionProvider
 
 execution = SyncExecutionProvider()
 ```
@@ -477,7 +477,7 @@ No configuration parameters.
 ### Thread Pool
 
 ```python
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
 
 execution = ThreadPoolExecutionProvider(
     max_workers=10
@@ -493,7 +493,7 @@ execution = ThreadPoolExecutionProvider(
 ### Celery
 
 ```python
-from rufus.implementations.execution.celery import CeleryExecutor
+from ruvon.implementations.execution.celery import CeleryExecutor
 
 execution = CeleryExecutor(
     broker_url="redis://localhost:6379/0",
@@ -515,7 +515,7 @@ execution = CeleryExecutor(
 ### Logging Observer
 
 ```python
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.observability.logging import LoggingObserver
 
 observer = LoggingObserver()
 ```
@@ -525,7 +525,7 @@ No configuration parameters.
 ### No-op Observer
 
 ```python
-from rufus.providers.observer import NoopObserver
+from ruvon.providers.observer import NoopObserver
 
 observer = NoopObserver()
 ```
@@ -539,8 +539,8 @@ Disables all observability hooks.
 Configuration sources in order of precedence (highest to lowest):
 
 1. **Code** - Explicit constructor parameters
-2. **Environment variables** - `RUFUS_*`, `DATABASE_URL`, etc.
-3. **Config file** - `~/.rufus/config.yaml`
+2. **Environment variables** - `RUVON_*`, `DATABASE_URL`, etc.
+3. **Config file** - `~/.ruvon/config.yaml`
 4. **Defaults** - Built-in default values
 
 **Example:**
@@ -553,7 +553,7 @@ persistence = SQLitePersistenceProvider(db_path="custom.db")
 export DATABASE_URL="sqlite:///env.db"
 
 # Config file (lowest priority)
-# ~/.rufus/config.yaml:
+# ~/.ruvon/config.yaml:
 # persistence:
 #   sqlite:
 #     db_path: "config.db"
@@ -566,7 +566,7 @@ export DATABASE_URL="sqlite:///env.db"
 ### PostgreSQL
 
 ```bash
-export DATABASE_URL="postgresql://rufus:secret@db-host:5432/rufus_prod"
+export DATABASE_URL="postgresql://ruvon:secret@db-host:5432/ruvon_prod"
 export POSTGRES_POOL_MIN_SIZE=20
 export POSTGRES_POOL_MAX_SIZE=100
 export CELERY_BROKER_URL="redis://redis-host:6379/0"
@@ -583,8 +583,8 @@ export POSTGRES_POOL_MAX_QUERIES=100000
 ### Debugging
 
 ```bash
-export RUFUS_USE_UVLOOP=false
-export RUFUS_USE_ORJSON=false
+export RUVON_USE_UVLOOP=false
+export RUVON_USE_ORJSON=false
 export NO_COLOR=1
 ```
 
@@ -596,7 +596,7 @@ export NO_COLOR=1
 
 ```bash
 # .env
-DATABASE_URL=postgresql://rufus:secret@postgres:5432/rufus_cloud
+DATABASE_URL=postgresql://ruvon:secret@postgres:5432/ruvon_cloud
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
 POSTGRES_POOL_MIN_SIZE=20
@@ -609,12 +609,12 @@ POSTGRES_POOL_MAX_SIZE=100
 version: "3.8"
 
 services:
-  rufus-server:
-    image: rufus:latest
+  ruvon-server:
+    image: ruvon:latest
     env_file: .env
     environment:
-      - RUFUS_USE_UVLOOP=true
-      - RUFUS_USE_ORJSON=true
+      - RUVON_USE_UVLOOP=true
+      - RUVON_USE_ORJSON=true
     depends_on:
       - postgres
       - redis
@@ -622,9 +622,9 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: rufus
+      POSTGRES_USER: ruvon
       POSTGRES_PASSWORD: secret
-      POSTGRES_DB: rufus_cloud
+      POSTGRES_DB: ruvon_cloud
 
   redis:
     image: redis:7-alpine

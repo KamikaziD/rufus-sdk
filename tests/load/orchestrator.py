@@ -519,7 +519,7 @@ class LoadTestOrchestrator:
         import os
 
         registration_key = os.getenv(
-            "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
+            "RUVON_REGISTRATION_KEY", "demo-registration-key-2024")
 
         # Limit concurrent registrations to avoid exhausting the server's DB pool.
         # Default: 50 concurrent (matches server pool max_size default).
@@ -612,7 +612,7 @@ class LoadTestOrchestrator:
         import os
 
         registration_key = os.getenv(
-            "RUFUS_REGISTRATION_KEY", "demo-registration-key-2024")
+            "RUVON_REGISTRATION_KEY", "demo-registration-key-2024")
 
         concurrency = int(os.getenv("LOAD_TEST_SETUP_CONCURRENCY", "50"))
         semaphore = asyncio.Semaphore(concurrency)
@@ -803,7 +803,7 @@ class ScenarioRunner:
         Measures JetStream publish ack latency (scale-aware p99 target:
         <10ms @<=100 devices, <25ms @<=1k, <50ms @<=10k, <150ms beyond).
         No HTTP calls, no server registration — pure NATS publish path.
-        Requires RUFUS_NATS_URL or NATS_URL env var.
+        Requires RUVON_NATS_URL or NATS_URL env var.
         """
         await orchestrator.setup_devices(
             num_devices,
@@ -968,7 +968,7 @@ class ScenarioRunner:
         """
         try:
             import msgspec as _ms
-            from rufus.providers.dtos import WorkflowRecord
+            from ruvon.providers.dtos import WorkflowRecord
             _sample = WorkflowRecord(
                 id="preflight",
                 workflow_type="T",

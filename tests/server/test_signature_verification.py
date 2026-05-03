@@ -32,7 +32,7 @@ def _make_device(public_key_b64=None):
 
 def _make_service(device_record):
     """Return a DeviceService with a mocked persistence pool."""
-    from rufus_server.device_service import DeviceService
+    from ruvon_server.device_service import DeviceService
 
     mock_conn = AsyncMock()
     mock_conn.fetchrow = AsyncMock(return_value=None)

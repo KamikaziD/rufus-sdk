@@ -14,7 +14,7 @@ Tests:
 """
 import pytest
 
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 # ---------------------------------------------------------------------------

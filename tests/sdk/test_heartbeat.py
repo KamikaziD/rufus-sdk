@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from unittest.mock import Mock, AsyncMock, patch
 
-from rufus.heartbeat import HeartbeatManager, HeartbeatPersistence
+from ruvon.heartbeat import HeartbeatManager, HeartbeatPersistence
 
 
 class MockHeartbeatPersistence:

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Compressed static server for the Rufus browser demo.
+Compressed static server for the Ruvon browser demo.
 
 Drop-in replacement for `python -m http.server`:
 
     python examples/browser_demo/serve.py [port]   # default 8080
 
 Negotiates brotli (if installed) or gzip compression for text-based assets,
-reducing the rufus-sdk wheel transfer size by ~25–35%.
+reducing the ruvon-sdk wheel transfer size by ~25–35%.
 
 Optional brotli support:
     pip install brotli
@@ -86,7 +86,7 @@ print(f"Serving on http://localhost:{PORT}  [{mode} compression]")
 print("Press Ctrl-C to stop.")
 print()
 
-# Serve from the repo root so /dist/rufus_sdk-*.whl resolves correctly
+# Serve from the repo root so /dist/ruvon_sdk-*.whl resolves correctly
 repo_root = Path(__file__).resolve().parents[2]
 os.chdir(repo_root)
 

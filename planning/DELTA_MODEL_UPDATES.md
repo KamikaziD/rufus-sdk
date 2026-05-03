@@ -116,7 +116,7 @@ deltas/
 ### Automatic Delta Updates
 
 ```python
-from rufus_edge.config_manager import ConfigManager
+from ruvon_edge.config_manager import ConfigManager
 
 # Initialize config manager
 config_manager = ConfigManager(...)
@@ -136,7 +136,7 @@ success = await config_manager.download_model(
 ### Manual Delta Application
 
 ```python
-from rufus_edge.delta_updates import DeltaUpdateManager
+from ruvon_edge.delta_updates import DeltaUpdateManager
 
 # Initialize delta manager
 delta_manager = DeltaUpdateManager(http_client=http_client)
@@ -271,7 +271,7 @@ await config_manager.download_model(
 ### Track Bandwidth Savings
 
 ```python
-from rufus_edge.delta_updates import DeltaUpdateManager
+from ruvon_edge.delta_updates import DeltaUpdateManager
 
 delta_manager = DeltaUpdateManager(http_client=client)
 
@@ -399,7 +399,7 @@ delta_url: "http://cdn.example.com/deltas/..."   # ✗ HTTP rejected
 
 ## API Reference
 
-See [src/rufus_edge/delta_updates.py](../src/rufus_edge/delta_updates.py) for complete API documentation.
+See [src/ruvon_edge/delta_updates.py](../src/ruvon_edge/delta_updates.py) for complete API documentation.
 
 **Key Classes**:
 - `DeltaUpdateManager`: Edge-side delta download and application

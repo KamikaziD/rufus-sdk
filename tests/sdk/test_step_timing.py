@@ -9,12 +9,12 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 from pydantic import BaseModel
 
-from rufus.workflow import Workflow
-from rufus.models import WorkflowStep
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.workflow import Workflow
+from ruvon.models import WorkflowStep
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 class _State(BaseModel):
@@ -75,7 +75,7 @@ async def test_duration_ms_not_set_for_async_dispatch():
     """on_step_executed for ASYNC steps should not set duration_ms (None is acceptable)."""
     # This is tested implicitly — async steps don't set _step_start, so duration is None
     # We verify by checking the class hierarchy: AsyncWorkflowStep is NOT a WorkflowStep
-    from rufus.models import (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
+    from ruvon.models import (AsyncWorkflowStep, HttpWorkflowStep, ParallelWorkflowStep,
                                FireAndForgetWorkflowStep, LoopStep, CronScheduleWorkflowStep,
                                WasmWorkflowStep)
 

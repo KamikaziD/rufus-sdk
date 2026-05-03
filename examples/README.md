@@ -1,10 +1,10 @@
-# Rufus SDK Examples
+# Ruvon SDK Examples
 
-Complete working examples demonstrating Rufus workflows across different industries and use cases.
+Complete working examples demonstrating Ruvon workflows across different industries and use cases.
 
 ## Learning Path
 
-**New to Rufus?** Follow this path:
+**New to Ruvon?** Follow this path:
 
 1. **[Quickstart](quickstart/)** ⭐ - 5-minute introduction (Beginner)
 2. **[SQLite Task Manager](sqlite_task_manager/)** ⭐ - Complete tutorial (Beginner)
@@ -25,7 +25,7 @@ Complete working examples demonstrating Rufus workflows across different industr
 #### [Quickstart](quickstart/)
 **Time:** 5 minutes
 **What You'll Learn:**
-- Install Rufus
+- Install Ruvon
 - Create a simple workflow
 - Run it with the CLI
 
@@ -37,7 +37,7 @@ Complete working examples demonstrating Rufus workflows across different industr
 **Run It:**
 ```bash
 cd examples/quickstart/
-rufus start HelloWorkflow --data '{"name": "World"}'
+ruvon start HelloWorkflow --data '{"name": "World"}'
 ```
 
 ---
@@ -246,7 +246,7 @@ docker compose up --scale celery-worker=5
 #### [Browser Demo](browser_demo/)
 **Time:** 30 minutes to explore, 2+ hours to extend
 **What You'll Learn:**
-- Running Rufus workflows entirely in-browser via Pyodide
+- Running Ruvon workflows entirely in-browser via Pyodide
 - WebGPU-accelerated ML inference with Transformers.js
 - Shard-paged LLM inference for memory-constrained environments
 - Service Worker offline caching and PWA installation
@@ -339,7 +339,7 @@ python -m http.server 8080
 
 All examples require:
 ```bash
-# Install Rufus SDK
+# Install Ruvon SDK
 pip install -r requirements.txt
 ```
 
@@ -350,7 +350,7 @@ Some examples have additional requirements (Docker, Redis, PostgreSQL) - see the
 To verify your setup works:
 ```bash
 cd examples/quickstart/
-rufus start HelloWorkflow --data '{"name": "Test"}'
+ruvon start HelloWorkflow --data '{"name": "Test"}'
 ```
 
 If this works, you're ready to explore other examples!
@@ -375,7 +375,7 @@ Have a great example to share? We'd love to include it!
 
 **What makes a good example:**
 - ✅ Solves a real-world problem
-- ✅ Demonstrates specific Rufus features
+- ✅ Demonstrates specific Ruvon features
 - ✅ Includes working code and clear documentation
 - ✅ Follows the example structure above
 - ✅ Can run with minimal setup
@@ -389,7 +389,7 @@ See [Contributing Guide](../docs/appendices/contributing.md) for details.
 - **General questions:** See [Documentation](../docs/index.md)
 - **Example-specific:** Check the example's README.md
 - **Stuck?** Try the [Troubleshooting Guide](../docs/how-to-guides/troubleshooting.md)
-- **Still stuck?** Open an issue on [GitHub](https://github.com/KamikaziD/rufus-sdk/issues)
+- **Still stuck?** Open an issue on [GitHub](https://github.com/KamikaziD/ruvon-sdk/issues)
 
 ---
 

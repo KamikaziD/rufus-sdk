@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rufus Edge platform uses a **hybrid command delivery system** that combines:
+The Ruvon Edge platform uses a **hybrid command delivery system** that combines:
 - **Heartbeat-based delivery** for routine commands (restart, backup, config updates)
 - **WebSocket-based delivery** for critical commands (emergency stop, fraud alerts)
 

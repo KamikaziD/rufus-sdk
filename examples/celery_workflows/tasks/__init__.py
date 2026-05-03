@@ -1,7 +1,7 @@
 """
 Celery tasks for workflow examples.
 """
-from rufus.celery_app import celery_app
+from ruvon.celery_app import celery_app
 
 # Import all tasks to register them with Celery
 from tasks.payment_tasks import (

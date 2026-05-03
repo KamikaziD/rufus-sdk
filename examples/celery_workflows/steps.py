@@ -3,7 +3,7 @@ Synchronous step functions for workflows.
 
 These are simple, fast functions executed immediately (not via Celery).
 """
-from rufus.models import StepContext, StartSubWorkflowDirective
+from ruvon.models import StepContext, StartSubWorkflowDirective
 from models.state_models import OrderState, PaymentState, NotificationState
 import time
 

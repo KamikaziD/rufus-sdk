@@ -9,7 +9,7 @@
 
 ## Overview
 
-Successfully extracted and integrated **full Celery support** from Confucius monolith into Rufus SDK, including database migrations and comprehensive integration tests.
+Successfully extracted and integrated **full Celery support** from Confucius monolith into Ruvon SDK, including database migrations and comprehensive integration tests.
 
 ---
 
@@ -19,12 +19,12 @@ Successfully extracted and integrated **full Celery support** from Confucius mon
 
 | Component | File | Lines | Status |
 |-----------|------|-------|--------|
-| Worker Registry | `src/rufus/worker_registry.py` | 97 | ✅ Complete |
-| Postgres Executor | `src/rufus/utils/postgres_executor.py` | 152 | ✅ Complete |
-| Event Publisher | `src/rufus/events.py` | 171 | ✅ Complete |
-| Celery Tasks | `src/rufus/tasks.py` | 450 | ✅ Complete |
-| Celery App | `src/rufus/celery_app.py` | 144 | ✅ Complete |
-| Execution Provider | `src/rufus/implementations/execution/celery.py` | 287 | ✅ Complete |
+| Worker Registry | `src/ruvon/worker_registry.py` | 97 | ✅ Complete |
+| Postgres Executor | `src/ruvon/utils/postgres_executor.py` | 152 | ✅ Complete |
+| Event Publisher | `src/ruvon/events.py` | 171 | ✅ Complete |
+| Celery Tasks | `src/ruvon/tasks.py` | 450 | ✅ Complete |
+| Celery App | `src/ruvon/celery_app.py` | 144 | ✅ Complete |
+| Execution Provider | `src/ruvon/implementations/execution/celery.py` | 287 | ✅ Complete |
 
 **Total**: ~1,500 lines of production-ready code
 
@@ -60,17 +60,17 @@ Successfully extracted and integrated **full Celery support** from Confucius mon
 ## Files Created (Total: 15)
 
 ### Core Implementation (8 files)
-1. `src/rufus/worker_registry.py`
-2. `src/rufus/utils/postgres_executor.py`
-3. `src/rufus/events.py`
-4. `src/rufus/tasks.py`
-5. `src/rufus/celery_app.py`
-6. `src/rufus/implementations/execution/celery.py`
+1. `src/ruvon/worker_registry.py`
+2. `src/ruvon/utils/postgres_executor.py`
+3. `src/ruvon/events.py`
+4. `src/ruvon/tasks.py`
+5. `src/ruvon/celery_app.py`
+6. `src/ruvon/implementations/execution/celery.py`
 7. `tests/test_celery_imports.py`
 8. `CELERY_IMPLEMENTATION_SUMMARY.md`
 
 ### Database Migration (1 file)
-9. `src/rufus/alembic/versions/d08b401e4c86_add_worker_nodes_table_for_celery_fleet_.py`
+9. `src/ruvon/alembic/versions/d08b401e4c86_add_worker_nodes_table_for_celery_fleet_.py`
 
 ### Integration Tests (4 files)
 10. `tests/integration/test_celery_execution.py`
@@ -120,7 +120,7 @@ Successfully extracted and integrated **full Celery support** from Confucius mon
 ### 1. Install Dependencies
 ```bash
 # Install with Celery support (after pushing to GitHub)
-pip install "rufus[celery] @ git+https://github.com/KamikaziD/rufus-sdk.git"
+pip install "ruvon[celery] @ git+https://github.com/KamikaziD/ruvon-sdk.git"
 
 # Or install dependencies directly
 pip install celery redis psycopg2-binary prometheus-client
@@ -130,9 +130,9 @@ pip install celery redis psycopg2-binary prometheus-client
 ```bash
 # PostgreSQL
 docker run -d --name postgres -p 5432:5432 \
-  -e POSTGRES_DB=rufus \
-  -e POSTGRES_USER=rufus \
-  -e POSTGRES_PASSWORD=rufus_secret_2024 \
+  -e POSTGRES_DB=ruvon \
+  -e POSTGRES_USER=ruvon \
+  -e POSTGRES_PASSWORD=ruvon_secret_2024 \
   postgres:15
 
 # Redis
@@ -141,30 +141,30 @@ docker run -d --name redis -p 6379:6379 redis:latest
 
 ### 3. Initialize Database
 ```bash
-cd src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5432/rufus"
+cd src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon"
 alembic upgrade head
 ```
 
 ### 4. Start Celery Worker
 ```bash
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5432/rufus"
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5432/ruvon"
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 
-celery -A rufus.celery_app worker --loglevel=info --concurrency=4
+celery -A ruvon.celery_app worker --loglevel=info --concurrency=4
 ```
 
 ### 5. Use in Code
 ```python
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.execution.celery import CeleryExecutionProvider
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
-from rufus.implementations.observability.logging import LoggingObserver
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.execution.celery import CeleryExecutionProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.observability.logging import LoggingObserver
 
 # Initialize providers
 execution = CeleryExecutionProvider()
-persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/rufus")
+persistence = PostgresPersistenceProvider(db_url="postgresql://localhost/ruvon")
 await persistence.initialize()
 
 # Create builder
@@ -198,14 +198,14 @@ cd tests/integration
 docker-compose up -d
 
 # Apply migrations
-cd ../../src/rufus
-export DATABASE_URL="postgresql://rufus:rufus_secret_2024@localhost:5433/rufus_test"
+cd ../../src/ruvon
+export DATABASE_URL="postgresql://ruvon:ruvon_secret_2024@localhost:5433/ruvon_test"
 alembic upgrade head
 
 # Start worker
 export CELERY_BROKER_URL="redis://localhost:6380/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6380/0"
-celery -A rufus.celery_app worker --loglevel=info &
+celery -A ruvon.celery_app worker --loglevel=info &
 
 # Run tests
 pytest tests/integration/test_celery_execution.py -v -s
@@ -319,10 +319,10 @@ from confucius.celery_app import celery_app
 from confucius.tasks import resume_from_async_task
 from confucius.worker_registry import WorkerRegistry
 
-# After (Rufus)
-from rufus.celery_app import celery_app
-from rufus.tasks import resume_from_async_task
-from rufus.worker_registry import WorkerRegistry
+# After (Ruvon)
+from ruvon.celery_app import celery_app
+from ruvon.tasks import resume_from_async_task
+from ruvon.worker_registry import WorkerRegistry
 ```
 
 ---
@@ -362,14 +362,14 @@ Production readiness: 90%
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
-git push main claude/rufus-fintech-pivot-peNgM
+git push main claude/ruvon-fintech-pivot-peNgM
 ```
 
 ---
 
 ## Success Metrics
 
-✅ **100% extraction success** - All Confucius code adapted to Rufus
+✅ **100% extraction success** - All Confucius code adapted to Ruvon
 ✅ **100% import success** - All modules import without errors
 ✅ **100% syntax validation** - Migration and tests validated
 ✅ **90% production ready** - Only example app and load tests pending

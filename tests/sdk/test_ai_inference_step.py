@@ -3,8 +3,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from rufus.models import AIInferenceWorkflowStep, AIInferenceConfig, WorkflowStep, StepContext
-from rufus.workflow import Workflow
+from ruvon.models import AIInferenceWorkflowStep, AIInferenceConfig, WorkflowStep, StepContext
+from ruvon.workflow import Workflow
 
 
 class SimpleState(BaseModel):
@@ -15,11 +15,11 @@ class SimpleState(BaseModel):
 
 def _make_workflow(inference_provider=None):
     """Create a minimal Workflow instance for testing AI_INFERENCE dispatch."""
-    from rufus.implementations.persistence.memory import InMemoryPersistence
-    from rufus.implementations.execution.sync import SyncExecutor
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-    from rufus.builder import WorkflowBuilder
+    from ruvon.implementations.persistence.memory import InMemoryPersistence
+    from ruvon.implementations.execution.sync import SyncExecutor
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.builder import WorkflowBuilder
 
     state = SimpleState()
     step = AIInferenceWorkflowStep(
@@ -80,11 +80,11 @@ async def test_ai_inference_no_provider_fallback_skip():
 @pytest.mark.asyncio
 async def test_ai_inference_no_provider_fallback_fail():
     """When no inference_provider and fallback_on_error='fail', step raises RuntimeError."""
-    from rufus.implementations.persistence.memory import InMemoryPersistence
-    from rufus.implementations.execution.sync import SyncExecutor
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-    from rufus.builder import WorkflowBuilder
+    from ruvon.implementations.persistence.memory import InMemoryPersistence
+    from ruvon.implementations.execution.sync import SyncExecutor
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.builder import WorkflowBuilder
     from unittest.mock import AsyncMock, MagicMock
 
     state = SimpleState()
@@ -125,7 +125,7 @@ async def test_ai_inference_no_provider_fallback_fail():
     await executor.initialize(None)
     await persistence.save_workflow(wf.id, wf.to_dict())
 
-    from rufus.models import WorkflowFailedException
+    from ruvon.models import WorkflowFailedException
     with pytest.raises(WorkflowFailedException):
         await wf.next_step(user_input={})
     assert wf.status == "FAILED"
@@ -161,11 +161,11 @@ async def test_ai_inference_with_provider():
 @pytest.mark.asyncio
 async def test_ai_inference_default_fallback():
     """fallback_on_error='default' returns the default_result when no provider."""
-    from rufus.implementations.persistence.memory import InMemoryPersistence
-    from rufus.implementations.execution.sync import SyncExecutor
-    from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-    from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-    from rufus.builder import WorkflowBuilder
+    from ruvon.implementations.persistence.memory import InMemoryPersistence
+    from ruvon.implementations.execution.sync import SyncExecutor
+    from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+    from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+    from ruvon.builder import WorkflowBuilder
     from pydantic import BaseModel
 
     class StateWithInference(BaseModel):

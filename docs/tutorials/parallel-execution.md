@@ -33,7 +33,7 @@ Validate Order →  Check Inventory  ↓
 Total Time: 2 seconds
 ```
 
-Rufus provides the `PARALLEL` step type to run tasks concurrently.
+Ruvon provides the `PARALLEL` step type to run tasks concurrently.
 
 ---
 
@@ -58,8 +58,8 @@ Let's build an order processing workflow with parallel validation checks.
 Create a new directory:
 
 ```bash
-mkdir rufus-parallel-demo
-cd rufus-parallel-demo
+mkdir ruvon-parallel-demo
+cd ruvon-parallel-demo
 mkdir -p order_processor config
 touch order_processor/__init__.py
 ```
@@ -114,7 +114,7 @@ Parallel tasks for order validation
 
 import asyncio
 from order_processor.models import OrderState
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 def check_inventory(state: OrderState, context: StepContext, **kwargs) -> dict:
@@ -213,7 +213,7 @@ Sequential steps for order processing
 """
 
 from order_processor.models import OrderState
-from rufus.models import StepContext
+from ruvon.models import StepContext
 
 
 def validate_order(state: OrderState, context: StepContext, **kwargs) -> dict:
@@ -358,12 +358,12 @@ import asyncio
 import time
 from pathlib import Path
 
-from rufus.builder import WorkflowBuilder
-from rufus.implementations.persistence.memory import InMemoryPersistenceProvider
-from rufus.implementations.execution.thread_pool import ThreadPoolExecutionProvider
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
+from ruvon.implementations.persistence.memory import InMemoryPersistenceProvider
+from ruvon.implementations.execution.thread_pool import ThreadPoolExecutionProvider
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
 
 
 async def main():
@@ -525,7 +525,7 @@ Let's compare execution times with different executors.
 **Sequential Executor**:
 
 ```python
-from rufus.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.execution.sync import SyncExecutor
 
 # In main():
 execution_provider=SyncExecutor(),  # Sequential execution
@@ -664,7 +664,7 @@ Workflow fails if any task fails:
 
 3. **Celery for Distributed**: Use for heavy workloads
    ```python
-   from rufus.implementations.execution.celery import CeleryExecutor
+   from ruvon.implementations.execution.celery import CeleryExecutor
    execution_provider=CeleryExecutor()
    ```
 

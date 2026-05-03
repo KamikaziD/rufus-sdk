@@ -1,6 +1,6 @@
 # SQLite Persistence - Troubleshooting Guide
 
-This guide covers common issues, error messages, and solutions when using SQLite with Rufus SDK.
+This guide covers common issues, error messages, and solutions when using SQLite with Ruvon SDK.
 
 ## Table of Contents
 - [Common Errors](#common-errors)
@@ -62,7 +62,7 @@ await persistence.conn.execute("PRAGMA journal_mode=WAL")
 4. **Switch to PostgreSQL for high concurrency:**
 ```python
 # For >50 concurrent writers, use PostgreSQL
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 persistence = PostgresPersistenceProvider(db_url="postgresql://...")
 ```
 
@@ -96,7 +96,7 @@ python tools/migrate.py --db sqlite:///workflows.db --status
 
 2. **Create schema manually** (for testing):
 ```python
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 persistence = SQLitePersistenceProvider(db_path=":memory:")
 await persistence.initialize()
@@ -389,7 +389,7 @@ ValueError: Invalid UUID format
 1. **Use provided conversion helpers:**
 ```python
 # These are built into SQLitePersistenceProvider
-from rufus.implementations.persistence.sqlite import SQLitePersistenceProvider
+from ruvon.implementations.persistence.sqlite import SQLitePersistenceProvider
 
 # UUID conversion
 uuid_text = persistence._serialize_json(uuid_obj)
@@ -534,7 +534,7 @@ async def persistence():
 ```python
 # 1. Use absolute path
 persistence = SQLitePersistenceProvider(
-    db_path="/var/lib/rufus/workflows.db",
+    db_path="/var/lib/ruvon/workflows.db",
     timeout=30.0
 )
 
@@ -545,7 +545,7 @@ from datetime import datetime
 def backup_database():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = f"/backups/workflows_{timestamp}.db"
-    shutil.copy("/var/lib/rufus/workflows.db", backup_path)
+    shutil.copy("/var/lib/ruvon/workflows.db", backup_path)
     print(f"Backup created: {backup_path}")
 
 # Run backup daily via cron
@@ -623,7 +623,7 @@ If you encounter issues not covered in this guide:
    logging.basicConfig(level=logging.DEBUG)
    ```
 
-4. **File an issue** at: https://github.com/KamikaziD/rufus-sdk/issues
+4. **File an issue** at: https://github.com/KamikaziD/ruvon-sdk/issues
    - Include error messages
    - Provide minimal reproduction case
    - Share system information (Python version, aiosqlite version, OS)
@@ -636,4 +636,4 @@ If you encounter issues not covered in this guide:
 - [aiosqlite Documentation](https://aiosqlite.omnilib.dev/)
 - [SQLITE_IMPLEMENTATION_PLAN.md](../../SQLITE_IMPLEMENTATION_PLAN.md)
 - [CLAUDE.md - SQLite Section](../../CLAUDE.md#sqlite-persistence-provider)
-- [Rufus SDK Examples](../)
+- [Ruvon SDK Examples](../)

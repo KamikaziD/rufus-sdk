@@ -1,4 +1,4 @@
-# Rufus SDK Documentation Structure
+# Ruvon SDK Documentation Structure
 
 Visual guide to the complete documentation organization after appendices creation and planning archive.
 
@@ -7,7 +7,7 @@ Visual guide to the complete documentation organization after appendices creatio
 ## Directory Structure
 
 ```
-rufus/
+ruvon/
 ├── docs/
 │   ├── README.md                          # Documentation hub
 │   │
@@ -49,8 +49,8 @@ rufus/
 │   │   └── LOAD_TESTING_PLAN.md
 │   │
 │   ├── Analysis Documents/
-│   │   ├── CONFUCIUS_VS_RUFUS_ANALYSIS.md
-│   │   ├── CONFUCIUS_VS_RUFUS_ANALYSIS_ADDENDUM.md
+│   │   ├── CONFUCIUS_VS_RUVON_ANALYSIS.md
+│   │   ├── CONFUCIUS_VS_RUVON_ANALYSIS_ADDENDUM.md
 │   │   ├── PHASE3_GO_NO_GO_DECISION.md
 │   │   └── REASSESSMENT.md
 │   │
@@ -68,7 +68,7 @@ rufus/
 │       ├── PRODUCTION_READINESS.md
 │       ├── PHASE_1_COMPLETE.md
 │       ├── REMAINING_TASKS.md
-│       ├── RUFUS_SOLUTION.md
+│       ├── RUVON_SOLUTION.md
 │       ├── LOAD_TEST_FIXES.md
 │       ├── load_test.md
 │       └── ai_pilot_b_bidding.md
@@ -133,7 +133,7 @@ rufus/
 - Technical specifications
 - For looking up details
 
-**Audience:** Users learning and using Rufus
+**Audience:** Users learning and using Ruvon
 
 ---
 
@@ -215,7 +215,7 @@ changelog.md → migration-notes.md → Upgrade → Test
 
 ## When to Use Each Document Type
 
-### "I want to learn Rufus"
+### "I want to learn Ruvon"
 → `QUICKSTART.md` → `docs/tutorials/`
 
 ### "I need to do X"
@@ -320,9 +320,9 @@ See `docs/appendices/contributing.md` for full guidelines.
 - 📖 [Main Documentation](docs/README.md)
 - 📚 [Appendices Index](docs/appendices/README.md)
 - 📦 [Planning Archive](planning/README.md)
-- 💬 [Discussions](https://github.com/your-org/rufus-sdk/discussions)
+- 💬 [Discussions](https://github.com/your-org/ruvon-sdk/discussions)
 
 ---
 
 **Last Updated:** 2026-02-13
-**Maintained By:** Rufus SDK Team
+**Maintained By:** Ruvon SDK Team

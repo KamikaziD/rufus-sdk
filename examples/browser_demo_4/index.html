@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Ruvon Swarm Studio — Browser Demo 4</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>⬡</text></svg>"/>
+<style>
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #05080f; color: #e0e6ef; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+#app { display: flex; height: 100vh; }
+
+/* Sidebar */
+#sidebar {
+  width: 280px; min-width: 260px;
+  background: #0b0f1a;
+  border-right: 1px solid #1a2236;
+  display: flex; flex-direction: column;
+  padding: 16px;
+  overflow-y: auto;
+  gap: 20px;
+  z-index: 10;
+}
+
+/* Canvas area */
+#canvas-wrap {
+  flex: 1; position: relative; overflow: hidden;
+}
+canvas { display: block; width: 100%; height: 100%; }
+
+/* ── Sidebar sections ────────────────────────────────────────────────────── */
+.section-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+  color: #4a7bc4; text-transform: uppercase; margin-bottom: 8px;
+}
+
+.section { display: flex; flex-direction: column; gap: 8px; }
+
+/* Preset buttons */
+.preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.preset-btn {
+  padding: 7px 4px; border: 1px solid #1e2d45; background: #101827;
+  color: #9eb4d4; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: all 0.15s;
+}
+.preset-btn:hover { background: #162236; color: #e0e6ef; border-color: #2c4a7a; }
+.preset-btn.active { background: #1a3a6e; border-color: #4a7bc4; color: #a8c8ff; }
+
+/* Custom intent */
+#intent-input {
+  width: 100%; padding: 8px 10px;
+  background: #101827; border: 1px solid #1e2d45; border-radius: 6px;
+  color: #e0e6ef; font-size: 12px; outline: none;
+}
+#intent-input:focus { border-color: #4a7bc4; }
+#intent-input::placeholder { color: #4a607a; }
+
+/* Launch button */
+#launch-btn {
+  width: 100%; padding: 10px;
+  background: linear-gradient(135deg, #1a3a6e, #2a5caa);
+  border: none; border-radius: 8px;
+  color: #cce0ff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+  letter-spacing: 0.05em;
+}
+#launch-btn:hover { background: linear-gradient(135deg, #2a5caa, #3a72c8); }
+
+/* Drone count slider */
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-row input[type=range] { flex: 1; accent-color: #4a7bc4; }
+.slider-row span { font-size: 12px; color: #6a8fb4; min-width: 32px; text-align: right; }
+
+/* Mode toggle */
+#mode-toggle-wrap {
+  display: flex; background: #101827; border: 1px solid #1e2d45;
+  border-radius: 8px; overflow: hidden;
+}
+.mode-btn {
+  flex: 1; padding: 7px 4px; border: none; background: transparent;
+  color: #6a8fb4; font-size: 11px; cursor: pointer; transition: all 0.15s;
+}
+.mode-btn.active { background: #1a3a6e; color: #a8c8ff; }
+
+/* Simulation controls */
+.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sim-btn {
+  padding: 7px 4px; border: 1px solid #1e2d45; background: #101827;
+  color: #9eb4d4; border-radius: 6px; cursor: pointer; font-size: 11px;
+  transition: all 0.15s;
+}
+.sim-btn:hover { background: #162236; color: #e0e6ef; }
+.sim-btn.danger { border-color: #5a2a2a; color: #ef9a9a; }
+.sim-btn.danger:hover { background: #2a1212; }
+
+/* Overlay toggles */
+.toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.toggle-row label { font-size: 12px; color: #9eb4d4; }
+.toggle {
+  position: relative; width: 36px; height: 18px; display: inline-block;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0; background: #1e2d45; border-radius: 18px;
+  cursor: pointer; transition: 0.2s;
+}
+.toggle-slider::before {
+  content: ""; position: absolute; left: 2px; top: 2px;
+  width: 14px; height: 14px; background: #6a8fb4;
+  border-radius: 50%; transition: 0.2s;
+}
+.toggle input:checked + .toggle-slider { background: #1a3a6e; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(18px); background: #4a7bc4; }
+
+/* Stats */
+.stat-row { display: flex; justify-content: space-between; font-size: 11px; }
+.stat-row .label { color: #4a607a; }
+.stat-row .val { color: #9eb4d4; font-variant-numeric: tabular-nums; }
+#sovereign-badge {
+  font-size: 10px; padding: 2px 8px;
+  background: #1a3a6e; border: 1px solid #4a7bc4;
+  border-radius: 4px; color: #a8c8ff; word-break: break-all;
+}
+
+/* Mode description banner */
+#mode-banner {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(10, 16, 30, 0.88); border: 1px solid #1a2236;
+  border-radius: 8px; padding: 10px 18px;
+  font-size: 12px; color: #6a8fb4; text-align: center;
+  max-width: 480px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+#mode-banner strong { color: #a8c8ff; }
+#mode-banner a { color: #4a7bc4; text-decoration: none; pointer-events: all; }
+
+/* Toast */
+#toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: #1a3a6e; border: 1px solid #4a7bc4;
+  border-radius: 8px; padding: 8px 20px;
+  font-size: 12px; color: #a8c8ff;
+  opacity: 0; transition: opacity 0.3s;
+  pointer-events: none; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+
+/* Header logo */
+#logo {
+  font-size: 13px; font-weight: 700; color: #4a7bc4; letter-spacing: 0.08em;
+  border-bottom: 1px solid #1a2236; padding-bottom: 12px;
+}
+#logo span { color: #9eb4d4; font-weight: 400; font-size: 10px; display: block; }
+
+/* ── Model selector ──────────────────────────────────────────────────────── */
+.model-btn-row { display: flex; gap: 6px; }
+.model-btn {
+  flex: 1; padding: 6px 4px; border: 1px solid #1e2d45;
+  background: #101827; color: #9eb4d4; border-radius: 6px;
+  cursor: pointer; font-size: 11px; text-align: center; line-height: 1.4;
+  transition: all 0.15s;
+}
+.model-btn span { display: block; font-size: 9px; color: #4a607a; }
+.model-btn:hover { background: #162236; border-color: #2c4a7a; }
+.model-btn.active { background: #1a3a6e; border-color: #4a7bc4; color: #a8c8ff; }
+.model-btn.active span { color: #6a8fb4; }
+#model-status { font-size: 10px; color: #4a607a; min-height: 14px; }
+#token-stream {
+  font-size: 10px; color: #6a8fb4; font-family: monospace;
+  min-height: 16px; max-height: 56px; overflow: hidden;
+  word-break: break-all; line-height: 1.4;
+}
+
+/* ── Group mesh UI ───────────────────────────────────────────────────────── */
+#group-code-display {
+  background: #060c18; border: 1px solid #1a2236; border-radius: 6px;
+  padding: 8px 10px;
+}
+#group-code {
+  font-size: 18px; font-weight: 700; color: #4fc3f7;
+  letter-spacing: 0.1em; margin: 2px 0;
+}
+.join-row { display: flex; gap: 6px; }
+.join-row .intent-input {
+  flex: 1; padding: 7px 8px;
+  background: #101827; border: 1px solid #1e2d45; border-radius: 6px;
+  color: #e0e6ef; font-size: 11px; outline: none;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.join-row .intent-input:focus { border-color: #4a7bc4; }
+#mesh-status { font-size: 10px; color: #4a607a; min-height: 14px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="logo">
+      ⬡ RUVON SWARM STUDIO
+      <span>Browser Demo 4 · Agentic AI Mesh</span>
+    </div>
+
+    <!-- Mesh Group -->
+    <div class="section">
+      <div class="section-title">Mesh Group</div>
+      <div id="group-code-display" style="display:none">
+        <div style="font-size:10px;color:#4a607a">Your group code</div>
+        <div id="group-code"></div>
+        <div style="font-size:9px;color:#4a607a;margin-top:2px">Share this code — others paste it to join</div>
+      </div>
+      <button id="btn-start-mesh" class="sim-btn" style="width:100%">⬡ Start Mesh Group</button>
+      <div class="join-row">
+        <input id="join-code-input" class="intent-input" type="text" placeholder="Paste group code…"/>
+        <button id="btn-join-mesh" class="sim-btn">Join</button>
+      </div>
+      <div id="mesh-status"></div>
+    </div>
+
+    <!-- Mode toggle -->
+    <div class="section">
+      <div class="section-title">Mode</div>
+      <div id="mode-toggle-wrap">
+        <button class="mode-btn active" data-mode="swarm">Swarm Mode</button>
+        <button class="mode-btn" data-mode="payment">Payment Mode</button>
+      </div>
+    </div>
+
+    <!-- Pattern Input -->
+    <div class="section" id="swarm-controls">
+      <div class="section-title">Pattern Input</div>
+      <div class="preset-grid">
+        <button class="preset-btn active" data-preset="horse">🐎 Running Horse</button>
+        <button class="preset-btn" data-preset="birds">🐦 Flocking Birds</button>
+        <button class="preset-btn" data-preset="heart">❤️ Pulsing Heart</button>
+        <button class="preset-btn" data-preset="waterfall">💧 Waterfall</button>
+        <button class="preset-btn" data-preset="spiral">🌀 Spiral</button>
+        <button class="preset-btn" data-preset="diamond">💎 Diamond</button>
+        <button class="preset-btn" data-preset="ruvon">⬡ Ruvon</button>
+        <button class="preset-btn" data-preset="circle">⭕ Circle</button>
+      </div>
+      <input id="intent-input" type="text" placeholder='Ask AI: "write TEST" or "form a galaxy"'/>
+      <div id="intent-status" style="font-size:10px;color:#4a607a;min-height:14px;padding-left:2px;"></div>
+      <div class="slider-row">
+        <span style="color:#4a607a;font-size:11px">Drones</span>
+        <input id="drone-slider" type="range" min="50" max="1000" value="300" step="50"/>
+        <span id="drone-count">300</span>
+      </div>
+      <button id="launch-btn">⚡ Launch Swarm</button>
+    </div>
+
+    <!-- AI Brain -->
+    <div class="section">
+      <div class="section-title">AI Brain</div>
+      <div class="model-btn-row" id="model-selector">
+        <button class="model-btn active" data-model="SmolLM2-135M">
+          SmolLM2<span>88 MB · fast</span>
+        </button>
+        <button class="model-btn" data-model="Qwen2.5-0.5B">
+          Qwen2.5<span>395 MB · smart</span>
+        </button>
+        <button class="model-btn" data-model="Nemotron-Mini-4B">
+          Nemotron<span>2.7 GB · paged</span>
+        </button>
+      </div>
+      <button class="model-btn" id="btn-ollama" style="width:100%;text-align:left;padding:6px 8px">
+        ⚡ Ollama (local)<span>native · any model</span>
+      </button>
+      <div id="ollama-row" style="display:none;flex-direction:column;gap:4px">
+        <input id="ollama-model-input" type="text" style="
+          width:100%;padding:6px 8px;background:#101827;border:1px solid #4a7bc4;
+          border-radius:6px;color:#e0e6ef;font-size:11px;outline:none;font-family:monospace"
+          placeholder="model name (e.g. nemotron-3-nano:4b)"
+          value="nemotron-3-nano:4b"/>
+        <div style="font-size:9px;color:#4a607a">
+          Run: <code style="color:#6a9fd4">OLLAMA_ORIGINS=* ollama serve</code>
+        </div>
+      </div>
+      <div id="model-status"></div>
+      <div id="token-stream"></div>
+      <button id="btn-clear-cache" class="sim-btn" style="font-size:10px">🗑 Clear LLM Cache</button>
+    </div>
+
+    <!-- Simulation -->
+    <div class="section">
+      <div class="section-title">Simulation</div>
+      <div class="sim-grid">
+        <button class="sim-btn danger" id="btn-fail">💥 Fail 10%</button>
+        <button class="sim-btn" id="btn-recover">♻️ Recover All</button>
+        <button class="sim-btn danger" id="btn-partition">📡 Partition</button>
+        <button class="sim-btn" id="btn-drain">🔋 Drain Battery</button>
+      </div>
+    </div>
+
+    <!-- Educational Overlays -->
+    <div class="section">
+      <div class="section-title">Educational Overlays</div>
+      <div class="toggle-row">
+        <label>S(Vc) score bars</label>
+        <label class="toggle"><input type="checkbox" id="tog-score"/><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>SAF queue indicators</label>
+        <label class="toggle"><input type="checkbox" id="tog-saf"/><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Show Sovereign ♛</label>
+        <label class="toggle"><input type="checkbox" id="tog-sovereign" checked/><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="section">
+      <div class="section-title">Mesh Stats</div>
+      <div class="stat-row"><span class="label">Drones active</span><span class="val" id="stat-active">—</span></div>
+      <div class="stat-row"><span class="label">Avg S(Vc)</span><span class="val" id="stat-score">—</span></div>
+      <div class="stat-row"><span class="label">Avg deviation</span><span class="val" id="stat-dev">— px</span></div>
+      <div class="stat-row"><span class="label">SAF queued</span><span class="val" id="stat-saf">0</span></div>
+      <div class="stat-row"><span class="label">Mesh peers</span><span class="val" id="stat-peers">1</span></div>
+      <div class="stat-row"><span class="label">Compute nodes</span><span class="val" id="stat-compute">1</span></div>
+      <div class="stat-row"><span class="label">Sovereign</span></div>
+      <div id="sovereign-badge">—</div>
+    </div>
+  </aside>
+
+  <!-- Canvas -->
+  <div id="canvas-wrap">
+    <canvas id="swarm-canvas"></canvas>
+    <div id="mode-banner">
+      <strong>Agentic AI mesh swarm.</strong><br/>
+      Type <em>"write RUVON"</em> or <em>"form a galaxy"</em> — the AI brain parses natural language
+      and commands 1 000 drones. Open a second tab → inference distributes across the mesh.
+    </div>
+    <div id="toast"></div>
+  </div>
+
+</div>
+
+<!-- PixiJS v7 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
+
+<script type="module">
+import { initRenderer, renderFrame, setOverlayVisible, getCanvasSize, onClick } from "./renderer.js";
+import { createDrone, stepDrone, assignFormationTargets, scoreDrone, failDrone, recoverDrone, drainBattery } from "./drone_sim.js";
+import { getFormationTargets, textFormation, resolveIntent, PRESETS } from "./formations.js";
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let drones = [];
+let droneCount = 300;
+let currentPreset = "horse";
+let overlayScore = false;
+let overlaySOV = true;
+let sovereignId = null;
+let animFrame = null;
+let partitioned = false;
+let meshBrain = null;
+let _toastTimer;
+let _computeNodeCount = 1;
+let _physicsActive = true;   // false when this tab is a mesh follower
+let isSovereignLocal = true; // updated by READY / ELECTION messages
+
+// Command brain (replaces intent_worker — two-tier MiniLM + LLM)
+let commandBrain = null;
+let commandBrainReady = false;
+let _pendingReqId = 0;
+let _pendingIntentText = null;
+
+// Shared compute mesh — maps commandBrain reqId → mesh task_id for shards
+const _shardCallbacks = new Map();
+
+// ── wllama main-thread (Tier-2 LLM) ──────────────────────────────────────────
+const WLLAMA_CDN  = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/index.js";
+const WLLAMA_BASE = "https://cdn.jsdelivr.net/npm/@wllama/wllama@2/esm/";
+const WLLAMA_PATHS = {
+  "single-thread/wllama.wasm": WLLAMA_BASE + "single-thread/wllama.wasm",
+  "multi-thread/wllama.wasm":  WLLAMA_BASE + "multi-thread/wllama.wasm",
+};
+const MODEL_CONFIGS = {
+  "SmolLM2-135M": {
+    repo: "bartowski/SmolLM2-135M-Instruct-GGUF",
+    file: "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    ramMb: 88,
+  },
+  "Qwen2.5-0.5B": {
+    repo: "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+    file: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+    ramMb: 395,
+  },
+  "Nemotron-Mini-4B": {
+    repo: "bartowski/Nemotron-Mini-4B-Instruct-GGUF",
+    file: "Nemotron-Mini-4B-Instruct-Q4_K_M.gguf",
+    ramMb: 2700,
+  },
+};
+const SYSTEM_PROMPT =
+`You are a drone swarm controller. Reply with a single JSON object and nothing else.
+
+Valid responses:
+{"action":"formation","preset":"NAME"}  where NAME is one of: circle heart horse birds waterfall spiral diamond ruvon star triangle cross arrow hexagon smiley lightning rocket
+{"action":"text","content":"WORD"}  to spell a word with drones
+{"action":"text","content":"EMOJI"}  to form any object/animal as an emoji silhouette
+{"action":"scatter"}
+{"action":"recover"}
+
+Q: write HELLO
+A: {"action":"text","content":"HELLO"}
+Q: make a circle
+A: {"action":"formation","preset":"circle"}
+Q: draw a hat
+A: {"action":"text","content":"🎩"}
+Q: show a dragon
+A: {"action":"text","content":"🐉"}
+Q: horse
+A: {"action":"formation","preset":"horse"}
+Q: scatter
+A: {"action":"scatter"}
+Q:`;
+
+let _wllamaClass = null;
+let _wllama = null;
+let _wllama_loaded_model = null;
+let _activeModel = "SmolLM2-135M";
+let _useOllama = false;
+let _ollamaModel = "nemotron-3-nano:4b";
+let _modelMutex = Promise.resolve();
+const _textDecoder = new TextDecoder();
+
+// Clear all OPFS files (wllama cache lives here)
+async function clearWllamaCache() {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const names = [];
+    for await (const [name] of root.entries()) names.push(name);
+    await Promise.all(names.map(n => root.removeEntry(n, { recursive: true }).catch(() => {})));
+    console.log(`[wllama] OPFS cache cleared (${names.length} entries removed)`);
+    return names.length;
+  } catch (e) {
+    console.warn("[wllama] Cache clear failed:", e);
+    return 0;
+  }
+}
+
+async function ensureWllama(modelKey, { _retry } = {}) {
+  if (!_wllamaClass) {
+    const mod = await import(WLLAMA_CDN);
+    _wllamaClass = mod.Wllama;
+  }
+  if (_wllama && _wllama_loaded_model === modelKey) return;
+
+  // Evict old model
+  if (_wllama) {
+    try { await _wllama.exit(); } catch (_) {}
+    _wllama = null;
+    _wllama_loaded_model = null;
+  }
+
+  const cfg = MODEL_CONFIGS[modelKey] ?? MODEL_CONFIGS["SmolLM2-135M"];
+  const modelStatusEl = document.getElementById("model-status");
+  modelStatusEl.textContent = `⬇ Loading ${modelKey} (${cfg.ramMb} MB)…`;
+
+  _wllama = new _wllamaClass(WLLAMA_PATHS, {
+    logger: { debug: () => {}, log: () => {}, warn: console.warn, error: console.error },
+  });
+
+  try {
+    await _wllama.loadModelFromHF(cfg.repo, cfg.file, {
+      n_ctx: 4096,      // enough for system prompt + chat template overhead
+      progressCallback: ({ loaded, total }) => {
+        if (total > 0) {
+          modelStatusEl.textContent = `⬇ ${modelKey} ${Math.round(loaded / total * 100)}%`;
+        }
+      },
+    });
+  } catch (err) {
+    const isCorrupt = err?.message?.includes("magic") || err?.message?.includes("ftell")
+      || err?.message?.includes("Invalid");
+    if (isCorrupt && !_retry) {
+      console.warn("[wllama] Corrupt cache detected — clearing OPFS and retrying…", err.message);
+      modelStatusEl.textContent = "⚠ Corrupt cache — clearing and retrying…";
+      try { await _wllama.exit(); } catch (_) {}
+      _wllama = null;
+      await clearWllamaCache();
+      return ensureWllama(modelKey, { _retry: true });
+    }
+    throw err;
+  }
+
+  _wllama_loaded_model = modelKey;
+  modelStatusEl.textContent = `✓ ${modelKey} loaded`;
+  meshBrain.postMessage({ type: "MODEL_LOADED" });
+}
+
+function parseCommandMain(raw) {
+  // Strip markdown code fences if the model wrapped its output
+  const cleaned = raw.replace(/```[a-z]*\n?/gi, "").trim();
+  const match = cleaned.match(/\{[^}]+\}/s);
+  if (!match) return null;
+  try {
+    const cmd = JSON.parse(match[0]);
+    // Normalise action aliases small models invent
+    if (cmd?.action === "response" || cmd?.action === "write" || cmd?.action === "display") {
+      cmd.action = "text";
+    }
+    // Fix BPE tokenizer space artifacts: "H I"→"HI", "Ha nd"→"Hand", "R U V O N"→"RUVON"
+    // If ALL space-separated segments are ≤3 chars, treat spaces as BPE artifacts and join.
+    if (cmd?.content && typeof cmd.content === "string") {
+      const segs = cmd.content.trim().split(" ");
+      if (segs.length > 1 && segs.every(s => s.length <= 3)) {
+        cmd.content = segs.join("");
+      } else {
+        cmd.content = cmd.content.trim();
+      }
+    }
+    return cmd;
+  } catch (_) { return null; }
+}
+
+// ---------------------------------------------------------------------------
+// Ollama backend (http://localhost:11434) — streaming chat completion
+// ---------------------------------------------------------------------------
+async function runWithOllama(text) {
+  const tokenStreamEl = document.getElementById("token-stream");
+  const modelStatusEl = document.getElementById("model-status");
+  modelStatusEl.textContent = `⟳ Ollama (${_ollamaModel})…`;
+  tokenStreamEl.textContent = "";
+
+  const t0 = performance.now();
+  const resp = await fetch("http://localhost:11434/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: _ollamaModel,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user",   content: text },
+      ],
+      stream: true,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Ollama HTTP ${resp.status}: ${body.slice(0, 200)}`);
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let accumulated = "";
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();             // keep incomplete last line
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const data = JSON.parse(line);
+        const piece = data.message?.content ?? "";
+        if (piece) { accumulated += piece; tokenStreamEl.textContent += piece; }
+      } catch (_) {}
+    }
+  }
+
+  const elapsed = Math.round(performance.now() - t0);
+  console.log(`[ollama] Raw output (${elapsed}ms):`, accumulated);
+  const cmd = parseCommandMain(accumulated);
+  console.log("[ollama] Parsed command:", cmd);
+  tokenStreamEl.textContent = "";
+  modelStatusEl.textContent = `✓ Ollama ${elapsed}ms`;
+  return { result: accumulated, cmd, elapsed };
+}
+
+async function runWllamaMainThread(text, reqId, miniLmFallback, isShardRequest, taskId) {
+  const modelStatusEl = document.getElementById("model-status");
+  const tokenStreamEl = document.getElementById("token-stream");
+  const statusEl = document.getElementById("intent-status");
+
+  _modelMutex = _modelMutex.then(async () => {
+    let cmd = null, elapsed = 0;
+    try {
+      if (_useOllama) {
+        // ── Ollama path ────────────────────────────────────────────────────
+        ({ cmd, elapsed } = await runWithOllama(text));
+      } else {
+        // ── wllama WASM path ───────────────────────────────────────────────
+        await ensureWllama(_activeModel);
+        modelStatusEl.textContent = "⟳ Thinking…";
+        tokenStreamEl.textContent = "";
+
+        console.log(`[wllama] Prompt: "${text}" (model: ${_activeModel})`);
+        const t0 = performance.now();
+
+        const result = await _wllama.createChatCompletion(
+          [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user",   content: text },
+          ],
+          {
+            nPredict: 50,       // JSON is short — cap to speed up generation
+            temperature: 0.05,  // near-deterministic for structured output
+            onNewToken: (_tok, piece) => {
+              const s = piece instanceof Uint8Array
+                ? _textDecoder.decode(piece, { stream: true })
+                : String(piece);
+              tokenStreamEl.textContent += s;
+            },
+          }
+        );
+
+        elapsed = Math.round(performance.now() - t0);
+        console.log(`[wllama] Raw output (${elapsed}ms):`, result);
+        tokenStreamEl.textContent = "";
+        cmd = parseCommandMain(result);
+        console.log("[wllama] Parsed command:", cmd);
+      }
+
+      const action_obj = cmd ?? { action: "formation", preset: miniLmFallback?.preset ?? "circle" };
+
+      if (isShardRequest) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj,
+          preset: action_obj.preset ?? null,
+          confidence: cmd ? 1 : (miniLmFallback?.confidence ?? 0),
+        });
+        return;
+      }
+
+      const inputEl = document.getElementById("intent-input");
+      const userText = inputEl.value.trim();
+      const backend = _useOllama ? "Ollama" : "LLM";
+      if (action_obj.action === "formation" && action_obj.preset) {
+        statusEl.textContent = `✓ "${userText}" → ${action_obj.preset} (${backend}, ${elapsed}ms)`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      } else {
+        statusEl.textContent = `✓ "${userText}" → ${action_obj.action}${action_obj.content ? ": " + action_obj.content : ""} (${backend}, ${elapsed}ms)`;
+      }
+      handleCommand(action_obj);
+    } catch (err) {
+      console.error("[llm-main]", err);
+
+      // wllama WASM crash (RuntimeError: unreachable) — evict so next call reloads
+      const isWasmCrash = err?.message?.includes("unreachable") || err?.message?.includes("RuntimeError");
+      if (isWasmCrash && _wllama) {
+        console.warn("[wllama] WASM crashed — evicting model for next call");
+        try { await _wllama.exit(); } catch (_) {}
+        _wllama = null;
+        _wllama_loaded_model = null;
+      }
+
+      const isOllamaErr = _useOllama && (err?.message?.includes("fetch") || err?.message?.includes("Ollama"));
+      if (isOllamaErr) {
+        modelStatusEl.textContent = "⚠ Ollama unreachable — is it running?";
+      } else {
+        modelStatusEl.textContent = "⚠ LLM error — using MiniLM fallback";
+      }
+
+      const fallback = { action: "formation", preset: miniLmFallback?.preset ?? "circle" };
+      if (isShardRequest) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj: fallback,
+          preset: fallback.preset,
+          confidence: miniLmFallback?.confidence ?? 0,
+        });
+      } else {
+        statusEl.textContent = `✓ "${text}" → ${fallback.preset} (fallback)`;
+        handleCommand(fallback);
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById("swarm-canvas");
+const canvasWrap = document.getElementById("canvas-wrap");
+canvas.width  = canvasWrap.clientWidth;
+canvas.height = canvasWrap.clientHeight;
+
+await initRenderer(canvas);
+
+// Start mesh brain worker
+meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+meshBrain.postMessage({ type: "INIT", drone_count: droneCount, is_founder: true });
+meshBrain.onmessage = handleBrainMsg;
+
+// Start command brain worker (load model in background — non-blocking)
+commandBrain = new Worker(new URL("./command_brain.js", import.meta.url));
+commandBrain.onmessage = handleCommandMsg;
+commandBrain.postMessage({ type: "INIT" });
+
+// Launch initial swarm (physics active by default)
+launchSwarm();
+
+// Broadcast swarm state every 100 ms so follower tabs can render it
+setInterval(() => {
+  if (!isSovereignLocal || drones.length === 0) return;
+  meshBrain.postMessage({
+    type: "SWARM_STATE_UPDATE",
+    formation: currentPreset,
+    drones: drones.map(d => ({
+      id: d.id,
+      x: Math.round(d.x), y: Math.round(d.y),
+      vx: +d.vx.toFixed(2), vy: +d.vy.toFixed(2),
+      status: d.status, tier: d.tier,
+      battery: Math.round(d.battery),
+      score: +d.score.toFixed(2),
+    })),
+  });
+}, 100);
+
+// ---------------------------------------------------------------------------
+// Group code generation
+// ---------------------------------------------------------------------------
+function generateGroupCode() {
+  const words = ["RUVON","MESH","SWARM","DRONE","NODE","APEX","SYNC","FLUX"];
+  const w = words[Math.floor(Math.random() * words.length)];
+  const n = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${w}-${n}`;
+}
+
+// ---------------------------------------------------------------------------
+// Swarm lifecycle
+// ---------------------------------------------------------------------------
+function launchSwarm() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  const { w, h } = getCanvasSize();
+
+  drones = Array.from({ length: droneCount }, (_, i) =>
+    createDrone(i, Math.random() * w, Math.random() * h)
+  );
+
+  const targets = getFormationTargets(currentPreset, droneCount).map(pt => ({
+    x: pt.x * w, y: pt.y * h,
+  }));
+  assignFormationTargets(drones, targets);
+
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: currentPreset });
+
+  loop();
+  toast(`Swarm launched: ${droneCount} drones → ${currentPreset}`);
+}
+
+function startPhysicsLoop() {
+  _physicsActive = true;
+}
+
+function startRenderOnlyLoop() {
+  _physicsActive = false;
+}
+
+function loop() {
+  const { w, h } = getCanvasSize();
+  if (_physicsActive) {
+    for (const drone of drones) {
+      drone.score = scoreDrone(drone);
+      stepDrone(drone, drones, w, h, currentPreset);
+    }
+  }
+  renderFrame(drones, sovereignId);
+  updateStats();
+  animFrame = requestAnimationFrame(loop);
+}
+
+// Apply state received from the sovereign tab
+function applyReceivedState(remoteDrones, formation) {
+  if (isSovereignLocal) return;
+  const remoteMap = new Map(remoteDrones.map(d => [d.id, d]));
+  const { w, h } = getCanvasSize();
+  // Remove drones that no longer exist
+  drones = drones.filter(d => remoteMap.has(d.id));
+  // Update existing / add new
+  for (const rd of remoteDrones) {
+    const local = drones.find(d => d.id === rd.id);
+    if (local) {
+      Object.assign(local, rd);
+    } else {
+      const nd = createDrone(rd.id, rd.x, rd.y);
+      Object.assign(nd, rd);
+      drones.push(nd);
+    }
+  }
+  currentPreset = formation;
+}
+
+// ---------------------------------------------------------------------------
+// Command dispatcher — handles structured action objects from the AI brain
+// ---------------------------------------------------------------------------
+function handleCommand(cmd) {
+  if (!cmd?.action) return;
+  switch (cmd.action) {
+    case "formation":
+      applyFormation(cmd.preset ?? "circle");
+      break;
+    case "text": {
+      const content = cmd.content?.trim();
+      if (!content) break;
+      // Guard against bad model output: single ASCII punctuation (e.g. "." "?" "!")
+      // is not a valid emoji or word — fall back to circle formation
+      if (content.length <= 2 && /^[\x20-\x7E]+$/.test(content) && !/[A-Za-z0-9]/.test(content)) {
+        console.warn(`[handleCommand] Bad model content "${content}" — falling back to circle`);
+        toast("(model output unclear — try again)");
+        applyFormation("circle");
+        break;
+      }
+      applyTextFormation(content);
+      break;
+    }
+    case "scatter":
+      scatterDrones();
+      break;
+    case "fail":
+      failRandomDrones(cmd.pct ?? 10);
+      break;
+    case "recover":
+      drones.forEach(d => recoverDrone(d));
+      toast("All drones recovered");
+      break;
+    default:
+      console.warn("[handleCommand] unknown action:", cmd.action);
+  }
+}
+
+function applyFormation(preset, originalText) {
+  const { w, h } = getCanvasSize();
+  const targets = getFormationTargets(preset, drones.length).map(pt => ({
+    x: pt.x * w, y: pt.y * h,
+  }));
+  assignFormationTargets(drones, targets);
+  currentPreset = preset;
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset });
+  const label = originalText ? `"${originalText}" → ${preset}` : preset;
+  toast(`Formation: ${label}`);
+}
+
+function applyTextFormation(content) {
+  const { w, h } = getCanvasSize();
+  // textFormation runs on main thread where document/canvas is available
+  const pts = textFormation(content, drones.length);
+  const targets = pts.map(pt => ({ x: pt.x * w, y: pt.y * h }));
+  if (pts.length > 0) {
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const xRange = `[${Math.min(...xs).toFixed(2)}, ${Math.max(...xs).toFixed(2)}]`;
+    const yRange = `[${Math.min(...ys).toFixed(2)}, ${Math.max(...ys).toFixed(2)}]`;
+    console.log(`[text] "${content}" → ${pts.length} targets, canvas ${w}×${h}, x=${xRange} y=${yRange}`);
+  } else {
+    console.warn(`[text] "${content}" → EMPTY (falling back to circle)`);
+  }
+  assignFormationTargets(drones, targets);
+  currentPreset = "text";
+  meshBrain.postMessage({ type: "FORMATION_CHANGE", preset: "text" });
+  // Distinguish emoji shapes from text display in the toast
+  const isEmoji = content.length <= 4 && !/[A-Za-z0-9]/.test(content);
+  toast(isEmoji ? `Forming: ${content}` : `Writing: "${content}"`);
+}
+
+function scatterDrones() {
+  const { w, h } = getCanvasSize();
+  drones.forEach(d => {
+    d.targetX = Math.random() * w;
+    d.targetY = Math.random() * h;
+  });
+  currentPreset = "scatter";
+  toast("Scattered");
+}
+
+function failRandomDrones(pct) {
+  const failCount = Math.max(1, Math.floor(drones.length * pct / 100));
+  const active = drones.filter(d => d.status !== "offline");
+  for (let i = 0; i < failCount && i < active.length; i++) {
+    failDrone(active[Math.floor(Math.random() * active.length)]);
+  }
+  toast(`${failCount} drones failed`);
+}
+
+// ---------------------------------------------------------------------------
+// Mesh brain messages
+// ---------------------------------------------------------------------------
+function handleBrainMsg(evt) {
+  const msg = evt.data;
+  switch (msg.type) {
+    case "READY":
+      isSovereignLocal = msg.is_sovereign;
+      sovereignId = msg.is_sovereign ? msg.pod_id : null;
+      document.getElementById("sovereign-badge").textContent = msg.pod_id;
+      if (isSovereignLocal) startPhysicsLoop();
+      else startRenderOnlyLoop();
+      break;
+
+    case "ELECTION": {
+      const wasSovereign = isSovereignLocal;
+      isSovereignLocal = msg.is_me;
+      sovereignId = msg.sovereign_pod_id;
+      document.getElementById("sovereign-badge").textContent = msg.sovereign_pod_id;
+      if (!wasSovereign && isSovereignLocal) {
+        startPhysicsLoop();
+        toast("You are now Sovereign ♛");
+      } else if (wasSovereign && !isSovereignLocal) {
+        startRenderOnlyLoop();
+        toast("Sovereignty transferred");
+      } else {
+        toast(msg.is_me ? "You are now Sovereign ♛" : `New Sovereign: ${msg.sovereign_pod_id}`);
+      }
+      break;
+    }
+
+    case "PEER_UPDATE":
+      document.getElementById("stat-peers").textContent = msg.peers.length + 1;
+      updateComputeNodes(msg.peers);
+      break;
+
+    case "HELP_SENT":
+      toast(`Help-push → ${msg.targets.length} peers`);
+      break;
+
+    case "PARTITIONED":
+      toast("Network partitioned — SAF queues active");
+      break;
+
+    case "RESTORED":
+      toast("Mesh restored — SAF draining");
+      break;
+
+    // Sovereign broadcasts its drone state; followers apply it
+    case "SWARM_STATE":
+      applyReceivedState(msg.drones, msg.formation);
+      break;
+
+    // Mesh assigned an INFERENCE_SHARD to this pod — route to commandBrain
+    case "RUN_INFERENCE": {
+      if (!commandBrainReady) {
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: msg.task_id,
+          action_obj: null, preset: null, confidence: 0,
+        });
+        break;
+      }
+      const shardReqId = ++_pendingReqId;
+      _shardCallbacks.set(shardReqId, msg.task_id);
+      commandBrain.postMessage({ type: "RESOLVE", text: msg.text, reqId: shardReqId });
+      break;
+    }
+
+    // Distributed inference task completed (result from another pod)
+    case "TASK_COMPLETED": {
+      const result = msg.result;
+      if (!result) break;
+      if (result.action_obj) {
+        handleCommand(result.action_obj);
+      } else if (result.preset && result.confidence > 0.1) {
+        applyFormation(result.preset);
+        const statusEl = document.getElementById("intent-status");
+        statusEl.textContent = `✓ ${result.preset} (${result.confidence}) [mesh]`;
+      }
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+function updateStats() {
+  const active = drones.filter(d => d.status !== "offline").length;
+  const avgScore = drones.length > 0
+    ? (drones.reduce((s, d) => s + d.score, 0) / drones.length).toFixed(3)
+    : 0;
+  const avgDev = drones.length > 0
+    ? Math.round(drones.reduce((s, d) => s + d.formationDeviation, 0) / drones.length)
+    : 0;
+  const safTotal = drones.reduce((s, d) => s + d.safQueue.length, 0);
+
+  document.getElementById("stat-active").textContent = `${active} / ${drones.length}`;
+  document.getElementById("stat-score").textContent  = avgScore;
+  document.getElementById("stat-dev").textContent    = `${avgDev} px`;
+  document.getElementById("stat-saf").textContent    = safTotal;
+}
+
+function updateComputeNodes(peers) {
+  const capable = peers.filter(p => p.tier >= 2 && p.cpu_load < 0.8).length;
+  _computeNodeCount = 1 + capable;
+  const el = document.getElementById("stat-compute");
+  el.textContent = _computeNodeCount;
+  el.style.color = _computeNodeCount > 1 ? "#a5d6a7" : "";
+}
+
+// ---------------------------------------------------------------------------
+// Command brain messages
+// ---------------------------------------------------------------------------
+function handleCommandMsg(evt) {
+  const msg = evt.data;
+  const statusEl = document.getElementById("intent-status");
+  const modelStatusEl = document.getElementById("model-status");
+  const tokenStreamEl = document.getElementById("token-stream");
+
+  switch (msg.type) {
+    // MiniLM lifecycle
+    case "LOADING":
+      statusEl.textContent = "⬇ Downloading semantic model (23 MB)…";
+      break;
+    case "PROGRESS":
+      statusEl.textContent = `⬇ Loading model… ${msg.pct}%`;
+      break;
+    case "READY":
+      commandBrainReady = true;
+      statusEl.textContent = "✓ AI brain ready";
+      setTimeout(() => { if (statusEl.textContent.startsWith("✓ AI brain")) statusEl.textContent = ""; }, 2000);
+      if (_pendingIntentText) {
+        const text = _pendingIntentText;
+        _pendingIntentText = null;
+        resolveWithBrain(text);
+      }
+      break;
+
+    // command_brain escalates to main-thread wllama when confidence is low or trigger word matched
+    case "ESCALATE": {
+      const isShardRequest = _shardCallbacks.has(msg.reqId);
+      const taskId = isShardRequest ? _shardCallbacks.get(msg.reqId) : null;
+      if (isShardRequest) _shardCallbacks.delete(msg.reqId);
+      runWllamaMainThread(msg.text, msg.reqId, msg.miniLmFallback, isShardRequest, taskId);
+      break;
+    }
+
+    // command_brain forwards model switch request (from SET_MODEL it received)
+    case "MODEL_SWITCH_REQUEST": {
+      if (!_useOllama) {
+        _activeModel = msg.model;
+        if (_wllama && _wllama_loaded_model !== _activeModel) {
+          const toExit = _wllama;
+          _wllama = null;
+          _wllama_loaded_model = null;
+          toExit.exit().catch(() => {});
+        }
+        modelStatusEl.textContent = `Model: ${_activeModel}`;
+        tokenStreamEl.textContent = "";
+      }
+      break;
+    }
+
+    // Resolved command — apply it
+    case "COMMAND": {
+      tokenStreamEl.textContent = "";
+
+      // Check if this was a mesh shard request
+      if (_shardCallbacks.has(msg.reqId)) {
+        const taskId = _shardCallbacks.get(msg.reqId);
+        _shardCallbacks.delete(msg.reqId);
+        // Return the full action object so the submitting pod can dispatch it
+        const action_obj = { action: msg.action, preset: msg.preset, content: msg.content, pct: msg.pct };
+        meshBrain.postMessage({
+          type: "INFERENCE_RESULT",
+          task_id: taskId,
+          action_obj,
+          preset: msg.preset,
+          confidence: msg.confidence ?? 1,
+        });
+        break;
+      }
+
+      // Local command
+      const inputEl = document.getElementById("intent-input");
+      const userText = inputEl.value.trim();
+      const action_obj = { action: msg.action, preset: msg.preset, content: msg.content, pct: msg.pct };
+
+      if (msg.action === "formation" && msg.preset) {
+        statusEl.textContent = `✓ "${userText}" → ${msg.preset}${msg.confidence ? ` (${msg.confidence})` : ""}`;
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      } else {
+        statusEl.textContent = `✓ "${userText}" → ${msg.action}${msg.content ? ": " + msg.content : ""}`;
+      }
+      handleCommand(action_obj);
+      break;
+    }
+
+    case "ERROR":
+      console.warn("[command_brain] error:", msg.message);
+      statusEl.textContent = "⚠ AI brain error — using fuzzy match";
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Intent resolution
+// ---------------------------------------------------------------------------
+function resolveWithBrain(text) {
+  if (!commandBrainReady) {
+    _pendingIntentText = text;
+    return;
+  }
+  document.getElementById("intent-status").textContent = "⟳ Resolving…";
+  // Route through mesh — Sovereign assigns to best compute node
+  meshBrain.postMessage({ type: "INFERENCE_TASK", text, reqId: ++_pendingReqId });
+}
+
+// ---------------------------------------------------------------------------
+// UI interactions
+// ---------------------------------------------------------------------------
+
+// Mode toggle
+document.querySelectorAll(".mode-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    if (btn.dataset.mode === "payment") {
+      window.open("../browser_demo_2/index.html", "_blank");
+      btn.classList.remove("active");
+      document.querySelector('.mode-btn[data-mode="swarm"]').classList.add("active");
+    }
+  });
+});
+
+// Preset buttons
+document.querySelectorAll(".preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentPreset = btn.dataset.preset;
+    document.getElementById("intent-input").value = "";
+    document.getElementById("intent-status").textContent = "";
+    applyFormation(currentPreset);
+  });
+});
+
+// Intent input — client-side Levenshtein fires instantly; AI brain refines
+document.getElementById("intent-input").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const text = e.target.value.trim();
+  if (!text) return;
+
+  // Instant client-side Levenshtein fallback
+  const clientResolved = resolveIntent(text);
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+  currentPreset = clientResolved;
+  applyFormation(clientResolved, text);
+
+  // AI brain for real natural language understanding
+  resolveWithBrain(text);
+});
+
+// Drone count slider
+const droneSlider = document.getElementById("drone-slider");
+const droneCountEl = document.getElementById("drone-count");
+droneSlider.addEventListener("input", () => {
+  droneCount = parseInt(droneSlider.value);
+  droneCountEl.textContent = droneCount;
+  meshBrain.postMessage({ type: "DRONE_COUNT_CHANGE", drone_count: droneCount });
+});
+
+// Launch button
+document.getElementById("launch-btn").addEventListener("click", () => {
+  droneCount = parseInt(droneSlider.value);
+  launchSwarm();
+});
+
+// Simulation buttons
+document.getElementById("btn-fail").addEventListener("click", () => {
+  failRandomDrones(10);
+  toast("💥 10% drones failed — mesh adapting");
+});
+
+document.getElementById("btn-recover").addEventListener("click", () => {
+  drones.forEach(d => recoverDrone(d));
+  toast("♻️ All drones recovered");
+});
+
+document.getElementById("btn-partition").addEventListener("click", () => {
+  if (!partitioned) {
+    meshBrain.postMessage({ type: "PARTITION_START" });
+    const count = Math.floor(drones.length * 0.3);
+    for (let i = 0; i < count; i++) {
+      const d = drones[Math.floor(Math.random() * drones.length)];
+      d.safQueue.push({ cmd: "MOVE_TO", ts: Date.now() });
+    }
+    document.getElementById("btn-partition").textContent = "📡 Restore Mesh";
+    partitioned = true;
+    toast("📡 30% of drones partitioned — SAF active");
+  } else {
+    meshBrain.postMessage({ type: "PARTITION_END" });
+    drones.forEach(d => { d.safQueue = []; });
+    document.getElementById("btn-partition").textContent = "📡 Partition";
+    partitioned = false;
+    toast("✅ Mesh restored — SAF queues drained");
+  }
+});
+
+document.getElementById("btn-drain").addEventListener("click", () => {
+  const count = Math.max(1, Math.floor(drones.length * 0.15));
+  const active = drones.filter(d => d.status !== "offline");
+  for (let i = 0; i < count; i++) {
+    const d = active[Math.floor(Math.random() * active.length)];
+    drainBattery(d, 40 + Math.random() * 30);
+    meshBrain.postMessage({ type: "DRONE_BATTERY_LOW", droneId: d.id });
+  }
+  toast(`🔋 ${count} drones battery-drained — help-push triggered`);
+});
+
+// Click canvas → toggle drone fail/recover
+onClick((clickX, clickY) => {
+  let nearest = null, nearestDist = 30;
+  for (const drone of drones) {
+    const d = Math.hypot(drone.x - clickX, drone.y - clickY);
+    if (d < nearestDist) { nearestDist = d; nearest = drone; }
+  }
+  if (nearest) {
+    if (nearest.status === "offline") { recoverDrone(nearest); toast(`♻️ Drone #${nearest.id} recovered`); }
+    else { failDrone(nearest); toast(`💥 Drone #${nearest.id} failed`); }
+  }
+});
+
+// Overlay toggles
+document.getElementById("tog-score").addEventListener("change", e => {
+  overlayScore = e.target.checked;
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+document.getElementById("tog-saf").addEventListener("change", () => {
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+document.getElementById("tog-sovereign").addEventListener("change", e => {
+  overlaySOV = e.target.checked;
+  setOverlayVisible(overlayScore || overlaySOV);
+});
+
+// Clear LLM Cache button
+document.getElementById("btn-clear-cache").addEventListener("click", async () => {
+  if (_wllama) {
+    try { await _wllama.exit(); } catch (_) {}
+    _wllama = null;
+    _wllama_loaded_model = null;
+  }
+  const n = await clearWllamaCache();
+  document.getElementById("model-status").textContent = n > 0 ? `✓ Cache cleared (${n} files)` : "Cache already empty";
+  toast("LLM cache cleared");
+});
+
+// Ollama button
+document.getElementById("btn-ollama").addEventListener("click", () => {
+  document.querySelectorAll(".model-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("btn-ollama").classList.add("active");
+  _useOllama = true;
+  _ollamaModel = document.getElementById("ollama-model-input").value.trim() || "qwen2.5:0.5b";
+  document.getElementById("ollama-row").style.display = "flex";
+  document.getElementById("model-status").textContent = `Ollama: ${_ollamaModel}`;
+  document.getElementById("token-stream").textContent = "";
+  // Evict any loaded wllama model to free RAM
+  if (_wllama) {
+    const toExit = _wllama; _wllama = null; _wllama_loaded_model = null;
+    toExit.exit().catch(() => {});
+  }
+  toast(`Brain: Ollama (${_ollamaModel})`);
+});
+
+// Ollama model name input — update _ollamaModel on change
+document.getElementById("ollama-model-input").addEventListener("change", () => {
+  _ollamaModel = document.getElementById("ollama-model-input").value.trim() || "qwen2.5:0.5b";
+  if (_useOllama) {
+    document.getElementById("model-status").textContent = `Ollama: ${_ollamaModel}`;
+    toast(`Ollama model: ${_ollamaModel}`);
+  }
+});
+
+// Model selector — update active model on both main thread (wllama) and worker (MiniLM)
+document.querySelectorAll("#model-selector .model-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".model-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("btn-ollama").classList.remove("active");
+    btn.classList.add("active");
+    _useOllama = false;
+    document.getElementById("ollama-row").style.display = "none";
+    const model = btn.dataset.model;
+    if (_activeModel !== model) {
+      _activeModel = model;
+      if (_wllama && _wllama_loaded_model !== model) {
+        const toExit = _wllama;
+        _wllama = null;
+        _wllama_loaded_model = null;
+        toExit.exit().catch(() => {});
+      }
+      document.getElementById("model-status").textContent = `Model: ${model}`;
+      document.getElementById("token-stream").textContent = "";
+      toast(`Brain: ${model}`);
+    }
+    commandBrain.postMessage({ type: "SET_MODEL", model });
+  });
+});
+
+// Group mesh — Start
+document.getElementById("btn-start-mesh").addEventListener("click", () => {
+  const code = generateGroupCode();
+  document.getElementById("group-code").textContent = code;
+  document.getElementById("group-code-display").style.display = "block";
+  document.getElementById("btn-start-mesh").style.display = "none";
+  document.getElementById("mesh-status").textContent = "⬡ Mesh started — share the code";
+  // Re-init brain with the group key as founder
+  meshBrain.postMessage({ type: "STOP" });
+  setTimeout(() => {
+    meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+    meshBrain.onmessage = handleBrainMsg;
+    meshBrain.postMessage({ type: "INIT", drone_count: droneCount, group_key: code, is_founder: true });
+  }, 200);
+});
+
+// Group mesh — Join
+document.getElementById("btn-join-mesh").addEventListener("click", () => {
+  const code = document.getElementById("join-code-input").value.trim().toUpperCase();
+  if (!code) return;
+  document.getElementById("mesh-status").textContent = `Joining ${code}…`;
+  document.getElementById("group-code").textContent = code;
+  document.getElementById("group-code-display").style.display = "block";
+  document.getElementById("btn-start-mesh").style.display = "none";
+  // Re-init brain as a joiner (not founder)
+  meshBrain.postMessage({ type: "STOP" });
+  setTimeout(() => {
+    meshBrain = new Worker(new URL("./mesh_brain.js", import.meta.url));
+    meshBrain.onmessage = handleBrainMsg;
+    meshBrain.postMessage({ type: "INIT", drone_count: droneCount, group_key: code, is_founder: false });
+  }, 200);
+});
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
+
+// Resize
+window.addEventListener("resize", () => {
+  canvas.width  = canvasWrap.clientWidth;
+  canvas.height = canvasWrap.clientHeight;
+  if (drones.length > 0) applyFormation(currentPreset);
+});
+</script>
+</body>
+</html>

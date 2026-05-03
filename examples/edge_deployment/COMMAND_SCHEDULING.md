@@ -1,6 +1,6 @@
 ## Command Scheduling
 
-One-time and recurring command execution with cron-style scheduling for Rufus Edge devices.
+One-time and recurring command execution with cron-style scheduling for Ruvon Edge devices.
 
 ## Overview
 
@@ -501,8 +501,8 @@ The scheduler daemon runs in the background and processes due schedules.
 
 **As a Service**:
 ```bash
-python -m rufus_server.scheduler_daemon \
-  --db-url postgresql://user:pass@localhost/rufus \
+python -m ruvon_server.scheduler_daemon \
+  --db-url postgresql://user:pass@localhost/ruvon \
   --interval 60
 
 # Output:
@@ -512,8 +512,8 @@ python -m rufus_server.scheduler_daemon \
 
 **Run Once** (Testing):
 ```bash
-python -m rufus_server.scheduler_daemon \
-  --db-url postgresql://user:pass@localhost/rufus \
+python -m ruvon_server.scheduler_daemon \
+  --db-url postgresql://user:pass@localhost/ruvon \
   --run-once
 
 # Output:
@@ -532,13 +532,13 @@ python -m rufus_server.scheduler_daemon \
 **Systemd Service**:
 ```ini
 [Unit]
-Description=Rufus Command Scheduler
+Description=Ruvon Command Scheduler
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python -m rufus_server.scheduler_daemon \
-  --db-url postgresql://localhost/rufus \
+ExecStart=/usr/bin/python -m ruvon_server.scheduler_daemon \
+  --db-url postgresql://localhost/ruvon \
   --interval 60
 Restart=always
 RestartSec=10
@@ -550,8 +550,8 @@ WantedBy=multi-user.target
 **Docker Compose**:
 ```yaml
 scheduler:
-  image: myapp/rufus:latest
-  command: python -m rufus_server.scheduler_daemon --db-url postgresql://postgres/rufus --interval 60
+  image: myapp/ruvon:latest
+  command: python -m ruvon_server.scheduler_daemon --db-url postgresql://postgres/ruvon --interval 60
   restart: always
   depends_on:
     - postgres
@@ -562,20 +562,20 @@ scheduler:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rufus-scheduler
+  name: ruvon-scheduler
 spec:
   replicas: 1
   template:
     spec:
       containers:
       - name: scheduler
-        image: myapp/rufus:latest
+        image: myapp/ruvon:latest
         command:
         - python
         - -m
-        - rufus_server.scheduler_daemon
+        - ruvon_server.scheduler_daemon
         - --db-url
-        - postgresql://postgres/rufus
+        - postgresql://postgres/ruvon
         - --interval
         - "60"
 ```
@@ -761,7 +761,7 @@ Track these metrics:
 **1. Check scheduler daemon is running**:
 ```bash
 # Check if daemon is processing schedules
-tail -f /var/log/rufus/scheduler.log
+tail -f /var/log/ruvon/scheduler.log
 ```
 
 **2. Verify schedule status**:

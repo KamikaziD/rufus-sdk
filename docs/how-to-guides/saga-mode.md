@@ -11,7 +11,7 @@ Saga mode enables automatic rollback when workflows fail. Each step can define a
 ### Enable saga mode
 
 ```python
-from rufus.builder import WorkflowBuilder
+from ruvon.builder import WorkflowBuilder
 
 # Create workflow
 workflow = await builder.create_workflow(
@@ -33,7 +33,7 @@ except Exception as e:
 ### Define compensatable steps
 
 ```python
-from rufus.models import StepContext
+from ruvon.models import StepContext
 from my_app.state_models import OrderState
 
 def charge_payment(state: OrderState, context: StepContext) -> dict:
@@ -314,7 +314,7 @@ def refund_payment(state: OrderState, context: StepContext) -> dict:
 
 ```python
 import pytest
-from rufus.testing.harness import TestHarness
+from ruvon.testing.harness import TestHarness
 from unittest.mock import Mock, patch
 
 @pytest.mark.asyncio
@@ -379,7 +379,7 @@ Track compensation in audit logs:
 
 ```python
 # Query compensation events
-from rufus.implementations.persistence.postgres import PostgresPersistenceProvider
+from ruvon.implementations.persistence.postgres import PostgresPersistenceProvider
 
 persistence = PostgresPersistenceProvider(db_url)
 await persistence.initialize()

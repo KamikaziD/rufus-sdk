@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Healthcare Wearable Demo - Rufus Edge AI Inference
+Healthcare Wearable Demo - Ruvon Edge AI Inference
 
 Demonstrates on-device AI for patient vital signs monitoring:
 1. Normal readings - no alert
@@ -11,7 +11,7 @@ Demonstrates on-device AI for patient vital signs monitoring:
 Usage:
     python examples/healthcare_wearable/demo.py
 
-This demo shows how Rufus Edge handles:
+This demo shows how Ruvon Edge handles:
 - On-device ML inference for anomaly detection
 - Offline-first health monitoring
 - Store-and-Forward for alert sync
@@ -27,12 +27,12 @@ project_root = os.path.join(os.path.dirname(__file__), '..', '..')
 sys.path.insert(0, os.path.join(project_root, 'src'))
 sys.path.insert(0, project_root)
 
-from rufus.implementations.persistence.memory import InMemoryPersistence
-from rufus.implementations.execution.sync import SyncExecutor
-from rufus.implementations.observability.logging import LoggingObserver
-from rufus.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
-from rufus.implementations.templating.jinja2 import Jinja2TemplateEngine
-from rufus.builder import WorkflowBuilder
+from ruvon.implementations.persistence.memory import InMemoryPersistence
+from ruvon.implementations.execution.sync import SyncExecutor
+from ruvon.implementations.observability.logging import LoggingObserver
+from ruvon.implementations.expression_evaluator.simple import SimpleExpressionEvaluator
+from ruvon.implementations.templating.jinja2 import Jinja2TemplateEngine
+from ruvon.builder import WorkflowBuilder
 
 from examples.healthcare_wearable.models import SensorData, VitalMonitoringState
 from examples.healthcare_wearable.mock_model import MockAnomalyDetector, MockInferenceProvider

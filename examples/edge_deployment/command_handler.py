@@ -223,7 +223,7 @@ class CommandHandler:
         logger.info("Updating configuration...")
 
         # TODO: Save config to file
-        # config_path = "/etc/rufus/config.json"
+        # config_path = "/etc/ruvon/config.json"
         # with open(config_path, 'w') as f:
         #     json.dump(config, f, indent=2)
 

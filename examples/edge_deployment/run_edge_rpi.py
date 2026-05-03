@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Rufus Edge Runner for Raspberry Pi 5
+Ruvon Edge Runner for Raspberry Pi 5
 
-This script runs a Rufus Edge agent on a Raspberry Pi 5,
+This script runs a Ruvon Edge agent on a Raspberry Pi 5,
 demonstrating:
 - ARM64 hardware detection
 - CPU-only inference (no GPU)
@@ -14,10 +14,10 @@ Usage:
     cd docker && docker compose up -d
 
     # Copy this script to the Raspberry Pi
-    scp -r examples/edge_deployment/ pi@raspberrypi:~/rufus/
+    scp -r examples/edge_deployment/ pi@raspberrypi:~/ruvon/
 
     # On the Raspberry Pi:
-    cd ~/rufus/edge_deployment
+    cd ~/ruvon/edge_deployment
     python run_edge_rpi.py --cloud-url http://YOUR_MAC_IP:8000
 
 Requirements:
@@ -41,27 +41,27 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger('rufus.edge.rpi')
+logger = logging.getLogger('ruvon.edge.rpi')
 
 
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Rufus Edge Agent for Raspberry Pi 5'
+        description='Ruvon Edge Agent for Raspberry Pi 5'
     )
     parser.add_argument(
         '--cloud-url',
-        default=os.getenv('RUFUS_CLOUD_URL', 'http://localhost:8000'),
-        help='URL of the Rufus Cloud Control Plane'
+        default=os.getenv('RUVON_CLOUD_URL', 'http://localhost:8000'),
+        help='URL of the Ruvon Cloud Control Plane'
     )
     parser.add_argument(
         '--device-id',
-        default=os.getenv('RUFUS_DEVICE_ID', f'rpi5-{platform.node()[:8]}'),
+        default=os.getenv('RUVON_DEVICE_ID', f'rpi5-{platform.node()[:8]}'),
         help='Unique device identifier'
     )
     parser.add_argument(
         '--api-key',
-        default=os.getenv('RUFUS_API_KEY', 'demo-api-key-rpi'),
+        default=os.getenv('RUVON_API_KEY', 'demo-api-key-rpi'),
         help='API key for cloud authentication'
     )
     parser.add_argument(
@@ -170,7 +170,7 @@ async def main():
 
     print("\n" + "#"*60)
     print("#" + " "*58 + "#")
-    print("#    RUFUS EDGE - Raspberry Pi 5" + " "*24 + "#")
+    print("#    RUVON EDGE - Raspberry Pi 5" + " "*24 + "#")
     print("#" + " "*58 + "#")
     print("#"*60)
 

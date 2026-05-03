@@ -1,5 +1,5 @@
 """
-Integration tests: RufusEdgeAgent WASM resolver wiring.
+Integration tests: RuvonEdgeAgent WASM resolver wiring.
 
 Verifies that:
   1. agent.start() creates a SqliteWasmBinaryResolver and assigns _wasm_resolver
@@ -15,29 +15,29 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rufus_edge.agent import RufusEdgeAgent
-from rufus.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
+from ruvon_edge.agent import RuvonEdgeAgent
+from ruvon.implementations.execution.wasm_runtime import SqliteWasmBinaryResolver
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_agent(db_path: str = ":memory:") -> RufusEdgeAgent:
-    return RufusEdgeAgent(
+def make_agent(db_path: str = ":memory:") -> RuvonEdgeAgent:
+    return RuvonEdgeAgent(
         device_id="test-device-001",
         cloud_url="",  # no cloud; avoids bootstrap HTTP calls
         db_path=db_path,
     )
 
 
-async def _start_agent_minimal(agent: RufusEdgeAgent):
+async def _start_agent_minimal(agent: RuvonEdgeAgent):
     """Start agent with all network/polling patched out."""
     with (
         patch.object(agent, "bootstrap", new=AsyncMock(return_value=True)),
-        patch("rufus_edge.agent.ConfigManager") as MockCM,
-        patch("rufus_edge.agent.SyncManager") as MockSM,
-        patch("rufus_edge.agent.asyncio") as mock_asyncio,
+        patch("ruvon_edge.agent.ConfigManager") as MockCM,
+        patch("ruvon_edge.agent.SyncManager") as MockSM,
+        patch("ruvon_edge.agent.asyncio") as mock_asyncio,
     ):
         mock_cm = MockCM.return_value
         mock_cm.initialize = AsyncMock()
@@ -208,7 +208,7 @@ class TestPatchBroadcastHandler:
     async def test_on_patch_broadcast_calls_swap_module(self):
         """_on_patch_broadcast verifies hash and calls pool.swap_module."""
         import hashlib
-        from rufus.implementations.execution.component_runtime import _get_wasm_pool
+        from ruvon.implementations.execution.component_runtime import _get_wasm_pool
 
         binary = b"\x00asm\x0e\x00\x01\x00" + b"\xab" * 50
         wasm_hash = hashlib.sha256(binary).hexdigest()
@@ -224,7 +224,7 @@ class TestPatchBroadcastHandler:
     async def test_on_patch_broadcast_skipped_with_nkey_verifier_reject(self):
         """_on_patch_broadcast discards patch when NKey verification fails."""
         import hashlib
-        from rufus.implementations.execution.component_runtime import _get_wasm_pool
+        from ruvon.implementations.execution.component_runtime import _get_wasm_pool
 
         binary = b"\x00asm\x0e\x00\x01\x00" + b"\xcd" * 50
         wasm_hash = hashlib.sha256(binary).hexdigest()
